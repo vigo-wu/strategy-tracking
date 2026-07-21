@@ -1,11 +1,13 @@
 """
 红利资产·绝对防御低回撤波段 · 历史回测（model.md 公式 + 第四节出场）。
-池子近似：主板宽池 + 换手地量 + 均线支撑 + 右侧企稳；
-中证红利/股息率未过滤，结果偏宽，需结合实盘成分解读。
+默认股票池：主题目录 list.md；若无则回退主板宽池。
+信号：换手地量 + 均线支撑 + 右侧企稳（未再过滤股息率）。
 """
 from __future__ import annotations
 
+import argparse
 import json
+import re
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +20,7 @@ THEME_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = THEME_ROOT.parent
 DATA_DIR = REPO_ROOT / "data" / "daily"
 OUT_DIR = THEME_ROOT / "output"
+LIST_MD = THEME_ROOT / "list.md"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 OUT_DIR.mkdir(exist_ok=True)
 
@@ -26,6 +29,31 @@ BT_END = "2026-07-20"
 HIST_START = "2021-01-01"
 MIN_AMOUNT = 1.5e8
 MAX_HOLD_DAYS = 20  # 约 4 周
+
+
+def to_bs_code(code6: str) -> str:
+    c = code6.zfill(6)
+    if c.startswith(("5", "6", "9")):
+        return f"sh.{c}"
+    return f"sz.{c}"
+
+
+def load_list_md(path: Path = LIST_MD) -> pd.DataFrame:
+    """解析 list.md 表格：| 序号 | 股票代码 | 股票名称 |"""
+    text = path.read_text(encoding="utf-8")
+    rows = []
+    for line in text.splitlines():
+        m = re.match(
+            r"\|\s*\d+\s*\|\s*(\d{6})\s*\|\s*([^|]+?)\s*\|",
+            line.strip(),
+        )
+        if not m:
+            continue
+        code6, name = m.group(1), m.group(2).strip()
+        rows.append({"code": to_bs_code(code6), "code6": code6, "name": name})
+    if not rows:
+        raise ValueError(f"未能从 {path} 解析到股票代码")
+    return pd.DataFrame(rows)
 
 
 @dataclass
@@ -278,37 +306,64 @@ def summarize(trades: list[Trade]) -> dict:
         "notes": [
             "入场：信号日收盘；单票仓位回测未建模（实盘 25%）",
             "R1 破锚均线×0.975（保本后止损=成本）；R3 盈≥6%或RSI6>75；R4 满约20交易日",
-            "未过滤中证红利成分与股息率；主板宽池 + 换手≤0.6% 近似",
+            "未再过滤静态股息率；信号侧换手近3日均≤0.6%",
         ],
     }
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="红利资产绝对防御波段回测")
+    parser.add_argument(
+        "--universe",
+        choices=["list", "mainboard"],
+        default="list",
+        help="股票池：list=主题 list.md（默认），mainboard=主板宽池",
+    )
+    parser.add_argument(
+        "--list",
+        type=Path,
+        default=LIST_MD,
+        help="list.md 路径（universe=list 时生效）",
+    )
+    args = parser.parse_args()
+
     print("=== 股票池 ===")
-    bs.login()
-    try:
-        universe = list_main_board()
-    finally:
-        bs.logout()
-    print(f"主板近似池 {len(universe)} 只")
+    if args.universe == "list":
+        universe = load_list_md(args.list)
+        pool_label = f"list.md（{args.list.name}）"
+    else:
+        bs.login()
+        try:
+            universe = list_main_board()
+        finally:
+            bs.logout()
+        pool_label = "主板近似池"
+    print(f"{pool_label} {len(universe)} 只")
     print("=== 缓存日线（含 turn） ===")
     ensure_cache(universe, HIST_START, BT_END)
     print("=== 回测 ===")
     all_trades: list[Trade] = []
     for i, row in universe.iterrows():
-        if i % 100 == 0:
-            print(f"  {i+1}/{len(universe)}")
+        if i % 10 == 0 or args.universe == "list":
+            print(f"  {i+1}/{len(universe)} {row['code6']} {row['name']}")
         all_trades.extend(backtest_one(row["code6"], row["name"]))
     summary = summarize(all_trades)
+    notes = list(summary.get("notes") or [])
+    notes.append(f"股票池：{pool_label}，共 {len(universe)} 只")
+    summary["notes"] = notes
     summary.update(
         {
             "bt_start": BT_START,
             "bt_end": BT_END,
+            "universe": args.universe,
             "universe_size": len(universe),
+            "universe_codes": universe["code6"].tolist(),
             "run_at": datetime.now().isoformat(timespec="seconds"),
         }
     )
     stamp = f"{BT_START}_{BT_END}".replace("-", "")
+    if args.universe == "list":
+        stamp = f"list_{stamp}"
     trades_df = pd.DataFrame([asdict(t) for t in all_trades])
     trades_df.to_csv(OUT_DIR / f"backtest_trades_{stamp}.csv", index=False, encoding="utf-8-sig")
     (OUT_DIR / f"backtest_summary_{stamp}.json").write_text(
@@ -318,6 +373,7 @@ def main() -> None:
         "# 红利资产·绝对防御低回撤波段 · 历史回测报告",
         "",
         f"- 区间：{BT_START} ~ {BT_END}",
+        f"- 股票池：{pool_label}，共 {len(universe)} 只",
         f"- 交易数：{summary.get('trade_count')}",
         f"- 胜率：{summary.get('win_rate_pct')}%",
         f"- 平均收益：{summary.get('avg_ret_pct')}%",
@@ -334,3 +390,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
