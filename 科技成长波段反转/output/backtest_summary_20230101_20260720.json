@@ -1,0 +1,31 @@
+{
+  "trade_count": 88,
+  "win_count": 38,
+  "loss_count": 50,
+  "win_rate_pct": 43.18,
+  "avg_ret_pct": 2.23,
+  "median_ret_pct": -2.19,
+  "avg_win_pct": 12.63,
+  "avg_loss_pct": -5.68,
+  "max_ret_pct": 64.02,
+  "min_ret_pct": -13.27,
+  "avg_hold_days": 9.9,
+  "exit_reason_counts": {
+    "R1": 26,
+    "R3": 56,
+    "R4": 6
+  },
+  "chain_equal_weight_total_ret_pct": 10.0,
+  "profit_factor": 1.69,
+  "bt_start": "2023-01-01",
+  "bt_end": "2026-07-20",
+  "universe_size": 1545,
+  "run_at": "2026-07-21T15:32:00",
+  "notes": [
+    "入场：信号日收盘（尾盘一次到位）",
+    "R1：收盘<起爆开盘价；R2：≥5日且盈≥15%且触BOLL上轨且换手>20%减半仓",
+    "R3：已减仓或持股≥10日后收盘<MA10；R4：满20个交易日",
+    "未做历史市值50-500亿过滤；未做概念/催化剂过滤",
+    "同标的持仓期不叠加新信号；同日多票收益按等权均值再串联"
+  ]
+}

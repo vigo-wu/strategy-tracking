@@ -1,0 +1,25 @@
+{
+  "trade_count": 1331,
+  "win_rate_pct": 48.84,
+  "avg_ret_pct": 0.13,
+  "median_ret_pct": -0.21,
+  "avg_win_pct": 4.17,
+  "avg_loss_pct": -3.73,
+  "avg_hold_days": 9.8,
+  "exit_reason_counts": {
+    "R4": 240,
+    "R1": 542,
+    "R3": 549
+  },
+  "max_ret_pct": 15.26,
+  "min_ret_pct": -12.8,
+  "notes": [
+    "入场：信号日收盘；单票仓位回测未建模（实盘 25%）",
+    "R1 破锚均线×0.975（保本后止损=成本）；R3 盈≥6%或RSI6>75；R4 满约20交易日",
+    "未过滤中证红利成分与股息率；主板宽池 + 换手≤0.6% 近似"
+  ],
+  "bt_start": "2023-01-01",
+  "bt_end": "2026-07-20",
+  "universe_size": 3043,
+  "run_at": "2026-07-21T17:58:11"
+}
