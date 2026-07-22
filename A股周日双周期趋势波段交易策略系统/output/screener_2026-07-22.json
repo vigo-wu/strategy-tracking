@@ -1,0 +1,19 @@
+{
+  "run_at": "2026-07-22T16:03:12",
+  "trade_date": "2026-07-22",
+  "version": "v3.1",
+  "list_path": "D:\\vigo\\strategy-tracking\\list.md",
+  "universe_size": 50,
+  "hit_count": 0,
+  "fail_stats": {
+    "hist_fail": 50,
+    "tech_fail": 0
+  },
+  "market": {
+    "ok": false,
+    "reason": "上证数据不足",
+    "trade_date": "2026-07-22"
+  },
+  "hits": [],
+  "note": "仅list池；大盘=上证收盘≥日EMA130"
+}

@@ -1,0 +1,51 @@
+{
+  "trade_count": 37,
+  "win_rate_pct": 75.68,
+  "avg_ret_pct": 4.35,
+  "median_ret_pct": 2.38,
+  "avg_win_pct": 6.72,
+  "avg_loss_pct": -3.01,
+  "avg_hold_days": 40.2,
+  "exit_reason_counts": {
+    "R2+R3": 28,
+    "R1": 6,
+    "R2+R0+R1": 3
+  },
+  "max_ret_pct": 41.48,
+  "min_ret_pct": -4.99,
+  "sum_pnl": 79137.2,
+  "avg_pnl": 2138.84,
+  "max_pnl": 20415.96,
+  "min_pnl": -2494.8,
+  "r0_count": 17,
+  "r2_count": 31,
+  "notes": [
+    "策略版本：origin v3.1（R0=+8%保本 / R2=+9%平60% / R3=余仓连2日破EMA60）",
+    "总资金 200000；单笔约 50000；最多 4 仓；同板块最多 3",
+    "大盘：上证收盘≥日EMA130 才开仓（原持仓不受影响）；R1含收破EMA60超2%",
+    "未计税费；板块行业为手工粗分",
+    "股票池：list.md，共 20 只"
+  ],
+  "total_capital": 200000.0,
+  "per_trade_budget": 50000.0,
+  "max_slots": 4,
+  "max_per_sector": 3,
+  "signal_count": 71,
+  "filled_count": 37,
+  "skipped_count": 34,
+  "skipped_market": 26,
+  "skipped_sector": 0,
+  "peak_concurrent": 4,
+  "final_equity": 279137.2,
+  "total_pnl": 79137.2,
+  "total_return_pct": 39.57,
+  "strategy_version": "v3.1",
+  "bt_start": "2023-01-01",
+  "bt_end": "2026-07-21",
+  "universe": "list",
+  "universe_size": 20,
+  "zero_signal_codes": [
+    "601880"
+  ],
+  "run_at": "2026-07-22T11:14:53"
+}

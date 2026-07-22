@@ -4,9 +4,7 @@
 
 | 主题 | 手册 | 日志 | 观察池 |
 | :--- | :--- | :--- | :--- |
-| 科技成长波段反转（2–4 周） | [`科技成长波段反转/model.md`](./科技成长波段反转/model.md) | [`log/`](./科技成长波段反转/log/) | [`portfolio/`](./科技成长波段反转/portfolio/) |
-| 大蓝筹防御型波段（1–3 周，控回撤） | [`大蓝筹防御型波段策略/model.md`](./大蓝筹防御型波段策略/model.md) | [`log/`](./大蓝筹防御型波段策略/log/) | [`portfolio/`](./大蓝筹防御型波段策略/portfolio/) |
-| 红利资产·绝对防御低回撤波段（2–4 周） | [`红利资产·绝对防御低回撤波段策略/model.md`](./红利资产·绝对防御低回撤波段策略/model.md) | [`log/`](./红利资产·绝对防御低回撤波段策略/log/) | [`portfolio/`](./红利资产·绝对防御低回撤波段策略/portfolio/) |
+| 周日双周期趋势波段（v3.1 · list20 · 20万） | [`A股周日双周期趋势波段交易策略系统/model.md`](./A股周日双周期趋势波段交易策略系统/model.md) | [`log/`](./A股周日双周期趋势波段交易策略系统/log/) | [`portfolio/`](./A股周日双周期趋势波段交易策略系统/portfolio/) |
 
 **共享**：日线缓存 [`data/daily/`](./data/daily/) · Skill [`.cursor/skills/a-share-daily-model/`](./.cursor/skills/a-share-daily-model/)
 
@@ -20,9 +18,14 @@ python scripts/run_screener.py
 python scripts/run_backtest.py    # 可选
 ```
 
-对 Agent 说「按 a-share-daily-model 续写今日日志 / 跑选股 / 跑回测 / 建档」。
+对 Agent 说「按 a-share-daily-model 续写今日日志 / 跑选股 / 跑回测 / 建档 / 策略变更」。
 
 ## 新增主题
 
 1. 新建 `<主题名>/model.md`  
 2. 按 Skill **A. 建档** 补齐 log / portfolio / scripts，并登记本表  
+
+## 策略变更 / 名单回测
+
+- 有 `origin.md` 或口述优化：按 Skill **E. 策略变更**  
+- 用 `list.md` + 定额仓位回测：按 Skill **D. 回测**（详见 skill 内 `reference-backtest.md`）  
