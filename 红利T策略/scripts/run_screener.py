@@ -139,7 +139,7 @@ def main() -> None:
         "--float-a-price",
         type=float,
         default=None,
-        help="若已持有 Float A，传入成交价以判定今日能否开 B（空间>=2.5%）",
+        help="若已持有 Float A，传入成交价以判定今日能否开 B（空间>=2.5%%）",
     )
     args = parser.parse_args()
 

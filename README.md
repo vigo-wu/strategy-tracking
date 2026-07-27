@@ -4,7 +4,6 @@
 
 | 主题 | 手册 | 日志 | 观察池 |
 | :--- | :--- | :--- | :--- |
-| 周日双周期趋势波段（v3.1 · list20 · 20万） | [`A股周日双周期趋势波段交易策略系统/model.md`](./A股周日双周期趋势波段交易策略系统/model.md) | [`log/`](./A股周日双周期趋势波段交易策略系统/log/) | [`portfolio/`](./A股周日双周期趋势波段交易策略系统/portfolio/) |
 | 红利T · 561580 日线做T（v2.5 · 底仓20万/A5万/B2.5万） | [`红利T策略/model.md`](./红利T策略/model.md) | [`log/`](./红利T策略/log/) | [`portfolio/`](./红利T策略/portfolio/) |
 
 **共享**：日线缓存 [`data/daily/`](./data/daily/) · Skill [`.cursor/skills/a-share-daily-model/`](./.cursor/skills/a-share-daily-model/)
