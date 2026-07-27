@@ -1,0 +1,41 @@
+{
+  "version": "v1.0",
+  "universe": "list",
+  "list_path": "D:\\vigo\\strategy-tracking\\红利T策略\\list.md",
+  "start": "2023-01-01",
+  "end": "2026-07-24",
+  "total_capital": 200000.0,
+  "base_pct": 0.8,
+  "float_trade_pct": 0.1,
+  "max_float_slots": 2,
+  "r1_stop": 0.03,
+  "summaries": [
+    {
+      "code": "561580",
+      "name": "国证央企红利ETF",
+      "base_entry": "2026-01-05",
+      "end_date": "2026-07-24",
+      "end_equity": 195657.2,
+      "total_return_pct": -2.17,
+      "float_trades": 1,
+      "float_win_rate": 100.0,
+      "float_avg_ret": 8.51,
+      "float_median_ret": 8.51,
+      "float_pnl": 1692.0,
+      "base_pnl": -6034.8,
+      "skipped": 0
+    }
+  ],
+  "float_trade_count": 1,
+  "skipped_count": 0,
+  "float_win_rate": 100.0,
+  "float_avg_ret": 8.51,
+  "exit_dist": {
+    "期末": 1,
+    "期末底仓": 1
+  },
+  "report": "D:\\vigo\\strategy-tracking\\红利T策略\\output\\backtest_report_list_20230101_20260724.md",
+  "trades_csv": "D:\\vigo\\strategy-tracking\\红利T策略\\output\\backtest_trades_list_20230101_20260724.csv",
+  "skipped_csv": null,
+  "note": "不计税费；不含红利再投；周信号次日开盘成交"
+}

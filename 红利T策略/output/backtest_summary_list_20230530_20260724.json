@@ -1,0 +1,43 @@
+{
+  "version": "v2.5",
+  "universe": "list",
+  "list_path": "D:\\vigo\\strategy-tracking\\红利T策略\\list.md",
+  "start": "2023-05-30",
+  "end": "2026-07-24",
+  "total_capital": 275000.0,
+  "base_budget": 200000.0,
+  "float_a_budget": 50000.0,
+  "float_b_budget": 25000.0,
+  "space_step": 0.025,
+  "r1_stop": null,
+  "summaries": [
+    {
+      "code": "561580",
+      "name": "国证央企红利ETF",
+      "base_entry": "2023-05-30",
+      "end_date": "2026-07-24",
+      "end_equity": 367208.9,
+      "total_return_pct": 33.53,
+      "float_trades": 7,
+      "float_win_rate": 85.7,
+      "float_avg_ret": 5.03,
+      "float_median_ret": 4.33,
+      "float_pnl": 12721.8,
+      "base_pnl": 79487.1,
+      "skipped": 6
+    }
+  ],
+  "float_trade_count": 7,
+  "skipped_count": 6,
+  "float_win_rate": 85.7,
+  "float_avg_ret": 5.03,
+  "exit_dist": {
+    "R高抛": 5,
+    "期末": 2,
+    "期末底仓": 1
+  },
+  "report": "D:\\vigo\\strategy-tracking\\红利T策略\\output\\backtest_report_list_20230530_20260724.md",
+  "trades_csv": "D:\\vigo\\strategy-tracking\\红利T策略\\output\\backtest_trades_list_20230530_20260724.csv",
+  "skipped_csv": "D:\\vigo\\strategy-tracking\\红利T策略\\output\\backtest_skipped_list_20230530_20260724.csv",
+  "note": "v2.5；无R1；B须相对A跌>=2.5%；高抛一次清仓；不计税费"
+}

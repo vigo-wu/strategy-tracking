@@ -1,0 +1,3 @@
+﻿code,name,leg,entry_date,exit_date,entry_price,exit_price,hold_weeks,hold_days,ret_pct,exit_reason,shares,cost,proceeds,pnl,skipped,skip_reason
+561580,国证央企红利ETF,float,2026-06-29,2026-07-24,1.105,1.199,3,19,8.51,期末,18000,19890.0,21582.0,1692.0,False,
+561580,国证央企红利ETF,base,2026-01-05,2026-07-24,1.246,1.199,26,133,-3.77,期末底仓,128400,159986.4,153951.6,-6034.8,False,
