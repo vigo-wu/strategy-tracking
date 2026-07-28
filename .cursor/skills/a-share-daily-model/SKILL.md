@@ -186,3 +186,4 @@ R 规则以**变更后的 model.md** 为唯一真源；脚本不得残留旧出�
 - [reference-layout.md](reference-layout.md) — 目录与脚本路径  
 - [reference-templates.md](reference-templates.md) — log / portfolio 骨架  
 - [reference-backtest.md](reference-backtest.md) — list 回测、定额仓位、报告章节  
+- [qmt-model-script](../qmt-model-script/SKILL.md) — model.md → MiniQMT / xtquant 实盘脚本  

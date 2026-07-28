@@ -119,6 +119,34 @@ python scripts/run_backtest.py --universe list
 
 报告：[`output/backtest_report_list_20230530_20260724.md`](./output/backtest_report_list_20230530_20260724.md)
 
+### 6.4 MiniQMT / xtquant 外部脚本
+
+脚本：[`scripts/qmt_hongli_t.py`](./scripts/qmt_hongli_t.py)（独立进程连 userdata）
+
+### 6.5 国金 QMT 终端内运行（模型交易）
+
+脚本：[`scripts/qmt_terminal_hongli_t.py`](./scripts/qmt_terminal_hongli_t.py)  
+部署到终端：
+
+```bash
+python scripts/_deploy_qmt_gbk.py
+```
+
+会写入：
+
+- `D:\office\国金证券QMT交易端\python\红利T_v25.py`
+- `D:\office\国金证券QMT交易端\python\新建策略文件1.py`
+
+**操作步骤**
+
+1. 打开国金 QMT，登录交易账号  
+2. 行情主图打开 **561580**，周期选 **日线**  
+3. 【模型交易】→ 选择 `红利T_v25`（或新建策略文件1）→ 选账号 → **实盘**（模拟只出信号）  
+4. 默认 `DRY_RUN=True`（只打印不下单）；确认日志后再在脚本里改 `False`，重新部署/编译  
+5. 决策窗 **14:30–14:57**；只操作 Float A/B，**底仓请手工持有**（高抛不会卖底仓）
+
+编码必须是 **GBK**（`#coding:gbk`），勿用记事本另存成 UTF-8。
+
 ---
 
 *提示：浮仓允许套牢；靠空间步长与红利再投控风险，不做 3% 日线割肉。*
