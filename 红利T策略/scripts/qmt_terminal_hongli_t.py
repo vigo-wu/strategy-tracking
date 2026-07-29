@@ -1,8 +1,8 @@
 #coding:gbk
 """
-HongliT v2.5 for Guojin QMT terminal (model trade).
+HongliT v2.6 for Guojin QMT terminal (model trade).
 
-Main chart: 561580.SH, period=1d
+Main chart: 561580.SH; PERIOD below or "follow" chart period.
 UI: select stock + account, run in LIVE (not simulate) to send orders.
 
 Rules:
@@ -15,6 +15,7 @@ IMPORTANT:
   - Keep this file encoding=GBK, first line #coding:gbk
   - Base position is MANUAL; this script only trades float A/B
   - DRY_RUN=True prints only; set False to passorder
+  - Download matching period history in QMT data manager before backtest
 """
 import datetime
 import json
@@ -41,12 +42,63 @@ KDJ_N = 9
 LOWER_TOL = 1.002
 UPPER_TOL = 0.998
 
+# K-line period for indicators / decisions.
+# "follow" = C.period from main chart; or set explicitly:
+#   1m / 3m / 5m / 15m / 30m / 1h / 1d / 1w / 1mon / 1q / 1hy / 1y
+PERIOD = "follow"
+# 0 = auto count by period; else fixed bar count for OHLC fetch
+OHLC_COUNT = 0
+
+# Live decision window (only for daily+ periods; intraday uses every bar in session)
 DECISION_START = "143000"
 DECISION_END = "145700"
 
 # QMT model runtime has no __file__; use fixed path under terminal python/
 STATE_FILE = r"D:\office\国金证券QMT交易端\python\hongli_t_qmt_state.json"
 # =======================================================
+
+_VALID_PERIODS = (
+    "1m",
+    "3m",
+    "5m",
+    "15m",
+    "30m",
+    "1h",
+    "1d",
+    "1w",
+    "1mon",
+    "1q",
+    "1hy",
+    "1y",
+)
+_PERIOD_COUNT = {
+    "1m": 1200,
+    "3m": 800,
+    "5m": 600,
+    "15m": 400,
+    "30m": 300,
+    "1h": 240,
+    "1d": 120,
+    "1w": 100,
+    "1mon": 80,
+    "1q": 60,
+    "1hy": 40,
+    "1y": 30,
+}
+_PERIOD_HIST_START = {
+    "1m": "20240101",
+    "3m": "20240101",
+    "5m": "20230101",
+    "15m": "20230101",
+    "30m": "20220101",
+    "1h": "20220101",
+    "1d": "20220101",
+    "1w": "20180101",
+    "1mon": "20150101",
+    "1q": "20100101",
+    "1hy": "20050101",
+    "1y": "20000101",
+}
 
 
 class _S(object):
@@ -60,6 +112,67 @@ def _lot(price, budget):
     if price is None or price <= 0 or budget <= 0:
         return 0
     return int(budget // (price * 100)) * 100
+
+
+def _norm_period(p):
+    if p is None:
+        return None
+    s = str(p).strip().lower()
+    if s in ("", "follow", "none"):
+        return None
+    # common aliases from chart UI
+    aliases = {
+        "day": "1d",
+        "daily": "1d",
+        "week": "1w",
+        "weekly": "1w",
+        "month": "1mon",
+        "monthly": "1mon",
+        "hour": "1h",
+        "60m": "1h",
+        "min": "1m",
+        "minute": "1m",
+    }
+    s = aliases.get(s, s)
+    if s in _VALID_PERIODS:
+        return s
+    return None
+
+
+def _resolve_period(C):
+    """PERIOD config, else C.period, else 1d."""
+    cfg = _norm_period(PERIOD)
+    if cfg:
+        return cfg
+    chart = _norm_period(getattr(C, "period", None))
+    if chart:
+        return chart
+    return "1d"
+
+
+def _is_intraday(period):
+    p = period or "1d"
+    if p == "1mon":
+        return False
+    return p.endswith("m") or p == "1h"
+
+
+def _ohlc_count(period):
+    if OHLC_COUNT and int(OHLC_COUNT) > 0:
+        return int(OHLC_COUNT)
+    return int(_PERIOD_COUNT.get(period, 120))
+
+
+def _hist_start(period):
+    return _PERIOD_HIST_START.get(period, "20220101")
+
+
+def _bar_end_str(C):
+    """end_time for get_market_data*: yyyymmdd or yyyymmddHHMMSS."""
+    dt = _bar_datetime(C)
+    if _is_intraday(getattr(A, "period", "1d")):
+        return dt.strftime("%Y%m%d%H%M%S")
+    return dt.strftime("%Y%m%d")
 
 
 def _load_state():
@@ -213,32 +326,38 @@ def _series_from_ex(md, stock, field):
     return out
 
 
-def _download_hist(stock):
-    """Supplement local daily history (QMT builtin name varies)."""
+def _download_hist(stock, period):
+    """Supplement local history for the configured period (QMT builtin name varies)."""
+    start = _hist_start(period)
     for fn_name in ("download_history_data", "down_history_data"):
         fn = globals().get(fn_name)
         if callable(fn):
             try:
-                fn(stock, "1d", "20220101", "")
-                print("HongliT downloaded history via", fn_name)
+                fn(stock, period, start, "")
+                print("HongliT downloaded history via", fn_name, period, "from", start)
                 return
             except Exception as e:
                 print(fn_name, "fail", e)
 
 
-def _get_ohlc(C, stock, count=120):
-    """Fetch daily OHLC; try get_market_data_ex then fallbacks."""
-    end = _bar_end_yyyymmdd(C)
+def _get_ohlc(C, stock, count=None):
+    """Fetch OHLC for A.period; try get_market_data_ex then fallbacks."""
+    period = getattr(A, "period", "1d")
+    if count is None:
+        count = _ohlc_count(period)
+    end = _bar_end_str(C)
     need = max(BOLL_N, KDJ_N) + 2
     md = None
     source = None
+    high = None
+    low = None
 
     # 1) get_market_data_ex
     try:
         md = C.get_market_data_ex(
             fields=["high", "low", "close"],
             stock_code=[stock],
-            period="1d",
+            period=period,
             end_time=end,
             count=count,
             dividend_type="front_ratio",
@@ -251,7 +370,7 @@ def _get_ohlc(C, stock, count=120):
             md = C.get_market_data_ex(
                 ["high", "low", "close"],
                 [stock],
-                period="1d",
+                period=period,
                 start_time="",
                 end_time=end,
                 count=count,
@@ -273,7 +392,7 @@ def _get_ohlc(C, stock, count=120):
             md2 = C.get_market_data(
                 ["high", "low", "close"],
                 stock_code=[stock],
-                period="1d",
+                period=period,
                 end_time=end,
                 count=count,
                 dividend_type="front_ratio",
@@ -289,9 +408,9 @@ def _get_ohlc(C, stock, count=120):
     # 3) get_history_data (legacy, still works on some builds)
     if not close or len(close) < need:
         try:
-            c_map = C.get_history_data(count, "1d", "close", dividend_type="front_ratio")
-            h_map = C.get_history_data(count, "1d", "high", dividend_type="front_ratio")
-            l_map = C.get_history_data(count, "1d", "low", dividend_type="front_ratio")
+            c_map = C.get_history_data(count, period, "close", dividend_type="front_ratio")
+            h_map = C.get_history_data(count, period, "high", dividend_type="front_ratio")
+            l_map = C.get_history_data(count, period, "low", dividend_type="front_ratio")
             if c_map and stock in c_map:
                 close = [float(x) for x in c_map[stock] if x == x]
                 high = [float(x) for x in h_map[stock]] if h_map and stock in h_map else list(close)
@@ -304,6 +423,8 @@ def _get_ohlc(C, stock, count=120):
     if not close:
         _diag_once(
             "empty",
+            "period=",
+            period,
             "end=",
             end,
             "barpos=",
@@ -324,11 +445,25 @@ def _get_ohlc(C, stock, count=120):
         low = list(close)
 
     if len(close) < need:
-        _diag_once("short", "n=", len(close), "need=", need, "source=", source, "end=", end)
+        _diag_once(
+            "short",
+            "period=",
+            period,
+            "n=",
+            len(close),
+            "need=",
+            need,
+            "source=",
+            source,
+            "end=",
+            end,
+        )
         return None
 
     _diag_once(
         "ok",
+        "period=",
+        period,
         "source=",
         source,
         "n=",
@@ -413,6 +548,8 @@ def _order_sell(C, vol, remark):
 def init(C):
     # stock from chart; account from 模型交易 UI if present, else config
     A.stock = C.stockcode + "." + C.market
+    A.period = _resolve_period(C)
+    A.intraday = _is_intraday(A.period)
     if "account" in globals() and account:
         A.acct = str(account)
     elif hasattr(C, "accountid") and C.accountid:
@@ -435,7 +572,7 @@ def init(C):
     A.waiting_list = []
     A.busy = False
     A.is_backtest = _is_backtest(C)
-    _download_hist(A.stock)
+    _download_hist(A.stock, A.period)
     _load_state()
     # backtest: start with clean float state so replay is consistent
     if A.is_backtest:
@@ -448,10 +585,16 @@ def init(C):
         A.ready_logged = True
     C.set_universe([A.stock])
     print(
-        "HongliT v2.5 init",
+        "HongliT v2.6 init",
         A.stock,
         A.acct,
         A.acct_type,
+        "PERIOD=",
+        A.period,
+        "cfg=",
+        PERIOD,
+        "chart=",
+        getattr(C, "period", None),
         "DRY_RUN=",
         DRY_RUN,
         "BACKTEST=",
@@ -483,14 +626,16 @@ def _handle(C):
     now = _bar_datetime(C) if bt else datetime.datetime.now()
     now_s = now.strftime("%H%M%S")
     day = now.strftime("%Y%m%d")
+    intraday = getattr(A, "intraday", False)
 
     if not bt:
-        # live: only near close window
+        # live: session hours
         if now_s < "093000" or now_s > "150000":
             return
-        if now_s < DECISION_START or now_s > DECISION_END:
+        # daily+: near-close window; intraday: every last bar in session
+        if (not intraday) and (now_s < DECISION_START or now_s > DECISION_END):
             return
-    # backtest daily bar ~= close decision, no wall-clock window
+    # backtest: each bar ~= decision at bar close
 
     _reset_day(day)
 
@@ -533,6 +678,7 @@ def _handle(C):
         A.ready_logged = True
         print(
             "HongliT",
+            getattr(A, "period", "?"),
             day,
             now_s,
             "n=%d close=%.4f lower=%.4f upper=%.4f J=%.2f buy=%s sell=%s A=%s B=%s dropA=%s"

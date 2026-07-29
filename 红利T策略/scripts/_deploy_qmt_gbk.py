@@ -40,7 +40,7 @@ def main() -> None:
         dest.write_bytes(data)
         print("wrote", dest, "bytes", len(data))
     print("OK: open Guojin QMT -> model trade -> load 红利T_v25 / 新建策略文件1")
-    print("Main chart: 561580.SH period 1d | DRY_RUN=True by default")
+    print("Main chart: 561580.SH | PERIOD=follow (or 1m/5m/1h/1d/...) | DRY_RUN default in source")
 
 
 if __name__ == "__main__":
