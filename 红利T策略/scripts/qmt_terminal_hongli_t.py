@@ -8,12 +8,12 @@ UI: select stock + account, run in LIVE (not simulate) to send orders.
 Rules:
   R-A   zero float + lower band + J<=0     -> buy Float A (50000)
   R-B   has A + lower + J<=0 + drop>=2.5%  -> buy Float B (25000) else skip
-  R-Sell upper + J>=100                    -> sell ALL float only (keep base)
+  R-Sell upper + J>=100                    -> sell ALL float A/B
   No R1
 
 IMPORTANT:
   - Keep this file encoding=GBK, first line #coding:gbk
-  - Base position is MANUAL; this script only trades float A/B
+  - This script only trades float A/B (no base position)
   - DRY_RUN=True prints only; set False to passorder
   - Download matching period history in QMT data manager before backtest
 """
@@ -25,7 +25,6 @@ import numpy as np
 
 # ===================== user config =====================
 DRY_RUN = False
-AUTO_BUY_BASE = False
 
 # Fallback when not started from "模型交易" (no account/accountType inject)
 ACCOUNT_ID = "39953913"
@@ -33,7 +32,6 @@ ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 
 FLOAT_A_BUDGET = 50000.0
 FLOAT_B_BUDGET = 25000.0
-BASE_BUDGET = 200000.0
 SPACE_STEP = 0.025
 
 BOLL_N = 20
@@ -178,7 +176,6 @@ def _bar_end_str(C):
 def _load_state():
     A.float_a = None
     A.float_b = None
-    A.base_done = False
     A.acted_day = ""
     A.acted = set()
     if not os.path.isfile(STATE_FILE):
@@ -188,7 +185,6 @@ def _load_state():
             raw = json.load(f)
         A.float_a = raw.get("float_a")
         A.float_b = raw.get("float_b")
-        A.base_done = bool(raw.get("base_done", False))
         A.acted_day = raw.get("acted_day", "") or ""
         print("HongliT load state", STATE_FILE, A.float_a, A.float_b)
     except Exception as e:
@@ -199,7 +195,6 @@ def _save_state():
     payload = {
         "float_a": A.float_a,
         "float_b": A.float_b,
-        "base_done": A.base_done,
         "acted_day": A.acted_day,
         "updated": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
@@ -695,16 +690,6 @@ def _handle(C):
                 None if drop_vs_a is None else round(drop_vs_a * 100, 2),
             ),
         )
-
-    # optional base once
-    if AUTO_BUY_BASE and (not A.base_done) and ("BASE" not in A.acted):
-        vol = _lot(last, min(BASE_BUDGET, cash))
-        if vol >= 100:
-            if _order_buy(C, vol, "BASE"):
-                A.base_done = True
-                A.acted.add("BASE")
-                _save_state()
-                return
 
     # R-Sell first: clear float only
     if sell_cond and (has_a or has_b) and ("SELL" not in A.acted):
