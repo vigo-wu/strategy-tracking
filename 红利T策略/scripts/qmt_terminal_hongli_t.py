@@ -23,7 +23,7 @@ import os
 import numpy as np
 
 # ===================== user config =====================
-DRY_RUN = True
+DRY_RUN = False
 AUTO_BUY_BASE = False
 
 # Fallback when not started from "模型交易" (no account/accountType inject)
@@ -614,3 +614,5 @@ def _handle(C):
 
     if (not buy_cond) and (not sell_cond) and interesting:
         print("HongliT hold float")
+
+
