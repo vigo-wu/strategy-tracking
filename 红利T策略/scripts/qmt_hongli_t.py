@@ -49,8 +49,7 @@ ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 STOCK_CODE = "561580.SH"  # 国证央企红利 ETF
 STRATEGY_NAME = "HongliT_v25"
 
-# 定额（与 model.md 一致，单位：元）
-BASE_BUDGET = 200_000.0
+# 定额（单位：元；仅浮仓 A/B，无底仓）
 FLOAT_A_BUDGET = 50_000.0
 FLOAT_B_BUDGET = 25_000.0
 SPACE_STEP = 0.025  # Float B 相对 A 最低跌幅
@@ -67,8 +66,6 @@ DECISION_END = (14, 57)
 
 # True=只打印信号；False=真实下单
 DRY_RUN = True
-# True=启动时若无底仓则一次性买入底仓定额
-AUTO_BUY_BASE = False
 
 # 状态落盘（与脚本同目录，兼容放到 QMT\python\ 下运行）
 STATE_PATH = Path(__file__).resolve().parent / "hongli_t_qmt_state.json"
@@ -89,7 +86,6 @@ A.last_signal_date = ""  # YYYYMMDD，当日已决策则不再下单
 A.acted_today = set()  # {"RA","RB","SELL"}
 A.float_a = None  # {"shares":int,"price":float,"cost":float} | None
 A.float_b = None
-A.base_done = False
 A.busy = False
 
 
@@ -110,9 +106,8 @@ def load_state():
         return
     A.float_a = raw.get("float_a")
     A.float_b = raw.get("float_b")
-    A.base_done = bool(raw.get("base_done", False))
     A.last_signal_date = raw.get("last_signal_date", "")
-    log("已加载状态", STATE_PATH, "A=", A.float_a, "B=", A.float_b, "base_done=", A.base_done)
+    log("已加载状态", STATE_PATH, "A=", A.float_a, "B=", A.float_b)
 
 
 def save_state():
@@ -121,7 +116,6 @@ def save_state():
         "stock": STOCK_CODE,
         "version": "v2.5",
         "updated_at": dt.datetime.now().isoformat(timespec="seconds"),
-        "base_done": A.base_done,
         "float_a": A.float_a,
         "float_b": A.float_b,
         "last_signal_date": A.last_signal_date,
@@ -321,27 +315,6 @@ def place_sell(code: str, shares: int, remark: str) -> bool:
     return True
 
 
-def ensure_base_position():
-    """可选：一次性建底仓。"""
-    if not AUTO_BUY_BASE or A.base_done:
-        return
-    total, _ = query_position(STOCK_CODE)
-    if total > 0:
-        A.base_done = True
-        save_state()
-        log("账户已有持仓，标记底仓完成 总量=", total)
-        return
-    price = last_price(STOCK_CODE)
-    sh = lot_shares(price, BASE_BUDGET)
-    cash = query_cash()
-    if sh <= 0 or sh * price > cash:
-        log("底仓资金不足", "cash=", cash, "need≈", BASE_BUDGET)
-        return
-    if place_buy(STOCK_CODE, sh, "BASE"):
-        A.base_done = True
-        save_state()
-
-
 # ---------- 信号判定与执行 ----------
 
 
@@ -495,7 +468,6 @@ def main():
     load_state()
     trader = connect_trader()
     print_account_snapshot()
-    ensure_base_position()
 
     # 先补日线，再订阅（参考官方：download → subscribe → run）
     xtdata.download_history_data(STOCK_CODE, period="1d", incrementally=True)
