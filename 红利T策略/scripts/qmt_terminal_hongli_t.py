@@ -1,6 +1,6 @@
 #coding:gbk
 """
-HongliT v2.14 for Guojin QMT terminal (model trade).
+HongliT v2.15 for Guojin QMT terminal (model trade).
 
 Main chart: 561580.SH; PERIOD below or "follow" chart period.
 UI: select stock + account, run in LIVE (not simulate) to send orders.
@@ -23,11 +23,16 @@ Risk profile (any PERIOD when USE_RISK_RULES=True):
   - REQUIRE_ABOVE_DAILY_MA    -> open only if daily close > MA(DAILY_MA_N)
   - DAILY_MA_N                -> any MA length (e.g. 10/20/60)
 
-Live order safety (v2.14):
-  - Update float state only after deal fill (pending); backtest/DRY_RUN still instant
+Live order safety (v2.14+):
+  - Update float state only after deal fill (pending); DRY_RUN instant; backtest passorder+gate
   - init reconciles JSON float vs broker (skips if pending); BASE_SHARES never adopted/sold
   - pending timeout -> cancel first; clear only after order terminal (no double order)
   - cooldown stored as wall-clock datetime (survives model restart)
+
+Backtest T+1 (v2.15):
+  - QMT skips same-day sell (可卖0); never clear float unless sellable>0
+  - sell volume capped by prior-day opened float (opened_at date < bar date)
+  - avoid fake flat -> re-entry overlay (0017.csv class bug)
 
 IMPORTANT:
   - Keep this file encoding=GBK, first line #coding:gbk
@@ -425,6 +430,26 @@ def _sell_float_vol():
         vol += int(A.float_a["shares"])
     if _has_leg(getattr(A, "float_b", None)):
         vol += int(A.float_b["shares"])
+    return vol
+
+
+def _sellable_float_vol(now):
+    """A-share/ETF T+1: only float opened on a prior calendar day is sellable."""
+    if now is None:
+        now = datetime.datetime.now()
+    today = now.strftime("%Y%m%d")
+    vol = 0
+    for leg in (getattr(A, "float_a", None), getattr(A, "float_b", None)):
+        if not _has_leg(leg):
+            continue
+        sh = int(leg.get("shares", 0) or 0)
+        ot = _parse_opened_at(leg.get("opened_at"))
+        if ot is None:
+            # legacy / adopted without stamp: allow (live broker can_use still gates)
+            vol += sh
+            continue
+        if ot.strftime("%Y%m%d") < today:
+            vol += sh
     return vol
 
 
@@ -920,16 +945,18 @@ def _adopt_share_cap(price):
     return int(budget // 100) * 100
 
 
-def _max_sell_vol():
-    """Sell at most strategy float, never touch BASE_SHARES."""
+def _max_sell_vol(now=None):
+    """Sell at most strategy float, never touch BASE_SHARES; honor T+1."""
     want = _sell_float_vol()
     if want < 100:
         return 0
+    sellable = _sellable_float_vol(now)
     if getattr(A, "is_backtest", False) or DRY_RUN:
-        return want
+        # backtest cannot query broker can_use; gate by opened_at day (T+1)
+        return max(0, min(want, sellable))
     broker_vol, can, _cost = _broker_position(A.stock)
     floatable = _floatable_broker_vol(broker_vol)
-    return max(0, min(want, int(can), floatable))
+    return max(0, min(want, sellable, int(can), floatable))
 
 
 def _reconcile_float_with_broker():
@@ -1106,6 +1133,7 @@ def _apply_buy_fill(intent, vol, price, opened_at):
         A.acted.add("RA")
         print("HongliT R-A filled", A.float_a)
     elif intent == "RB":
+        leg["opened_at"] = opened_at or datetime.datetime.now().strftime("%Y%m%d%H%M%S")
         A.float_b = leg
         A.acted.add("RB")
         print("HongliT R-B filled", A.float_b)
@@ -1237,17 +1265,21 @@ def _new_remark(tag, side, vol):
 
 
 def _order_buy(C, vol, remark_tag, intent, price_hint, opened_at, now):
-    """Submit buy. Instant apply on backtest/DRY_RUN; else pending until fill."""
+    """Submit buy. DRY_RUN instant; backtest passorder+instant; live pending until fill."""
     msg = _new_remark(remark_tag, "BUY", vol)
     print(("[DRY] " if DRY_RUN else "") + msg)
-    if DRY_RUN or getattr(A, "is_backtest", False):
+    if DRY_RUN:
         _apply_buy_fill(intent, vol, price_hint, opened_at)
         return True
     try:
-        passorder(A.buy_code, 1101, A.acct, A.stock, 14, -1, vol, "HongliT_v214", 1, msg, C)
+        passorder(A.buy_code, 1101, A.acct, A.stock, 14, -1, vol, "HongliT_v215", 1, msg, C)
     except Exception as e:
         print("HongliT passorder BUY fail", e)
         return False
+    # Backtest: still passorder so QMT shows 操作明细; apply state immediately
+    if getattr(A, "is_backtest", False):
+        _apply_buy_fill(intent, vol, price_hint, opened_at)
+        return True
     A.pending = {
         "remark": msg,
         "side": "buy",
@@ -1264,22 +1296,38 @@ def _order_buy(C, vol, remark_tag, intent, price_hint, opened_at, now):
 
 
 def _order_sell(C, vol, remark_tag, intent, last_hint, now):
-    """Submit sell. Instant clear on backtest/DRY_RUN; else pending until fill."""
+    """Submit sell. DRY_RUN/backtest: only mutate float when T+1-sellable; live pending until fill."""
     want = int(vol)
-    vol = min(want, _max_sell_vol())
+    max_sell = _max_sell_vol(now)
+    vol = min(want, max_sell)
     if vol < 100:
-        print("sell skip, max_sell=", _max_sell_vol(), "want=", want)
+        print(
+            "sell skip, max_sell=",
+            max_sell,
+            "want=",
+            want,
+            "sellable=",
+            _sellable_float_vol(now),
+            "(keep float; no fake clear)",
+        )
+        # stop same-day re-fire; acted clears on next calendar day via _reset_day
+        A.acted.add("SELL")
         return False
     msg = _new_remark(remark_tag, "SELL", vol)
     print(("[DRY] " if DRY_RUN else "") + msg)
-    if DRY_RUN or getattr(A, "is_backtest", False):
-        _clear_float_after_sell(now, intent or remark_tag, last=last_hint)
+    if DRY_RUN:
+        # apply only the volume we would have sold (T+1 may be partial)
+        _apply_sell_fill(now, intent or remark_tag, last_hint, vol)
         return True
     try:
-        passorder(A.sell_code, 1101, A.acct, A.stock, 14, -1, vol, "HongliT_v214", 1, msg, C)
+        passorder(A.sell_code, 1101, A.acct, A.stock, 14, -1, vol, "HongliT_v215", 1, msg, C)
     except Exception as e:
         print("HongliT passorder SELL fail", e)
         return False
+    # Backtest: passorder only sellable qty (QMT skips if want>can); then sync state to vol
+    if getattr(A, "is_backtest", False):
+        _apply_sell_fill(now, intent or remark_tag, last_hint, vol)
+        return True
     A.pending = {
         "remark": msg,
         "side": "sell",
@@ -1345,7 +1393,7 @@ def init(C):
             print("HongliT reconcile fail", e)
     C.set_universe([A.stock])
     print(
-        "HongliT v2.14 init",
+        "HongliT v2.15 init",
         A.stock,
         A.acct,
         A.acct_type,
@@ -1615,7 +1663,8 @@ def _handle(C):
         if vol < 100:
             print("R-B skip cash/lot")
             return
-        _order_buy(C, vol, "RB", "RB", last, None, now)
+        opened_at = now.strftime("%Y%m%d%H%M%S")
+        _order_buy(C, vol, "RB", "RB", last, opened_at, now)
         return
 
     if (not buy_cond) and (not sell_cond) and interesting:

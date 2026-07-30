@@ -146,6 +146,14 @@ HongliT diag: ok source= get_market_data_ex n= 120 end= 20240930 last= 1.08 std2
 
 `passorder` 实盘盘中立刻报单常用 `quickTrade=1`；定时器/回调内用 `2`。日线收盘决策在最新 bar 上用 `1` 即可。
 
+### 7.1 回测假平仓叠仓（T+1）
+
+**现象**：操作明细出现连续两笔买入中间无卖出；日志有 `R-Sell done, float cleared`，但系统 WARNING `可卖0股...跳过`。
+
+**原因**：回测里 `_broker_position` 不可用，旧逻辑在 `passorder` 后立刻清浮仓；QMT 因 T+1 拒单后策略误判空仓，次日再开 R-A。
+
+**正确（v2.15+）**：用 `opened_at` 日历日做 T+1 可卖上限；`sellable<100` 时 **保留浮仓、不假清仓**；仅对可卖数量 `passorder` + `_apply_sell_fill`。
+
 ---
 
 ## 8. 环境与语法
