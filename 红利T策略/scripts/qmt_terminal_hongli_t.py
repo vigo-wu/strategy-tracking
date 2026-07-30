@@ -1,6 +1,6 @@
 #coding:gbk
 """
-HongliT v2.12 for Guojin QMT terminal (model trade).
+HongliT v2.14 for Guojin QMT terminal (model trade).
 
 Main chart: 561580.SH; PERIOD below or "follow" chart period.
 UI: select stock + account, run in LIVE (not simulate) to send orders.
@@ -13,19 +13,25 @@ Rules:
 
 Risk profile (any PERIOD when USE_RISK_RULES=True):
   - ENABLE_FLOAT_B=False      -> skip R-B (A-only)
-  - EXIT_AFTER                -> defer R-Sell/MaxHold until HHMMSS (intraday only; StopLoss may bypass)
+  - EXIT_AFTER                -> defer R-Sell/MaxHold until HHMMSS; ""=off; intraday only
   - STOP_LOSS_IGNORE_EXIT_AFTER -> StopLoss may fire before EXIT_AFTER
   - MAX_HOLD_DAYS             -> soft max-hold (loss-only) calendar days; 0=off
   - MAX_HOLD_HARD_DAYS        -> hard force clear even if profit; 0=off
-  - COOLDOWN_BARS / LOSS      -> asymmetric cooldown after sell (in barpos units)
-  - NO_ENTRY_AFTER            -> no new R-A at/after HHMMSS (intraday only); ""=off
+  - COOLDOWN_BARS / LOSS      -> after sell; bars * PERIOD duration -> wall-clock until
+  - NO_ENTRY_AFTER            -> no new R-A at/after HHMMSS; ""=off; intraday only
   - STOP_LOSS                 -> soft stop vs avg float cost; 0=off
   - REQUIRE_ABOVE_DAILY_MA    -> open only if daily close > MA(DAILY_MA_N)
   - DAILY_MA_N                -> any MA length (e.g. 10/20/60)
 
+Live order safety (v2.14):
+  - Update float state only after deal fill (pending); backtest/DRY_RUN still instant
+  - init reconciles JSON float vs broker (skips if pending); BASE_SHARES never adopted/sold
+  - pending timeout -> cancel first; clear only after order terminal (no double order)
+  - cooldown stored as wall-clock datetime (survives model restart)
+
 IMPORTANT:
   - Keep this file encoding=GBK, first line #coding:gbk
-  - This script only trades float A/B (no base position)
+  - This script only trades float A/B; set BASE_SHARES if account also holds base
   - DRY_RUN=True prints only; set False to passorder
   - Download matching period history in QMT data manager before backtest
 """
@@ -68,10 +74,15 @@ STOP_LOSS_IGNORE_EXIT_AFTER = True  # StopLoss may fire before EXIT_AFTER (gap g
 MAX_HOLD_DAYS = 4           # soft: force clear if hold>=N AND float loss; 0=off
 MAX_HOLD_ONLY_LOSS = True
 MAX_HOLD_HARD_DAYS = 8      # always force clear at N days (leak guard); 0=off
-COOLDOWN_BARS = 16          # after profitable sell (barpos units; tune per PERIOD)
+COOLDOWN_BARS = 16          # after profitable sell; converted to wall time via PERIOD
 COOLDOWN_BARS_LOSS = 28     # after losing sell
 NO_ENTRY_AFTER = "143000"   # no new R-A at/after HHMMSS; ""=off; intraday only
 STOP_LOSS = 0.03            # soft stop vs avg float cost; 0=off
+PENDING_TIMEOUT_SEC = 180   # live: request cancel after N seconds if not filled
+PENDING_ORPHAN_SEC = 60     # after cancel request, if order never appears, clear pending
+
+# Shares reserved as base position (never adopted / never sold by this strategy)
+BASE_SHARES = 0
 
 # Daily trend filter (applies to R-A / R-B on any period)
 REQUIRE_ABOVE_DAILY_MA = True   # only open when daily close > MA(DAILY_MA_N)
@@ -128,6 +139,24 @@ _PERIOD_HIST_START = {
     "1hy": "20050101",
     "1y": "20000101",
 }
+# wall-clock minutes per bar (for cooldown bars -> datetime)
+_PERIOD_BAR_MINUTES = {
+    "1m": 1,
+    "3m": 3,
+    "5m": 5,
+    "15m": 15,
+    "30m": 30,
+    "1h": 60,
+    "1d": 24 * 60,
+    "1w": 7 * 24 * 60,
+    "1mon": 30 * 24 * 60,
+    "1q": 90 * 24 * 60,
+    "1hy": 180 * 24 * 60,
+    "1y": 365 * 24 * 60,
+}
+# QMT order status (cover common 50-series and compact enums)
+_ORDER_FILLED = (56, 8)
+_ORDER_DEAD = (54, 57, 53, 5, 6, 9)  # cancelled / rejected / partial-cancel terminal
 
 
 class _S(object):
@@ -209,7 +238,8 @@ def _load_state():
     A.float_b = None
     A.acted_day = ""
     A.acted = set()
-    A.cooldown_until_bar = -1
+    A.cooldown_until = ""
+    A.pending = None
     if not os.path.isfile(STATE_FILE):
         return
     try:
@@ -218,8 +248,23 @@ def _load_state():
         A.float_a = raw.get("float_a")
         A.float_b = raw.get("float_b")
         A.acted_day = raw.get("acted_day", "") or ""
-        A.cooldown_until_bar = int(raw.get("cooldown_until_bar", -1) or -1)
-        print("HongliT load state", STATE_FILE, A.float_a, A.float_b, "cd_bar=", A.cooldown_until_bar)
+        acted = raw.get("acted") or []
+        if isinstance(acted, list):
+            A.acted = set([str(x) for x in acted])
+        A.cooldown_until = str(raw.get("cooldown_until", "") or "")
+        pend = raw.get("pending")
+        A.pending = pend if isinstance(pend, dict) else None
+        # drop legacy barpos cooldown (unsafe across restarts)
+        print(
+            "HongliT load state",
+            STATE_FILE,
+            A.float_a,
+            A.float_b,
+            "cd_until=",
+            A.cooldown_until or "-",
+            "pending=",
+            bool(A.pending),
+        )
     except Exception as e:
         print("HongliT load state fail", e)
 
@@ -229,7 +274,9 @@ def _save_state():
         "float_a": A.float_a,
         "float_b": A.float_b,
         "acted_day": A.acted_day,
-        "cooldown_until_bar": getattr(A, "cooldown_until_bar", -1),
+        "acted": sorted(list(getattr(A, "acted", set()) or [])),
+        "cooldown_until": getattr(A, "cooldown_until", "") or "",
+        "pending": getattr(A, "pending", None),
         "updated": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
     try:
@@ -328,27 +375,48 @@ def _entry_time_ok(now_s):
     return str(now_s) < gate
 
 
-def _set_cooldown(C, is_loss=False):
+def _cooldown_timedelta(bars):
+    p = getattr(A, "period", "1d") or "1d"
+    mins = int(_PERIOD_BAR_MINUTES.get(p, 24 * 60))
+    return datetime.timedelta(minutes=max(0, int(bars)) * mins)
+
+
+def _set_cooldown(now, is_loss=False):
     if not _use_risk_rules():
         return
     bars = int(COOLDOWN_BARS_LOSS) if is_loss else int(COOLDOWN_BARS)
     if bars <= 0:
         return
-    until = int(getattr(C, "barpos", 0)) + bars
-    A.cooldown_until_bar = until
-    print("HongliT cooldown until barpos=", until, "bars=", bars, "loss=", bool(is_loss))
+    if now is None:
+        now = datetime.datetime.now()
+    until = now + _cooldown_timedelta(bars)
+    A.cooldown_until = until.strftime("%Y%m%d%H%M%S")
+    print(
+        "HongliT cooldown until",
+        A.cooldown_until,
+        "bars=",
+        bars,
+        "period=",
+        getattr(A, "period", "?"),
+        "loss=",
+        bool(is_loss),
+    )
 
 
-def _in_cooldown(C):
+def _in_cooldown(now):
     if not _use_risk_rules():
         return False
-    # either win/loss cooldown may be active; until_bar is absolute
     if int(COOLDOWN_BARS) <= 0 and int(COOLDOWN_BARS_LOSS) <= 0:
         return False
-    until = int(getattr(A, "cooldown_until_bar", -1) or -1)
-    if until < 0:
+    until_s = str(getattr(A, "cooldown_until", "") or "").strip()
+    if not until_s:
         return False
-    return int(getattr(C, "barpos", 0)) < until
+    until = _parse_opened_at(until_s)
+    if until is None:
+        return False
+    if now is None:
+        now = datetime.datetime.now()
+    return now < until
 
 
 def _sell_float_vol():
@@ -360,17 +428,47 @@ def _sell_float_vol():
     return vol
 
 
-def _clear_float_after_sell(C, remark, last=None):
+def _clear_float_after_sell(now, remark, last=None):
     is_loss = False
     if last is not None:
         is_loss = _float_ret(last) < 0
     A.float_a = None
     A.float_b = None
     A.acted.add("SELL")
-    _set_cooldown(C, is_loss=is_loss)
+    _set_cooldown(now, is_loss=is_loss)
     _save_state()
     print("HongliT", remark, "done, float cleared loss=", bool(is_loss))
 
+
+def _shrink_float_to_vol(target_vol):
+    """Reduce float A/B so total shares <= target_vol (drop B first)."""
+    target_vol = int(target_vol)
+    if target_vol < 100:
+        A.float_a = None
+        A.float_b = None
+        return
+    a = int(A.float_a["shares"]) if _has_leg(A.float_a) else 0
+    b = int(A.float_b["shares"]) if _has_leg(A.float_b) else 0
+    total = a + b
+    if total <= target_vol:
+        return
+    drop = total - target_vol
+    if b > 0:
+        take = min(b, drop)
+        b -= take
+        drop -= take
+        if b < 100:
+            A.float_b = None
+        else:
+            A.float_b["shares"] = b
+            A.float_b["cost"] = round(b * float(A.float_b.get("price", 0) or 0), 2)
+    if drop > 0 and a > 0:
+        a = max(0, a - drop)
+        if a < 100:
+            A.float_a = None
+        else:
+            A.float_a["shares"] = a
+            A.float_a["cost"] = round(a * float(A.float_a.get("price", 0) or 0), 2)
 
 def _calc_indicators(high, low, close):
     """Return (lower, upper, j, last_close) or None."""
@@ -765,40 +863,434 @@ def _available_cash():
     return float(accs[0].m_dAvailable)
 
 
+def _pos_code(p):
+    return p.m_strInstrumentID + "." + p.m_strExchangeID
+
+
+def _broker_position(stock):
+    """Return (total_vol, can_use, avg_cost) for stock; (0,0,0) if none."""
+    if getattr(A, "is_backtest", False) or DRY_RUN:
+        return 0, 0, 0.0
+    positions = get_trade_detail_data(A.acct, A.acct_type, "position")
+    if not positions:
+        return 0, 0, 0.0
+    for p in positions:
+        if _pos_code(p) != stock:
+            continue
+        vol = int(getattr(p, "m_nVolume", 0) or 0)
+        can = int(getattr(p, "m_nCanUseVolume", 0) or 0)
+        cost = 0.0
+        for attr in ("m_dOpenPrice", "m_dCostPrice", "m_dAvgPrice"):
+            v = getattr(p, attr, None)
+            if v is not None:
+                try:
+                    cost = float(v)
+                    if cost > 0:
+                        break
+                except Exception:
+                    pass
+        return vol, can, cost
+    return 0, 0, 0.0
+
+
 def _can_use_vol(stock):
     if getattr(A, "is_backtest", False) or DRY_RUN:
-        # backtest/dry: trust strategy state shares
         return 10**9
-    positions = get_trade_detail_data(A.acct, A.acct_type, "position")
-    for p in positions:
-        code = p.m_strInstrumentID + "." + p.m_strExchangeID
-        if code == stock:
-            return int(p.m_nCanUseVolume or 0)
+    _vol, can, _cost = _broker_position(stock)
+    return int(can)
+
+
+def _base_shares():
+    return max(0, int(BASE_SHARES or 0))
+
+
+def _floatable_broker_vol(broker_vol):
+    """Shares above BASE_SHARES that this strategy may manage."""
+    return max(0, int(broker_vol) - _base_shares())
+
+
+def _adopt_share_cap(price):
+    """Max shares to adopt on reconcile: float budgets only (not entire account)."""
+    budget = float(FLOAT_A_BUDGET)
+    if _enable_float_b():
+        budget += float(FLOAT_B_BUDGET)
+    if price and price > 0:
+        return _lot(price, budget)
+    # unknown price: cap by budget at ~1 yuan worst-case lot step
+    return int(budget // 100) * 100
+
+
+def _max_sell_vol():
+    """Sell at most strategy float, never touch BASE_SHARES."""
+    want = _sell_float_vol()
+    if want < 100:
+        return 0
+    if getattr(A, "is_backtest", False) or DRY_RUN:
+        return want
+    broker_vol, can, _cost = _broker_position(A.stock)
+    floatable = _floatable_broker_vol(broker_vol)
+    return max(0, min(want, int(can), floatable))
+
+
+def _reconcile_float_with_broker():
+    """Align JSON float vs broker floatable shares. Skip if pending. Never touch BASE_SHARES."""
+    if getattr(A, "is_backtest", False) or DRY_RUN:
+        return
+    if getattr(A, "pending", None):
+        print("HongliT reconcile skip: pending active")
+        return
+    broker_vol, _can, broker_cost = _broker_position(A.stock)
+    floatable = _floatable_broker_vol(broker_vol)
+    state_vol = _sell_float_vol()
+    changed = False
+    if floatable < 100:
+        if state_vol > 0:
+            print(
+                "HongliT reconcile: no floatable (broker=%s base=%s), clear float was %s"
+                % (broker_vol, _base_shares(), state_vol)
+            )
+            A.float_a = None
+            A.float_b = None
+            changed = True
+    elif state_vol <= 0:
+        px = float(broker_cost) if broker_cost and broker_cost > 0 else 0.0
+        cap = _adopt_share_cap(px if px > 0 else None)
+        sh = int(min(floatable, cap) // 100) * 100
+        if sh < 100:
+            print(
+                "HongliT reconcile: broker has shares but adopt cap <100 (floatable=%s cap=%s); leave unmanaged"
+                % (floatable, cap)
+            )
+        else:
+            A.float_a = {
+                "shares": sh,
+                "price": px,
+                "cost": round(sh * px, 2) if px > 0 else 0.0,
+                "opened_at": datetime.datetime.now().strftime("%Y%m%d%H%M%S"),
+                "adopted": True,
+            }
+            A.float_b = None
+            changed = True
+            print(
+                "HongliT reconcile: adopt floatable as float_a",
+                A.float_a,
+                "broker=",
+                broker_vol,
+                "base=",
+                _base_shares(),
+            )
+    elif state_vol > floatable:
+        print(
+            "HongliT reconcile: shrink float",
+            state_vol,
+            "->",
+            floatable,
+            "(broker=%s base=%s)" % (broker_vol, _base_shares()),
+        )
+        _shrink_float_to_vol(floatable)
+        changed = True
+    if changed:
+        _save_state()
+
+
+def _deal_fill(remark, stock):
+    """Sum deals matching remark+stock -> (vol, avg_price)."""
+    vol = 0
+    notional = 0.0
+    try:
+        deals = get_trade_detail_data(A.acct, A.acct_type, "deal")
+    except Exception as e:
+        print("HongliT deal query fail", e)
+        return 0, 0.0
+    if not deals:
+        return 0, 0.0
+    for d in deals:
+        if str(getattr(d, "m_strRemark", "") or "") != remark:
+            continue
+        code = getattr(d, "m_strInstrumentID", "") + "." + getattr(d, "m_strExchangeID", "")
+        if code != stock:
+            continue
+        v = int(getattr(d, "m_nVolume", 0) or 0)
+        px = float(getattr(d, "m_dPrice", 0) or 0)
+        if v > 0:
+            vol += v
+            notional += v * px
+    avg = (notional / float(vol)) if vol > 0 else 0.0
+    return vol, avg
+
+
+def _find_order(remark, stock):
+    try:
+        orders = get_trade_detail_data(A.acct, A.acct_type, "order")
+    except Exception as e:
+        print("HongliT order query fail", e)
+        return None
+    if not orders:
+        return None
+    hit = None
+    for od in orders:
+        if str(getattr(od, "m_strRemark", "") or "") != remark:
+            continue
+        code = getattr(od, "m_strInstrumentID", "") + "." + getattr(od, "m_strExchangeID", "")
+        if code != stock:
+            continue
+        hit = od
+    return hit
+
+
+def _order_traded_vol(od):
+    if od is None:
+        return 0
+    for attr in ("m_nVolumeTraded", "m_nDealVolume", "m_nTradedVolume"):
+        v = getattr(od, attr, None)
+        if v is not None:
+            try:
+                return int(v)
+            except Exception:
+                pass
     return 0
 
 
-def _order_buy(C, vol, remark):
-    msg = "HongliT BUY %s %s x%d" % (remark, A.stock, vol)
-    print(("[DRY] " if DRY_RUN else "") + msg)
-    if DRY_RUN:
+def _order_sys_id(od):
+    if od is None:
+        return None
+    for attr in ("m_strOrderSysID", "m_strOrderID", "m_nOrderID", "m_nRef"):
+        v = getattr(od, attr, None)
+        if v is None or v == "" or v == 0:
+            continue
+        return v
+    return None
+
+
+def _try_cancel_order(od, C):
+    """Best-effort cancel via QMT builtins (API name varies by build)."""
+    oid = _order_sys_id(od)
+    if oid is None:
+        print("HongliT cancel skip: no order id")
+        return False
+    # prefer cancel(sysId, account, accountType, ContextInfo)
+    for fn_name in ("cancel", "cancel_order", "cancelorder"):
+        fn = globals().get(fn_name)
+        if not callable(fn):
+            continue
+        try:
+            fn(oid, A.acct, A.acct_type, C)
+            print("HongliT cancel via", fn_name, oid)
+            return True
+        except TypeError:
+            try:
+                fn(oid, A.acct, A.acct_type)
+                print("HongliT cancel via", fn_name, "(3arg)", oid)
+                return True
+            except Exception as e:
+                print("HongliT", fn_name, "fail", e)
+        except Exception as e:
+            print("HongliT", fn_name, "fail", e)
+    print("HongliT cancel unavailable; keep waiting for terminal status, oid=", oid)
+    return False
+
+
+def _apply_buy_fill(intent, vol, price, opened_at):
+    vol = int(vol)
+    price = float(price) if price and price > 0 else 0.0
+    if vol < 100:
+        return
+    leg = {
+        "shares": vol,
+        "price": price,
+        "cost": round(vol * price, 2),
+    }
+    if intent == "RA":
+        leg["opened_at"] = opened_at or datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+        A.float_a = leg
+        A.acted.add("RA")
+        print("HongliT R-A filled", A.float_a)
+    elif intent == "RB":
+        A.float_b = leg
+        A.acted.add("RB")
+        print("HongliT R-B filled", A.float_b)
+    _save_state()
+
+
+def _apply_sell_fill(now, intent, last_hint, filled_vol):
+    """Clear or shrink float after sell fill."""
+    want = _sell_float_vol()
+    filled_vol = int(filled_vol)
+    tag = intent or "SELL"
+    if filled_vol >= max(100, int(want * 0.95)) or filled_vol >= want:
+        _clear_float_after_sell(now, tag, last=last_hint)
+        return
+    if filled_vol >= 100:
+        remain = max(0, want - filled_vol)
+        print("HongliT partial sell fill", filled_vol, "remain~", remain)
+        _shrink_float_to_vol(remain)
+        if remain < 100:
+            _clear_float_after_sell(now, tag + "/partial", last=last_hint)
+        else:
+            A.acted.add("SELL")
+            _save_state()
+
+
+def _clear_pending(reason=""):
+    if getattr(A, "pending", None):
+        print("HongliT pending clear", reason, A.pending.get("remark"))
+    A.pending = None
+    _save_state()
+
+
+def _process_pending(C, now):
+    """Live: resolve pending; timeout cancels first; clear only on terminal. Return True if blocking."""
+    pend = getattr(A, "pending", None)
+    if not pend:
+        return False
+    if getattr(A, "is_backtest", False) or DRY_RUN:
+        A.pending = None
+        return False
+
+    remark = str(pend.get("remark", "") or "")
+    stock = str(pend.get("stock", A.stock) or A.stock)
+    side = str(pend.get("side", "") or "")
+    intent = str(pend.get("intent", "") or "")
+    target = int(pend.get("vol", 0) or 0)
+    submitted = _parse_opened_at(pend.get("submitted_at"))
+    age = 0.0
+    if submitted is not None and now is not None:
+        age = (now - submitted).total_seconds()
+
+    deal_vol, deal_avg = _deal_fill(remark, stock)
+    od = _find_order(remark, stock)
+    status = int(getattr(od, "m_nOrderStatus", -1) or -1) if od is not None else -1
+    traded = max(deal_vol, _order_traded_vol(od))
+    px = deal_avg if deal_avg > 0 else float(pend.get("price_hint", 0) or 0)
+    cancel_req = bool(pend.get("cancel_requested"))
+
+    print(
+        "HongliT pending check",
+        intent,
+        "deal=",
+        deal_vol,
+        "traded=",
+        traded,
+        "status=",
+        status,
+        "age=%.0fs" % age,
+        "cancel_req=",
+        cancel_req,
+    )
+
+    done_fill = traded >= target and target >= 100
+    status_filled = status in _ORDER_FILLED
+    status_dead = status in _ORDER_DEAD
+
+    if done_fill or (status_filled and traded >= 100):
+        use_vol = traded if traded >= 100 else deal_vol
+        if side == "buy":
+            _apply_buy_fill(intent, use_vol, px, pend.get("opened_at"))
+        else:
+            _apply_sell_fill(now, intent, pend.get("last_hint"), use_vol)
+        _clear_pending("filled")
+        return False
+
+    if status_dead:
+        if traded >= 100:
+            if side == "buy":
+                _apply_buy_fill(intent, traded, px, pend.get("opened_at"))
+            else:
+                _apply_sell_fill(now, intent, pend.get("last_hint"), traded)
+            _clear_pending("dead-partial")
+        else:
+            _clear_pending("rejected/cancelled")
+        return False
+
+    # timeout: request cancel, keep blocking until terminal (prevents double order)
+    if age >= float(PENDING_TIMEOUT_SEC):
+        if not cancel_req:
+            if od is not None:
+                _try_cancel_order(od, C)
+            else:
+                print("HongliT pending timeout, order not visible yet; wait for cancel/orphan")
+            pend["cancel_requested"] = True
+            pend["cancel_at"] = (now or datetime.datetime.now()).strftime("%Y%m%d%H%M%S")
+            A.pending = pend
+            _save_state()
+            return True
+        # cancel already requested
+        cancel_at = _parse_opened_at(pend.get("cancel_at"))
+        cancel_age = 0.0
+        if cancel_at is not None and now is not None:
+            cancel_age = (now - cancel_at).total_seconds()
+        if od is None and cancel_age >= float(PENDING_ORPHAN_SEC):
+            # never saw the order — likely submit failed; safe to unlock
+            print("HongliT pending orphan clear (no order after cancel wait)")
+            _clear_pending("orphan")
+            return False
+        # still live or settling — do NOT clear, do NOT retry
         return True
-    passorder(A.buy_code, 1101, A.acct, A.stock, 14, -1, vol, "HongliT_v25", 1, msg, C)
-    A.waiting_list.append(msg)
+
     return True
 
 
-def _order_sell(C, vol, remark):
-    can = _can_use_vol(A.stock)
-    vol = min(int(vol), can)
-    if vol < 100:
-        print("sell skip, can_use=", can, "want=", vol)
-        return False
-    msg = "HongliT SELL %s %s x%d" % (remark, A.stock, vol)
+def _new_remark(tag, side, vol):
+    # unique remark so deal/order matching does not hit stale rows
+    ts = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+    return "HongliT %s %s %s x%d %s" % (side, tag, A.stock, int(vol), ts)
+
+
+def _order_buy(C, vol, remark_tag, intent, price_hint, opened_at, now):
+    """Submit buy. Instant apply on backtest/DRY_RUN; else pending until fill."""
+    msg = _new_remark(remark_tag, "BUY", vol)
     print(("[DRY] " if DRY_RUN else "") + msg)
-    if DRY_RUN:
+    if DRY_RUN or getattr(A, "is_backtest", False):
+        _apply_buy_fill(intent, vol, price_hint, opened_at)
         return True
-    passorder(A.sell_code, 1101, A.acct, A.stock, 14, -1, vol, "HongliT_v25", 1, msg, C)
-    A.waiting_list.append(msg)
+    try:
+        passorder(A.buy_code, 1101, A.acct, A.stock, 14, -1, vol, "HongliT_v214", 1, msg, C)
+    except Exception as e:
+        print("HongliT passorder BUY fail", e)
+        return False
+    A.pending = {
+        "remark": msg,
+        "side": "buy",
+        "intent": intent,
+        "vol": int(vol),
+        "stock": A.stock,
+        "price_hint": float(price_hint),
+        "opened_at": opened_at,
+        "submitted_at": (now or datetime.datetime.now()).strftime("%Y%m%d%H%M%S"),
+        "cancel_requested": False,
+    }
+    _save_state()
+    return True
+
+
+def _order_sell(C, vol, remark_tag, intent, last_hint, now):
+    """Submit sell. Instant clear on backtest/DRY_RUN; else pending until fill."""
+    want = int(vol)
+    vol = min(want, _max_sell_vol())
+    if vol < 100:
+        print("sell skip, max_sell=", _max_sell_vol(), "want=", want)
+        return False
+    msg = _new_remark(remark_tag, "SELL", vol)
+    print(("[DRY] " if DRY_RUN else "") + msg)
+    if DRY_RUN or getattr(A, "is_backtest", False):
+        _clear_float_after_sell(now, intent or remark_tag, last=last_hint)
+        return True
+    try:
+        passorder(A.sell_code, 1101, A.acct, A.stock, 14, -1, vol, "HongliT_v214", 1, msg, C)
+    except Exception as e:
+        print("HongliT passorder SELL fail", e)
+        return False
+    A.pending = {
+        "remark": msg,
+        "side": "sell",
+        "intent": intent or remark_tag,
+        "vol": int(vol),
+        "stock": A.stock,
+        "last_hint": last_hint,
+        "submitted_at": (now or datetime.datetime.now()).strftime("%Y%m%d%H%M%S"),
+        "cancel_requested": False,
+    }
+    _save_state()
     return True
 
 
@@ -826,7 +1318,6 @@ def init(C):
 
     A.buy_code = 23 if A.acct_type == "STOCK" else 33
     A.sell_code = 24 if A.acct_type == "STOCK" else 34
-    A.waiting_list = []
     A.busy = False
     A.is_backtest = _is_backtest(C)
     _download_hist(A.stock, A.period)
@@ -839,15 +1330,22 @@ def init(C):
         A.float_b = None
         A.acted_day = ""
         A.acted = set()
-        A.cooldown_until_bar = -1
+        A.cooldown_until = ""
+        A.pending = None
         A.ready_logged = False
     else:
         A.ready_logged = True
-    if not hasattr(A, "cooldown_until_bar"):
-        A.cooldown_until_bar = -1
+        if not hasattr(A, "cooldown_until"):
+            A.cooldown_until = ""
+        if not hasattr(A, "pending"):
+            A.pending = None
+        try:
+            _reconcile_float_with_broker()
+        except Exception as e:
+            print("HongliT reconcile fail", e)
     C.set_universe([A.stock])
     print(
-        "HongliT v2.12 init",
+        "HongliT v2.14 init",
         A.stock,
         A.acct,
         A.acct_type,
@@ -861,6 +1359,8 @@ def init(C):
         _use_risk_rules(),
         "B=",
         _enable_float_b(),
+        "baseShares=",
+        _base_shares(),
         "exitAfter=",
         (EXIT_AFTER if getattr(A, "intraday", False) else "-") if _use_risk_rules() else "-",
         "stopIgnoreExit=",
@@ -871,6 +1371,8 @@ def init(C):
         MAX_HOLD_HARD_DAYS if _use_risk_rules() else 0,
         "cdWin/Loss=",
         ("%s/%s" % (COOLDOWN_BARS, COOLDOWN_BARS_LOSS)) if _use_risk_rules() else "-",
+        "cdUntil=",
+        getattr(A, "cooldown_until", "") or "-",
         "noEntryAfter=",
         (NO_ENTRY_AFTER if getattr(A, "intraday", False) else "-") if _use_risk_rules() else "-",
         "stopLoss=",
@@ -914,23 +1416,16 @@ def _handle(C):
         # live: session hours
         if now_s < "093000" or now_s > "150000":
             return
+        # resolve pending fills even outside daily decision window
+        if getattr(A, "pending", None):
+            if _process_pending(C, now):
+                return
         # daily+: near-close window; intraday: every last bar in session
         if (not intraday) and (now_s < DECISION_START or now_s > DECISION_END):
             return
     # backtest: each bar ~= decision at bar close
 
     _reset_day(day)
-
-    if (not bt) and A.waiting_list:
-        found = []
-        orders = get_trade_detail_data(A.acct, A.acct_type, "order")
-        for od in orders:
-            if od.m_strRemark in A.waiting_list:
-                found.append(od.m_strRemark)
-        A.waiting_list = [x for x in A.waiting_list if x not in found]
-        if A.waiting_list:
-            print("waiting orders", A.waiting_list)
-            return
 
     cash = _available_cash()
     if cash is None:
@@ -998,29 +1493,33 @@ def _handle(C):
         and fret <= -float(STOP_LOSS)
         and stop_time_ok
         and ("SELL" not in A.acted)
+        and (not getattr(A, "pending", None))
     ):
         sell_vol = _sell_float_vol()
         print(
             "HongliT StopLoss trigger ret=%.2f%% <= -%.2f%% now=%s exitGate=%s"
             % (fret * 100.0, float(STOP_LOSS) * 100.0, now_s, exit_ok)
         )
-        if _order_sell(C, sell_vol, "StopLoss"):
-            _clear_float_after_sell(C, "StopLoss", last=last)
+        _order_sell(C, sell_vol, "StopLoss", "StopLoss", last, now)
         return
 
     # R-Sell first: clear float only
-    if sell_cond and (has_a or has_b) and ("SELL" not in A.acted):
+    if sell_cond and (has_a or has_b) and ("SELL" not in A.acted) and (not getattr(A, "pending", None)):
         if not exit_ok:
             print("R-Sell defer until", EXIT_AFTER, "now=", now_s)
             return
         else:
             sell_vol = _sell_float_vol()
-            if _order_sell(C, sell_vol, "RSell"):
-                _clear_float_after_sell(C, "R-Sell", last=last)
+            _order_sell(C, sell_vol, "RSell", "R-Sell", last, now)
             return
 
     # Soft max-hold (loss-only) + hard max-hold leak guard
-    if _use_risk_rules() and (has_a or has_b) and ("SELL" not in A.acted):
+    if (
+        _use_risk_rules()
+        and (has_a or has_b)
+        and ("SELL" not in A.acted)
+        and (not getattr(A, "pending", None))
+    ):
         hard_n = int(MAX_HOLD_HARD_DAYS)
         soft_n = int(MAX_HOLD_DAYS)
         hard_hit = hard_n > 0 and hold_d >= float(hard_n)
@@ -1045,21 +1544,25 @@ def _handle(C):
                     "HongliT %s trigger hold_days=%.2f soft=%s hard=%s ret=%.2f%%"
                     % (tag, hold_d, soft_n, hard_n, fret * 100.0)
                 )
-                if _order_sell(C, sell_vol, tag):
-                    _clear_float_after_sell(C, tag, last=last)
+                _order_sell(C, sell_vol, tag, tag, last, now)
                 return
 
     # R-A
-    if buy_cond and zero_float and ("RA" not in A.acted):
+    if (
+        buy_cond
+        and zero_float
+        and ("RA" not in A.acted)
+        and (not getattr(A, "pending", None))
+    ):
         if not _entry_time_ok(now_s):
             print("R-A skip after", NO_ENTRY_AFTER, "now=", now_s)
             return
-        if _in_cooldown(C):
+        if _in_cooldown(now):
             print(
-                "R-A skip cooldown barpos=",
-                getattr(C, "barpos", None),
+                "R-A skip cooldown now=",
+                now.strftime("%Y%m%d%H%M%S"),
                 "until=",
-                getattr(A, "cooldown_until_bar", None),
+                getattr(A, "cooldown_until", None),
             )
             return
         above_ma, d_last, d_ma = _daily_ma_ok(C, A.stock, closes_hint=close)
@@ -1077,23 +1580,20 @@ def _handle(C):
         vol = _lot(last, budget)
         if vol < 100:
             print("R-A skip cash/lot")
-            A.acted.add("RA")
-            _save_state()
             return
-        if _order_buy(C, vol, "RA"):
-            A.float_a = {
-                "shares": vol,
-                "price": float(last),
-                "cost": round(vol * last, 2),
-                "opened_at": now.strftime("%Y%m%d%H%M%S"),
-            }
-            A.acted.add("RA")
-            _save_state()
-            print("HongliT R-A opened", A.float_a)
+        opened_at = now.strftime("%Y%m%d%H%M%S")
+        _order_buy(C, vol, "RA", "RA", last, opened_at, now)
         return
 
     # R-B (disabled when USE_RISK_RULES and ENABLE_FLOAT_B=False)
-    if _enable_float_b() and buy_cond and has_a and (not has_b) and ("RB" not in A.acted):
+    if (
+        _enable_float_b()
+        and buy_cond
+        and has_a
+        and (not has_b)
+        and ("RB" not in A.acted)
+        and (not getattr(A, "pending", None))
+    ):
         above_ma, d_last, d_ma = _daily_ma_ok(C, A.stock, closes_hint=close)
         if not above_ma:
             print(
@@ -1114,14 +1614,8 @@ def _handle(C):
         vol = _lot(last, budget)
         if vol < 100:
             print("R-B skip cash/lot")
-            A.acted.add("RB")
-            _save_state()
             return
-        if _order_buy(C, vol, "RB"):
-            A.float_b = {"shares": vol, "price": float(last), "cost": round(vol * last, 2)}
-            A.acted.add("RB")
-            _save_state()
-            print("HongliT R-B opened", A.float_b)
+        _order_buy(C, vol, "RB", "RB", last, None, now)
         return
 
     if (not buy_cond) and (not sell_cond) and interesting:
