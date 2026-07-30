@@ -1,6 +1,6 @@
 #coding:gbk
 """
-HongliT v2.9 for Guojin QMT terminal (model trade).
+HongliT v2.12 for Guojin QMT terminal (model trade).
 
 Main chart: 561580.SH; PERIOD below or "follow" chart period.
 UI: select stock + account, run in LIVE (not simulate) to send orders.
@@ -11,15 +11,17 @@ Rules:
   R-Sell upper + J>=100                    -> sell ALL float A/B
   No R1
 
-15m profile (auto when period==15m, or FORCE_15M_RULES):
-  - ENABLE_FLOAT_B_15M=False  -> skip R-B
-  - EXIT_AFTER_15M            -> defer R-Sell/MaxHold (NOT StopLoss)
-  - STOP_LOSS_IGNORE_EXIT_AFTER -> StopLoss may fire from 09:45
-  - MAX_HOLD_DAYS_15M         -> soft max-hold (loss-only) calendar days
-  - MAX_HOLD_HARD_DAYS_15M    -> hard force clear even if profit
-  - COOLDOWN_BARS_15M / LOSS  -> asymmetric cooldown after sell
-  - NO_ENTRY_AFTER_15M        -> no new R-A after HHMMSS
-  - STOP_LOSS_15M             -> soft stop vs avg float cost; 0=off
+Risk profile (any PERIOD when USE_RISK_RULES=True):
+  - ENABLE_FLOAT_B=False      -> skip R-B (A-only)
+  - EXIT_AFTER                -> defer R-Sell/MaxHold until HHMMSS (intraday only; StopLoss may bypass)
+  - STOP_LOSS_IGNORE_EXIT_AFTER -> StopLoss may fire before EXIT_AFTER
+  - MAX_HOLD_DAYS             -> soft max-hold (loss-only) calendar days; 0=off
+  - MAX_HOLD_HARD_DAYS        -> hard force clear even if profit; 0=off
+  - COOLDOWN_BARS / LOSS      -> asymmetric cooldown after sell (in barpos units)
+  - NO_ENTRY_AFTER            -> no new R-A at/after HHMMSS (intraday only); ""=off
+  - STOP_LOSS                 -> soft stop vs avg float cost; 0=off
+  - REQUIRE_ABOVE_DAILY_MA    -> open only if daily close > MA(DAILY_MA_N)
+  - DAILY_MA_N                -> any MA length (e.g. 10/20/60)
 
 IMPORTANT:
   - Keep this file encoding=GBK, first line #coding:gbk
@@ -57,20 +59,24 @@ PERIOD = "follow"
 # 0 = auto count by period; else fixed bar count for OHLC fetch
 OHLC_COUNT = 0
 
-# ---- 15m profile ----
-# Auto-on when resolved period is "15m"; set True to force on any period.
-FORCE_15M_RULES = False
-# Applied only while 15m profile is active:
-ENABLE_FLOAT_B_15M = False  # False = close R-B (A-only)
-EXIT_AFTER_15M = "100000"   # defer R-Sell/MaxHold until 10:00 (not StopLoss)
-STOP_LOSS_IGNORE_EXIT_AFTER = True  # StopLoss may fire at 09:45 (gap guard)
-MAX_HOLD_DAYS_15M = 4       # soft: force clear if hold>=N AND float loss; 0=off
-MAX_HOLD_ONLY_LOSS_15M = True
-MAX_HOLD_HARD_DAYS_15M = 8  # always force clear at N days (leak guard); 0=off
-COOLDOWN_BARS_15M = 16      # after profitable sell (~1 session)
-COOLDOWN_BARS_LOSS_15M = 28 # after losing sell (~1.75 sessions)
-NO_ENTRY_AFTER_15M = "143000"  # no new R-A at/after 14:30; ""=off
-STOP_LOSS_15M = 0.03        # soft stop vs avg float cost; 0=off
+# ---- risk profile (any PERIOD) ----
+# Master switch: False = classic R-A/B/Sell only (no maxhold/cooldown/time gates/stop).
+USE_RISK_RULES = True
+ENABLE_FLOAT_B = False      # False = close R-B (A-only); ignored if USE_RISK_RULES=False (B on)
+EXIT_AFTER = "100000"       # defer R-Sell/MaxHold until HHMMSS; ""=off; intraday only
+STOP_LOSS_IGNORE_EXIT_AFTER = True  # StopLoss may fire before EXIT_AFTER (gap guard)
+MAX_HOLD_DAYS = 4           # soft: force clear if hold>=N AND float loss; 0=off
+MAX_HOLD_ONLY_LOSS = True
+MAX_HOLD_HARD_DAYS = 8      # always force clear at N days (leak guard); 0=off
+COOLDOWN_BARS = 16          # after profitable sell (barpos units; tune per PERIOD)
+COOLDOWN_BARS_LOSS = 28     # after losing sell
+NO_ENTRY_AFTER = "143000"   # no new R-A at/after HHMMSS; ""=off; intraday only
+STOP_LOSS = 0.03            # soft stop vs avg float cost; 0=off
+
+# Daily trend filter (applies to R-A / R-B on any period)
+REQUIRE_ABOVE_DAILY_MA = True   # only open when daily close > MA(DAILY_MA_N)
+DAILY_MA_N = 20                 # MA period: any int >=2 (10/20/60/...)
+DAILY_MA_COUNT = 60             # fetch bars; auto raised to >= DAILY_MA_N+5
 
 # Live decision window (only for daily+ periods; intraday uses every bar in session)
 DECISION_START = "143000"
@@ -244,15 +250,14 @@ def _has_leg(leg):
     return leg is not None and int(leg.get("shares", 0)) >= 100
 
 
-def _use_15m_rules():
-    if FORCE_15M_RULES:
-        return True
-    return getattr(A, "period", "") == "15m"
+def _use_risk_rules():
+    """Risk profile (maxhold/cooldown/stop/time gates/float-B switch). Any PERIOD."""
+    return bool(USE_RISK_RULES)
 
 
 def _enable_float_b():
-    if _use_15m_rules():
-        return bool(ENABLE_FLOAT_B_15M)
+    if _use_risk_rules():
+        return bool(ENABLE_FLOAT_B)
     return True
 
 
@@ -300,29 +305,33 @@ def _float_ret(last):
 
 
 def _exit_time_ok(now_s):
-    """15m: defer R-Sell/MaxHold until EXIT_AFTER_15M (StopLoss may bypass)."""
-    if not _use_15m_rules():
+    """Defer R-Sell/MaxHold until EXIT_AFTER (intraday only; StopLoss may bypass)."""
+    if not _use_risk_rules():
         return True
-    gate = str(EXIT_AFTER_15M or "").strip()
+    if not getattr(A, "intraday", False):
+        return True
+    gate = str(EXIT_AFTER or "").strip()
     if not gate:
         return True
     return str(now_s) >= gate
 
 
 def _entry_time_ok(now_s):
-    """15m: block new R-A at/after NO_ENTRY_AFTER_15M."""
-    if not _use_15m_rules():
+    """Block new R-A at/after NO_ENTRY_AFTER (intraday only)."""
+    if not _use_risk_rules():
         return True
-    gate = str(NO_ENTRY_AFTER_15M or "").strip()
+    if not getattr(A, "intraday", False):
+        return True
+    gate = str(NO_ENTRY_AFTER or "").strip()
     if not gate:
         return True
     return str(now_s) < gate
 
 
 def _set_cooldown(C, is_loss=False):
-    if not _use_15m_rules():
+    if not _use_risk_rules():
         return
-    bars = int(COOLDOWN_BARS_LOSS_15M) if is_loss else int(COOLDOWN_BARS_15M)
+    bars = int(COOLDOWN_BARS_LOSS) if is_loss else int(COOLDOWN_BARS)
     if bars <= 0:
         return
     until = int(getattr(C, "barpos", 0)) + bars
@@ -331,10 +340,10 @@ def _set_cooldown(C, is_loss=False):
 
 
 def _in_cooldown(C):
-    if not _use_15m_rules():
+    if not _use_risk_rules():
         return False
     # either win/loss cooldown may be active; until_bar is absolute
-    if int(COOLDOWN_BARS_15M) <= 0 and int(COOLDOWN_BARS_LOSS_15M) <= 0:
+    if int(COOLDOWN_BARS) <= 0 and int(COOLDOWN_BARS_LOSS) <= 0:
         return False
     until = int(getattr(A, "cooldown_until_bar", -1) or -1)
     if until < 0:
@@ -480,6 +489,112 @@ def _download_hist(stock, period):
                 return
             except Exception as e:
                 print(fn_name, "fail", e)
+
+
+def _fetch_closes(C, stock, period, count, end):
+    """Fetch close list for an explicit period (used by daily MA filter)."""
+    md = None
+    try:
+        md = C.get_market_data_ex(
+            fields=["close"],
+            stock_code=[stock],
+            period=period,
+            end_time=end,
+            count=count,
+            dividend_type="front_ratio",
+            fill_data=True,
+            subscribe=False,
+        )
+    except TypeError:
+        try:
+            md = C.get_market_data_ex(
+                ["close"],
+                [stock],
+                period=period,
+                start_time="",
+                end_time=end,
+                count=count,
+                dividend_type="front_ratio",
+            )
+        except Exception as e:
+            _diag_once("daily_ex_fail", e)
+            md = None
+    except Exception as e:
+        _diag_once("daily_ex_fail", e)
+        md = None
+    closes = _series_from_ex(md, stock, "close") if md is not None else None
+    if closes and len(closes) >= 2:
+        return closes
+    try:
+        md2 = C.get_market_data(
+            ["close"],
+            stock_code=[stock],
+            period=period,
+            end_time=end,
+            count=count,
+            dividend_type="front_ratio",
+        )
+        closes = _series_from_ex(md2, stock, "close")
+        if closes and len(closes) >= 2:
+            return closes
+    except Exception as e:
+        _diag_once("daily_gmd_fail", e)
+    try:
+        c_map = C.get_history_data(count, period, "close", dividend_type="front_ratio")
+        if c_map and stock in c_map:
+            return [float(x) for x in c_map[stock] if x == x]
+    except Exception as e:
+        _diag_once("daily_hist_fail", e)
+    return None
+
+
+def _daily_ma_ok(C, stock, closes_hint=None):
+    """True if latest daily close > MA(DAILY_MA_N). Cached per hour + MA length."""
+    if not bool(REQUIRE_ABOVE_DAILY_MA):
+        return True, None, None
+    n = int(DAILY_MA_N)
+    if n <= 1:
+        return True, None, None
+    day = _bar_datetime(C).strftime("%Y%m%d")
+    # refresh a few times per day on intraday so today's running close updates
+    bucket = "%s|ma%d" % (_bar_datetime(C).strftime("%Y%m%d%H"), n)
+    cache = getattr(A, "_daily_ma_cache", None)
+    if isinstance(cache, dict) and cache.get("bucket") == bucket and cache.get("ok") is not None:
+        return bool(cache.get("above")), cache.get("last"), cache.get("ma")
+
+    closes = None
+    # if strategy period is already daily, reuse hint series
+    if closes_hint is not None and getattr(A, "period", "") == "1d":
+        closes = list(closes_hint)
+    if not closes:
+        end = day  # daily API wants yyyymmdd
+        closes = _fetch_closes(C, stock, "1d", max(int(DAILY_MA_COUNT), n + 5), end)
+    if not closes or len(closes) < n:
+        _diag_once("daily_ma_short", "bars=", 0 if not closes else len(closes), "need=", n)
+        # fail-closed: do not open without trend confirmation
+        A._daily_ma_cache = {"bucket": bucket, "above": False, "ok": False, "last": None, "ma": None}
+        return False, None, None
+
+    last = float(closes[-1])
+    ma = float(np.mean(closes[-n:]))
+    above = last > ma
+    A._daily_ma_cache = {
+        "bucket": bucket,
+        "above": above,
+        "ok": True,
+        "last": last,
+        "ma": ma,
+    }
+    _diag_once(
+        "daily_ma_ok",
+        "last=",
+        round(last, 4),
+        "ma%d=" % n,
+        round(ma, 4),
+        "above=",
+        above,
+    )
+    return above, last, ma
 
 
 def _get_ohlc(C, stock, count=None):
@@ -715,6 +830,8 @@ def init(C):
     A.busy = False
     A.is_backtest = _is_backtest(C)
     _download_hist(A.stock, A.period)
+    if bool(REQUIRE_ABOVE_DAILY_MA):
+        _download_hist(A.stock, "1d")
     _load_state()
     # backtest: start with clean float state so replay is consistent
     if A.is_backtest:
@@ -730,7 +847,7 @@ def init(C):
         A.cooldown_until_bar = -1
     C.set_universe([A.stock])
     print(
-        "HongliT v2.9 init",
+        "HongliT v2.12 init",
         A.stock,
         A.acct,
         A.acct_type,
@@ -740,24 +857,26 @@ def init(C):
         PERIOD,
         "chart=",
         getattr(C, "period", None),
-        "15m_rules=",
-        _use_15m_rules(),
+        "riskRules=",
+        _use_risk_rules(),
         "B=",
         _enable_float_b(),
         "exitAfter=",
-        EXIT_AFTER_15M if _use_15m_rules() else "-",
+        (EXIT_AFTER if getattr(A, "intraday", False) else "-") if _use_risk_rules() else "-",
         "stopIgnoreExit=",
-        STOP_LOSS_IGNORE_EXIT_AFTER if _use_15m_rules() else False,
+        STOP_LOSS_IGNORE_EXIT_AFTER if _use_risk_rules() else False,
         "maxHoldDays=",
-        MAX_HOLD_DAYS_15M if _use_15m_rules() else 0,
+        MAX_HOLD_DAYS if _use_risk_rules() else 0,
         "maxHoldHard=",
-        MAX_HOLD_HARD_DAYS_15M if _use_15m_rules() else 0,
+        MAX_HOLD_HARD_DAYS if _use_risk_rules() else 0,
         "cdWin/Loss=",
-        ("%s/%s" % (COOLDOWN_BARS_15M, COOLDOWN_BARS_LOSS_15M)) if _use_15m_rules() else "-",
+        ("%s/%s" % (COOLDOWN_BARS, COOLDOWN_BARS_LOSS)) if _use_risk_rules() else "-",
         "noEntryAfter=",
-        NO_ENTRY_AFTER_15M if _use_15m_rules() else "-",
+        (NO_ENTRY_AFTER if getattr(A, "intraday", False) else "-") if _use_risk_rules() else "-",
         "stopLoss=",
-        STOP_LOSS_15M if _use_15m_rules() else 0,
+        STOP_LOSS if _use_risk_rules() else 0,
+        "dailyMA=",
+        ("on/MA%d" % int(DAILY_MA_N)) if REQUIRE_ABOVE_DAILY_MA else "off",
         "DRY_RUN=",
         DRY_RUN,
         "BACKTEST=",
@@ -870,20 +989,20 @@ def _handle(C):
     fret = _float_ret(last) if (has_a or has_b) else 0.0
     exit_ok = _exit_time_ok(now_s)
 
-    # 15m soft stop (before R-Sell). May ignore EXIT_AFTER to catch open gaps.
+    # Soft stop (before R-Sell). May ignore EXIT_AFTER to catch open gaps.
     stop_time_ok = exit_ok or bool(STOP_LOSS_IGNORE_EXIT_AFTER)
     if (
-        _use_15m_rules()
-        and float(STOP_LOSS_15M) > 0
+        _use_risk_rules()
+        and float(STOP_LOSS) > 0
         and (has_a or has_b)
-        and fret <= -float(STOP_LOSS_15M)
+        and fret <= -float(STOP_LOSS)
         and stop_time_ok
         and ("SELL" not in A.acted)
     ):
         sell_vol = _sell_float_vol()
         print(
             "HongliT StopLoss trigger ret=%.2f%% <= -%.2f%% now=%s exitGate=%s"
-            % (fret * 100.0, float(STOP_LOSS_15M) * 100.0, now_s, exit_ok)
+            % (fret * 100.0, float(STOP_LOSS) * 100.0, now_s, exit_ok)
         )
         if _order_sell(C, sell_vol, "StopLoss"):
             _clear_float_after_sell(C, "StopLoss", last=last)
@@ -892,7 +1011,7 @@ def _handle(C):
     # R-Sell first: clear float only
     if sell_cond and (has_a or has_b) and ("SELL" not in A.acted):
         if not exit_ok:
-            print("R-Sell defer until", EXIT_AFTER_15M, "now=", now_s)
+            print("R-Sell defer until", EXIT_AFTER, "now=", now_s)
             return
         else:
             sell_vol = _sell_float_vol()
@@ -900,19 +1019,19 @@ def _handle(C):
                 _clear_float_after_sell(C, "R-Sell", last=last)
             return
 
-    # 15m: soft max-hold (loss-only) + hard max-hold leak guard
-    if _use_15m_rules() and (has_a or has_b) and ("SELL" not in A.acted):
-        hard_n = int(MAX_HOLD_HARD_DAYS_15M)
-        soft_n = int(MAX_HOLD_DAYS_15M)
+    # Soft max-hold (loss-only) + hard max-hold leak guard
+    if _use_risk_rules() and (has_a or has_b) and ("SELL" not in A.acted):
+        hard_n = int(MAX_HOLD_HARD_DAYS)
+        soft_n = int(MAX_HOLD_DAYS)
         hard_hit = hard_n > 0 and hold_d >= float(hard_n)
         soft_hit = soft_n > 0 and hold_d >= float(soft_n)
-        if soft_hit and (not hard_hit) and bool(MAX_HOLD_ONLY_LOSS_15M) and fret >= 0:
+        if soft_hit and (not hard_hit) and bool(MAX_HOLD_ONLY_LOSS) and fret >= 0:
             soft_hit = False  # float profit: wait for R-Sell
         if hard_hit or soft_hit:
             if not exit_ok:
                 print(
                     "MaxHold defer until",
-                    EXIT_AFTER_15M,
+                    EXIT_AFTER,
                     "now=",
                     now_s,
                     "hold=%.2f" % hold_d,
@@ -933,7 +1052,7 @@ def _handle(C):
     # R-A
     if buy_cond and zero_float and ("RA" not in A.acted):
         if not _entry_time_ok(now_s):
-            print("R-A skip after", NO_ENTRY_AFTER_15M, "now=", now_s)
+            print("R-A skip after", NO_ENTRY_AFTER, "now=", now_s)
             return
         if _in_cooldown(C):
             print(
@@ -941,6 +1060,17 @@ def _handle(C):
                 getattr(C, "barpos", None),
                 "until=",
                 getattr(A, "cooldown_until_bar", None),
+            )
+            return
+        above_ma, d_last, d_ma = _daily_ma_ok(C, A.stock, closes_hint=close)
+        if not above_ma:
+            print(
+                "R-A skip daily MA%d last=%s ma=%s"
+                % (
+                    int(DAILY_MA_N),
+                    None if d_last is None else round(d_last, 4),
+                    None if d_ma is None else round(d_ma, 4),
+                )
             )
             return
         budget = min(FLOAT_A_BUDGET, cash)
@@ -962,8 +1092,19 @@ def _handle(C):
             print("HongliT R-A opened", A.float_a)
         return
 
-    # R-B (disabled on 15m profile when ENABLE_FLOAT_B_15M=False)
+    # R-B (disabled when USE_RISK_RULES and ENABLE_FLOAT_B=False)
     if _enable_float_b() and buy_cond and has_a and (not has_b) and ("RB" not in A.acted):
+        above_ma, d_last, d_ma = _daily_ma_ok(C, A.stock, closes_hint=close)
+        if not above_ma:
+            print(
+                "R-B skip daily MA%d last=%s ma=%s"
+                % (
+                    int(DAILY_MA_N),
+                    None if d_last is None else round(d_last, 4),
+                    None if d_ma is None else round(d_ma, 4),
+                )
+            )
+            return
         ap = float(A.float_a["price"])
         need = ap * (1.0 - SPACE_STEP)
         if last > need + 1e-9:
@@ -985,7 +1126,7 @@ def _handle(C):
 
     if (not buy_cond) and (not sell_cond) and interesting:
         extra = ""
-        if _use_15m_rules() and (has_a or has_b):
+        if _use_risk_rules() and (has_a or has_b):
             extra = " holdDays=%.2f ret=%.2f%%" % (hold_d, fret * 100.0)
         print("HongliT hold float" + extra)
 
