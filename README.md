@@ -5,6 +5,8 @@
 | 主题 | 手册 | QMT 脚本 |
 | :--- | :--- | :--- |
 | 红利T · 561580 日线做T（v2.5 · 底仓20万/A5万/B2.5万） | [`红利T策略/model.md`](./红利T策略/model.md) | [`红利T策略/scripts/qmt/`](./红利T策略/scripts/qmt/) |
+| 波段3-5天 · 15M KDJ（v1.3） | [`波段3-5天策略/model.md`](./波段3-5天策略/model.md) | [`波段3-5天策略/scripts/qmt/`](./波段3-5天策略/scripts/qmt/) |
+| 趋势回调 · 日线 EMA60/20 + RSI + 布林（v1.0） | [`趋势回调策略/model.md`](./趋势回调策略/model.md) | [`趋势回调策略/scripts/qmt/`](./趋势回调策略/scripts/qmt/) |
 
 **Skills**：[`.cursor/skills/qmt-model-script/`](./.cursor/skills/qmt-model-script/)（策略→脚本 / 联调排障）· [`.cursor/skills/qmt-helper/`](./.cursor/skills/qmt-helper/)（XtQuant API 索引）
 
