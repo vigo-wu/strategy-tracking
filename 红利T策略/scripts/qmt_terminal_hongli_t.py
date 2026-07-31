@@ -1,6 +1,6 @@
 #coding:gbk
 """
-HongliT v2.18 for Guojin QMT terminal (model trade).
+HongliT v2.19 for Guojin QMT terminal (model trade).
 
 Main chart: 561580.SH; PERIOD below or "follow" chart period.
 UI: select stock + account, run in LIVE (not simulate) to send orders.
@@ -23,20 +23,22 @@ Risk profile (any PERIOD when USE_RISK_RULES=True):
   - REQUIRE_ABOVE_DAILY_MA    -> open only if daily close > MA(DAILY_MA_N)
   - DAILY_MA_N                -> any MA length (e.g. 10/20/60)
 
-Live order safety (v2.18):
+Live order safety (v2.19):
   - Update float state only after deal fill (pending); DRY_RUN instant; backtest passorder+instant
   - init reconciles JSON float vs broker (skips if pending); BASE_SHARES never adopted/sold
   - pending timeout -> cancel first; clear only after order terminal (no double order)
+  - pending resolved even outside 09:30-15:00 (late fills / cancels)
+  - partial sell fill keeps remain sellable same day (do not mark acted SELL)
   - cooldown stored as wall-clock datetime (survives model restart)
   - T+1 live: sell vol = min(float, m_nCanUseVolume); can_use<100 -> skip, keep float
   - init fully try/except; hist download start clamped (VIP max-start-date)
   - live heartbeat every LIVE_HEARTBEAT_SEC so UI silence != stopped
   - refresh is_backtest every handlebar; Guojin warmup->live catch-up detection
 
-Backtest safety (v2.18):
+Backtest safety (v2.19):
   - Mid-run init must NOT wipe float (was causing orphan double R-A)
   - Shadow bt_held tracks passorder fills; R-A blocked if held; sell clears held
-  - T+1: bt_locked = same-day buys; sell only available; never clear if QMT would skip
+  - T+1: bt_locked = same-day buys (R-A and R-B); sell only available; never clear if QMT would skip
   - Do not load/save STATE_FILE during backtest (memory only)
 
 IMPORTANT:
@@ -1320,28 +1322,27 @@ def _apply_buy_fill(intent, vol, price, opened_at):
     price = float(price) if price and price > 0 else 0.0
     if vol < 100:
         return
+    ot = str(opened_at or "").strip()
+    if not ot:
+        ot = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
     leg = {
         "shares": vol,
         "price": price,
         "cost": round(vol * price, 2),
+        "opened_at": ot,
     }
     if intent == "RA":
-        leg["opened_at"] = opened_at or datetime.datetime.now().strftime("%Y%m%d%H%M%S")
         A.float_a = leg
         A.acted.add("RA")
         if getattr(A, "is_backtest", False):
-            A.bt_opened_at = leg["opened_at"]
+            A.bt_opened_at = ot
         print("HongliT R-A filled", A.float_a)
     elif intent == "RB":
         A.float_b = leg
         A.acted.add("RB")
         print("HongliT R-B filled", A.float_b)
-    buy_day = None
-    if opened_at:
-        buy_day = str(opened_at).strip()[:8]
-    elif getattr(A, "is_backtest", False) and intent == "RA" and A.float_a:
-        buy_day = str(A.float_a.get("opened_at", "") or "")[:8]
-    _bt_held_add(vol, buy_day=buy_day if buy_day and len(buy_day) == 8 else None)
+    buy_day = ot[:8] if len(ot) >= 8 else None
+    _bt_held_add(vol, buy_day=buy_day)
     _save_state()
 
 
@@ -1363,7 +1364,7 @@ def _apply_sell_fill(now, intent, last_hint, filled_vol):
         if remain < 100:
             _clear_float_after_sell(now, tag + "/partial", last=last_hint)
         else:
-            A.acted.add("SELL")
+            # keep remain sellable same day (do NOT mark acted SELL)
             _save_state()
 
 
@@ -1484,7 +1485,7 @@ def _order_buy(C, vol, remark_tag, intent, price_hint, opened_at, now):
         _apply_buy_fill(intent, vol, price_hint, opened_at)
         return True
     try:
-        passorder(A.buy_code, 1101, A.acct, A.stock, 14, -1, vol, "HongliT_v216", 1, msg, C)
+        passorder(A.buy_code, 1101, A.acct, A.stock, 14, -1, vol, "HongliT_v219", 1, msg, C)
     except Exception as e:
         print("HongliT passorder BUY fail", e)
         return False
@@ -1578,7 +1579,7 @@ def _order_sell(C, vol, remark_tag, intent, last_hint, now):
                 _save_state()
         return True
     try:
-        passorder(A.sell_code, 1101, A.acct, A.stock, 14, -1, vol, "HongliT_v216", 1, msg, C)
+        passorder(A.sell_code, 1101, A.acct, A.stock, 14, -1, vol, "HongliT_v219", 1, msg, C)
     except Exception as e:
         print("HongliT passorder SELL fail", e)
         return False
@@ -1737,7 +1738,7 @@ def _init_impl(C):
         print("HongliT set_universe fail", e)
 
     print(
-        "HongliT v2.18 init",
+        "HongliT v2.19 init",
         A.stock,
         A.acct,
         A.acct_type,
@@ -1826,15 +1827,15 @@ def _handle(C):
     intraday = getattr(A, "intraday", False)
 
     if not bt:
-        # live: session hours
+        # resolve pending first (incl. after 15:00 fills/cancels)
+        if getattr(A, "pending", None):
+            if _process_pending(C, now):
+                _live_heartbeat("pending")
+                return
+        # live: session hours (no new decisions outside)
         if now_s < "093000" or now_s > "150000":
             _live_heartbeat("outside_session")
             return
-        # resolve pending fills even outside daily decision window
-        if getattr(A, "pending", None):
-            if _process_pending(C, now):
-                _live_heartbeat("pending_done")
-                return
         # daily+: near-close window; intraday: every last bar in session
         if (not intraday) and (now_s < DECISION_START or now_s > DECISION_END):
             _live_heartbeat("wait_decision_window")
@@ -2045,7 +2046,8 @@ def _handle(C):
         if vol < 100:
             print("R-B skip cash/lot")
             return
-        _order_buy(C, vol, "RB", "RB", last, None, now)
+        opened_at = now.strftime("%Y%m%d%H%M%S")
+        _order_buy(C, vol, "RB", "RB", last, opened_at, now)
         return
 
     if (not buy_cond) and (not sell_cond) and interesting:
