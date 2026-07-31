@@ -1,6 +1,6 @@
 #coding:gbk
 """
-HongliT v2.15 for Guojin QMT terminal (model trade).
+HongliT v2.16 for Guojin QMT terminal (model trade).
 
 Main chart: 561580.SH; PERIOD below or "follow" chart period.
 UI: select stock + account, run in LIVE (not simulate) to send orders.
@@ -23,16 +23,18 @@ Risk profile (any PERIOD when USE_RISK_RULES=True):
   - REQUIRE_ABOVE_DAILY_MA    -> open only if daily close > MA(DAILY_MA_N)
   - DAILY_MA_N                -> any MA length (e.g. 10/20/60)
 
-Live order safety (v2.14+):
-  - Update float state only after deal fill (pending); DRY_RUN instant; backtest passorder+gate
+Live order safety (v2.16):
+  - Update float state only after deal fill (pending); DRY_RUN instant; backtest passorder+instant
   - init reconciles JSON float vs broker (skips if pending); BASE_SHARES never adopted/sold
   - pending timeout -> cancel first; clear only after order terminal (no double order)
   - cooldown stored as wall-clock datetime (survives model restart)
+  - T+1 live: sell vol = min(float, m_nCanUseVolume); can_use<100 -> skip, keep float
 
-Backtest T+1 (v2.15):
-  - QMT skips same-day sell (可卖0); never clear float unless sellable>0
-  - sell volume capped by prior-day opened float (opened_at date < bar date)
-  - avoid fake flat -> re-entry overlay (0017.csv class bug)
+Backtest safety (v2.16):
+  - Mid-run init must NOT wipe float (was causing orphan double R-A)
+  - Shadow bt_held tracks passorder fills; R-A blocked if held; sell clears held
+  - T+1: bt_locked = same-day buys; sell only available; never clear if QMT would skip
+  - Do not load/save STATE_FILE during backtest (memory only)
 
 IMPORTANT:
   - Keep this file encoding=GBK, first line #coding:gbk
@@ -49,7 +51,7 @@ import numpy as np
 # ===================== user config =====================
 DRY_RUN = False
 
-# Fallback when not started from "模型交易" (no account/accountType inject)
+# Fallback when not started from model-trade UI (no account/accountType inject)
 ACCOUNT_ID = "39953913"
 ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 
@@ -275,6 +277,9 @@ def _load_state():
 
 
 def _save_state():
+    # backtest: memory-only; avoid clobbering live JSON / re-init desync
+    if getattr(A, "is_backtest", False):
+        return
     payload = {
         "float_a": A.float_a,
         "float_b": A.float_b,
@@ -289,6 +294,79 @@ def _save_state():
             json.dump(payload, f, ensure_ascii=True, indent=2)
     except Exception as e:
         print("HongliT save state fail", e)
+
+
+def _bt_held_vol():
+    return max(0, int(getattr(A, "bt_held", 0) or 0))
+
+
+def _bt_locked_vol():
+    return max(0, int(getattr(A, "bt_locked", 0) or 0))
+
+
+def _bt_available_vol():
+    """Backtest T+1: shares not bought today (QMT can-sell / ke mai)."""
+    return max(0, _bt_held_vol() - _bt_locked_vol())
+
+
+def _bt_roll_t1(day):
+    """New calendar day unlocks prior buys for selling."""
+    if not getattr(A, "is_backtest", False):
+        return
+    day = str(day or "")
+    if not day:
+        return
+    if str(getattr(A, "bt_lock_day", "") or "") == day:
+        return
+    if _bt_locked_vol() > 0:
+        print("HongliT bt T+1 unlock day=", day, "was_locked=", _bt_locked_vol())
+    A.bt_locked = 0
+    A.bt_lock_day = day
+
+
+def _bt_held_add(vol, buy_day=None):
+    if not getattr(A, "is_backtest", False):
+        return
+    vol = max(0, int(vol))
+    A.bt_held = _bt_held_vol() + vol
+    if buy_day:
+        _bt_roll_t1(str(buy_day)[:8])
+        A.bt_locked = _bt_locked_vol() + vol
+
+
+def _bt_held_set(vol):
+    if not getattr(A, "is_backtest", False):
+        return
+    A.bt_held = max(0, int(vol))
+    if A.bt_held < 100:
+        A.bt_opened_at = ""
+        A.bt_locked = 0
+    else:
+        A.bt_locked = min(_bt_locked_vol(), A.bt_held)
+
+
+def _bt_recover_float(now=None, last=None):
+    """If shadow held exists but float legs empty, re-adopt so exits still fire."""
+    if not getattr(A, "is_backtest", False):
+        return False
+    held = _bt_held_vol()
+    if held < 100:
+        return False
+    if _sell_float_vol() >= 100:
+        return False
+    px = float(last) if last and last > 0 else 0.0
+    ot = str(getattr(A, "bt_opened_at", "") or "").strip()
+    if not ot:
+        ot = (now or datetime.datetime.now()).strftime("%Y%m%d%H%M%S")
+    A.float_a = {
+        "shares": held,
+        "price": px,
+        "cost": round(held * px, 2) if px > 0 else 0.0,
+        "opened_at": ot,
+    }
+    A.float_b = None
+    print("HongliT bt recover float from held", A.float_a)
+    return True
 
 
 def _reset_day(day):
@@ -433,32 +511,13 @@ def _sell_float_vol():
     return vol
 
 
-def _sellable_float_vol(now):
-    """A-share/ETF T+1: only float opened on a prior calendar day is sellable."""
-    if now is None:
-        now = datetime.datetime.now()
-    today = now.strftime("%Y%m%d")
-    vol = 0
-    for leg in (getattr(A, "float_a", None), getattr(A, "float_b", None)):
-        if not _has_leg(leg):
-            continue
-        sh = int(leg.get("shares", 0) or 0)
-        ot = _parse_opened_at(leg.get("opened_at"))
-        if ot is None:
-            # legacy / adopted without stamp: allow (live broker can_use still gates)
-            vol += sh
-            continue
-        if ot.strftime("%Y%m%d") < today:
-            vol += sh
-    return vol
-
-
 def _clear_float_after_sell(now, remark, last=None):
     is_loss = False
     if last is not None:
         is_loss = _float_ret(last) < 0
     A.float_a = None
     A.float_b = None
+    _bt_held_set(0)
     A.acted.add("SELL")
     _set_cooldown(now, is_loss=is_loss)
     _save_state()
@@ -945,18 +1004,40 @@ def _adopt_share_cap(price):
     return int(budget // 100) * 100
 
 
-def _max_sell_vol(now=None):
-    """Sell at most strategy float, never touch BASE_SHARES; honor T+1."""
+def _max_sell_vol():
+    """Sell at most strategy float, never touch BASE_SHARES. Always T+1-capped."""
     want = _sell_float_vol()
+    if getattr(A, "is_backtest", False):
+        # include shadow held; cap by T+1 available (matches QMT can-sell)
+        want = max(want, _bt_held_vol())
+        avail = _bt_available_vol()
+        return max(0, min(want, avail))
     if want < 100:
         return 0
-    sellable = _sellable_float_vol(now)
-    if getattr(A, "is_backtest", False) or DRY_RUN:
-        # backtest cannot query broker can_use; gate by opened_at day (T+1)
-        return max(0, min(want, sellable))
+    if DRY_RUN:
+        # Dry-run still respects calendar T+1 so logs match live constraints.
+        return _dry_t1_sellable(want)
     broker_vol, can, _cost = _broker_position(A.stock)
     floatable = _floatable_broker_vol(broker_vol)
-    return max(0, min(want, sellable, int(can), floatable))
+    # Live hard rule: never exceed m_nCanUseVolume (same-day buys = 0 can_use).
+    return max(0, min(want, int(can), floatable))
+
+
+def _dry_t1_sellable(want):
+    """DRY_RUN T+1: block same-calendar-day exit when no broker can_use feed."""
+    want = int(want)
+    if want < 100:
+        return 0
+    now = datetime.datetime.now()
+    day = now.strftime("%Y%m%d")
+    locked = 0
+    for leg in (getattr(A, "float_a", None), getattr(A, "float_b", None)):
+        if not _has_leg(leg):
+            continue
+        ot = _parse_opened_at(leg.get("opened_at"))
+        if ot is not None and ot.strftime("%Y%m%d") == day:
+            locked += int(leg.get("shares", 0) or 0)
+    return max(0, want - locked)
 
 
 def _reconcile_float_with_broker():
@@ -1131,18 +1212,27 @@ def _apply_buy_fill(intent, vol, price, opened_at):
         leg["opened_at"] = opened_at or datetime.datetime.now().strftime("%Y%m%d%H%M%S")
         A.float_a = leg
         A.acted.add("RA")
+        if getattr(A, "is_backtest", False):
+            A.bt_opened_at = leg["opened_at"]
         print("HongliT R-A filled", A.float_a)
     elif intent == "RB":
-        leg["opened_at"] = opened_at or datetime.datetime.now().strftime("%Y%m%d%H%M%S")
         A.float_b = leg
         A.acted.add("RB")
         print("HongliT R-B filled", A.float_b)
+    buy_day = None
+    if opened_at:
+        buy_day = str(opened_at).strip()[:8]
+    elif getattr(A, "is_backtest", False) and intent == "RA" and A.float_a:
+        buy_day = str(A.float_a.get("opened_at", "") or "")[:8]
+    _bt_held_add(vol, buy_day=buy_day if buy_day and len(buy_day) == 8 else None)
     _save_state()
 
 
 def _apply_sell_fill(now, intent, last_hint, filled_vol):
     """Clear or shrink float after sell fill."""
     want = _sell_float_vol()
+    if getattr(A, "is_backtest", False):
+        want = max(want, _bt_held_vol())
     filled_vol = int(filled_vol)
     tag = intent or "SELL"
     if filled_vol >= max(100, int(want * 0.95)) or filled_vol >= want:
@@ -1152,6 +1242,7 @@ def _apply_sell_fill(now, intent, last_hint, filled_vol):
         remain = max(0, want - filled_vol)
         print("HongliT partial sell fill", filled_vol, "remain~", remain)
         _shrink_float_to_vol(remain)
+        _bt_held_set(remain)
         if remain < 100:
             _clear_float_after_sell(now, tag + "/partial", last=last_hint)
         else:
@@ -1248,11 +1339,11 @@ def _process_pending(C, now):
         if cancel_at is not None and now is not None:
             cancel_age = (now - cancel_at).total_seconds()
         if od is None and cancel_age >= float(PENDING_ORPHAN_SEC):
-            # never saw the order — likely submit failed; safe to unlock
+            # never saw the order - likely submit failed; safe to unlock
             print("HongliT pending orphan clear (no order after cancel wait)")
             _clear_pending("orphan")
             return False
-        # still live or settling — do NOT clear, do NOT retry
+        # still live or settling - do NOT clear, do NOT retry
         return True
 
     return True
@@ -1266,17 +1357,21 @@ def _new_remark(tag, side, vol):
 
 def _order_buy(C, vol, remark_tag, intent, price_hint, opened_at, now):
     """Submit buy. DRY_RUN instant; backtest passorder+instant; live pending until fill."""
+    # backtest guard: never open another leg while shadow held remains
+    if getattr(A, "is_backtest", False) and intent == "RA" and _bt_held_vol() >= 100:
+        print("HongliT R-A skip bt_held=", _bt_held_vol())
+        return False
     msg = _new_remark(remark_tag, "BUY", vol)
     print(("[DRY] " if DRY_RUN else "") + msg)
     if DRY_RUN:
         _apply_buy_fill(intent, vol, price_hint, opened_at)
         return True
     try:
-        passorder(A.buy_code, 1101, A.acct, A.stock, 14, -1, vol, "HongliT_v215", 1, msg, C)
+        passorder(A.buy_code, 1101, A.acct, A.stock, 14, -1, vol, "HongliT_v216", 1, msg, C)
     except Exception as e:
         print("HongliT passorder BUY fail", e)
         return False
-    # Backtest: still passorder so QMT shows 操作明细; apply state immediately
+    # Backtest: still passorder so QMT shows trade log; apply state immediately
     if getattr(A, "is_backtest", False):
         _apply_buy_fill(intent, vol, price_hint, opened_at)
         return True
@@ -1296,38 +1391,103 @@ def _order_buy(C, vol, remark_tag, intent, price_hint, opened_at, now):
 
 
 def _order_sell(C, vol, remark_tag, intent, last_hint, now):
-    """Submit sell. DRY_RUN/backtest: only mutate float when T+1-sellable; live pending until fill."""
+    """Submit sell. DRY_RUN instant; backtest passorder+instant; live pending until fill.
+
+    T+1 (backtest + live): never passorder more than sellable; never clear float on skip.
+    Live sellable = m_nCanUseVolume; backtest sellable = bt_held - bt_locked.
+    """
     want = int(vol)
-    max_sell = _max_sell_vol(now)
-    vol = min(want, max_sell)
-    if vol < 100:
-        print(
-            "sell skip, max_sell=",
-            max_sell,
-            "want=",
-            want,
-            "sellable=",
-            _sellable_float_vol(now),
-            "(keep float; no fake clear)",
-        )
-        # stop same-day re-fire; acted clears on next calendar day via _reset_day
-        A.acted.add("SELL")
-        return False
+    if getattr(A, "is_backtest", False):
+        if now is not None:
+            _bt_roll_t1(now.strftime("%Y%m%d"))
+        want = max(want, _bt_held_vol(), _sell_float_vol())
+        avail = _bt_available_vol()
+        vol = min(want, avail)
+        if vol < 100:
+            print(
+                "HongliT sell skip T+1 avail=",
+                avail,
+                "held=",
+                _bt_held_vol(),
+                "locked=",
+                _bt_locked_vol(),
+                "want=",
+                want,
+                "tag=",
+                remark_tag,
+            )
+            return False
+    else:
+        # live / DRY_RUN: always cap by _max_sell_vol (can_use or dry calendar T+1)
+        avail = _max_sell_vol()
+        vol = min(want, avail)
+        if vol < 100:
+            if DRY_RUN:
+                print(
+                    "HongliT [DRY] sell skip T+1 want=",
+                    want,
+                    "sellable=",
+                    avail,
+                    "tag=",
+                    remark_tag,
+                )
+            else:
+                broker_vol, can, _cost = _broker_position(A.stock)
+                print(
+                    "HongliT sell skip T+1/live can_use=",
+                    can,
+                    "broker=",
+                    broker_vol,
+                    "float=",
+                    _sell_float_vol(),
+                    "want=",
+                    want,
+                    "tag=",
+                    remark_tag,
+                )
+            return False
     msg = _new_remark(remark_tag, "SELL", vol)
     print(("[DRY] " if DRY_RUN else "") + msg)
     if DRY_RUN:
-        # apply only the volume we would have sold (T+1 may be partial)
-        _apply_sell_fill(now, intent or remark_tag, last_hint, vol)
+        # only clear what we "sold" under dry T+1 cap
+        if vol >= _sell_float_vol():
+            _clear_float_after_sell(now, intent or remark_tag, last=last_hint)
+        else:
+            remain = max(0, _sell_float_vol() - vol)
+            _shrink_float_to_vol(remain)
+            if remain < 100:
+                _clear_float_after_sell(now, (intent or remark_tag) + "/partial", last=last_hint)
+            else:
+                _save_state()
         return True
     try:
-        passorder(A.sell_code, 1101, A.acct, A.stock, 14, -1, vol, "HongliT_v215", 1, msg, C)
+        passorder(A.sell_code, 1101, A.acct, A.stock, 14, -1, vol, "HongliT_v216", 1, msg, C)
     except Exception as e:
         print("HongliT passorder SELL fail", e)
         return False
-    # Backtest: passorder only sellable qty (QMT skips if want>can); then sync state to vol
+    # Backtest: apply only the volume we could sell (T+1-aware); never clear on 0-fill
     if getattr(A, "is_backtest", False):
-        _apply_sell_fill(now, intent or remark_tag, last_hint, vol)
+        held_before = _bt_held_vol()
+        if vol >= held_before:
+            _clear_float_after_sell(now, intent or remark_tag, last=last_hint)
+        else:
+            remain = held_before - vol
+            print(
+                "HongliT T+1 partial sell",
+                vol,
+                "remain=",
+                remain,
+                "locked=",
+                _bt_locked_vol(),
+            )
+            _shrink_float_to_vol(remain)
+            _bt_held_set(remain)
+            if remain < 100:
+                _clear_float_after_sell(now, (intent or remark_tag) + "/partial", last=last_hint)
+            else:
+                _save_state()
         return True
+    # Live: pending until broker fill; do NOT clear float here (T+1 skip must not wipe state)
     A.pending = {
         "remark": msg,
         "side": "sell",
@@ -1343,7 +1503,7 @@ def _order_sell(C, vol, remark_tag, intent, last_hint, now):
 
 
 def init(C):
-    # stock from chart; account from 模型交易 UI if present, else config
+    # stock from chart; account from model-trade UI if present, else config
     A.stock = C.stockcode + "." + C.market
     A.period = _resolve_period(C)
     A.intraday = _is_intraday(A.period)
@@ -1371,17 +1531,50 @@ def init(C):
     _download_hist(A.stock, A.period)
     if bool(REQUIRE_ABOVE_DAILY_MA):
         _download_hist(A.stock, "1d")
-    _load_state()
-    # backtest: start with clean float state so replay is consistent
+
     if A.is_backtest:
-        A.float_a = None
-        A.float_b = None
-        A.acted_day = ""
-        A.acted = set()
-        A.cooldown_until = ""
-        A.pending = None
-        A.ready_logged = False
+        # QMT may re-call init mid-run; wiping float then orphans passorder fills.
+        # Fresh start: first bt session OR barpos near 0 (new replay).
+        barpos = 0
+        try:
+            barpos = int(getattr(C, "barpos", 0) or 0)
+        except Exception:
+            barpos = 0
+        fresh = (not getattr(A, "_bt_alive", False)) or (barpos <= 0)
+        if fresh:
+            A.float_a = None
+            A.float_b = None
+            A.acted_day = ""
+            A.acted = set()
+            A.cooldown_until = ""
+            A.pending = None
+            A.bt_held = 0
+            A.bt_locked = 0
+            A.bt_lock_day = ""
+            A.bt_opened_at = ""
+            A._bt_alive = True
+            A.ready_logged = False
+            print("HongliT backtest session start barpos=", barpos)
+        else:
+            if not hasattr(A, "bt_held"):
+                A.bt_held = _sell_float_vol()
+            if not hasattr(A, "acted") or A.acted is None:
+                A.acted = set()
+            if not hasattr(A, "cooldown_until"):
+                A.cooldown_until = ""
+            if not hasattr(A, "pending"):
+                A.pending = None
+            _bt_recover_float()
+            print(
+                "HongliT backtest re-init preserve barpos=",
+                barpos,
+                "float_a=",
+                A.float_a,
+                "bt_held=",
+                _bt_held_vol(),
+            )
     else:
+        _load_state()
         A.ready_logged = True
         if not hasattr(A, "cooldown_until"):
             A.cooldown_until = ""
@@ -1391,9 +1584,10 @@ def init(C):
             _reconcile_float_with_broker()
         except Exception as e:
             print("HongliT reconcile fail", e)
+
     C.set_universe([A.stock])
     print(
-        "HongliT v2.15 init",
+        "HongliT v2.16 init",
         A.stock,
         A.acct,
         A.acct_type,
@@ -1431,6 +1625,8 @@ def init(C):
         DRY_RUN,
         "BACKTEST=",
         A.is_backtest,
+        "bt_held=",
+        _bt_held_vol() if A.is_backtest else "-",
         "STATE=",
         STATE_FILE,
     )
@@ -1472,6 +1668,9 @@ def _handle(C):
         if (not intraday) and (now_s < DECISION_START or now_s > DECISION_END):
             return
     # backtest: each bar ~= decision at bar close
+    if bt:
+        _bt_roll_t1(day)
+        _bt_recover_float(now=now)
 
     _reset_day(day)
 
@@ -1487,18 +1686,23 @@ def _handle(C):
     if ind is None:
         return
     lower, upper, j, last = ind
+    if bt:
+        _bt_recover_float(now=now, last=last)
     buy_cond = (last <= lower * LOWER_TOL) and (j <= 0)
     sell_cond = (last >= upper * UPPER_TOL) and (j >= 100)
     has_a = _has_leg(A.float_a)
     has_b = _has_leg(A.float_b)
     zero_float = (not has_a) and (not has_b)
+    # shadow held blocks new R-A even if float legs were wiped mid-run
+    if bt and _bt_held_vol() >= 100:
+        zero_float = False
     drop_vs_a = None
     if has_a:
         ap = float(A.float_a["price"])
         if ap > 0:
             drop_vs_a = (ap - last) / ap
 
-    interesting = buy_cond or sell_cond or has_a or has_b
+    interesting = buy_cond or sell_cond or has_a or has_b or (bt and _bt_held_vol() >= 100)
     if (not getattr(A, "ready_logged", False)) or interesting or (C.barpos % 20 == 0):
         A.ready_logged = True
         print(
@@ -1506,7 +1710,7 @@ def _handle(C):
             getattr(A, "period", "?"),
             day,
             now_s,
-            "n=%d close=%.4f lower=%.4f upper=%.4f J=%.2f buy=%s sell=%s A=%s B=%s dropA=%s"
+            "n=%d close=%.4f lower=%.4f upper=%.4f J=%.2f buy=%s sell=%s A=%s B=%s dropA=%s bt_held=%s avail=%s"
             % (
                 len(close),
                 last,
@@ -1518,6 +1722,8 @@ def _handle(C):
                 has_a,
                 has_b,
                 None if drop_vs_a is None else round(drop_vs_a * 100, 2),
+                _bt_held_vol() if bt else "-",
+                _bt_available_vol() if bt else "-",
             ),
         )
 
@@ -1663,8 +1869,7 @@ def _handle(C):
         if vol < 100:
             print("R-B skip cash/lot")
             return
-        opened_at = now.strftime("%Y%m%d%H%M%S")
-        _order_buy(C, vol, "RB", "RB", last, opened_at, now)
+        _order_buy(C, vol, "RB", "RB", last, None, now)
         return
 
     if (not buy_cond) and (not sell_cond) and interesting:

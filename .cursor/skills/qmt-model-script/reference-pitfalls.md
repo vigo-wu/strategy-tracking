@@ -127,10 +127,12 @@ HongliT diag: ok source= get_market_data_ex n= 120 end= 20240930 last= 1.08 std2
 
 ## 6. 状态与仓位语义
 
-- 浮仓成本/股数写入 JSON；**回测开始应清空浮仓状态**，避免污染实盘 state 文件（或回测用单独 state 路径）。
-- 有底仓 + Float A/B 时：高抛 **只卖浮仓股数**，禁止按「全部持仓」清仓。
+- 浮仓成本/股数写入 JSON；**回测只用内存状态，禁止读写实盘 STATE_FILE**。
+- 回测 `init`：仅在新会话（`barpos<=0` / 首次）清空；**中途再 init 必须保留** `float` / `bt_held`（否则孤儿双开）。
+- 有底仓 + Float A/B 时：高抛 **只卖浮仓股数**，禁止按「全部持仓」清仓；`BASE_SHARES` 永不 adopt/卖出。
 - `sell=True` 且 `A=False B=False`：信号成立但无浮仓 → **不落单**，属正常。
 - `ContextInfo` 盘中会被回滚；委托/浮仓状态放 **全局对象 `A`**，不要挂在 `C.xxx`。
+- 回测影子仓：`bt_held`（总持仓）、`bt_locked`（当日买入、T+1 不可卖）、`avail=held-locked`。
 
 ---
 
@@ -139,20 +141,54 @@ HongliT diag: ok source= get_market_data_ex n= 120 end= 20240930 last= 1.08 std2
 | 日志 | 含义 |
 | :--- | :--- |
 | `start back test mode` | 回测，不是实盘委托 |
-| `DRY_RUN= True` | 只打印 `[DRY] BUY/SELL`，不 `passorder` |
+| `DRY_RUN= True` | 只打印 `[DRY] BUY/SELL`，不 `passorder`（仍应模拟 T+1） |
 | 模型交易选「模拟」 | 通常也不发真单 |
 
 真下单：`DRY_RUN=False` + 模型交易 **实盘** + 重新 GBK 部署编译。
 
 `passorder` 实盘盘中立刻报单常用 `quickTrade=1`；定时器/回调内用 `2`。日线收盘决策在最新 bar 上用 `1` 即可。
 
-### 7.1 回测假平仓叠仓（T+1）
+### 7.1 T+1：假平仓 → 孤儿仓 → 回测盈利虚高（必守）
 
-**现象**：操作明细出现连续两笔买入中间无卖出；日志有 `R-Sell done, float cleared`，但系统 WARNING `可卖0股...跳过`。
+**现象**
 
-**原因**：回测里 `_broker_position` 不可用，旧逻辑在 `passorder` 后立刻清浮仓；QMT 因 T+1 拒单后策略误判空仓，次日再开 R-A。
+```text
+[系统]WARNING:当前股票xxx可卖0股,小于需卖量N股,跳过
+HongliT R-Sell done, float cleared   # 错误：拒单后仍清状态
+# 随后操作明细：连续两笔买入中间无卖出；买82/卖80；期末残留仓
+# CSV「盈利」虚高（残留仓吃到波段涨幅），FIFO/闭合交易对数不上
+```
 
-**正确（v2.15+）**：用 `opened_at` 日历日做 T+1 可卖上限；`sellable<100` 时 **保留浮仓、不假清仓**；仅对可卖数量 `passorder` + `_apply_sell_fill`。
+**根因链**
+
+1. A 股/ETF **当日买入不可卖**（T+1）；QMT 回测用 `可卖` 校验，`需卖>可卖` 则**整单跳过**。
+2. 旧逻辑：`passorder` 后立刻 `_clear_float_after_sell`（回测）/ 或按 want 下单超过 `can_use`。
+3. 状态已空、账户仍持仓 → 次日再 R-A → 孤儿叠仓。
+4. 导出「盈利」被残留仓污染；修复后数字下降是**虚高被修正**，不是策略突然变差。
+
+**正确（回测 + 实盘，v2.16+）**
+
+| 模式 | 可卖来源 | 下单量 | 清浮仓时机 |
+| :--- | :--- | :--- | :--- |
+| 回测 | `bt_available = bt_held - bt_locked`（当日买入进 locked，换日 unlock） | `min(want, avail)`；`avail<100` 则 skip | 仅对实际可卖量 apply；**skip 不清仓** |
+| 实盘 | `m_nCanUseVolume`（经 `_max_sell_vol`） | 同上 | **仅成交/pending fill 后**；skip 打 `sell skip T+1/live` |
+| DRY_RUN | 按 `opened_at` 日历日估算同日锁定 | 同上 | 只清「模拟卖掉」的部分 |
+
+硬性禁令：
+
+- 禁止 `passorder` 后无条件清浮仓。
+- 禁止下单量 `> can_use` / `> bt_available`（会触发 QMT 整单跳过）。
+- 禁止用未校验的回测 CSV「盈利」合计当绩效（先查买卖笔数是否相等、期末是否空仓）。
+
+**回测验收清单**
+
+```
+- [ ] 日志有 v2.16+ init；出现 sell skip T+1 属正常（同日信号延后）
+- [ ] 操作明细：买入笔数 == 卖出笔数；无连续同向买入
+- [ ] 期末持仓 0（或仅 BASE_SHARES）
+- [ ] 单笔盈利 ≈ (卖价-买价)×数量（允许费用差）；合计与 FIFO 接近
+- [ ] 终端跑的是已部署的 HLCL/红利T_v25，不是旧副本；CSV mtime 晚于部署
+```
 
 ---
 
@@ -161,21 +197,24 @@ HongliT diag: ok source= get_market_data_ex n= 120 end= 20240930 last= 1.08 std2
 - 终端 Python 偏 **3.6**：避免 `list[str]`、`X | Y`、依赖 3.10+ 语法；终端版少用 `pathlib`/`__file__`。
 - 第三方库白名单：优先 `numpy`；缺库会 `Forbidden: Module ... not in whitelist`。
 - 改完仓库源码必须 **重新 `_deploy_qmt_gbk.py`**，并在 QMT 内 **重新编译/加载**；只改仓库文件终端不会自动更新。
+- 部署目标以实际运行文件为准（如 `D:\service\GJQMT\python\HLCL.py`）；`红利T_v25.py` / `HLT策略.py` 一并覆盖，避免加载错文件。
 
 ---
 
 ## 9. 推荐排障顺序（清单）
 
 ```
-终端回测无信号 / 报错时:
+终端回测无信号 / 报错 / 盈亏异常时:
 - [ ] 1. 确认跑的是终端版（有 init/handlebar），不是 xtquant 版
 - [ ] 2. 文件头 #coding:gbk 且磁盘编码为 GBK（部署脚本写出）
-- [ ] 3. 无 __file__；STATE 用绝对路径
+- [ ] 3. 无 __file__；STATE 用绝对路径；回测不写实盘 JSON
 - [ ] 4. account 有 UI 注入或 ACCOUNT_ID 兜底
 - [ ] 5. BACKTEST 用 K 线时间；无硬编码 barpos 暖机
 - [ ] 6. download_history_data + get_market_data_ex；看 diag ok/empty/short
-- [ ] 7. 主图品种=策略标的、周期=日线、区间足够长
+- [ ] 7. 主图品种=策略标的、周期匹配、区间足够长
 - [ ] 8. 看 DRY_RUN / back test mode，避免误判「没下单」
+- [ ] 9. T+1：无「可卖0仍 float cleared」；明细买卖闭合、无期末残留
+- [ ] 10. 部署文件 mtime / 日志版本号与仓库一致后再信 CSV 盈利
 ```
 
 ---
@@ -185,6 +224,7 @@ HongliT diag: ok source= get_market_data_ex n= 120 end= 20240930 last= 1.08 std2
 | 文件 | 用途 |
 | :--- | :--- |
 | `红利T策略/scripts/qmt_terminal_hongli_t.py` | 终端版真源（UTF-8 仓库） |
+| `红利T策略/QMT/qmt_terminal_hongli_t.py` | 同策略副本（保持与 scripts 同步） |
 | `红利T策略/scripts/_deploy_qmt_gbk.py` | 转 GBK 写入国金 `python\` |
 | `红利T策略/scripts/qmt_hongli_t.py` | 外部 xtquant 版（勿当终端模型） |
-| `D:\office\国金证券QMT交易端\python\HLT策略.py` | 终端运行副本（GBK） |
+| `D:\service\GJQMT\python\HLCL.py` 等 | 终端运行副本（GBK） |

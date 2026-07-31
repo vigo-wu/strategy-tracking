@@ -32,9 +32,11 @@ STATE_FILE = r"D:\office\国金证券QMT交易端\python\hongli_t_qmt_state.json
 3. **calc_* 指标**：与 `run_screener.py` 同公式（rolling / ewm 参数一致）  
 4. **fetch_daily_df**：download → get_market_data_ex → tick 修正当日 bar  
 5. **Callback 类**：日志级实现即可  
-6. **place_buy / place_sell**：尊重 DRY_RUN；整手；查可用仓  
+6. **place_buy / place_sell**：尊重 DRY_RUN；整手；**卖出量 ≤ 可卖**（实盘 `m_nCanUseVolume` / 回测 `bt_held-bt_locked`）；skip 不清浮仓；成交后再改状态  
 7. **evaluate_and_trade**：决策窗内；优先级一般 **先卖后买**；空间不足不记死 acted（允许同日跌透再开）  
 8. **main**：load_state → connect → 快照 → subscribe_quote(1m) → 窗内则立即 evaluate → run_forever  
+
+终端模型额外硬约束（见 [reference-pitfalls.md](reference-pitfalls.md) §7.1）：回测禁读写实盘 STATE；中途 `init` 不擦浮仓；T+1 未可卖则 `sell skip` 并保留状态。
 
 ## 信号分支伪代码
 

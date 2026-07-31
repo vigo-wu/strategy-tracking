@@ -6,15 +6,16 @@ import re
 from pathlib import Path
 
 REPO = (
-    Path(r"D:\persion\strategy-tracking")
+    Path(r"D:\vigo\strategy-tracking")
     / "红利T策略"
     / "scripts"
     / "qmt_terminal_hongli_t.py"
 )
-QMT_DIR = Path(r"D:\office\国金证券QMT交易端") / "python"
+QMT_DIR = Path(r"D:\service\GJQMT") / "python"
+# Cover every entry the user may load in model trade
 TARGETS = [
+    QMT_DIR / "HLCL.py",
     QMT_DIR / "红利T_v25.py",
-    QMT_DIR / "新建策略文件1.py",
     QMT_DIR / "HLT策略.py",
 ]
 
@@ -39,7 +40,7 @@ def main() -> None:
     for dest in TARGETS:
         dest.write_bytes(data)
         print("wrote", dest, "bytes", len(data))
-    print("OK: open Guojin QMT -> model trade -> load 红利T_v25 / 新建策略文件1")
+    print("OK: open Guojin QMT -> model trade -> load HLCL / 红利T_v25 / HLT策略")
     print("Main chart: 561580.SH | PERIOD=follow (or 1m/5m/1h/1d/...) | DRY_RUN default in source")
 
 
