@@ -129,43 +129,57 @@ df["Buy_Signal"] = np.where(bull & near20 & rsi_alert & rsi_cross & pattern & ya
 | `STOP_BELOW` | `0.01` | 低点下方 1% |
 | `ENTRY_MODE` | `close` | `close` / `next_open` |
 | `VOLUME_SHRINK_REQUIRED` | `False` | 缩量是否硬过滤 |
-| `TRADE_BUDGET` | `50000` | 单笔买入预算（元） |
-| `DRY_RUN` | `True` | 只打印不报单 |
+| `TRADE_BUDGET` | 单标的 `50000` / 池版 `10000` | 单笔买入预算（元） |
+| `MAX_HOLDINGS` | 池版 `10` | 同时持仓上限（仅 basket） |
+| `DRY_RUN` | `True`（池版默认） | 只打印不报单 |
 
 ---
 
 ## 6. QMT 运行（国金终端模型交易）
 
+### 6.1 单标的
+
 **脚本**：[`scripts/qmt/qmt_terminal_trend_pb.py`](./scripts/qmt/qmt_terminal_trend_pb.py)  
-**部署**：[`scripts/qmt/_deploy_qmt_gbk.py`](./scripts/qmt/_deploy_qmt_gbk.py) → GBK 写入 `TrendPB.py` / `趋势回调.py`
+**部署**：[`scripts/qmt/_deploy_qmt_gbk.py`](./scripts/qmt/_deploy_qmt_gbk.py) → `TrendPB.py` / `趋势回调.py`
+
+主图打开**目标股票**日线 → 加载 `TrendPB`。
+
+### 6.2 中证央企红利池（~50 只）
+
+**脚本**：[`scripts/qmt/qmt_terminal_trend_pb_basket.py`](./scripts/qmt/qmt_terminal_trend_pb_basket.py)  
+**部署**：[`scripts/qmt/_deploy_qmt_gbk_basket.py`](./scripts/qmt/_deploy_qmt_gbk_basket.py) → `TrendPBBasket.py` / `趋势回调池.py`
 
 | 配置项 | 默认 | 说明 |
 | :--- | :--- | :--- |
-| `PERIOD` | `1d` | 与主图日线一致 |
-| `STATE_FILE` | `...\python\trend_pb_qmt_state.json` | 实盘仓位；回测只用内存 |
+| `POOL_INDEX` | `000825.SH` | 中证中央企业红利；`get_sector` 取成分 |
+| `TRADE_BUDGET` | `10000` | 单笔预算 |
+| `MAX_HOLDINGS` | `10` | 同时最多持仓只数 |
+| `STATE_FILE` | `...\python\trend_pb_basket_qmt_state.json` | 按标的分 books |
 
-**下单约定（对齐 pitfalls §7.1）**
+```bash
+python 趋势回调策略/scripts/qmt/_deploy_qmt_gbk_basket.py
+```
+
+**操作步骤（池版）**
+
+1. 打开国金 QMT，登录交易账号  
+2. 主图打开 **`000825.SH`**，周期 **日线**（数据管理中确保指数成分/板块已下载）  
+3. 【模型交易】→ `TrendPBBasket` / `趋势回调池` → 选账号 → 先回测/`DRY_RUN`  
+4. 日志确认：`TrendPBBasket v1.0-basket init`、`pool= ~50`、`diag: ok batch`  
+5. 确认后再改 `DRY_RUN=False` 并重新部署编译  
+6. 遵守 T+1；满仓后日志 `buy skip: max holdings` 属正常  
+
+取池失败时可在脚本填 `POOL_FALLBACK = ["600028.SH", ...]`。回测 50 只会明显变慢，属预期。
+
+### 6.3 下单约定（两版相同，对齐 pitfalls §7.1）
 
 - `DRY_RUN`：不下单，日历日 T+1 模拟  
 - 回测：`passorder` 后即时落状态；可卖 = `bt_held - bt_locked`；`sell skip` 不清仓  
 - 实盘：`passorder` 后进 `pending`，**成交后**才改仓；可卖 = `m_nCanUseVolume`  
 - 减仓 50% 按整手向下取整；剩余不足 100 股则一次清仓  
 
-```bash
-python 趋势回调策略/scripts/qmt/_deploy_qmt_gbk.py
-```
-
-**操作步骤**
-
-1. 打开国金 QMT，登录交易账号  
-2. 行情主图打开目标股票，周期选 **日线**  
-3. 【模型交易】→ 选择 `TrendPB` / `趋势回调` → 选账号 → 先回测或模拟  
-4. 日志确认 `TrendPB v1.0 init`、`PERIOD= 1d`、`diag: ok` 后，再改 `DRY_RUN=False` 并重新部署编译  
-5. 真下单：模型交易选 **实盘** + `DRY_RUN=False`  
-6. 遵守 A 股 T+1；日志出现 `sell skip T+1` 属正常  
-
-编码由部署脚本写成 **GBK**。请只编辑仓库内 `qmt_terminal_trend_pb.py`（UTF-8）；勿直接打开国金 `python\TrendPB.py`。
+编码由部署脚本写成 **GBK**。请只编辑仓库内 UTF-8 源文件；勿直接打开国金 `python\` 下 GBK 文件。
 
 ---
 
-*提示：本策略为单标的趋势回调仓；改参数后务必重新部署并在 QMT 内重新编译。*
+*提示：改参数后务必重新部署并在 QMT 内重新编译。*
