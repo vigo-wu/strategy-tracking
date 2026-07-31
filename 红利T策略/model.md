@@ -121,31 +121,40 @@ python scripts/run_backtest.py --universe list
 
 ### 6.4 MiniQMT / xtquant 外部脚本
 
-脚本：[`scripts/qmt_hongli_t.py`](./scripts/qmt_hongli_t.py)（独立进程连 userdata）
+脚本（规划路径）：[`scripts/qmt/qmt_hongli_t.py`](./scripts/qmt/qmt_hongli_t.py)（独立进程连 userdata；当前仓库尚未落地）
 
 ### 6.5 国金 QMT 终端内运行（模型交易）
 
-脚本：[`scripts/qmt_terminal_hongli_t.py`](./scripts/qmt_terminal_hongli_t.py)  
+**真源**：[`scripts/qmt/hongli/`](./scripts/qmt/hongli/) 分模块维护（勿互相 import；部署时拼接）。  
+**预览单文件**（自动生成，勿手改）：[`scripts/qmt/qmt_terminal_hongli_t.py`](./scripts/qmt/qmt_terminal_hongli_t.py)
+
+| 模块 | 职责 |
+| :--- | :--- |
+| `config.py` | 参数（`DRY_RUN` / 预算 / 风控开关） |
+| `period.py` / `indicators.py` | 周期解析、BOLL+KDJ |
+| `state*.py` / `backtest.py` | 浮仓状态、回测 T+1 影子仓 |
+| `market*.py` / `mode.py` | 行情、日线 MA、暖机→实盘 |
+| `broker.py` / `orders.py` | 持仓可卖、pending、下单 |
+| `strategy.py` / `runtime.py` | R-A/B/Sell、`init`/`handlebar` |
+
 部署到终端：
 
 ```bash
-python scripts/_deploy_qmt_gbk.py
+python scripts/qmt/_deploy_qmt_gbk.py
 ```
 
-会写入：
-
-- `D:\office\国金证券QMT交易端\python\红利T_v25.py`
-- `D:\office\国金证券QMT交易端\python\新建策略文件1.py`
+会按依赖顺序拼接 `hongli/*.py` → GBK 写入 `HLCL.py` / `红利T_v25.py` / `HLT策略.py`。
 
 **操作步骤**
 
 1. 打开国金 QMT，登录交易账号  
-2. 行情主图打开 **561580**，周期选 **日线**  
-3. 【模型交易】→ 选择 `红利T_v25`（或新建策略文件1）→ 选账号 → **实盘**（模拟只出信号）  
-4. 默认 `DRY_RUN=True`（只打印不下单）；确认日志后再在脚本里改 `False`，重新部署/编译  
-5. 决策窗 **14:30–14:57**；只操作 Float A/B，**底仓请手工持有**（高抛不会卖底仓）
+2. 行情主图打开 **561580**，周期选 **日线**（或与 `PERIOD` 一致）  
+3. 【模型交易】→ 选择 `HLCL` / `红利T_v25` / `HLT策略` → 选账号 → **实盘**（模拟只出信号）  
+4. 默认 `DRY_RUN=True`（在 `hongli/config.py`）；确认日志后改 `False`，再部署/编译  
+5. 决策窗 **14:30–14:57**（日线+）；只操作 Float A/B，**底仓请手工持有**  
+6. 若点开始秒退：完全退出 QMT 后运行 `python scripts/qmt/_fix_hlcl_simplerun.py`，再开终端编译并启动
 
-编码必须是 **GBK**（`#coding:gbk`），勿用记事本另存成 UTF-8。
+编码由部署脚本写成 **GBK**；勿用外部编辑器直接改国金 `python\HLCL.py`。
 
 ---
 

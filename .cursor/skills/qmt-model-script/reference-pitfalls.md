@@ -13,8 +13,8 @@
 | **外部 xtquant** | `XtQuantTrader` + `run_forever` | `order_stock_async` | UTF-8 | 独立 Python 连 userdata |
 
 把 xtquant 脚本拷进 `QMT\python\` 当模型跑 → 编码/无 init/环境全错。  
-终端版示例：`红利T策略/scripts/qmt_terminal_hongli_t.py`  
-部署：`python scripts/_deploy_qmt_gbk.py` → 写入 `...\python\HLT策略.py` 等。
+终端版示例：`红利T策略/scripts/qmt/qmt_terminal_hongli_t.py`  
+部署：`python scripts/qmt/_deploy_qmt_gbk.py` → 写入 `...\python\HLT策略.py` 等。
 
 ---
 
@@ -221,7 +221,7 @@ HongliT R-Sell done, float cleared   # 错误：拒单后仍清状态
 2. `_deploy_qmt_gbk.py` 部署后：**公式编辑器打开 HLCL → 编译/保存**（勿用 UTF-8 编辑器直接存 `HLCL.py`）
 3. 模型交易：删掉坏行 → 重新添加 HLCL + 账户 + 主图 `561580.SH` 15m → **实盘**开始
 4. 验收日志：`PythonFormula construct` → `bindTradeCallBackFunc` → `start back test mode` → `continueRun` → 出现 `HongliT ... init`；之后 FormulaOutput 有心跳/信号行
-5. 若仍见 `doRun -u`：先关 QMT 再跑 `scripts/_fix_hlcl_simplerun.py`，确认 xml 未被 UI 写回 `simpleRun=1`
+5. 若仍见 `doRun -u`：先关 QMT 再跑 `scripts/qmt/_fix_hlcl_simplerun.py`，确认 xml 未被 UI 写回 `simpleRun=1`
 6. **日常避免**：不要勾 HLCL「独立/简易运行」；改代码只用 `_deploy_qmt_gbk.py`（会检查 simpleRun）；勿用外部编辑器直接存 `HLCL.py`；秒退且日志含 `standalone doRun` 时先 exit QMT 再 fix
 
 ---
@@ -249,8 +249,8 @@ HongliT R-Sell done, float cleared   # 错误：拒单后仍清状态
 
 | 文件 | 用途 |
 | :--- | :--- |
-| `红利T策略/scripts/qmt_terminal_hongli_t.py` | 终端版真源（UTF-8 仓库） |
-| `红利T策略/QMT/qmt_terminal_hongli_t.py` | 同策略副本（保持与 scripts 同步） |
-| `红利T策略/scripts/_deploy_qmt_gbk.py` | 转 GBK 写入国金 `python\` |
-| `红利T策略/scripts/qmt_hongli_t.py` | 外部 xtquant 版（勿当终端模型） |
+| `红利T策略/scripts/qmt/hongli/*.py` | 终端版真源（分模块片段） |
+| `红利T策略/scripts/qmt/qmt_terminal_hongli_t.py` | 拼接预览（AUTO-GENERATED，勿手改） |
+| `红利T策略/scripts/qmt/_deploy_qmt_gbk.py` | 按 MODULE_ORDER 拼接并转 GBK 写入国金 `python\` |
+| `红利T策略/scripts/qmt/qmt_hongli_t.py` | 外部 xtquant 版（勿当终端模型） |
 | `D:\service\GJQMT\python\HLCL.py` 等 | 终端运行副本（GBK） |

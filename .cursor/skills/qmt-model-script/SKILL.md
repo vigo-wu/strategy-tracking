@@ -35,7 +35,7 @@ description: >-
 | 外部 Python 连 userdata | **A'. xtquant 转写** |
 | 终端报错 / 回测无日志 / 盈利异常 | **C. 排障** → [reference-pitfalls.md](reference-pitfalls.md) |
 | 策略变更后同步脚本 | **B. 对齐** |
-| 部署到 `QMT\python\` | `python scripts/_deploy_qmt_gbk.py`（覆盖实际加载文件） |
+| 部署到 `QMT\python\` | `python scripts/qmt/_deploy_qmt_gbk.py`（覆盖实际加载文件） |
 
 ---
 
@@ -44,13 +44,13 @@ description: >-
 ```
 转写进度:
 - [ ] 1. 读 model.md + screener 指标
-- [ ] 2. 写 scripts/qmt_terminal_<简名>.py（init/handlebar/passorder）
+- [ ] 2. 写 scripts/qmt/hongli/ 分模块（或单文件再拆）；deploy 拼接为 init/handlebar/passorder
 - [ ] 3. #coding:gbk；ACCOUNT_ID 兜底；STATE 绝对路径（禁 __file__）
 - [ ] 4. 行情：download_history_data + get_market_data_ex；禁依赖 get_history_data
 - [ ] 5. 回测用 K 线时间；实盘用 is_last_bar + 决策窗；全局 A 存状态
 - [ ] 6. DRY_RUN=True；浮仓与底仓分离（高抛只卖浮仓）
 - [ ] 7. T+1：回测 bt_locked；实盘 min(float, can_use)；skip 不清仓；pending 成交后才改状态
-- [ ] 8. _deploy_qmt_gbk.py 写入终端 python\；model.md 写操作步骤
+- [ ] 8. scripts/qmt/_deploy_qmt_gbk.py 写入终端 python\；model.md 写操作步骤
 - [ ] 9. 回测先见 diag: ok，再改 DRY_RUN=False 实盘；验收买卖笔数相等、期末空仓
 ```
 
@@ -64,7 +64,7 @@ description: >-
 ```
 转写进度:
 - [ ] 1. 对照 reference-xtquant
-- [ ] 2. 写 scripts/qmt_<简名>.py（UTF-8）
+- [ ] 2. 写 scripts/qmt/qmt_<简名>.py（UTF-8）
 - [ ] 3. QMT_USERDATA / ACCOUNT_ID；DRY_RUN=True
 - [ ] 4. 状态可落盘；model.md 注明「勿当终端模型导入」
 - [ ] 5. 卖出用可卖数量（查询持仓可用），勿假设当日可平
@@ -126,4 +126,4 @@ description: >-
 - [reference-pitfalls.md](reference-pitfalls.md) — **国金终端联调踩坑（优先读，含 T+1）**
 - [reference-xtquant.md](reference-xtquant.md) — 外部 xtquant 要点  
 - [reference-template.md](reference-template.md) — 脚本骨架  
-- 示例：`红利T策略/scripts/qmt_terminal_hongli_t.py`、`qmt_hongli_t.py`、`_deploy_qmt_gbk.py`
+- 示例：`红利T策略/scripts/qmt/qmt_terminal_hongli_t.py`、`qmt_hongli_t.py`、`_deploy_qmt_gbk.py`

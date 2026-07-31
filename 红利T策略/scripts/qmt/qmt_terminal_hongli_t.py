@@ -1,53 +1,6 @@
 #coding:gbk
-"""
-HongliT v2.19 for Guojin QMT terminal (model trade).
-
-Main chart: 561580.SH; PERIOD below or "follow" chart period.
-UI: select stock + account, run in LIVE (not simulate) to send orders.
-
-Rules:
-  R-A   zero float + lower band + J<=0     -> buy Float A (FLOAT_A_BUDGET)
-  R-B   has A + lower + J<=0 + drop>=2.5%  -> buy Float B (FLOAT_B_BUDGET) else skip
-  R-Sell upper + J>=100                    -> sell ALL float A/B
-  No R1
-
-Risk profile (any PERIOD when USE_RISK_RULES=True):
-  - ENABLE_FLOAT_B=False      -> skip R-B (A-only)
-  - EXIT_AFTER                -> defer R-Sell/MaxHold until HHMMSS; ""=off; intraday only
-  - STOP_LOSS_IGNORE_EXIT_AFTER -> StopLoss may fire before EXIT_AFTER
-  - MAX_HOLD_DAYS             -> soft max-hold (loss-only) calendar days; 0=off
-  - MAX_HOLD_HARD_DAYS        -> hard force clear even if profit; 0=off
-  - COOLDOWN_BARS / LOSS      -> after sell; bars * PERIOD duration -> wall-clock until
-  - NO_ENTRY_AFTER            -> no new R-A at/after HHMMSS; ""=off; intraday only
-  - STOP_LOSS                 -> soft stop vs avg float cost; 0=off
-  - REQUIRE_ABOVE_DAILY_MA    -> open only if daily close > MA(DAILY_MA_N)
-  - DAILY_MA_N                -> any MA length (e.g. 10/20/60)
-
-Live order safety (v2.19):
-  - Update float state only after deal fill (pending); DRY_RUN instant; backtest passorder+instant
-  - init reconciles JSON float vs broker (skips if pending); BASE_SHARES never adopted/sold
-  - pending timeout -> cancel first; clear only after order terminal (no double order)
-  - pending resolved even outside 09:30-15:00 (late fills / cancels)
-  - partial sell fill keeps remain sellable same day (do not mark acted SELL)
-  - cooldown stored as wall-clock datetime (survives model restart)
-  - T+1 live: sell vol = min(float, m_nCanUseVolume); can_use<100 -> skip, keep float
-  - init fully try/except; hist download start clamped (VIP max-start-date)
-  - live heartbeat every LIVE_HEARTBEAT_SEC so UI silence != stopped
-  - refresh is_backtest every handlebar; Guojin warmup->live catch-up detection
-
-Backtest safety (v2.19):
-  - Mid-run init must NOT wipe float (was causing orphan double R-A)
-  - Shadow bt_held tracks passorder fills; R-A blocked if held; sell clears held
-  - T+1: bt_locked = same-day buys (R-A and R-B); sell only available; never clear if QMT would skip
-  - Do not load/save STATE_FILE during backtest (memory only)
-
-IMPORTANT:
-  - Keep this file encoding=GBK, first line #coding:gbk
-  - This script only trades float A/B; set BASE_SHARES if account also holds base
-  - DRY_RUN=True prints only; set False to passorder
-  - Download matching period history in QMT data manager before backtest
-  - Model trade: expect BACKTEST=False + status running; recompile after deploy
-"""
+# 由 scripts/qmt/_deploy_qmt_gbk.py 从 hongli/*.py 自动生成
+# 请勿手改本文件。请编辑 hongli 片段后重新部署。
 import datetime
 import json
 import os
@@ -55,10 +8,66 @@ import traceback
 
 import numpy as np
 
-# ===================== user config =====================
+
+# === hongli/_header.py ===
+# 国金 QMT 拼接片段。运行时勿跨模块 import；
+# 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
+#
+# HongliT v2.19 — 国金 QMT 终端模型交易。
+#
+# 主图标的: 561580.SH；PERIOD 见 config，或 "follow" 跟随主图周期。
+# 界面: 选标的 + 账号，用实盘模式（非模拟）才会真正下单。
+#
+# 规则:
+#   R-A   零浮仓 + 下轨 + J<=0     -> 买 Float A（FLOAT_A_BUDGET）
+#   R-B   已有 A + 下轨 + J<=0 + 跌幅>=2.5%  -> 买 Float B（FLOAT_B_BUDGET），否则跳过
+#   R-Sell 上轨 + J>=100                    -> 清全部浮仓 A/B
+#   无 R1
+#
+# 风控档（USE_RISK_RULES=True 时任意 PERIOD 生效）:
+#   - ENABLE_FLOAT_B=False      -> 关闭 R-B（仅 A）
+#   - EXIT_AFTER                -> 延后 R-Sell/MaxHold 至 HHMMSS；""=关；仅日内
+#   - STOP_LOSS_IGNORE_EXIT_AFTER -> 止损可早于 EXIT_AFTER 触发
+#   - MAX_HOLD_DAYS             -> 软最长持仓（仅亏损）日历日；0=关
+#   - MAX_HOLD_HARD_DAYS        -> 硬性到期强平（含盈利）；0=关
+#   - COOLDOWN_BARS / LOSS      -> 卖出后冷却；根数 * PERIOD 时长 -> 墙钟截止
+#   - NO_ENTRY_AFTER            -> 该时刻起禁止新开 R-A；""=关；仅日内
+#   - STOP_LOSS                 -> 相对浮仓均价软止损；0=关
+#   - REQUIRE_ABOVE_DAILY_MA    -> 仅当日线收盘 > MA(DAILY_MA_N) 时开仓
+#   - DAILY_MA_N                -> 均线周期（如 10/20/60）
+#
+# 实盘委托安全 (v2.19):
+#   - 浮仓状态仅成交后更新（pending）；DRY_RUN 即时；回测 passorder+即时
+#   - init 用券商持仓对齐 JSON 浮仓（有 pending 则跳过）；BASE_SHARES 永不吸纳/卖出
+#   - pending 超时先撤单；仅终态后清空（防双单）
+#   - 15:00 后仍处理 pending（晚成交/撤单）
+#   - 卖出部分成交保留当日剩余可卖（不标记 acted SELL）
+#   - 冷却存墙钟时间（模型重启仍有效）
+#   - 实盘 T+1: 卖量 = min(浮仓, m_nCanUseVolume)；可卖<100 则跳过并保留浮仓
+#   - init 全包 try/except；历史下载起点钳制（VIP 最早日期）
+#   - 实盘心跳 LIVE_HEARTBEAT_SEC，避免 UI 静默被当成已停
+#   - 每根 handlebar 刷新 is_backtest；国金暖机->实盘追赶检测
+#
+# 回测安全 (v2.19):
+#   - 运行中途 init 不得清空浮仓（曾导致孤儿双开 R-A）
+#   - 影子 bt_held 跟踪 passorder 成交；有持仓则拦 R-A；卖出清空 held
+#   - T+1: bt_locked = 当日买入（R-A/R-B）；仅可卖部分可卖；QMT 会跳过时绝不清仓
+#   - 回测不读写 STATE_FILE（仅内存）
+#
+# 注意:
+#   - 部署产物编码=GBK，首行 #coding:gbk
+#   - 本策略只交易浮仓 A/B；账户另有底仓时设 BASE_SHARES
+#   - DRY_RUN=True 只打印；False 才 passorder
+#   - 回测前在 QMT 数据管理下载对应周期历史
+#   - 模型交易: 期望 BACKTEST=False 且常驻；部署后需重新编译
+
+# === hongli/config.py ===
+# 国金 QMT 拼接片段。运行时勿跨模块 import；
+# 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
+# ===================== 用户配置 =====================
 DRY_RUN = True
 
-# Fallback when not started from model-trade UI (no account/accountType inject)
+# 未从模型交易界面启动时的兜底（无 account/accountType 注入）
 ACCOUNT_ID = "39953913"
 ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 
@@ -72,50 +81,50 @@ KDJ_N = 9
 LOWER_TOL = 1.002
 UPPER_TOL = 0.998
 
-# K-line period for indicators / decisions.
-# "follow" = C.period from main chart; or set explicitly:
+# K 线周期（指标 / 决策）。
+# "follow" = 跟随主图 C.period；或显式指定:
 #   1m / 3m / 5m / 15m / 30m / 1h / 1d / 1w / 1mon / 1q / 1hy / 1y
 PERIOD = "follow"
-# 0 = auto count by period; else fixed bar count for OHLC fetch
+# 0 = 按周期自动根数；否则固定 OHLC 拉取根数
 OHLC_COUNT = 0
 
-# ---- risk profile (any PERIOD) ----
-# Master switch: False = classic R-A/B/Sell only (no maxhold/cooldown/time gates/stop).
+# ---- 风控档（任意 PERIOD）----
+# 总开关: False = 仅经典 R-A/B/Sell（无最长持仓/冷却/时段门/止损）。
 USE_RISK_RULES = True
-ENABLE_FLOAT_B = False      # False = close R-B (A-only); ignored if USE_RISK_RULES=False (B on)
-EXIT_AFTER = "100000"       # defer R-Sell/MaxHold until HHMMSS; ""=off; intraday only
-STOP_LOSS_IGNORE_EXIT_AFTER = True  # StopLoss may fire before EXIT_AFTER (gap guard)
-MAX_HOLD_DAYS = 4           # soft: force clear if hold>=N AND float loss; 0=off
+ENABLE_FLOAT_B = False      # False = 关闭 R-B（仅 A）；USE_RISK_RULES=False 时忽略（B 开启）
+EXIT_AFTER = "100000"       # 延后 R-Sell/MaxHold 至 HHMMSS；""=关；仅日内
+STOP_LOSS_IGNORE_EXIT_AFTER = True  # 止损可早于 EXIT_AFTER（防跳空）
+MAX_HOLD_DAYS = 4           # 软: 持仓>=N 且浮仓亏损则强平；0=关
 MAX_HOLD_ONLY_LOSS = True
-MAX_HOLD_HARD_DAYS = 8      # always force clear at N days (leak guard); 0=off
-COOLDOWN_BARS = 16          # after profitable sell; converted to wall time via PERIOD
-COOLDOWN_BARS_LOSS = 28     # after losing sell
-NO_ENTRY_AFTER = "143000"   # no new R-A at/after HHMMSS; ""=off; intraday only
-STOP_LOSS = 0.03            # soft stop vs avg float cost; 0=off
-PENDING_TIMEOUT_SEC = 180   # live: request cancel after N seconds if not filled
-PENDING_ORPHAN_SEC = 60     # after cancel request, if order never appears, clear pending
+MAX_HOLD_HARD_DAYS = 8      # 硬: 满 N 日一律强平（防漏单）；0=关
+COOLDOWN_BARS = 16          # 盈利卖出后冷却；按 PERIOD 换成墙钟
+COOLDOWN_BARS_LOSS = 28     # 亏损卖出后冷却
+NO_ENTRY_AFTER = "143000"   # 该时刻起禁新开 R-A；""=关；仅日内
+STOP_LOSS = 0.03            # 相对浮仓均价软止损；0=关
+PENDING_TIMEOUT_SEC = 180   # 实盘: 未成交满 N 秒则请求撤单
+PENDING_ORPHAN_SEC = 60     # 撤单请求后若始终无委托，清空 pending
 
-# Shares reserved as base position (never adopted / never sold by this strategy)
+# 预留底仓股数（本策略不吸纳、不卖出）
 BASE_SHARES = 0
 
-# Daily trend filter (applies to R-A / R-B on any period)
-REQUIRE_ABOVE_DAILY_MA = True   # only open when daily close > MA(DAILY_MA_N)
-DAILY_MA_N = 20                 # MA period: any int >=2 (10/20/60/...)
-DAILY_MA_COUNT = 60             # fetch bars; auto raised to >= DAILY_MA_N+5
+# 日线趋势过滤（任意周期的 R-A / R-B）
+REQUIRE_ABOVE_DAILY_MA = True   # 仅当日线收盘 > MA(DAILY_MA_N) 时开仓
+DAILY_MA_N = 20                 # 均线周期: 任意整数 >=2（10/20/60/...）
+DAILY_MA_COUNT = 60             # 拉取根数；自动抬到 >= DAILY_MA_N+5
 
-# Live decision window (only for daily+ periods; intraday uses every bar in session)
+# 实盘决策窗（仅日线及以上；日内则交易时段每根都决策）
 DECISION_START = "143000"
 DECISION_END = "145700"
 
-# Live heartbeat: print at most once per N seconds on last bar (0=off)
+# 实盘心跳: 最新 K 上最多每 N 秒打印一次（0=关）
 LIVE_HEARTBEAT_SEC = 60
-# Clamp download_history_data start so VIP max-start-date cannot abort model
+# 钳制 download_history_data 起点，避免 VIP 最早日期导致模型中止
 HIST_MAX_LOOKBACK_DAYS = 360
-# Live: skip remote hist download by default (local cache + get_market_data_ex)
+# 实盘: 默认不远程补历史（本地缓存 + get_market_data_ex）
 DOWNLOAD_HIST_LIVE = False
 DOWNLOAD_HIST_BACKTEST = True
 
-# QMT model runtime has no __file__; use fixed path under terminal python/
+# QMT 模型运行时无 __file__；使用终端 python/ 下固定路径
 STATE_FILE = r"D:\service\GJQMT\python\hongli_t_qmt_state.json"
 # =======================================================
 
@@ -161,7 +170,7 @@ _PERIOD_HIST_START = {
     "1hy": "20050101",
     "1y": "20000101",
 }
-# wall-clock minutes per bar (for cooldown bars -> datetime)
+# 每根 K 对应墙钟分钟数（冷却根数 -> 时间）
 _PERIOD_BAR_MINUTES = {
     "1m": 1,
     "3m": 3,
@@ -176,11 +185,13 @@ _PERIOD_BAR_MINUTES = {
     "1hy": 180 * 24 * 60,
     "1y": 365 * 24 * 60,
 }
-# QMT order status (cover common 50-series and compact enums)
+# QMT 委托状态（覆盖常见 50 段与精简枚举）
 _ORDER_FILLED = (56, 8)
-_ORDER_DEAD = (54, 57, 53, 5, 6, 9)  # cancelled / rejected / partial-cancel terminal
+_ORDER_DEAD = (54, 57, 53, 5, 6, 9)  # 已撤 / 废单 / 部撤终态
 
-
+# === hongli/ctx.py ===
+# 国金 QMT 拼接片段。运行时勿跨模块 import；
+# 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 class _S(object):
     pass
 
@@ -193,14 +204,16 @@ def _lot(price, budget):
         return 0
     return int(budget // (price * 100)) * 100
 
-
+# === hongli/period.py ===
+# 国金 QMT 拼接片段。运行时勿跨模块 import；
+# 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def _norm_period(p):
     if p is None:
         return None
     s = str(p).strip().lower()
     if s in ("", "follow", "none"):
         return None
-    # common aliases from chart UI
+    # 主图界面常见别名
     aliases = {
         "day": "1d",
         "daily": "1d",
@@ -220,7 +233,7 @@ def _norm_period(p):
 
 
 def _resolve_period(C):
-    """PERIOD config, else C.period, else 1d."""
+    """优先 PERIOD 配置，否则 C.period，否则 1d。"""
     cfg = _norm_period(PERIOD)
     if cfg:
         return cfg
@@ -244,7 +257,7 @@ def _ohlc_count(period):
 
 
 def _hist_start(period):
-    """Earliest yyyymmdd for download; clamped to HIST_MAX_LOOKBACK_DAYS."""
+    """下载最早 yyyymmdd；受 HIST_MAX_LOOKBACK_DAYS 钳制。"""
     cfg = str(_PERIOD_HIST_START.get(period, "20220101") or "20220101")
     days = int(HIST_MAX_LOOKBACK_DAYS or 0)
     if days <= 0:
@@ -256,13 +269,15 @@ def _hist_start(period):
 
 
 def _bar_end_str(C):
-    """end_time for get_market_data*: yyyymmdd or yyyymmddHHMMSS."""
+    """get_market_data* 的 end_time：yyyymmdd 或 yyyymmddHHMMSS。"""
     dt = _bar_datetime(C)
     if _is_intraday(getattr(A, "period", "1d")):
         return dt.strftime("%Y%m%d%H%M%S")
     return dt.strftime("%Y%m%d")
 
-
+# === hongli/state_io.py ===
+# 国金 QMT 拼接片段。运行时勿跨模块 import；
+# 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def _load_state():
     A.float_a = None
     A.float_b = None
@@ -284,7 +299,7 @@ def _load_state():
         A.cooldown_until = str(raw.get("cooldown_until", "") or "")
         pend = raw.get("pending")
         A.pending = pend if isinstance(pend, dict) else None
-        # drop legacy barpos cooldown (unsafe across restarts)
+        # 丢弃旧版按 barpos 的冷却（重启不安全）
         print(
             "HongliT load state",
             STATE_FILE,
@@ -300,7 +315,7 @@ def _load_state():
 
 
 def _save_state():
-    # backtest: memory-only; avoid clobbering live JSON / re-init desync
+    # 回测: 仅内存；避免覆盖实盘 JSON / 再 init 不同步
     if getattr(A, "is_backtest", False):
         return
     payload = {
@@ -318,7 +333,9 @@ def _save_state():
     except Exception as e:
         print("HongliT save state fail", e)
 
-
+# === hongli/backtest.py ===
+# 国金 QMT 拼接片段。运行时勿跨模块 import；
+# 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def _bt_held_vol():
     return max(0, int(getattr(A, "bt_held", 0) or 0))
 
@@ -328,12 +345,12 @@ def _bt_locked_vol():
 
 
 def _bt_available_vol():
-    """Backtest T+1: shares not bought today (QMT can-sell / ke mai)."""
+    """回测 T+1: 非当日买入的可卖股数（对应 QMT 可卖）。"""
     return max(0, _bt_held_vol() - _bt_locked_vol())
 
 
 def _bt_roll_t1(day):
-    """New calendar day unlocks prior buys for selling."""
+    """新日历日解锁此前买入，变为可卖。"""
     if not getattr(A, "is_backtest", False):
         return
     day = str(day or "")
@@ -369,7 +386,7 @@ def _bt_held_set(vol):
 
 
 def _bt_recover_float(now=None, last=None):
-    """If shadow held exists but float legs empty, re-adopt so exits still fire."""
+    """影子持仓仍在但浮仓腿为空时，重新吸纳以便退出信号仍能触发。"""
     if not getattr(A, "is_backtest", False):
         return False
     held = _bt_held_vol()
@@ -391,7 +408,9 @@ def _bt_recover_float(now=None, last=None):
     print("HongliT bt recover float from held", A.float_a)
     return True
 
-
+# === hongli/state.py ===
+# 国金 QMT 拼接片段。运行时勿跨模块 import；
+# 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def _reset_day(day):
     if A.acted_day != day:
         A.acted_day = day
@@ -404,7 +423,7 @@ def _has_leg(leg):
 
 
 def _use_risk_rules():
-    """Risk profile (maxhold/cooldown/stop/time gates/float-B switch). Any PERIOD."""
+    """风控档（最长持仓/冷却/止损/时段门/Float-B 开关）。任意 PERIOD。"""
     return bool(USE_RISK_RULES)
 
 
@@ -434,7 +453,7 @@ def _hold_days(opened_at, now):
 
 
 def _float_avg_cost():
-    """Share-weighted avg entry of float A/B; 0 if empty."""
+    """浮仓 A/B 按股数加权均价；空则 0。"""
     cost = 0.0
     sh = 0
     for leg in (getattr(A, "float_a", None), getattr(A, "float_b", None)):
@@ -458,7 +477,7 @@ def _float_ret(last):
 
 
 def _exit_time_ok(now_s):
-    """Defer R-Sell/MaxHold until EXIT_AFTER (intraday only; StopLoss may bypass)."""
+    """延后 R-Sell/MaxHold 至 EXIT_AFTER（仅日内；止损可绕过）。"""
     if not _use_risk_rules():
         return True
     if not getattr(A, "intraday", False):
@@ -470,7 +489,7 @@ def _exit_time_ok(now_s):
 
 
 def _entry_time_ok(now_s):
-    """Block new R-A at/after NO_ENTRY_AFTER (intraday only)."""
+    """NO_ENTRY_AFTER 及之后禁止新开 R-A（仅日内）。"""
     if not _use_risk_rules():
         return True
     if not getattr(A, "intraday", False):
@@ -548,7 +567,7 @@ def _clear_float_after_sell(now, remark, last=None):
 
 
 def _shrink_float_to_vol(target_vol):
-    """Reduce float A/B so total shares <= target_vol (drop B first)."""
+    """缩减浮仓 A/B 使总股数 <= target_vol（先减 B）。"""
     target_vol = int(target_vol)
     if target_vol < 100:
         A.float_a = None
@@ -577,8 +596,11 @@ def _shrink_float_to_vol(target_vol):
             A.float_a["shares"] = a
             A.float_a["cost"] = round(a * float(A.float_a.get("price", 0) or 0), 2)
 
+# === hongli/indicators.py ===
+# 国金 QMT 拼接片段。运行时勿跨模块 import；
+# 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def _calc_indicators(high, low, close):
-    """Return (lower, upper, j, last_close) or None."""
+    """返回 (下轨, 上轨, J, 最新收盘) 或 None。"""
     n = len(close)
     need = max(BOLL_N, KDJ_N) + 2
     if n < need:
@@ -586,7 +608,7 @@ def _calc_indicators(high, low, close):
     c = np.asarray(close, dtype=float)
     h = np.asarray(high, dtype=float)
     l = np.asarray(low, dtype=float)
-    # reject padded / flat window (history not ready)
+    # 拒绝填充/平坦窗口（历史未就绪）
     if np.std(c[-BOLL_N:]) < 1e-8:
         return None
     mid = np.mean(c[-BOLL_N:])
@@ -594,7 +616,7 @@ def _calc_indicators(high, low, close):
     lower = mid - BOLL_K * std
     upper = mid + BOLL_K * std
 
-    # KDJ same as run_screener: RSV ewm(com=2)
+    # KDJ 与 run_screener 一致: RSV ewm(com=2)
     rsv = np.zeros(n, dtype=float)
     for i in range(n):
         i0 = max(0, i - KDJ_N + 1)
@@ -615,7 +637,9 @@ def _calc_indicators(high, low, close):
     j = 3.0 * k[-1] - 2.0 * d[-1]
     return lower, upper, float(j), float(c[-1])
 
-
+# === hongli/market_util.py ===
+# 国金 QMT 拼接片段。运行时勿跨模块 import；
+# 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def _bar_end_yyyymmdd(C):
     dt = _bar_datetime(C)
     return dt.strftime("%Y%m%d")
@@ -631,11 +655,11 @@ def _diag_once(key, *msg):
 
 
 def _series_from_ex(md, stock, field):
-    """Parse get_market_data_ex / get_market_data result into float list."""
+    """将 get_market_data_ex / get_market_data 结果解析为 float 列表。"""
     if md is None:
         return None
     obj = None
-    # shape1: {code: DataFrame(columns=fields)}
+    # 形态1: {代码: DataFrame(列为字段)}
     if isinstance(md, dict) and stock in md:
         df = md[stock]
         if hasattr(df, "columns") and field in getattr(df, "columns", []):
@@ -647,7 +671,7 @@ def _series_from_ex(md, stock, field):
                 obj = df[field]
             except Exception:
                 pass
-    # shape2: {field: DataFrame(columns=codes)} / Series
+    # 形态2: {字段: DataFrame(列为代码)} / Series
     if obj is None and isinstance(md, dict) and field in md:
         df = md[field]
         if hasattr(df, "columns"):
@@ -674,7 +698,7 @@ def _series_from_ex(md, stock, field):
     out = []
     for fv in vals:
         try:
-            if fv != fv:  # nan
+            if fv != fv:  # NaN
                 continue
             out.append(float(fv))
         except Exception:
@@ -683,7 +707,7 @@ def _series_from_ex(md, stock, field):
 
 
 def _download_hist(stock, period):
-    """Supplement local history for the configured period (QMT builtin name varies)."""
+    """按配置周期补本地历史（QMT 内置函数名因版本而异）。"""
     start = _hist_start(period)
     for fn_name in ("download_history_data", "down_history_data"):
         fn = globals().get(fn_name)
@@ -699,7 +723,7 @@ def _download_hist(stock, period):
 
 
 def _live_heartbeat(reason=""):
-    """Periodic live log so silent early-return is not mistaken for model stop."""
+    """周期性实盘日志，避免静默提前 return 被当成模型已停。"""
     if getattr(A, "is_backtest", False):
         return
     sec = int(LIVE_HEARTBEAT_SEC or 0)
@@ -726,9 +750,11 @@ def _live_heartbeat(reason=""):
         ("reason=" + str(reason)) if reason else "",
     )
 
-
+# === hongli/market.py ===
+# 国金 QMT 拼接片段。运行时勿跨模块 import；
+# 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def _fetch_closes(C, stock, period, count, end):
-    """Fetch close list for an explicit period (used by daily MA filter)."""
+    """按指定周期拉取收盘价序列（供日线均线过滤）。"""
     md = None
     try:
         md = C.get_market_data_ex(
@@ -785,29 +811,29 @@ def _fetch_closes(C, stock, period, count, end):
 
 
 def _daily_ma_ok(C, stock, closes_hint=None):
-    """True if latest daily close > MA(DAILY_MA_N). Cached per hour + MA length."""
+    """最新日线收盘 > MA(DAILY_MA_N) 则为 True。按小时+均线周期缓存。"""
     if not bool(REQUIRE_ABOVE_DAILY_MA):
         return True, None, None
     n = int(DAILY_MA_N)
     if n <= 1:
         return True, None, None
     day = _bar_datetime(C).strftime("%Y%m%d")
-    # refresh a few times per day on intraday so today's running close updates
+    # 日内策略一天刷新数次，使今日滚动收盘价更新
     bucket = "%s|ma%d" % (_bar_datetime(C).strftime("%Y%m%d%H"), n)
     cache = getattr(A, "_daily_ma_cache", None)
     if isinstance(cache, dict) and cache.get("bucket") == bucket and cache.get("ok") is not None:
         return bool(cache.get("above")), cache.get("last"), cache.get("ma")
 
     closes = None
-    # if strategy period is already daily, reuse hint series
+    # 策略周期已是日线时，复用传入序列
     if closes_hint is not None and getattr(A, "period", "") == "1d":
         closes = list(closes_hint)
     if not closes:
-        end = day  # daily API wants yyyymmdd
+        end = day  # 日线 API 要 yyyymmdd
         closes = _fetch_closes(C, stock, "1d", max(int(DAILY_MA_COUNT), n + 5), end)
     if not closes or len(closes) < n:
         _diag_once("daily_ma_short", "bars=", 0 if not closes else len(closes), "need=", n)
-        # fail-closed: do not open without trend confirmation
+        # 失败关闭: 无趋势确认则不开仓
         A._daily_ma_cache = {"bucket": bucket, "above": False, "ok": False, "last": None, "ma": None}
         return False, None, None
 
@@ -834,7 +860,7 @@ def _daily_ma_ok(C, stock, closes_hint=None):
 
 
 def _get_ohlc(C, stock, count=None):
-    """Fetch OHLC for A.period; try get_market_data_ex then fallbacks."""
+    """按 A.period 拉取 OHLC；先 get_market_data_ex，再回退。"""
     period = getattr(A, "period", "1d")
     if count is None:
         count = _ohlc_count(period)
@@ -898,7 +924,7 @@ def _get_ohlc(C, stock, count=None):
         except Exception as e:
             _diag_once("gmd_fail", e)
 
-    # 3) get_history_data (legacy, still works on some builds)
+    # 3) get_history_data（旧接口，部分版本仍可用）
     if not close or len(close) < need:
         try:
             c_map = C.get_history_data(count, period, "close", dividend_type="front_ratio")
@@ -970,13 +996,15 @@ def _get_ohlc(C, stock, count=None):
     )
     return high, low, close
 
-
+# === hongli/mode.py ===
+# 国金 QMT 拼接片段。运行时勿跨模块 import；
+# 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def _is_backtest(C):
     return bool(getattr(C, "do_back_test", False))
 
 
 def _on_mode_switch_to_live(C):
-    """Warmup finished: use live semantics (STATE / pending / wall clock)."""
+    """暖机结束: 切到实盘语义（STATE / pending / 墙钟）。"""
     print(
         "HongliT mode switch backtest -> live",
         "raw_do_back_test=",
@@ -1001,11 +1029,11 @@ def _on_mode_switch_to_live(C):
 
 
 def _refresh_mode(C):
-    """Refresh A.is_backtest every bar.
+    """每根 K 刷新 A.is_backtest。
 
-    Guojin model-trade often starts with do_back_test=True (history warmup),
-    then re-enters the same last bar for realtime while the flag may stay True.
-    Catch-up rule: 2nd+ call on today's last bar with unchanged barpos => live.
+    国金模型交易常先以 do_back_test=True 暖机历史，
+    再进入同一根最新 K 做实时，而标志可能仍为 True。
+    追赶规则: 今日最新 K 上 barpos 不变的第 2 次及以后调用 => 实盘。
     """
     prev = getattr(A, "is_backtest", None)
     raw = bool(getattr(C, "do_back_test", False))
@@ -1041,21 +1069,23 @@ def _refresh_mode(C):
 
 
 def _bar_datetime(C):
-    """Bar time in backtest; wall clock in live."""
+    """回测用 K 线时间；实盘用墙钟。"""
     try:
         tag = C.get_bar_timetag(C.barpos)
-        # timetag_to_datetime is QMT builtin when available
+        # timetag_to_datetime 为 QMT 内置（若有）
         if "timetag_to_datetime" in globals():
             s = timetag_to_datetime(tag, "%Y%m%d%H%M%S")
             return datetime.datetime.strptime(str(s), "%Y%m%d%H%M%S")
-        # fallback: ms timestamp
+        # 回退: 毫秒时间戳
         if tag > 10**12:
             return datetime.datetime.fromtimestamp(tag / 1000.0)
         return datetime.datetime.fromtimestamp(tag)
     except Exception:
         return datetime.datetime.now()
 
-
+# === hongli/broker.py ===
+# 国金 QMT 拼接片段。运行时勿跨模块 import；
+# 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def _available_cash():
     if getattr(A, "is_backtest", False):
         return 10**9
@@ -1071,7 +1101,7 @@ def _pos_code(p):
 
 
 def _broker_position(stock):
-    """Return (total_vol, can_use, avg_cost) for stock; (0,0,0) if none."""
+    """返回标的 (总量, 可卖, 成本价)；无持仓则 (0,0,0)。"""
     if getattr(A, "is_backtest", False) or DRY_RUN:
         return 0, 0, 0.0
     positions = get_trade_detail_data(A.acct, A.acct_type, "position")
@@ -1108,42 +1138,42 @@ def _base_shares():
 
 
 def _floatable_broker_vol(broker_vol):
-    """Shares above BASE_SHARES that this strategy may manage."""
+    """超出 BASE_SHARES、可由本策略管理的股数。"""
     return max(0, int(broker_vol) - _base_shares())
 
 
 def _adopt_share_cap(price):
-    """Max shares to adopt on reconcile: float budgets only (not entire account)."""
+    """对账吸纳上限: 仅按浮仓预算（非整户持仓）。"""
     budget = float(FLOAT_A_BUDGET)
     if _enable_float_b():
         budget += float(FLOAT_B_BUDGET)
     if price and price > 0:
         return _lot(price, budget)
-    # unknown price: cap by budget at ~1 yuan worst-case lot step
+    # 未知价格: 按预算以约 1 元最差手数估算上限
     return int(budget // 100) * 100
 
 
 def _max_sell_vol():
-    """Sell at most strategy float, never touch BASE_SHARES. Always T+1-capped."""
+    """最多卖策略浮仓，永不碰 BASE_SHARES。始终受 T+1 约束。"""
     want = _sell_float_vol()
     if getattr(A, "is_backtest", False):
-        # include shadow held; cap by T+1 available (matches QMT can-sell)
+        # 计入影子持仓；按 T+1 可卖封顶（对齐 QMT 可卖）
         want = max(want, _bt_held_vol())
         avail = _bt_available_vol()
         return max(0, min(want, avail))
     if want < 100:
         return 0
     if DRY_RUN:
-        # Dry-run still respects calendar T+1 so logs match live constraints.
+        # 空跑仍遵守日历 T+1，使日志与实盘约束一致。
         return _dry_t1_sellable(want)
     broker_vol, can, _cost = _broker_position(A.stock)
     floatable = _floatable_broker_vol(broker_vol)
-    # Live hard rule: never exceed m_nCanUseVolume (same-day buys = 0 can_use).
+    # 实盘硬规则: 不超过 m_nCanUseVolume（当日买 = 可卖 0）。
     return max(0, min(want, int(can), floatable))
 
 
 def _dry_t1_sellable(want):
-    """DRY_RUN T+1: block same-calendar-day exit when no broker can_use feed."""
+    """DRY_RUN 的 T+1: 无券商可卖数据时，禁止同日历日卖出。"""
     want = int(want)
     if want < 100:
         return 0
@@ -1160,7 +1190,7 @@ def _dry_t1_sellable(want):
 
 
 def _reconcile_float_with_broker():
-    """Align JSON float vs broker floatable shares. Skip if pending. Never touch BASE_SHARES."""
+    """对齐 JSON 浮仓与券商可管理股数。有 pending 则跳过。永不碰 BASE_SHARES。"""
     if getattr(A, "is_backtest", False) or DRY_RUN:
         return
     if getattr(A, "pending", None):
@@ -1219,9 +1249,11 @@ def _reconcile_float_with_broker():
     if changed:
         _save_state()
 
-
+# === hongli/orders.py ===
+# 国金 QMT 拼接片段。运行时勿跨模块 import；
+# 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def _deal_fill(remark, stock):
-    """Sum deals matching remark+stock -> (vol, avg_price)."""
+    """汇总匹配 remark+标的 的成交 -> (量, 均价)。"""
     vol = 0
     notional = 0.0
     try:
@@ -1290,12 +1322,12 @@ def _order_sys_id(od):
 
 
 def _try_cancel_order(od, C):
-    """Best-effort cancel via QMT builtins (API name varies by build)."""
+    """尽力通过 QMT 内置撤单（API 名因版本而异）。"""
     oid = _order_sys_id(od)
     if oid is None:
         print("HongliT cancel skip: no order id")
         return False
-    # prefer cancel(sysId, account, accountType, ContextInfo)
+    # 优先 cancel(sysId, account, accountType, ContextInfo)
     for fn_name in ("cancel", "cancel_order", "cancelorder"):
         fn = globals().get(fn_name)
         if not callable(fn):
@@ -1347,7 +1379,7 @@ def _apply_buy_fill(intent, vol, price, opened_at):
 
 
 def _apply_sell_fill(now, intent, last_hint, filled_vol):
-    """Clear or shrink float after sell fill."""
+    """卖出成交后清空或缩减浮仓。"""
     want = _sell_float_vol()
     if getattr(A, "is_backtest", False):
         want = max(want, _bt_held_vol())
@@ -1364,7 +1396,7 @@ def _apply_sell_fill(now, intent, last_hint, filled_vol):
         if remain < 100:
             _clear_float_after_sell(now, tag + "/partial", last=last_hint)
         else:
-            # keep remain sellable same day (do NOT mark acted SELL)
+            # 当日剩余仍可卖（不要标记 acted SELL）
             _save_state()
 
 
@@ -1376,7 +1408,7 @@ def _clear_pending(reason=""):
 
 
 def _process_pending(C, now):
-    """Live: resolve pending; timeout cancels first; clear only on terminal. Return True if blocking."""
+    """实盘: 处理 pending；超时先撤；仅终态清空。仍阻塞则返回 True。"""
     pend = getattr(A, "pending", None)
     if not pend:
         return False
@@ -1439,7 +1471,7 @@ def _process_pending(C, now):
             _clear_pending("rejected/cancelled")
         return False
 
-    # timeout: request cancel, keep blocking until terminal (prevents double order)
+    # 超时: 请求撤单，终态前继续阻塞（防双单）
     if age >= float(PENDING_TIMEOUT_SEC):
         if not cancel_req:
             if od is not None:
@@ -1451,31 +1483,31 @@ def _process_pending(C, now):
             A.pending = pend
             _save_state()
             return True
-        # cancel already requested
+        # 已请求过撤单
         cancel_at = _parse_opened_at(pend.get("cancel_at"))
         cancel_age = 0.0
         if cancel_at is not None and now is not None:
             cancel_age = (now - cancel_at).total_seconds()
         if od is None and cancel_age >= float(PENDING_ORPHAN_SEC):
-            # never saw the order - likely submit failed; safe to unlock
+            # 始终未见委托 - 多半提交失败；可安全解锁
             print("HongliT pending orphan clear (no order after cancel wait)")
             _clear_pending("orphan")
             return False
-        # still live or settling - do NOT clear, do NOT retry
+        # 仍存活或结算中 - 不清空、不重试
         return True
 
     return True
 
 
 def _new_remark(tag, side, vol):
-    # unique remark so deal/order matching does not hit stale rows
+    # 唯一 remark，避免成交/委托匹配到旧单
     ts = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
     return "HongliT %s %s %s x%d %s" % (side, tag, A.stock, int(vol), ts)
 
 
 def _order_buy(C, vol, remark_tag, intent, price_hint, opened_at, now):
-    """Submit buy. DRY_RUN instant; backtest passorder+instant; live pending until fill."""
-    # backtest guard: never open another leg while shadow held remains
+    """提交买入。DRY_RUN 即时；回测 passorder+即时；实盘 pending 至成交。"""
+    # 回测保护: 影子持仓仍在时不再新开腿
     if getattr(A, "is_backtest", False) and intent == "RA" and _bt_held_vol() >= 100:
         print("HongliT R-A skip bt_held=", _bt_held_vol())
         return False
@@ -1489,7 +1521,7 @@ def _order_buy(C, vol, remark_tag, intent, price_hint, opened_at, now):
     except Exception as e:
         print("HongliT passorder BUY fail", e)
         return False
-    # Backtest: still passorder so QMT shows trade log; apply state immediately
+    # 回测: 仍 passorder 以便 QMT 出成交日志；状态立即落地
     if getattr(A, "is_backtest", False):
         _apply_buy_fill(intent, vol, price_hint, opened_at)
         return True
@@ -1509,10 +1541,10 @@ def _order_buy(C, vol, remark_tag, intent, price_hint, opened_at, now):
 
 
 def _order_sell(C, vol, remark_tag, intent, last_hint, now):
-    """Submit sell. DRY_RUN instant; backtest passorder+instant; live pending until fill.
+    """提交卖出。DRY_RUN 即时；回测 passorder+即时；实盘 pending 至成交。
 
-    T+1 (backtest + live): never passorder more than sellable; never clear float on skip.
-    Live sellable = m_nCanUseVolume; backtest sellable = bt_held - bt_locked.
+    T+1（回测+实盘）: 下单量不超过可卖；跳过时绝不清浮仓。
+    实盘可卖 = m_nCanUseVolume；回测可卖 = bt_held - bt_locked。
     """
     want = int(vol)
     if getattr(A, "is_backtest", False):
@@ -1536,7 +1568,7 @@ def _order_sell(C, vol, remark_tag, intent, last_hint, now):
             )
             return False
     else:
-        # live / DRY_RUN: always cap by _max_sell_vol (can_use or dry calendar T+1)
+        # 实盘 / DRY_RUN: 一律用 _max_sell_vol 封顶（可卖或空跑日历 T+1）
         avail = _max_sell_vol()
         vol = min(want, avail)
         if vol < 100:
@@ -1567,7 +1599,7 @@ def _order_sell(C, vol, remark_tag, intent, last_hint, now):
     msg = _new_remark(remark_tag, "SELL", vol)
     print(("[DRY] " if DRY_RUN else "") + msg)
     if DRY_RUN:
-        # only clear what we "sold" under dry T+1 cap
+        # 空跑仅按 T+1 上限清算「卖出」部分
         if vol >= _sell_float_vol():
             _clear_float_after_sell(now, intent or remark_tag, last=last_hint)
         else:
@@ -1583,7 +1615,7 @@ def _order_sell(C, vol, remark_tag, intent, last_hint, now):
     except Exception as e:
         print("HongliT passorder SELL fail", e)
         return False
-    # Backtest: apply only the volume we could sell (T+1-aware); never clear on 0-fill
+    # 回测: 仅按实际可卖量落地（含 T+1）；0 成交绝不清仓
     if getattr(A, "is_backtest", False):
         held_before = _bt_held_vol()
         if vol >= held_before:
@@ -1605,7 +1637,7 @@ def _order_sell(C, vol, remark_tag, intent, last_hint, now):
             else:
                 _save_state()
         return True
-    # Live: pending until broker fill; do NOT clear float here (T+1 skip must not wipe state)
+    # 实盘: pending 至券商成交；此处不清浮仓（T+1 跳过不得抹状态）
     A.pending = {
         "remark": msg,
         "side": "sell",
@@ -1619,9 +1651,11 @@ def _order_sell(C, vol, remark_tag, intent, last_hint, now):
     _save_state()
     return True
 
-
+# === hongli/runtime.py ===
+# 国金 QMT 拼接片段。运行时勿跨模块 import；
+# 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def init(C):
-    # Always set busy early so a partial init cannot crash handlebar on A.busy
+    # 尽早设 busy，避免 init 半截时 handlebar 因 A.busy 崩溃
     A.busy = False
     A._hb_at = None
     try:
@@ -1635,7 +1669,7 @@ def init(C):
 
 
 def _init_impl(C):
-    # stock from chart; account from model-trade UI if present, else config
+    # 标的来自主图；账号优先模型交易界面，否则用配置
     A.stock = C.stockcode + "." + C.market
     A.period = _resolve_period(C)
     A.intraday = _is_intraday(A.period)
@@ -1679,8 +1713,8 @@ def _init_impl(C):
         )
 
     if A.is_backtest:
-        # QMT may re-call init mid-run; wiping float then orphans passorder fills.
-        # Fresh start: first bt session OR barpos near 0 (new replay).
+        # QMT 可能中途再调 init；若清空浮仓会导致 passorder 成交变孤儿。
+        # 全新开始: 首次回测会话 或 barpos 接近 0（新回放）。
         barpos = 0
         try:
             barpos = int(getattr(C, "barpos", 0) or 0)
@@ -1721,7 +1755,7 @@ def _init_impl(C):
             )
     else:
         _load_state()
-        # False -> first live decision bar always prints close=/J=
+        # False -> 实盘首根决策 K 必打印 close=/J=
         A.ready_logged = False
         if not hasattr(A, "cooldown_until"):
             A.cooldown_until = ""
@@ -1790,9 +1824,9 @@ def _init_impl(C):
 
 
 def handlebar(C):
-    # live: only latest bar; backtest: every bar (skip inside if OHLC not ready)
+    # 实盘: 仅最新 K；回测: 每根（OHLC 未就绪则内部跳过）
     try:
-        # Must refresh before is_last_bar gate (Guojin warmup -> live)
+        # 须在 is_last_bar 门控前刷新（国金暖机 -> 实盘）
         is_bt = _refresh_mode(C)
         if (not is_bt) and (not C.is_last_bar()):
             return
@@ -1818,7 +1852,9 @@ def handlebar(C):
         except Exception:
             pass
 
-
+# === hongli/strategy.py ===
+# 国金 QMT 拼接片段。运行时勿跨模块 import；
+# 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def _handle(C):
     bt = getattr(A, "is_backtest", False)
     now = _bar_datetime(C) if bt else datetime.datetime.now()
@@ -1827,21 +1863,21 @@ def _handle(C):
     intraday = getattr(A, "intraday", False)
 
     if not bt:
-        # resolve pending first (incl. after 15:00 fills/cancels)
+        # 先处理 pending（含 15:00 后成交/撤单）
         if getattr(A, "pending", None):
             if _process_pending(C, now):
                 _live_heartbeat("pending")
                 return
-        # live: session hours (no new decisions outside)
+        # 实盘: 交易时段外不做新决策
         if now_s < "093000" or now_s > "150000":
             _live_heartbeat("outside_session")
             return
-        # daily+: near-close window; intraday: every last bar in session
+        # 日线+: 临近收盘窗；日内: 时段内每根最新 K
         if (not intraday) and (now_s < DECISION_START or now_s > DECISION_END):
             _live_heartbeat("wait_decision_window")
             return
         _live_heartbeat("in_session")
-    # backtest: each bar ~= decision at bar close
+    # 回测: 每根约等于该 K 收盘决策
     if bt:
         _bt_roll_t1(day)
         _bt_recover_float(now=now)
@@ -1870,7 +1906,7 @@ def _handle(C):
     has_a = _has_leg(A.float_a)
     has_b = _has_leg(A.float_b)
     zero_float = (not has_a) and (not has_b)
-    # shadow held blocks new R-A even if float legs were wiped mid-run
+    # 影子持仓拦住新 R-A（即使中途浮仓腿被清空）
     if bt and _bt_held_vol() >= 100:
         zero_float = False
     drop_vs_a = None
@@ -1904,7 +1940,7 @@ def _handle(C):
             ),
         )
 
-    # ensure opened_at exists for live-restored legs (avoid instant MaxHold)
+    # 实盘恢复的腿补 opened_at（避免立刻触发 MaxHold）
     if has_a and not A.float_a.get("opened_at"):
         A.float_a["opened_at"] = now.strftime("%Y%m%d%H%M%S")
         _save_state()
@@ -1915,7 +1951,7 @@ def _handle(C):
     fret = _float_ret(last) if (has_a or has_b) else 0.0
     exit_ok = _exit_time_ok(now_s)
 
-    # Soft stop (before R-Sell). May ignore EXIT_AFTER to catch open gaps.
+    # 软止损（先于 R-Sell）。可忽略 EXIT_AFTER 以抓住开盘跳空。
     stop_time_ok = exit_ok or bool(STOP_LOSS_IGNORE_EXIT_AFTER)
     if (
         _use_risk_rules()
@@ -1934,7 +1970,7 @@ def _handle(C):
         _order_sell(C, sell_vol, "StopLoss", "StopLoss", last, now)
         return
 
-    # R-Sell first: clear float only
+    # 先做 R-Sell: 只清浮仓
     if sell_cond and (has_a or has_b) and ("SELL" not in A.acted) and (not getattr(A, "pending", None)):
         if not exit_ok:
             print("R-Sell defer until", EXIT_AFTER, "now=", now_s)
@@ -1944,7 +1980,7 @@ def _handle(C):
             _order_sell(C, sell_vol, "RSell", "R-Sell", last, now)
             return
 
-    # Soft max-hold (loss-only) + hard max-hold leak guard
+    # 软最长持仓（仅亏损）+ 硬最长持仓防漏
     if (
         _use_risk_rules()
         and (has_a or has_b)
@@ -1956,7 +1992,7 @@ def _handle(C):
         hard_hit = hard_n > 0 and hold_d >= float(hard_n)
         soft_hit = soft_n > 0 and hold_d >= float(soft_n)
         if soft_hit and (not hard_hit) and bool(MAX_HOLD_ONLY_LOSS) and fret >= 0:
-            soft_hit = False  # float profit: wait for R-Sell
+            soft_hit = False  # 浮仓盈利: 等 R-Sell
         if hard_hit or soft_hit:
             if not exit_ok:
                 print(
@@ -2016,7 +2052,7 @@ def _handle(C):
         _order_buy(C, vol, "RA", "RA", last, opened_at, now)
         return
 
-    # R-B (disabled when USE_RISK_RULES and ENABLE_FLOAT_B=False)
+    # R-B（USE_RISK_RULES 且 ENABLE_FLOAT_B=False 时关闭）
     if (
         _enable_float_b()
         and buy_cond
@@ -2056,18 +2092,18 @@ def _handle(C):
             extra = " holdDays=%.2f ret=%.2f%%" % (hold_d, fret * 100.0)
         print("HongliT hold float" + extra)
 
-
-# Guojin model trade must load this as PythonFormula (init/handlebar).
-# If launched via doRun `python -u HLCL.py ...` (simpleRun=1), it exits instantly
-# and strategy log only shows start/stop - not a resident monitor.
+# === hongli/_main_guard.py ===
+# 国金 QMT 拼接片段。运行时勿跨模块 import；
+# 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
+# 国金模型交易须按 PythonFormula 加载（init/handlebar）。
+# 若经 doRun `python -u HLCL.py ...`（simpleRun=1）启动会立刻退出，
+# 策略日志只见开始/结束 — 并非常驻监控。
 if __name__ == "__main__":
-    import sys
 
     print(
         "HongliT ERROR: standalone doRun (simpleRun=1). "
-        "EXIT QMT fully -> python scripts/_fix_hlcl_simplerun.py -> "
+        "EXIT QMT fully -> python scripts/qmt/_fix_hlcl_simplerun.py -> "
         "reopen QMT -> compile HLCL -> model trade Start. "
         "Expect HongliT init, not this line."
     )
     sys.exit(2)
-

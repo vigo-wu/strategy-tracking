@@ -1,7 +1,7 @@
 # QMT 脚本骨架
 
-输出路径：`<主题>/scripts/qmt_<简名>.py`。  
-完整可参考仓库：`红利T策略/scripts/qmt_hongli_t.py`。
+输出路径：`<主题>/scripts/qmt/qmt_<简名>.py`。  
+完整可参考仓库：`红利T策略/scripts/qmt/qmt_hongli_t.py`。
 
 ## 顶部配置（必须集中、可改）
 
