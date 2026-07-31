@@ -4,9 +4,6 @@ __pycache__/
 .venv/
 venv/
 
-# 行情缓存（可再生成；体积大）
-data/daily/*.csv
-
 # IDE
 .idea/
 .vscode/

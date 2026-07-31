@@ -20,7 +20,7 @@ description: >-
 | **终端模型交易**（国金等） | `init`/`handlebar`/`passorder` | GBK | [reference-pitfalls.md](reference-pitfalls.md) |
 | **外部 xtquant** | `XtQuantTrader` | UTF-8 | [reference-xtquant.md](reference-xtquant.md) |
 
-指标与 R 规则以该主题 `model.md` + `run_screener.py` / `run_backtest.py` 为真源。  
+指标与 R 规则以该主题 `model.md` 与 `scripts/qmt/` 实现为真源。  
 权威 API：[完整实例](https://dict.thinktrader.net/nativeApi/code_examples.html)、[常见问题](https://dict.thinktrader.net/innerApi/question_answer.html)。
 
 **A 股/ETF 终端脚本必须遵守 T+1**（回测 `bt_locked` + 实盘 `m_nCanUseVolume`）：详见 [reference-pitfalls.md](reference-pitfalls.md) §7.1。
@@ -43,7 +43,7 @@ description: >-
 
 ```
 转写进度:
-- [ ] 1. 读 model.md + screener 指标
+- [ ] 1. 读 model.md + 既有指标实现
 - [ ] 2. 写 scripts/qmt/hongli/ 分模块（或单文件再拆）；deploy 拼接为 init/handlebar/passorder
 - [ ] 3. #coding:gbk；ACCOUNT_ID 兜底；STATE 绝对路径（禁 __file__）
 - [ ] 4. 行情：download_history_data + get_market_data_ex；禁依赖 get_history_data

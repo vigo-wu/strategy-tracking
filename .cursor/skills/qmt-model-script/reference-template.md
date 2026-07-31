@@ -29,7 +29,7 @@ STATE_FILE = r"D:\office\国金证券QMT交易端\python\hongli_t_qmt_state.json
 
 1. **状态容器** `A`：trader、acc、float 腿、acted_today、busy  
 2. **load_state / save_state**：JSON 持久化浮仓成本与股数  
-3. **calc_* 指标**：与 `run_screener.py` 同公式（rolling / ewm 参数一致）  
+3. **calc_* 指标**：与主题 `model.md` / 既有 QMT 指标模块同公式（rolling / ewm 参数一致）  
 4. **fetch_daily_df**：download → get_market_data_ex → tick 修正当日 bar  
 5. **Callback 类**：日志级实现即可  
 6. **place_buy / place_sell**：尊重 DRY_RUN；整手；**卖出量 ≤ 可卖**（实盘 `m_nCanUseVolume` / 回测 `bt_held-bt_locked`）；skip 不清浮仓；成交后再改状态  

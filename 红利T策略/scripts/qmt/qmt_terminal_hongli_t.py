@@ -625,7 +625,7 @@ def _shrink_float_to_vol(target_vol):
             A.float_a["cost"] = round(a * float(A.float_a.get("price", 0) or 0), 2)
 
 # === hongli/indicators.py ===
-# 作用: 布林带 + KDJ(J)，与 run_screener 对齐
+# 作用: 布林带 + KDJ(J)，与 model.md 对齐
 # 主要符号: _calc_indicators
 # 拼接序: 8/16 | 上一部: state.py | 下一部: market_util.py
 # 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
@@ -648,7 +648,7 @@ def _calc_indicators(high, low, close):
     lower = mid - BOLL_K * std
     upper = mid + BOLL_K * std
 
-    # KDJ 与 run_screener 一致: RSV ewm(com=2)
+    # KDJ 与 model.md 一致: RSV ewm(com=2)
     rsv = np.zeros(n, dtype=float)
     for i in range(n):
         i0 = max(0, i - KDJ_N + 1)

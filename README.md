@@ -1,31 +1,26 @@
-# chinaAModel · A股日度选股模型仓库
+# strategy-tracking · QMT 策略仓库
 
-多主题日度选股 / 跟踪 / 回测。结构对齐 [`stock_analysis_model_tracking`](../stock_analysis_model_tracking)（一主题一目录），频率为**每个交易日**。
+本仓库只保留 **QMT（国金终端模型 / xtquant）** 相关内容：策略说明、可部署脚本、Agent Skill。
 
-| 主题 | 手册 | 日志 | 观察池 |
-| :--- | :--- | :--- | :--- |
-| 红利T · 561580 日线做T（v2.5 · 底仓20万/A5万/B2.5万） | [`红利T策略/model.md`](./红利T策略/model.md) | [`log/`](./红利T策略/log/) | [`portfolio/`](./红利T策略/portfolio/) |
+| 主题 | 手册 | QMT 脚本 |
+| :--- | :--- | :--- |
+| 红利T · 561580 日线做T（v2.5 · 底仓20万/A5万/B2.5万） | [`红利T策略/model.md`](./红利T策略/model.md) | [`红利T策略/scripts/qmt/`](./红利T策略/scripts/qmt/) |
 
-**共享**：日线缓存 [`data/daily/`](./data/daily/) · Skill [`.cursor/skills/a-share-daily-model/`](./.cursor/skills/a-share-daily-model/)
+**Skills**：[`.cursor/skills/qmt-model-script/`](./.cursor/skills/qmt-model-script/)（策略→脚本 / 联调排障）· [`.cursor/skills/qmt-helper/`](./.cursor/skills/qmt-helper/)（XtQuant API 索引）
 
-## 每日用法
+## 国金终端部署
 
 ```bash
-pip install -r requirements.txt
-cd <主题目录>    # 例：大蓝筹防御型波段策略
-python scripts/run_screener.py
-# 按 a-share-daily-model「续日」更新 portfolio + log
-python scripts/run_backtest.py    # 可选
+cd 红利T策略
+python scripts/qmt/_deploy_qmt_gbk.py
 ```
 
-对 Agent 说「按 a-share-daily-model 续写今日日志 / 跑选股 / 跑回测 / 建档 / 策略变更」。
+会按依赖顺序拼接 `scripts/qmt/hongli/*.py` → GBK 写入终端 `python\`（如 `HLCL.py` / `红利T_v25.py` / `HLT策略.py`）。
 
-## 新增主题
+操作步骤、参数与 T+1 约定见 [`红利T策略/model.md`](./红利T策略/model.md) §6.5；模块导航见 [`scripts/qmt/hongli/NAV.md`](./红利T策略/scripts/qmt/hongli/NAV.md)。
 
-1. 新建 `<主题名>/model.md`  
-2. 按 Skill **A. 建档** 补齐 log / portfolio / scripts，并登记本表  
+默认 `DRY_RUN=True`（`hongli/config.py`）；回测见 `diag: ok` 后再改 `False` 实盘。
 
-## 策略变更 / 名单回测
+## Agent 用法
 
-- 有 `origin.md` 或口述优化：按 Skill **E. 策略变更**  
-- 用 `list.md` + 定额仓位回测：按 Skill **D. 回测**（详见 skill 内 `reference-backtest.md`）  
+对 Agent 说「按 qmt-model-script 转写 / 对齐 / 排障」或「查 QMT API（qmt-helper）」。
