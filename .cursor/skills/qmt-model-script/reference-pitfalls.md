@@ -201,7 +201,32 @@ HongliT R-Sell done, float cleared   # 错误：拒单后仍清状态
 
 ---
 
-## 9. 推荐排障顺序（清单）
+## 9. 点开始秒退 / 不常驻（simpleRun / doRun）
+
+**现象**
+
+- 模型交易表「开始」与「结束」同一秒；策略日志只有 `[HLCL]开始运行` / `结束运行`
+- `XtClient_*.log`：`doRun execude cmd: -u "...\HLCL.py" ...` → `return code:1`（约 0.4s）
+- **没有** `PythonFormula construct` / `start back test mode` / `HongliT ... init`
+- 可能伴随：`CFromulaExpandData::loadFile load file [HLCL] parse error`
+
+**原因**
+
+终端模型靠 **内嵌 PythonFormula**（`init`/`handlebar`）挂在主图 K 线上常驻。  
+若公式目录项 `simpleRun="1"`（独立/简易运行），表按钮会改走外部 `python -u 脚本.py`；脚本无主循环 → 立刻退出。HLCL 曾长期为 `simpleRun=1`，而同目录其它 PY 模型均为 `0`。
+
+**正确**
+
+1. `indexUserConfig.xml` 中 HLCL：`simpleRun="0"`（与其它 Python 模型一致）；或在公式属性里关掉「独立/简易运行」
+2. `_deploy_qmt_gbk.py` 部署后：**公式编辑器打开 HLCL → 编译/保存**（勿用 UTF-8 编辑器直接存 `HLCL.py`）
+3. 模型交易：删掉坏行 → 重新添加 HLCL + 账户 + 主图 `561580.SH` 15m → **实盘**开始
+4. 验收日志：`PythonFormula construct` → `bindTradeCallBackFunc` → `start back test mode` → `continueRun` → 出现 `HongliT ... init`；之后 FormulaOutput 有心跳/信号行
+5. 若仍见 `doRun -u`：先关 QMT 再跑 `scripts/_fix_hlcl_simplerun.py`，确认 xml 未被 UI 写回 `simpleRun=1`
+6. **日常避免**：不要勾 HLCL「独立/简易运行」；改代码只用 `_deploy_qmt_gbk.py`（会检查 simpleRun）；勿用外部编辑器直接存 `HLCL.py`；秒退且日志含 `standalone doRun` 时先 exit QMT 再 fix
+
+---
+
+## 10. 推荐排障顺序（清单）
 
 ```
 终端回测无信号 / 报错 / 盈亏异常时:
@@ -215,11 +240,12 @@ HongliT R-Sell done, float cleared   # 错误：拒单后仍清状态
 - [ ] 8. 看 DRY_RUN / back test mode，避免误判「没下单」
 - [ ] 9. T+1：无「可卖0仍 float cleared」；明细买卖闭合、无期末残留
 - [ ] 10. 部署文件 mtime / 日志版本号与仓库一致后再信 CSV 盈利
+- [ ] 11. 秒退：无 doRun -u；有 PythonFormula construct + HongliT init（见 §9）
 ```
 
 ---
 
-## 10. 仓库锚点
+## 11. 仓库锚点
 
 | 文件 | 用途 |
 | :--- | :--- |

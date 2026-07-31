@@ -1,13 +1,13 @@
 #coding:gbk
 """
-HongliT v2.16 for Guojin QMT terminal (model trade).
+HongliT v2.18 for Guojin QMT terminal (model trade).
 
 Main chart: 561580.SH; PERIOD below or "follow" chart period.
 UI: select stock + account, run in LIVE (not simulate) to send orders.
 
 Rules:
-  R-A   zero float + lower band + J<=0     -> buy Float A (50000)
-  R-B   has A + lower + J<=0 + drop>=2.5%  -> buy Float B (25000) else skip
+  R-A   zero float + lower band + J<=0     -> buy Float A (FLOAT_A_BUDGET)
+  R-B   has A + lower + J<=0 + drop>=2.5%  -> buy Float B (FLOAT_B_BUDGET) else skip
   R-Sell upper + J>=100                    -> sell ALL float A/B
   No R1
 
@@ -23,14 +23,17 @@ Risk profile (any PERIOD when USE_RISK_RULES=True):
   - REQUIRE_ABOVE_DAILY_MA    -> open only if daily close > MA(DAILY_MA_N)
   - DAILY_MA_N                -> any MA length (e.g. 10/20/60)
 
-Live order safety (v2.16):
+Live order safety (v2.18):
   - Update float state only after deal fill (pending); DRY_RUN instant; backtest passorder+instant
   - init reconciles JSON float vs broker (skips if pending); BASE_SHARES never adopted/sold
   - pending timeout -> cancel first; clear only after order terminal (no double order)
   - cooldown stored as wall-clock datetime (survives model restart)
   - T+1 live: sell vol = min(float, m_nCanUseVolume); can_use<100 -> skip, keep float
+  - init fully try/except; hist download start clamped (VIP max-start-date)
+  - live heartbeat every LIVE_HEARTBEAT_SEC so UI silence != stopped
+  - refresh is_backtest every handlebar; Guojin warmup->live catch-up detection
 
-Backtest safety (v2.16):
+Backtest safety (v2.18):
   - Mid-run init must NOT wipe float (was causing orphan double R-A)
   - Shadow bt_held tracks passorder fills; R-A blocked if held; sell clears held
   - T+1: bt_locked = same-day buys; sell only available; never clear if QMT would skip
@@ -41,21 +44,23 @@ IMPORTANT:
   - This script only trades float A/B; set BASE_SHARES if account also holds base
   - DRY_RUN=True prints only; set False to passorder
   - Download matching period history in QMT data manager before backtest
+  - Model trade: expect BACKTEST=False + status running; recompile after deploy
 """
 import datetime
 import json
 import os
+import traceback
 
 import numpy as np
 
 # ===================== user config =====================
-DRY_RUN = False
+DRY_RUN = True
 
 # Fallback when not started from model-trade UI (no account/accountType inject)
 ACCOUNT_ID = "39953913"
 ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 
-FLOAT_A_BUDGET = 50000.0
+FLOAT_A_BUDGET = 10000.0
 FLOAT_B_BUDGET = 25000.0
 SPACE_STEP = 0.025
 
@@ -99,6 +104,14 @@ DAILY_MA_COUNT = 60             # fetch bars; auto raised to >= DAILY_MA_N+5
 # Live decision window (only for daily+ periods; intraday uses every bar in session)
 DECISION_START = "143000"
 DECISION_END = "145700"
+
+# Live heartbeat: print at most once per N seconds on last bar (0=off)
+LIVE_HEARTBEAT_SEC = 60
+# Clamp download_history_data start so VIP max-start-date cannot abort model
+HIST_MAX_LOOKBACK_DAYS = 360
+# Live: skip remote hist download by default (local cache + get_market_data_ex)
+DOWNLOAD_HIST_LIVE = False
+DOWNLOAD_HIST_BACKTEST = True
 
 # QMT model runtime has no __file__; use fixed path under terminal python/
 STATE_FILE = r"D:\service\GJQMT\python\hongli_t_qmt_state.json"
@@ -229,7 +242,15 @@ def _ohlc_count(period):
 
 
 def _hist_start(period):
-    return _PERIOD_HIST_START.get(period, "20220101")
+    """Earliest yyyymmdd for download; clamped to HIST_MAX_LOOKBACK_DAYS."""
+    cfg = str(_PERIOD_HIST_START.get(period, "20220101") or "20220101")
+    days = int(HIST_MAX_LOOKBACK_DAYS or 0)
+    if days <= 0:
+        return cfg
+    floor = (datetime.datetime.now() - datetime.timedelta(days=days)).strftime("%Y%m%d")
+    if cfg < floor:
+        return floor
+    return cfg
 
 
 def _bar_end_str(C):
@@ -664,13 +685,44 @@ def _download_hist(stock, period):
     start = _hist_start(period)
     for fn_name in ("download_history_data", "down_history_data"):
         fn = globals().get(fn_name)
-        if callable(fn):
-            try:
-                fn(stock, period, start, "")
-                print("HongliT downloaded history via", fn_name, period, "from", start)
-                return
-            except Exception as e:
-                print(fn_name, "fail", e)
+        if not callable(fn):
+            continue
+        try:
+            fn(stock, period, start, "")
+            print("HongliT downloaded history via", fn_name, period, "from", start)
+            return
+        except Exception as e:
+            print("HongliT", fn_name, "fail", period, "from", start, e)
+    print("HongliT download skip/unavailable period=", period, "from=", start)
+
+
+def _live_heartbeat(reason=""):
+    """Periodic live log so silent early-return is not mistaken for model stop."""
+    if getattr(A, "is_backtest", False):
+        return
+    sec = int(LIVE_HEARTBEAT_SEC or 0)
+    if sec <= 0:
+        return
+    now = datetime.datetime.now()
+    last = getattr(A, "_hb_at", None)
+    if last is not None and (now - last).total_seconds() < sec:
+        return
+    A._hb_at = now
+    print(
+        "HongliT live heartbeat",
+        now.strftime("%Y-%m-%d %H:%M:%S"),
+        "PERIOD=",
+        getattr(A, "period", "?"),
+        "stock=",
+        getattr(A, "stock", "?"),
+        "A=",
+        _has_leg(getattr(A, "float_a", None)),
+        "B=",
+        _has_leg(getattr(A, "float_b", None)),
+        "pending=",
+        bool(getattr(A, "pending", None)),
+        ("reason=" + str(reason)) if reason else "",
+    )
 
 
 def _fetch_closes(C, stock, period, count, end):
@@ -919,6 +971,71 @@ def _get_ohlc(C, stock, count=None):
 
 def _is_backtest(C):
     return bool(getattr(C, "do_back_test", False))
+
+
+def _on_mode_switch_to_live(C):
+    """Warmup finished: use live semantics (STATE / pending / wall clock)."""
+    print(
+        "HongliT mode switch backtest -> live",
+        "raw_do_back_test=",
+        getattr(A, "do_back_test_raw", None),
+        "barpos=",
+        getattr(C, "barpos", None),
+    )
+    A.ready_logged = False
+    A._hb_at = None
+    try:
+        _load_state()
+    except Exception as e:
+        print("HongliT live switch load_state fail", e)
+    if not hasattr(A, "cooldown_until"):
+        A.cooldown_until = ""
+    if not hasattr(A, "pending"):
+        A.pending = None
+    try:
+        _reconcile_float_with_broker()
+    except Exception as e:
+        print("HongliT live switch reconcile fail", e)
+
+
+def _refresh_mode(C):
+    """Refresh A.is_backtest every bar.
+
+    Guojin model-trade often starts with do_back_test=True (history warmup),
+    then re-enters the same last bar for realtime while the flag may stay True.
+    Catch-up rule: 2nd+ call on today's last bar with unchanged barpos => live.
+    """
+    prev = getattr(A, "is_backtest", None)
+    raw = bool(getattr(C, "do_back_test", False))
+    A.do_back_test_raw = raw
+    use_bt = raw
+    if raw:
+        try:
+            if C.is_last_bar():
+                bp = int(getattr(C, "barpos", 0) or 0)
+                last_bp = int(getattr(A, "_mode_last_bp", -1))
+                hits = int(getattr(A, "_mode_same_bp_hits", 0) or 0)
+                if bp == last_bp and bp >= 0:
+                    hits += 1
+                else:
+                    hits = 0
+                A._mode_last_bp = bp
+                A._mode_same_bp_hits = hits
+                bar_day = _bar_datetime(C).strftime("%Y%m%d")
+                today = datetime.datetime.now().strftime("%Y%m%d")
+                if bar_day == today and hits >= 1:
+                    use_bt = False
+        except Exception:
+            pass
+    else:
+        A._mode_same_bp_hits = 0
+
+    A.is_backtest = use_bt
+    if prev is True and (not use_bt):
+        _on_mode_switch_to_live(C)
+    elif prev is False and use_bt:
+        print("HongliT mode switch live -> backtest raw=", raw)
+    return use_bt
 
 
 def _bar_datetime(C):
@@ -1503,6 +1620,20 @@ def _order_sell(C, vol, remark_tag, intent, last_hint, now):
 
 
 def init(C):
+    # Always set busy early so a partial init cannot crash handlebar on A.busy
+    A.busy = False
+    A._hb_at = None
+    try:
+        _init_impl(C)
+    except Exception as e:
+        print("HongliT init error", e)
+        try:
+            traceback.print_exc()
+        except Exception:
+            pass
+
+
+def _init_impl(C):
     # stock from chart; account from model-trade UI if present, else config
     A.stock = C.stockcode + "." + C.market
     A.period = _resolve_period(C)
@@ -1527,10 +1658,24 @@ def init(C):
     A.buy_code = 23 if A.acct_type == "STOCK" else 33
     A.sell_code = 24 if A.acct_type == "STOCK" else 34
     A.busy = False
-    A.is_backtest = _is_backtest(C)
-    _download_hist(A.stock, A.period)
-    if bool(REQUIRE_ABOVE_DAILY_MA):
-        _download_hist(A.stock, "1d")
+    A._mode_last_bp = -1
+    A._mode_same_bp_hits = 0
+    A.do_back_test_raw = _is_backtest(C)
+    A.is_backtest = A.do_back_test_raw
+
+    do_dl = DOWNLOAD_HIST_BACKTEST if A.is_backtest else DOWNLOAD_HIST_LIVE
+    if do_dl:
+        try:
+            _download_hist(A.stock, A.period)
+            if bool(REQUIRE_ABOVE_DAILY_MA):
+                _download_hist(A.stock, "1d")
+        except Exception as e:
+            print("HongliT download_hist abort-safe", e)
+    else:
+        print(
+            "HongliT skip download_history (live); use local cache PERIOD=",
+            A.period,
+        )
 
     if A.is_backtest:
         # QMT may re-call init mid-run; wiping float then orphans passorder fills.
@@ -1575,7 +1720,8 @@ def init(C):
             )
     else:
         _load_state()
-        A.ready_logged = True
+        # False -> first live decision bar always prints close=/J=
+        A.ready_logged = False
         if not hasattr(A, "cooldown_until"):
             A.cooldown_until = ""
         if not hasattr(A, "pending"):
@@ -1585,9 +1731,13 @@ def init(C):
         except Exception as e:
             print("HongliT reconcile fail", e)
 
-    C.set_universe([A.stock])
+    try:
+        C.set_universe([A.stock])
+    except Exception as e:
+        print("HongliT set_universe fail", e)
+
     print(
-        "HongliT v2.16 init",
+        "HongliT v2.18 init",
         A.stock,
         A.acct,
         A.acct_type,
@@ -1625,8 +1775,14 @@ def init(C):
         DRY_RUN,
         "BACKTEST=",
         A.is_backtest,
+        "rawBT=",
+        getattr(A, "do_back_test_raw", A.is_backtest),
         "bt_held=",
         _bt_held_vol() if A.is_backtest else "-",
+        "hbSec=",
+        LIVE_HEARTBEAT_SEC,
+        "dlLive=",
+        DOWNLOAD_HIST_LIVE,
         "STATE=",
         STATE_FILE,
     )
@@ -1634,19 +1790,32 @@ def init(C):
 
 def handlebar(C):
     # live: only latest bar; backtest: every bar (skip inside if OHLC not ready)
-    if (not getattr(A, "is_backtest", False)) and (not C.is_last_bar()):
-        return
-    if A.busy:
-        return
-    A.busy = True
     try:
-        if getattr(A, "is_backtest", False) and (C.barpos % 100 == 0):
-            print("HongliT progress barpos=", C.barpos, "time=", _bar_end_yyyymmdd(C))
-        _handle(C)
+        # Must refresh before is_last_bar gate (Guojin warmup -> live)
+        is_bt = _refresh_mode(C)
+        if (not is_bt) and (not C.is_last_bar()):
+            return
+        if getattr(A, "busy", False):
+            return
+        A.busy = True
+        try:
+            if is_bt and (C.barpos % 100 == 0):
+                print("HongliT progress barpos=", C.barpos, "time=", _bar_end_yyyymmdd(C))
+            _handle(C)
+        except Exception as e:
+            print("HongliT handlebar error", e)
+            try:
+                traceback.print_exc()
+            except Exception:
+                pass
+        finally:
+            A.busy = False
     except Exception as e:
-        print("HongliT handlebar error", e)
-    finally:
-        A.busy = False
+        print("HongliT handlebar outer error", e)
+        try:
+            A.busy = False
+        except Exception:
+            pass
 
 
 def _handle(C):
@@ -1659,14 +1828,18 @@ def _handle(C):
     if not bt:
         # live: session hours
         if now_s < "093000" or now_s > "150000":
+            _live_heartbeat("outside_session")
             return
         # resolve pending fills even outside daily decision window
         if getattr(A, "pending", None):
             if _process_pending(C, now):
+                _live_heartbeat("pending_done")
                 return
         # daily+: near-close window; intraday: every last bar in session
         if (not intraday) and (now_s < DECISION_START or now_s > DECISION_END):
+            _live_heartbeat("wait_decision_window")
             return
+        _live_heartbeat("in_session")
     # backtest: each bar ~= decision at bar close
     if bt:
         _bt_roll_t1(day)
@@ -1676,14 +1849,17 @@ def _handle(C):
 
     cash = _available_cash()
     if cash is None:
+        _live_heartbeat("no_cash_or_login")
         return
 
     ohlc = _get_ohlc(C, A.stock)
     if ohlc is None:
+        _live_heartbeat("ohlc_none")
         return
     high, low, close = ohlc
     ind = _calc_indicators(high, low, close)
     if ind is None:
+        _live_heartbeat("ind_none")
         return
     lower, upper, j, last = ind
     if bt:
@@ -1878,4 +2054,18 @@ def _handle(C):
             extra = " holdDays=%.2f ret=%.2f%%" % (hold_d, fret * 100.0)
         print("HongliT hold float" + extra)
 
+
+# Guojin model trade must load this as PythonFormula (init/handlebar).
+# If launched via doRun `python -u HLCL.py ...` (simpleRun=1), it exits instantly
+# and strategy log only shows start/stop - not a resident monitor.
+if __name__ == "__main__":
+    import sys
+
+    print(
+        "HongliT ERROR: standalone doRun (simpleRun=1). "
+        "EXIT QMT fully -> python scripts/_fix_hlcl_simplerun.py -> "
+        "reopen QMT -> compile HLCL -> model trade Start. "
+        "Expect HongliT init, not this line."
+    )
+    sys.exit(2)
 
