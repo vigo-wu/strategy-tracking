@@ -1,4 +1,8 @@
 # === hongli/state.py ===
+# 作用: 浮仓腿、风控门闩、冷却、缩仓
+# 主要符号: _has_leg, _exit/_entry_time_ok, _set/_in_cooldown, _clear_float_*
+# 拼接序: 7/16 | 上一部: backtest.py | 下一部: indicators.py
+# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
 # 国金 QMT 拼接片段。运行时勿跨模块 import；
 # 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def _reset_day(day):

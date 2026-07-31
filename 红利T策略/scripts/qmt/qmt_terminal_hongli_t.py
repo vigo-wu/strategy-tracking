@@ -10,6 +10,10 @@ import numpy as np
 
 
 # === hongli/_header.py ===
+# 作用: 策略总览注释（规则/风控/实盘与回测约定），无可执行代码
+# 主要符号: 仅注释
+# 拼接序: 1/16 | 上一部: - | 下一部: config.py
+# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
 # 国金 QMT 拼接片段。运行时勿跨模块 import；
 # 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 #
@@ -62,6 +66,10 @@ import numpy as np
 #   - 模型交易: 期望 BACKTEST=False 且常驻；部署后需重新编译
 
 # === hongli/config.py ===
+# 作用: 用户可调参数与周期/委托常量
+# 主要符号: DRY_RUN, FLOAT_*_BUDGET, USE_RISK_RULES, STATE_FILE, _ORDER_*
+# 拼接序: 2/16 | 上一部: _header.py | 下一部: ctx.py
+# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
 # 国金 QMT 拼接片段。运行时勿跨模块 import；
 # 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 # ===================== 用户配置 =====================
@@ -71,8 +79,8 @@ DRY_RUN = True
 ACCOUNT_ID = "39953913"
 ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 
-FLOAT_A_BUDGET = 10000.0
-FLOAT_B_BUDGET = 25000.0
+FLOAT_A_BUDGET = 500.0
+FLOAT_B_BUDGET = 500.0
 SPACE_STEP = 0.025
 
 BOLL_N = 20
@@ -190,6 +198,10 @@ _ORDER_FILLED = (56, 8)
 _ORDER_DEAD = (54, 57, 53, 5, 6, 9)  # 已撤 / 废单 / 部撤终态
 
 # === hongli/ctx.py ===
+# 作用: 全局运行时对象与手数工具
+# 主要符号: A, _S, _lot
+# 拼接序: 3/16 | 上一部: config.py | 下一部: period.py
+# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
 # 国金 QMT 拼接片段。运行时勿跨模块 import；
 # 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 class _S(object):
@@ -205,6 +217,10 @@ def _lot(price, budget):
     return int(budget // (price * 100)) * 100
 
 # === hongli/period.py ===
+# 作用: 周期解析与取数时间/根数
+# 主要符号: _resolve_period, _ohlc_count, _bar_end_str, _hist_start
+# 拼接序: 4/16 | 上一部: ctx.py | 下一部: state_io.py
+# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
 # 国金 QMT 拼接片段。运行时勿跨模块 import；
 # 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def _norm_period(p):
@@ -276,6 +292,10 @@ def _bar_end_str(C):
     return dt.strftime("%Y%m%d")
 
 # === hongli/state_io.py ===
+# 作用: 实盘浮仓状态 JSON 读写（回测不落盘）
+# 主要符号: _load_state, _save_state
+# 拼接序: 5/16 | 上一部: period.py | 下一部: backtest.py
+# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
 # 国金 QMT 拼接片段。运行时勿跨模块 import；
 # 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def _load_state():
@@ -334,6 +354,10 @@ def _save_state():
         print("HongliT save state fail", e)
 
 # === hongli/backtest.py ===
+# 作用: 回测影子持仓与 T+1 锁定
+# 主要符号: _bt_held_*, _bt_locked_*, _bt_roll_t1, _bt_recover_float
+# 拼接序: 6/16 | 上一部: state_io.py | 下一部: state.py
+# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
 # 国金 QMT 拼接片段。运行时勿跨模块 import；
 # 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def _bt_held_vol():
@@ -409,6 +433,10 @@ def _bt_recover_float(now=None, last=None):
     return True
 
 # === hongli/state.py ===
+# 作用: 浮仓腿、风控门闩、冷却、缩仓
+# 主要符号: _has_leg, _exit/_entry_time_ok, _set/_in_cooldown, _clear_float_*
+# 拼接序: 7/16 | 上一部: backtest.py | 下一部: indicators.py
+# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
 # 国金 QMT 拼接片段。运行时勿跨模块 import；
 # 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def _reset_day(day):
@@ -597,6 +625,10 @@ def _shrink_float_to_vol(target_vol):
             A.float_a["cost"] = round(a * float(A.float_a.get("price", 0) or 0), 2)
 
 # === hongli/indicators.py ===
+# 作用: 布林带 + KDJ(J)，与 run_screener 对齐
+# 主要符号: _calc_indicators
+# 拼接序: 8/16 | 上一部: state.py | 下一部: market_util.py
+# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
 # 国金 QMT 拼接片段。运行时勿跨模块 import；
 # 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def _calc_indicators(high, low, close):
@@ -638,6 +670,10 @@ def _calc_indicators(high, low, close):
     return lower, upper, float(j), float(c[-1])
 
 # === hongli/market_util.py ===
+# 作用: 行情辅助：诊断、序列解析、补历史、心跳
+# 主要符号: _diag_once, _series_from_ex, _download_hist, _live_heartbeat
+# 拼接序: 9/16 | 上一部: indicators.py | 下一部: market.py
+# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
 # 国金 QMT 拼接片段。运行时勿跨模块 import；
 # 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def _bar_end_yyyymmdd(C):
@@ -751,6 +787,10 @@ def _live_heartbeat(reason=""):
     )
 
 # === hongli/market.py ===
+# 作用: 拉取 OHLC/收盘价与日线均线过滤
+# 主要符号: _fetch_closes, _daily_ma_ok, _get_ohlc
+# 拼接序: 10/16 | 上一部: market_util.py | 下一部: mode.py
+# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
 # 国金 QMT 拼接片段。运行时勿跨模块 import；
 # 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def _fetch_closes(C, stock, period, count, end):
@@ -997,6 +1037,10 @@ def _get_ohlc(C, stock, count=None):
     return high, low, close
 
 # === hongli/mode.py ===
+# 作用: 回测/实盘模式、暖机切换、K 线时间
+# 主要符号: _refresh_mode, _is_backtest, _bar_datetime
+# 拼接序: 11/16 | 上一部: market.py | 下一部: broker.py
+# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
 # 国金 QMT 拼接片段。运行时勿跨模块 import；
 # 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def _is_backtest(C):
@@ -1084,6 +1128,10 @@ def _bar_datetime(C):
         return datetime.datetime.now()
 
 # === hongli/broker.py ===
+# 作用: 资金/持仓可卖/底仓隔离/对账
+# 主要符号: _available_cash, _max_sell_vol, _reconcile_float_with_broker
+# 拼接序: 12/16 | 上一部: mode.py | 下一部: orders.py
+# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
 # 国金 QMT 拼接片段。运行时勿跨模块 import；
 # 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def _available_cash():
@@ -1250,6 +1298,10 @@ def _reconcile_float_with_broker():
         _save_state()
 
 # === hongli/orders.py ===
+# 作用: 委托生命周期：pending、买卖、成交回填
+# 主要符号: _process_pending, _order_buy, _order_sell
+# 拼接序: 13/16 | 上一部: broker.py | 下一部: runtime.py
+# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
 # 国金 QMT 拼接片段。运行时勿跨模块 import；
 # 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def _deal_fill(remark, stock):
@@ -1652,6 +1704,10 @@ def _order_sell(C, vol, remark_tag, intent, last_hint, now):
     return True
 
 # === hongli/runtime.py ===
+# 作用: QMT 入口：init / handlebar
+# 主要符号: init, handlebar, _init_impl
+# 拼接序: 14/16 | 上一部: orders.py | 下一部: strategy.py
+# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
 # 国金 QMT 拼接片段。运行时勿跨模块 import；
 # 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def init(C):
@@ -1853,6 +1909,10 @@ def handlebar(C):
             pass
 
 # === hongli/strategy.py ===
+# 作用: 交易决策：止损/R-Sell/MaxHold/R-A/R-B
+# 主要符号: _handle
+# 拼接序: 15/16 | 上一部: runtime.py | 下一部: _main_guard.py
+# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
 # 国金 QMT 拼接片段。运行时勿跨模块 import；
 # 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def _handle(C):
@@ -2093,6 +2153,10 @@ def _handle(C):
         print("HongliT hold float" + extra)
 
 # === hongli/_main_guard.py ===
+# 作用: 拦截 simpleRun/doRun 独立启动（应走模型交易）
+# 主要符号: __main__
+# 拼接序: 16/16 | 上一部: strategy.py | 下一部: -
+# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
 # 国金 QMT 拼接片段。运行时勿跨模块 import；
 # 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 # 国金模型交易须按 PythonFormula 加载（init/handlebar）。

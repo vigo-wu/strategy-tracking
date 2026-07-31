@@ -1,4 +1,8 @@
 # === hongli/strategy.py ===
+# 作用: 交易决策：止损/R-Sell/MaxHold/R-A/R-B
+# 主要符号: _handle
+# 拼接序: 15/16 | 上一部: runtime.py | 下一部: _main_guard.py
+# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
 # 国金 QMT 拼接片段。运行时勿跨模块 import；
 # 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def _handle(C):

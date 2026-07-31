@@ -1,4 +1,8 @@
 # === hongli/config.py ===
+# 作用: 用户可调参数与周期/委托常量
+# 主要符号: DRY_RUN, FLOAT_*_BUDGET, USE_RISK_RULES, STATE_FILE, _ORDER_*
+# 拼接序: 2/16 | 上一部: _header.py | 下一部: ctx.py
+# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
 # 国金 QMT 拼接片段。运行时勿跨模块 import；
 # 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 # ===================== 用户配置 =====================
@@ -8,8 +12,8 @@ DRY_RUN = True
 ACCOUNT_ID = "39953913"
 ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 
-FLOAT_A_BUDGET = 10000.0
-FLOAT_B_BUDGET = 25000.0
+FLOAT_A_BUDGET = 500.0
+FLOAT_B_BUDGET = 500.0
 SPACE_STEP = 0.025
 
 BOLL_N = 20

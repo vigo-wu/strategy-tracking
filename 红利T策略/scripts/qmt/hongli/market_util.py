@@ -1,4 +1,8 @@
 # === hongli/market_util.py ===
+# 作用: 行情辅助：诊断、序列解析、补历史、心跳
+# 主要符号: _diag_once, _series_from_ex, _download_hist, _live_heartbeat
+# 拼接序: 9/16 | 上一部: indicators.py | 下一部: market.py
+# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
 # 国金 QMT 拼接片段。运行时勿跨模块 import；
 # 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def _bar_end_yyyymmdd(C):

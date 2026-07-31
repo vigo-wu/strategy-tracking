@@ -1,4 +1,8 @@
 # === hongli/indicators.py ===
+# 作用: 布林带 + KDJ(J)，与 run_screener 对齐
+# 主要符号: _calc_indicators
+# 拼接序: 8/16 | 上一部: state.py | 下一部: market_util.py
+# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
 # 国金 QMT 拼接片段。运行时勿跨模块 import；
 # 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def _calc_indicators(high, low, close):

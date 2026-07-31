@@ -1,4 +1,8 @@
 # === hongli/runtime.py ===
+# 作用: QMT 入口：init / handlebar
+# 主要符号: init, handlebar, _init_impl
+# 拼接序: 14/16 | 上一部: orders.py | 下一部: strategy.py
+# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
 # 国金 QMT 拼接片段。运行时勿跨模块 import；
 # 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def init(C):

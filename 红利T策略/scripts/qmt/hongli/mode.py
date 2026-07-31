@@ -1,4 +1,8 @@
 # === hongli/mode.py ===
+# 作用: 回测/实盘模式、暖机切换、K 线时间
+# 主要符号: _refresh_mode, _is_backtest, _bar_datetime
+# 拼接序: 11/16 | 上一部: market.py | 下一部: broker.py
+# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
 # 国金 QMT 拼接片段。运行时勿跨模块 import；
 # 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def _is_backtest(C):

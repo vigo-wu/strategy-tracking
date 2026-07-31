@@ -126,6 +126,7 @@ python scripts/run_backtest.py --universe list
 ### 6.5 国金 QMT 终端内运行（模型交易）
 
 **真源**：[`scripts/qmt/hongli/`](./scripts/qmt/hongli/) 分模块维护（勿互相 import；部署时拼接）。  
+**导航**：[`scripts/qmt/hongli/NAV.md`](./scripts/qmt/hongli/NAV.md)（按改什么找哪里 / 拼接顺序 / 调用链）  
 **预览单文件**（自动生成，勿手改）：[`scripts/qmt/qmt_terminal_hongli_t.py`](./scripts/qmt/qmt_terminal_hongli_t.py)
 
 | 模块 | 职责 |

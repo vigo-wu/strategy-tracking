@@ -1,4 +1,8 @@
 # === hongli/broker.py ===
+# 作用: 资金/持仓可卖/底仓隔离/对账
+# 主要符号: _available_cash, _max_sell_vol, _reconcile_float_with_broker
+# 拼接序: 12/16 | 上一部: mode.py | 下一部: orders.py
+# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
 # 国金 QMT 拼接片段。运行时勿跨模块 import；
 # 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def _available_cash():

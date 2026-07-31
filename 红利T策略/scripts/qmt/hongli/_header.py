@@ -1,4 +1,8 @@
 # === hongli/_header.py ===
+# 作用: 策略总览注释（规则/风控/实盘与回测约定），无可执行代码
+# 主要符号: 仅注释
+# 拼接序: 1/16 | 上一部: - | 下一部: config.py
+# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
 # 国金 QMT 拼接片段。运行时勿跨模块 import；
 # 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 #

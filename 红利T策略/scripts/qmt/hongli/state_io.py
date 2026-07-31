@@ -1,4 +1,8 @@
 # === hongli/state_io.py ===
+# 作用: 实盘浮仓状态 JSON 读写（回测不落盘）
+# 主要符号: _load_state, _save_state
+# 拼接序: 5/16 | 上一部: period.py | 下一部: backtest.py
+# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
 # 国金 QMT 拼接片段。运行时勿跨模块 import；
 # 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def _load_state():

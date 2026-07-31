@@ -1,4 +1,8 @@
 # === hongli/period.py ===
+# 作用: 周期解析与取数时间/根数
+# 主要符号: _resolve_period, _ohlc_count, _bar_end_str, _hist_start
+# 拼接序: 4/16 | 上一部: ctx.py | 下一部: state_io.py
+# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
 # 国金 QMT 拼接片段。运行时勿跨模块 import；
 # 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def _norm_period(p):

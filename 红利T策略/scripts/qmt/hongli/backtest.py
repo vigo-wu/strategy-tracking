@@ -1,4 +1,8 @@
 # === hongli/backtest.py ===
+# 作用: 回测影子持仓与 T+1 锁定
+# 主要符号: _bt_held_*, _bt_locked_*, _bt_roll_t1, _bt_recover_float
+# 拼接序: 6/16 | 上一部: state_io.py | 下一部: state.py
+# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
 # 国金 QMT 拼接片段。运行时勿跨模块 import；
 # 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def _bt_held_vol():

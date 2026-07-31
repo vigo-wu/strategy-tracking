@@ -1,4 +1,8 @@
 # === hongli/orders.py ===
+# 作用: 委托生命周期：pending、买卖、成交回填
+# 主要符号: _process_pending, _order_buy, _order_sell
+# 拼接序: 13/16 | 上一部: broker.py | 下一部: runtime.py
+# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
 # 国金 QMT 拼接片段。运行时勿跨模块 import；
 # 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 def _deal_fill(remark, stock):
