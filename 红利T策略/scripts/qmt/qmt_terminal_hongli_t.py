@@ -1,6 +1,5 @@
 #coding:gbk
-# 由 scripts/qmt/_deploy_qmt_gbk.py 从 hongli/*.py 自动生成
-# 请勿手改本文件。请编辑 hongli 片段后重新部署。
+# 由 _deploy_qmt_gbk.py 自动生成；请勿手改。请编辑策略片段与 scripts/qmt_common/ 后重新部署。
 import datetime
 import json
 import os
@@ -74,6 +73,9 @@ import numpy as np
 # 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
 # ===================== 用户配置 =====================
 DRY_RUN = True
+
+STRATEGY_NAME = "HongliT"
+STRATEGY_VER = "v2.5"
 
 # 未从模型交易界面启动时的兜底（无 account/accountType 注入）
 ACCOUNT_ID = "39953913"
@@ -197,13 +199,10 @@ _PERIOD_BAR_MINUTES = {
 _ORDER_FILLED = (56, 8)
 _ORDER_DEAD = (54, 57, 53, 5, 6, 9)  # 已撤 / 废单 / 部撤终态
 
-# === hongli/ctx.py ===
+# === qmt_common/ctx.py ===
 # 作用: 全局运行时对象与手数工具
 # 主要符号: A, _S, _lot
-# 拼接序: 3/16 | 上一部: config.py | 下一部: period.py
-# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
-# 国金 QMT 拼接片段。运行时勿跨模块 import；
-# 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
+# 前置: 策略 config（可选 STRATEGY_NAME）
 class _S(object):
     pass
 
@@ -216,20 +215,73 @@ def _lot(price, budget):
         return 0
     return int(budget // (price * 100)) * 100
 
-# === hongli/period.py ===
+
+def _strategy_tag():
+    return str(globals().get("STRATEGY_NAME") or "QMT")
+
+# === qmt_common/time_util.py ===
+# 作用: 时间解析与日历日差
+# 主要符号: _parse_opened_at, _hold_calendar_days
+def _parse_opened_at(s):
+    if not s:
+        return None
+    s = str(s).strip()
+    for fmt, n in (("%Y%m%d%H%M%S", 14), ("%Y-%m-%d %H:%M:%S", 19), ("%Y%m%d", 8)):
+        try:
+            return datetime.datetime.strptime(s[:n], fmt)
+        except Exception:
+            continue
+    return None
+
+
+def _hold_calendar_days(opened_at, now):
+    """当前交易日 - 买入交易日（日历日差）。"""
+    ot = opened_at if isinstance(opened_at, datetime.datetime) else _parse_opened_at(opened_at)
+    if ot is None or now is None:
+        return 0
+    return max(0, (now.date() - ot.date()).days)
+
+# === qmt_common/period.py ===
 # 作用: 周期解析与取数时间/根数
 # 主要符号: _resolve_period, _ohlc_count, _bar_end_str, _hist_start
-# 拼接序: 4/16 | 上一部: ctx.py | 下一部: state_io.py
-# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
-# 国金 QMT 拼接片段。运行时勿跨模块 import；
-# 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
+# 前置: config 中 PERIOD / OHLC_COUNT / HIST_MAX_LOOKBACK_DAYS / _VALID_PERIODS
+#       可选 _PERIOD_COUNT / _PERIOD_HIST_START；_bar_datetime 由 mode 提供（运行时）
+_DEFAULT_PERIOD_COUNT = {
+    "1m": 1200,
+    "3m": 800,
+    "5m": 600,
+    "15m": 400,
+    "30m": 300,
+    "1h": 240,
+    "1d": 120,
+    "1w": 100,
+    "1mon": 80,
+    "1q": 60,
+    "1hy": 40,
+    "1y": 30,
+}
+_DEFAULT_PERIOD_HIST_START = {
+    "1m": "20240101",
+    "3m": "20240101",
+    "5m": "20230101",
+    "15m": "20230101",
+    "30m": "20220101",
+    "1h": "20220101",
+    "1d": "20220101",
+    "1w": "20180101",
+    "1mon": "20150101",
+    "1q": "20100101",
+    "1hy": "20050101",
+    "1y": "20000101",
+}
+
+
 def _norm_period(p):
     if p is None:
         return None
     s = str(p).strip().lower()
     if s in ("", "follow", "none"):
         return None
-    # 主图界面常见别名
     aliases = {
         "day": "1d",
         "daily": "1d",
@@ -243,20 +295,21 @@ def _norm_period(p):
         "minute": "1m",
     }
     s = aliases.get(s, s)
-    if s in _VALID_PERIODS:
+    valid = globals().get("_VALID_PERIODS") or tuple(_DEFAULT_PERIOD_COUNT.keys())
+    if s in valid:
         return s
     return None
 
 
-def _resolve_period(C):
-    """优先 PERIOD 配置，否则 C.period，否则 1d。"""
-    cfg = _norm_period(PERIOD)
+def _resolve_period(C, default="1d"):
+    """优先 PERIOD 配置，否则 C.period，否则 default。"""
+    cfg = _norm_period(globals().get("PERIOD"))
     if cfg:
         return cfg
     chart = _norm_period(getattr(C, "period", None))
     if chart:
         return chart
-    return "1d"
+    return default
 
 
 def _is_intraday(period):
@@ -267,15 +320,18 @@ def _is_intraday(period):
 
 
 def _ohlc_count(period):
-    if OHLC_COUNT and int(OHLC_COUNT) > 0:
-        return int(OHLC_COUNT)
-    return int(_PERIOD_COUNT.get(period, 120))
+    oc = globals().get("OHLC_COUNT")
+    if oc and int(oc) > 0:
+        return int(oc)
+    counts = globals().get("_PERIOD_COUNT") or _DEFAULT_PERIOD_COUNT
+    return int(counts.get(period, 120))
 
 
 def _hist_start(period):
     """下载最早 yyyymmdd；受 HIST_MAX_LOOKBACK_DAYS 钳制。"""
-    cfg = str(_PERIOD_HIST_START.get(period, "20220101") or "20220101")
-    days = int(HIST_MAX_LOOKBACK_DAYS or 0)
+    starts = globals().get("_PERIOD_HIST_START") or _DEFAULT_PERIOD_HIST_START
+    cfg = str(starts.get(period, "20220101") or "20220101")
+    days = int(globals().get("HIST_MAX_LOOKBACK_DAYS") or 0)
     if days <= 0:
         return cfg
     floor = (datetime.datetime.now() - datetime.timedelta(days=days)).strftime("%Y%m%d")
@@ -353,13 +409,10 @@ def _save_state():
     except Exception as e:
         print("HongliT save state fail", e)
 
-# === hongli/backtest.py ===
+# === qmt_common/backtest.py ===
 # 作用: 回测影子持仓与 T+1 锁定
-# 主要符号: _bt_held_*, _bt_locked_*, _bt_roll_t1, _bt_recover_float
-# 拼接序: 6/16 | 上一部: state_io.py | 下一部: state.py
-# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
-# 国金 QMT 拼接片段。运行时勿跨模块 import；
-# 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
+# 主要符号: _bt_held_*, _bt_locked_*, _bt_roll_t1
+# 说明: 仓位恢复（_bt_recover_*）由策略侧实现
 def _bt_held_vol():
     return max(0, int(getattr(A, "bt_held", 0) or 0))
 
@@ -383,7 +436,7 @@ def _bt_roll_t1(day):
     if str(getattr(A, "bt_lock_day", "") or "") == day:
         return
     if _bt_locked_vol() > 0:
-        print("HongliT bt T+1 unlock day=", day, "was_locked=", _bt_locked_vol())
+        print(_strategy_tag(), "bt T+1 unlock day=", day, "was_locked=", _bt_locked_vol())
     A.bt_locked = 0
     A.bt_lock_day = day
 
@@ -407,30 +460,6 @@ def _bt_held_set(vol):
         A.bt_locked = 0
     else:
         A.bt_locked = min(_bt_locked_vol(), A.bt_held)
-
-
-def _bt_recover_float(now=None, last=None):
-    """影子持仓仍在但浮仓腿为空时，重新吸纳以便退出信号仍能触发。"""
-    if not getattr(A, "is_backtest", False):
-        return False
-    held = _bt_held_vol()
-    if held < 100:
-        return False
-    if _sell_float_vol() >= 100:
-        return False
-    px = float(last) if last and last > 0 else 0.0
-    ot = str(getattr(A, "bt_opened_at", "") or "").strip()
-    if not ot:
-        ot = (now or datetime.datetime.now()).strftime("%Y%m%d%H%M%S")
-    A.float_a = {
-        "shares": held,
-        "price": px,
-        "cost": round(held * px, 2) if px > 0 else 0.0,
-        "opened_at": ot,
-    }
-    A.float_b = None
-    print("HongliT bt recover float from held", A.float_a)
-    return True
 
 # === hongli/state.py ===
 # 作用: 浮仓腿、风控门闩、冷却、缩仓
@@ -459,18 +488,6 @@ def _enable_float_b():
     if _use_risk_rules():
         return bool(ENABLE_FLOAT_B)
     return True
-
-
-def _parse_opened_at(s):
-    if not s:
-        return None
-    s = str(s).strip()
-    for fmt, n in (("%Y%m%d%H%M%S", 14), ("%Y-%m-%d %H:%M:%S", 19), ("%Y%m%d", 8)):
-        try:
-            return datetime.datetime.strptime(s[:n], fmt)
-        except Exception:
-            continue
-    return None
 
 
 def _hold_days(opened_at, now):
@@ -624,6 +641,32 @@ def _shrink_float_to_vol(target_vol):
             A.float_a["shares"] = a
             A.float_a["cost"] = round(a * float(A.float_a.get("price", 0) or 0), 2)
 
+# === hongli/bt_recover.py ===
+# 作用: 红利T 回测影子仓恢复为浮仓腿
+# 前置: common/backtest + state(_sell_float_vol)
+def _bt_recover_float(now=None, last=None):
+    """影子持仓仍在但浮仓腿为空时，重新吸纳以便退出信号仍能触发。"""
+    if not getattr(A, "is_backtest", False):
+        return False
+    held = _bt_held_vol()
+    if held < 100:
+        return False
+    if _sell_float_vol() >= 100:
+        return False
+    px = float(last) if last and last > 0 else 0.0
+    ot = str(getattr(A, "bt_opened_at", "") or "").strip()
+    if not ot:
+        ot = (now or datetime.datetime.now()).strftime("%Y%m%d%H%M%S")
+    A.float_a = {
+        "shares": held,
+        "price": px,
+        "cost": round(held * px, 2) if px > 0 else 0.0,
+        "opened_at": ot,
+    }
+    A.float_b = None
+    print(_strategy_tag(), "bt recover float from held", A.float_a)
+    return True
+
 # === hongli/indicators.py ===
 # 作用: 布林带 + KDJ(J)，与 model.md 对齐
 # 主要符号: _calc_indicators
@@ -669,13 +712,10 @@ def _calc_indicators(high, low, close):
     j = 3.0 * k[-1] - 2.0 * d[-1]
     return lower, upper, float(j), float(c[-1])
 
-# === hongli/market_util.py ===
+# === qmt_common/market_util.py ===
 # 作用: 行情辅助：诊断、序列解析、补历史、心跳
 # 主要符号: _diag_once, _series_from_ex, _download_hist, _live_heartbeat
-# 拼接序: 9/16 | 上一部: indicators.py | 下一部: market.py
-# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
-# 国金 QMT 拼接片段。运行时勿跨模块 import；
-# 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
+# 可选钩子: _heartbeat_extra() -> str
 def _bar_end_yyyymmdd(C):
     dt = _bar_datetime(C)
     return dt.strftime("%Y%m%d")
@@ -687,7 +727,7 @@ def _diag_once(key, *msg):
     if key in A._diag:
         return
     A._diag.add(key)
-    print("HongliT diag:", key, " ".join([str(x) for x in msg]))
+    print(_strategy_tag(), "diag:", key, " ".join([str(x) for x in msg]))
 
 
 def _series_from_ex(md, stock, field):
@@ -695,7 +735,6 @@ def _series_from_ex(md, stock, field):
     if md is None:
         return None
     obj = None
-    # 形态1: {代码: DataFrame(列为字段)}
     if isinstance(md, dict) and stock in md:
         df = md[stock]
         if hasattr(df, "columns") and field in getattr(df, "columns", []):
@@ -707,7 +746,6 @@ def _series_from_ex(md, stock, field):
                 obj = df[field]
             except Exception:
                 pass
-    # 形态2: {字段: DataFrame(列为代码)} / Series
     if obj is None and isinstance(md, dict) and field in md:
         df = md[field]
         if hasattr(df, "columns"):
@@ -751,18 +789,18 @@ def _download_hist(stock, period):
             continue
         try:
             fn(stock, period, start, "")
-            print("HongliT downloaded history via", fn_name, period, "from", start)
+            print(_strategy_tag(), "downloaded history via", fn_name, period, "from", start)
             return
         except Exception as e:
-            print("HongliT", fn_name, "fail", period, "from", start, e)
-    print("HongliT download skip/unavailable period=", period, "from=", start)
+            print(_strategy_tag(), fn_name, "fail", period, "from", start, e)
+    print(_strategy_tag(), "download skip/unavailable period=", period, "from=", start)
 
 
 def _live_heartbeat(reason=""):
     """周期性实盘日志，避免静默提前 return 被当成模型已停。"""
     if getattr(A, "is_backtest", False):
         return
-    sec = int(LIVE_HEARTBEAT_SEC or 0)
+    sec = int(globals().get("LIVE_HEARTBEAT_SEC") or 0)
     if sec <= 0:
         return
     now = datetime.datetime.now()
@@ -770,19 +808,22 @@ def _live_heartbeat(reason=""):
     if last is not None and (now - last).total_seconds() < sec:
         return
     A._hb_at = now
+    extra = ""
+    fn = globals().get("_heartbeat_extra")
+    if callable(fn):
+        try:
+            extra = str(fn() or "")
+        except Exception:
+            extra = ""
     print(
-        "HongliT live heartbeat",
+        _strategy_tag(),
+        "live heartbeat",
         now.strftime("%Y-%m-%d %H:%M:%S"),
         "PERIOD=",
         getattr(A, "period", "?"),
         "stock=",
         getattr(A, "stock", "?"),
-        "A=",
-        _has_leg(getattr(A, "float_a", None)),
-        "B=",
-        _has_leg(getattr(A, "float_b", None)),
-        "pending=",
-        bool(getattr(A, "pending", None)),
+        extra,
         ("reason=" + str(reason)) if reason else "",
     )
 
@@ -1036,13 +1077,10 @@ def _get_ohlc(C, stock, count=None):
     )
     return high, low, close
 
-# === hongli/mode.py ===
+# === qmt_common/mode.py ===
 # 作用: 回测/实盘模式、暖机切换、K 线时间
 # 主要符号: _refresh_mode, _is_backtest, _bar_datetime
-# 拼接序: 11/16 | 上一部: market.py | 下一部: broker.py
-# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
-# 国金 QMT 拼接片段。运行时勿跨模块 import；
-# 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
+# 钩子: _load_state；可选 _reconcile_with_broker
 def _is_backtest(C):
     return bool(getattr(C, "do_back_test", False))
 
@@ -1050,7 +1088,8 @@ def _is_backtest(C):
 def _on_mode_switch_to_live(C):
     """暖机结束: 切到实盘语义（STATE / pending / 墙钟）。"""
     print(
-        "HongliT mode switch backtest -> live",
+        _strategy_tag(),
+        "mode switch backtest -> live",
         "raw_do_back_test=",
         getattr(A, "do_back_test_raw", None),
         "barpos=",
@@ -1061,15 +1100,15 @@ def _on_mode_switch_to_live(C):
     try:
         _load_state()
     except Exception as e:
-        print("HongliT live switch load_state fail", e)
-    if not hasattr(A, "cooldown_until"):
-        A.cooldown_until = ""
+        print(_strategy_tag(), "live switch load_state fail", e)
     if not hasattr(A, "pending"):
         A.pending = None
-    try:
-        _reconcile_float_with_broker()
-    except Exception as e:
-        print("HongliT live switch reconcile fail", e)
+    recon = globals().get("_reconcile_with_broker")
+    if callable(recon):
+        try:
+            recon()
+        except Exception as e:
+            print(_strategy_tag(), "live switch reconcile fail", e)
 
 
 def _refresh_mode(C):
@@ -1108,51 +1147,60 @@ def _refresh_mode(C):
     if prev is True and (not use_bt):
         _on_mode_switch_to_live(C)
     elif prev is False and use_bt:
-        print("HongliT mode switch live -> backtest raw=", raw)
+        print(_strategy_tag(), "mode switch live -> backtest raw=", raw)
     return use_bt
 
 
 def _bar_datetime(C):
-    """回测用 K 线时间；实盘用墙钟。"""
+    """回测用 K 线时间；实盘用墙钟。
+
+    注意: 若调用方已判定实盘，可直接用 datetime.now()；
+    本函数在无法解析 timetag 时回退墙钟。
+    """
     try:
         tag = C.get_bar_timetag(C.barpos)
-        # timetag_to_datetime 为 QMT 内置（若有）
         if "timetag_to_datetime" in globals():
             s = timetag_to_datetime(tag, "%Y%m%d%H%M%S")
             return datetime.datetime.strptime(str(s), "%Y%m%d%H%M%S")
-        # 回退: 毫秒时间戳
         if tag > 10**12:
             return datetime.datetime.fromtimestamp(tag / 1000.0)
         return datetime.datetime.fromtimestamp(tag)
     except Exception:
         return datetime.datetime.now()
 
-# === hongli/broker.py ===
-# 作用: 资金/持仓可卖/底仓隔离/对账
-# 主要符号: _available_cash, _max_sell_vol, _reconcile_float_with_broker
-# 拼接序: 12/16 | 上一部: mode.py | 下一部: orders.py
-# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
-# 国金 QMT 拼接片段。运行时勿跨模块 import；
-# 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
+# === qmt_common/broker_base.py ===
+# 作用: 资金/持仓查询（只读券商账本）
+# 主要符号: _available_cash, _broker_position, _can_use_vol
+# 说明: _max_sell_vol / 底仓隔离由策略或 single/broker 提供
 def _available_cash():
     if getattr(A, "is_backtest", False):
         return 10**9
-    accs = get_trade_detail_data(A.acct, A.acct_type, "account")
+    try:
+        accs = get_trade_detail_data(A.acct, A.acct_type, "account")
+    except Exception as e:
+        _diag_once("cash_fail", e)
+        return None
     if not accs:
-        print("account not login", A.acct)
+        print(_strategy_tag(), "account not login", A.acct)
         return None
     return float(accs[0].m_dAvailable)
 
 
 def _pos_code(p):
-    return p.m_strInstrumentID + "." + p.m_strExchangeID
+    return str(getattr(p, "m_strInstrumentID", "") or "") + "." + str(
+        getattr(p, "m_strExchangeID", "") or ""
+    )
 
 
 def _broker_position(stock):
     """返回标的 (总量, 可卖, 成本价)；无持仓则 (0,0,0)。"""
     if getattr(A, "is_backtest", False) or DRY_RUN:
         return 0, 0, 0.0
-    positions = get_trade_detail_data(A.acct, A.acct_type, "position")
+    try:
+        positions = get_trade_detail_data(A.acct, A.acct_type, "position")
+    except Exception as e:
+        print(_strategy_tag(), "position query fail", e)
+        return 0, 0, 0.0
     if not positions:
         return 0, 0, 0.0
     for p in positions:
@@ -1180,9 +1228,11 @@ def _can_use_vol(stock):
     _vol, can, _cost = _broker_position(stock)
     return int(can)
 
-
+# === hongli/broker.py ===
+# 作用: 红利T 底仓隔离 / 可卖上限 / 浮仓对账
+# 前置: common/broker_base；主要符号: _max_sell_vol, _reconcile_with_broker
 def _base_shares():
-    return max(0, int(BASE_SHARES or 0))
+    return max(0, int(globals().get("BASE_SHARES") or 0))
 
 
 def _floatable_broker_vol(broker_vol):
@@ -1197,7 +1247,6 @@ def _adopt_share_cap(price):
         budget += float(FLOAT_B_BUDGET)
     if price and price > 0:
         return _lot(price, budget)
-    # 未知价格: 按预算以约 1 元最差手数估算上限
     return int(budget // 100) * 100
 
 
@@ -1205,18 +1254,15 @@ def _max_sell_vol():
     """最多卖策略浮仓，永不碰 BASE_SHARES。始终受 T+1 约束。"""
     want = _sell_float_vol()
     if getattr(A, "is_backtest", False):
-        # 计入影子持仓；按 T+1 可卖封顶（对齐 QMT 可卖）
         want = max(want, _bt_held_vol())
         avail = _bt_available_vol()
         return max(0, min(want, avail))
     if want < 100:
         return 0
     if DRY_RUN:
-        # 空跑仍遵守日历 T+1，使日志与实盘约束一致。
         return _dry_t1_sellable(want)
     broker_vol, can, _cost = _broker_position(A.stock)
     floatable = _floatable_broker_vol(broker_vol)
-    # 实盘硬规则: 不超过 m_nCanUseVolume（当日买 = 可卖 0）。
     return max(0, min(want, int(can), floatable))
 
 
@@ -1242,7 +1288,7 @@ def _reconcile_float_with_broker():
     if getattr(A, "is_backtest", False) or DRY_RUN:
         return
     if getattr(A, "pending", None):
-        print("HongliT reconcile skip: pending active")
+        print(_strategy_tag(), "reconcile skip: pending active")
         return
     broker_vol, _can, broker_cost = _broker_position(A.stock)
     floatable = _floatable_broker_vol(broker_vol)
@@ -1251,8 +1297,9 @@ def _reconcile_float_with_broker():
     if floatable < 100:
         if state_vol > 0:
             print(
-                "HongliT reconcile: no floatable (broker=%s base=%s), clear float was %s"
-                % (broker_vol, _base_shares(), state_vol)
+                _strategy_tag(),
+                "reconcile: no floatable (broker=%s base=%s), clear float was %s"
+                % (broker_vol, _base_shares(), state_vol),
             )
             A.float_a = None
             A.float_b = None
@@ -1263,8 +1310,9 @@ def _reconcile_float_with_broker():
         sh = int(min(floatable, cap) // 100) * 100
         if sh < 100:
             print(
-                "HongliT reconcile: broker has shares but adopt cap <100 (floatable=%s cap=%s); leave unmanaged"
-                % (floatable, cap)
+                _strategy_tag(),
+                "reconcile: broker has shares but adopt cap <100 (floatable=%s cap=%s); leave unmanaged"
+                % (floatable, cap),
             )
         else:
             A.float_a = {
@@ -1277,7 +1325,8 @@ def _reconcile_float_with_broker():
             A.float_b = None
             changed = True
             print(
-                "HongliT reconcile: adopt floatable as float_a",
+                _strategy_tag(),
+                "reconcile: adopt floatable as float_a",
                 A.float_a,
                 "broker=",
                 broker_vol,
@@ -1286,7 +1335,8 @@ def _reconcile_float_with_broker():
             )
     elif state_vol > floatable:
         print(
-            "HongliT reconcile: shrink float",
+            _strategy_tag(),
+            "reconcile: shrink float",
             state_vol,
             "->",
             floatable,
@@ -1297,13 +1347,25 @@ def _reconcile_float_with_broker():
     if changed:
         _save_state()
 
-# === hongli/orders.py ===
-# 作用: 委托生命周期：pending、买卖、成交回填
-# 主要符号: _process_pending, _order_buy, _order_sell
-# 拼接序: 13/16 | 上一部: broker.py | 下一部: runtime.py
-# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
-# 国金 QMT 拼接片段。运行时勿跨模块 import；
-# 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
+
+def _reconcile_with_broker():
+    """mode 暖机切实盘钩子。"""
+    _reconcile_float_with_broker()
+
+
+def _heartbeat_extra():
+    return "A=%s B=%s pending=%s" % (
+        _has_leg(getattr(A, "float_a", None)),
+        _has_leg(getattr(A, "float_b", None)),
+        bool(getattr(A, "pending", None)),
+    )
+
+# === qmt_common/orders_pending.py ===
+# 作用: 委托查询、撤单、pending 生命周期
+# 主要符号: _process_pending, _deal_fill, _try_cancel_order, _new_remark
+# 钩子(策略必须提供): _pending_on_buy_fill(pend, vol, px)
+#                     _pending_on_sell_fill(pend, now, vol, px)
+#                     _save_state
 def _deal_fill(remark, stock):
     """汇总匹配 remark+标的 的成交 -> (量, 均价)。"""
     vol = 0
@@ -1311,7 +1373,7 @@ def _deal_fill(remark, stock):
     try:
         deals = get_trade_detail_data(A.acct, A.acct_type, "deal")
     except Exception as e:
-        print("HongliT deal query fail", e)
+        print(_strategy_tag(), "deal query fail", e)
         return 0, 0.0
     if not deals:
         return 0, 0.0
@@ -1334,7 +1396,7 @@ def _find_order(remark, stock):
     try:
         orders = get_trade_detail_data(A.acct, A.acct_type, "order")
     except Exception as e:
-        print("HongliT order query fail", e)
+        print(_strategy_tag(), "order query fail", e)
         return None
     if not orders:
         return None
@@ -1377,86 +1439,39 @@ def _try_cancel_order(od, C):
     """尽力通过 QMT 内置撤单（API 名因版本而异）。"""
     oid = _order_sys_id(od)
     if oid is None:
-        print("HongliT cancel skip: no order id")
+        print(_strategy_tag(), "cancel skip: no order id")
         return False
-    # 优先 cancel(sysId, account, accountType, ContextInfo)
     for fn_name in ("cancel", "cancel_order", "cancelorder"):
         fn = globals().get(fn_name)
         if not callable(fn):
             continue
         try:
             fn(oid, A.acct, A.acct_type, C)
-            print("HongliT cancel via", fn_name, oid)
+            print(_strategy_tag(), "cancel via", fn_name, oid)
             return True
         except TypeError:
             try:
                 fn(oid, A.acct, A.acct_type)
-                print("HongliT cancel via", fn_name, "(3arg)", oid)
+                print(_strategy_tag(), "cancel via", fn_name, "(3arg)", oid)
                 return True
             except Exception as e:
-                print("HongliT", fn_name, "fail", e)
+                print(_strategy_tag(), fn_name, "fail", e)
         except Exception as e:
-            print("HongliT", fn_name, "fail", e)
-    print("HongliT cancel unavailable; keep waiting for terminal status, oid=", oid)
+            print(_strategy_tag(), fn_name, "fail", e)
+    print(_strategy_tag(), "cancel unavailable; keep waiting, oid=", oid)
     return False
-
-
-def _apply_buy_fill(intent, vol, price, opened_at):
-    vol = int(vol)
-    price = float(price) if price and price > 0 else 0.0
-    if vol < 100:
-        return
-    ot = str(opened_at or "").strip()
-    if not ot:
-        ot = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-    leg = {
-        "shares": vol,
-        "price": price,
-        "cost": round(vol * price, 2),
-        "opened_at": ot,
-    }
-    if intent == "RA":
-        A.float_a = leg
-        A.acted.add("RA")
-        if getattr(A, "is_backtest", False):
-            A.bt_opened_at = ot
-        print("HongliT R-A filled", A.float_a)
-    elif intent == "RB":
-        A.float_b = leg
-        A.acted.add("RB")
-        print("HongliT R-B filled", A.float_b)
-    buy_day = ot[:8] if len(ot) >= 8 else None
-    _bt_held_add(vol, buy_day=buy_day)
-    _save_state()
-
-
-def _apply_sell_fill(now, intent, last_hint, filled_vol):
-    """卖出成交后清空或缩减浮仓。"""
-    want = _sell_float_vol()
-    if getattr(A, "is_backtest", False):
-        want = max(want, _bt_held_vol())
-    filled_vol = int(filled_vol)
-    tag = intent or "SELL"
-    if filled_vol >= max(100, int(want * 0.95)) or filled_vol >= want:
-        _clear_float_after_sell(now, tag, last=last_hint)
-        return
-    if filled_vol >= 100:
-        remain = max(0, want - filled_vol)
-        print("HongliT partial sell fill", filled_vol, "remain~", remain)
-        _shrink_float_to_vol(remain)
-        _bt_held_set(remain)
-        if remain < 100:
-            _clear_float_after_sell(now, tag + "/partial", last=last_hint)
-        else:
-            # 当日剩余仍可卖（不要标记 acted SELL）
-            _save_state()
 
 
 def _clear_pending(reason=""):
     if getattr(A, "pending", None):
-        print("HongliT pending clear", reason, A.pending.get("remark"))
+        print(_strategy_tag(), "pending clear", reason, A.pending.get("remark"))
     A.pending = None
     _save_state()
+
+
+def _new_remark(tag, side, vol):
+    ts = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+    return "%s %s %s %s x%d %s" % (_strategy_tag(), side, tag, A.stock, int(vol), ts)
 
 
 def _process_pending(C, now):
@@ -1486,7 +1501,8 @@ def _process_pending(C, now):
     cancel_req = bool(pend.get("cancel_requested"))
 
     print(
-        "HongliT pending check",
+        _strategy_tag(),
+        "pending check",
         intent,
         "deal=",
         deal_vol,
@@ -1499,69 +1515,122 @@ def _process_pending(C, now):
         cancel_req,
     )
 
+    filled = globals().get("_ORDER_FILLED") or (56, 8)
+    dead = globals().get("_ORDER_DEAD") or (54, 57, 53, 5, 6, 9)
     done_fill = traded >= target and target >= 100
-    status_filled = status in _ORDER_FILLED
-    status_dead = status in _ORDER_DEAD
+    status_filled = status in filled
+    status_dead = status in dead
 
     if done_fill or (status_filled and traded >= 100):
         use_vol = traded if traded >= 100 else deal_vol
         if side == "buy":
-            _apply_buy_fill(intent, use_vol, px, pend.get("opened_at"))
+            _pending_on_buy_fill(pend, use_vol, px)
         else:
-            _apply_sell_fill(now, intent, pend.get("last_hint"), use_vol)
+            _pending_on_sell_fill(pend, now, use_vol, px)
         _clear_pending("filled")
         return False
 
     if status_dead:
         if traded >= 100:
             if side == "buy":
-                _apply_buy_fill(intent, traded, px, pend.get("opened_at"))
+                _pending_on_buy_fill(pend, traded, px)
             else:
-                _apply_sell_fill(now, intent, pend.get("last_hint"), traded)
+                _pending_on_sell_fill(pend, now, traded, px)
             _clear_pending("dead-partial")
         else:
             _clear_pending("rejected/cancelled")
         return False
 
-    # 超时: 请求撤单，终态前继续阻塞（防双单）
-    if age >= float(PENDING_TIMEOUT_SEC):
+    timeout = float(globals().get("PENDING_TIMEOUT_SEC") or 180)
+    orphan = float(globals().get("PENDING_ORPHAN_SEC") or 60)
+    if age >= timeout:
         if not cancel_req:
             if od is not None:
                 _try_cancel_order(od, C)
             else:
-                print("HongliT pending timeout, order not visible yet; wait for cancel/orphan")
+                print(_strategy_tag(), "pending timeout, order not visible yet")
             pend["cancel_requested"] = True
             pend["cancel_at"] = (now or datetime.datetime.now()).strftime("%Y%m%d%H%M%S")
             A.pending = pend
             _save_state()
             return True
-        # 已请求过撤单
         cancel_at = _parse_opened_at(pend.get("cancel_at"))
         cancel_age = 0.0
         if cancel_at is not None and now is not None:
             cancel_age = (now - cancel_at).total_seconds()
-        if od is None and cancel_age >= float(PENDING_ORPHAN_SEC):
-            # 始终未见委托 - 多半提交失败；可安全解锁
-            print("HongliT pending orphan clear (no order after cancel wait)")
+        if od is None and cancel_age >= orphan:
+            print(_strategy_tag(), "pending orphan clear (no order after cancel wait)")
             _clear_pending("orphan")
             return False
-        # 仍存活或结算中 - 不清空、不重试
         return True
 
     return True
 
+# === hongli/orders.py ===
+# 作用: 红利T 双浮仓腿买卖与成交落地
+# 前置: common/orders_pending；实现 _pending_on_* 钩子
+def _apply_buy_fill(intent, vol, price, opened_at):
+    vol = int(vol)
+    price = float(price) if price and price > 0 else 0.0
+    if vol < 100:
+        return
+    ot = str(opened_at or "").strip()
+    if not ot:
+        ot = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+    leg = {
+        "shares": vol,
+        "price": price,
+        "cost": round(vol * price, 2),
+        "opened_at": ot,
+    }
+    if intent == "RA":
+        A.float_a = leg
+        A.acted.add("RA")
+        if getattr(A, "is_backtest", False):
+            A.bt_opened_at = ot
+        print(_strategy_tag(), "R-A filled", A.float_a)
+    elif intent == "RB":
+        A.float_b = leg
+        A.acted.add("RB")
+        print(_strategy_tag(), "R-B filled", A.float_b)
+    buy_day = ot[:8] if len(ot) >= 8 else None
+    _bt_held_add(vol, buy_day=buy_day)
+    _save_state()
 
-def _new_remark(tag, side, vol):
-    # 唯一 remark，避免成交/委托匹配到旧单
-    ts = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-    return "HongliT %s %s %s x%d %s" % (side, tag, A.stock, int(vol), ts)
+
+def _apply_sell_fill(now, intent, last_hint, filled_vol):
+    """卖出成交后清空或缩减浮仓。"""
+    want = _sell_float_vol()
+    if getattr(A, "is_backtest", False):
+        want = max(want, _bt_held_vol())
+    filled_vol = int(filled_vol)
+    tag = intent or "SELL"
+    if filled_vol >= max(100, int(want * 0.95)) or filled_vol >= want:
+        _clear_float_after_sell(now, tag, last=last_hint)
+        return
+    if filled_vol >= 100:
+        remain = max(0, want - filled_vol)
+        print(_strategy_tag(), "partial sell fill", filled_vol, "remain~", remain)
+        _shrink_float_to_vol(remain)
+        _bt_held_set(remain)
+        if remain < 100:
+            _clear_float_after_sell(now, tag + "/partial", last=last_hint)
+        else:
+            _save_state()
+
+
+def _pending_on_buy_fill(pend, vol, px):
+    _apply_buy_fill(pend.get("intent"), vol, px, pend.get("opened_at"))
+
+
+def _pending_on_sell_fill(pend, now, vol, px):
+    _apply_sell_fill(now, pend.get("intent"), pend.get("last_hint"), vol)
 
 
 def _order_buy(C, vol, remark_tag, intent, price_hint, opened_at, now):
     """提交买入。DRY_RUN 即时；回测 passorder+即时；实盘 pending 至成交。"""
-    # 回测保护: 影子持仓仍在时不再新开腿
     if getattr(A, "is_backtest", False) and intent == "RA" and _bt_held_vol() >= 100:
-        print("HongliT R-A skip bt_held=", _bt_held_vol())
+        print(_strategy_tag(), "R-A skip bt_held=", _bt_held_vol())
         return False
     msg = _new_remark(remark_tag, "BUY", vol)
     print(("[DRY] " if DRY_RUN else "") + msg)
@@ -1571,9 +1640,8 @@ def _order_buy(C, vol, remark_tag, intent, price_hint, opened_at, now):
     try:
         passorder(A.buy_code, 1101, A.acct, A.stock, 14, -1, vol, "HongliT_v219", 1, msg, C)
     except Exception as e:
-        print("HongliT passorder BUY fail", e)
+        print(_strategy_tag(), "passorder BUY fail", e)
         return False
-    # 回测: 仍 passorder 以便 QMT 出成交日志；状态立即落地
     if getattr(A, "is_backtest", False):
         _apply_buy_fill(intent, vol, price_hint, opened_at)
         return True
@@ -1596,7 +1664,6 @@ def _order_sell(C, vol, remark_tag, intent, last_hint, now):
     """提交卖出。DRY_RUN 即时；回测 passorder+即时；实盘 pending 至成交。
 
     T+1（回测+实盘）: 下单量不超过可卖；跳过时绝不清浮仓。
-    实盘可卖 = m_nCanUseVolume；回测可卖 = bt_held - bt_locked。
     """
     want = int(vol)
     if getattr(A, "is_backtest", False):
@@ -1607,7 +1674,8 @@ def _order_sell(C, vol, remark_tag, intent, last_hint, now):
         vol = min(want, avail)
         if vol < 100:
             print(
-                "HongliT sell skip T+1 avail=",
+                _strategy_tag(),
+                "sell skip T+1 avail=",
                 avail,
                 "held=",
                 _bt_held_vol(),
@@ -1620,13 +1688,13 @@ def _order_sell(C, vol, remark_tag, intent, last_hint, now):
             )
             return False
     else:
-        # 实盘 / DRY_RUN: 一律用 _max_sell_vol 封顶（可卖或空跑日历 T+1）
         avail = _max_sell_vol()
         vol = min(want, avail)
         if vol < 100:
             if DRY_RUN:
                 print(
-                    "HongliT [DRY] sell skip T+1 want=",
+                    _strategy_tag(),
+                    "[DRY] sell skip T+1 want=",
                     want,
                     "sellable=",
                     avail,
@@ -1636,7 +1704,8 @@ def _order_sell(C, vol, remark_tag, intent, last_hint, now):
             else:
                 broker_vol, can, _cost = _broker_position(A.stock)
                 print(
-                    "HongliT sell skip T+1/live can_use=",
+                    _strategy_tag(),
+                    "sell skip T+1/live can_use=",
                     can,
                     "broker=",
                     broker_vol,
@@ -1651,7 +1720,6 @@ def _order_sell(C, vol, remark_tag, intent, last_hint, now):
     msg = _new_remark(remark_tag, "SELL", vol)
     print(("[DRY] " if DRY_RUN else "") + msg)
     if DRY_RUN:
-        # 空跑仅按 T+1 上限清算「卖出」部分
         if vol >= _sell_float_vol():
             _clear_float_after_sell(now, intent or remark_tag, last=last_hint)
         else:
@@ -1665,9 +1733,8 @@ def _order_sell(C, vol, remark_tag, intent, last_hint, now):
     try:
         passorder(A.sell_code, 1101, A.acct, A.stock, 14, -1, vol, "HongliT_v219", 1, msg, C)
     except Exception as e:
-        print("HongliT passorder SELL fail", e)
+        print(_strategy_tag(), "passorder SELL fail", e)
         return False
-    # 回测: 仅按实际可卖量落地（含 T+1）；0 成交绝不清仓
     if getattr(A, "is_backtest", False):
         held_before = _bt_held_vol()
         if vol >= held_before:
@@ -1675,7 +1742,8 @@ def _order_sell(C, vol, remark_tag, intent, last_hint, now):
         else:
             remain = held_before - vol
             print(
-                "HongliT T+1 partial sell",
+                _strategy_tag(),
+                "T+1 partial sell",
                 vol,
                 "remain=",
                 remain,
@@ -1689,7 +1757,6 @@ def _order_sell(C, vol, remark_tag, intent, last_hint, now):
             else:
                 _save_state()
         return True
-    # 实盘: pending 至券商成交；此处不清浮仓（T+1 跳过不得抹状态）
     A.pending = {
         "remark": msg,
         "side": "sell",

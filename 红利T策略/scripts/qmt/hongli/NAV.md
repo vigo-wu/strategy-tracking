@@ -1,6 +1,6 @@
 # HongliT 片段快速导航
 
-编辑本目录后部署：
+编辑本目录或 `scripts/qmt_common/` 后部署：
 
 ```bash
 python scripts/qmt/_deploy_qmt_gbk.py
@@ -19,54 +19,33 @@ python scripts/qmt/_deploy_qmt_gbk.py
 | `DRY_RUN` / 预算 / 风控开关 / 决策窗 | [`config.py`](./config.py) |
 | R-A / R-B / R-Sell / 止损 / MaxHold 逻辑 | [`strategy.py`](./strategy.py) |
 | `init` / `handlebar` 入口 | [`runtime.py`](./runtime.py) |
-| 下单 / pending / 成交回填 | [`orders.py`](./orders.py) |
-| 可卖 / 底仓 / 对账 | [`broker.py`](./broker.py) |
+| 双浮仓买卖 / fill | [`orders.py`](./orders.py) |
+| 底仓隔离 / 对账 | [`broker.py`](./broker.py) |
 | OHLC / 日线 MA | [`market.py`](./market.py) |
 | BOLL + KDJ | [`indicators.py`](./indicators.py) |
-| 回测 T+1 影子仓 | [`backtest.py`](./backtest.py) |
 | 浮仓腿 / 冷却 / 时段门 | [`state.py`](./state.py) |
 | 状态 JSON 读写 | [`state_io.py`](./state_io.py) |
-| 暖机→实盘 / K 线时间 | [`mode.py`](./mode.py) |
-| 周期解析 | [`period.py`](./period.py) |
-| 心跳 / 下载历史 / 行情解析 | [`market_util.py`](./market_util.py) |
-| 全局 `A` 对象 | [`ctx.py`](./ctx.py) |
-| 策略总说明 | [`_header.py`](./_header.py) |
-| simpleRun 秒退提示 | [`_main_guard.py`](./_main_guard.py) |
+| 回测浮仓恢复 | [`bt_recover.py`](./bt_recover.py) |
+| **共用** ctx/period/mode/T+1/pending/行情工具 | [`scripts/qmt_common/`](../../../../scripts/qmt_common/) |
 
 ---
 
 ## 拼接顺序（MODULE_ORDER）
 
-| # | 文件 | 作用 |
+| # | 片段 | 作用 |
 | ---: | :--- | :--- |
-| 1 | [`_header.py`](./_header.py) | 策略总览注释（规则 / 风控 / 实盘与回测约定） |
-| 2 | [`config.py`](./config.py) | 用户参数与周期/委托常量 |
-| 3 | [`ctx.py`](./ctx.py) | 全局运行时对象 `A`、手数 `_lot` |
-| 4 | [`period.py`](./period.py) | 周期归一化、OHLC 根数、end_time |
-| 5 | [`state_io.py`](./state_io.py) | 浮仓状态 JSON 加载/保存 |
-| 6 | [`backtest.py`](./backtest.py) | 回测影子持仓与 T+1 锁定 |
-| 7 | [`state.py`](./state.py) | 浮仓腿、风控门闩、冷却、缩仓 |
-| 8 | [`indicators.py`](./indicators.py) | 布林带 + KDJ(J) |
-| 9 | [`market_util.py`](./market_util.py) | 诊断、序列解析、补历史、心跳 |
-| 10 | [`market.py`](./market.py) | 拉收盘/OHLC、日线均线过滤 |
-| 11 | [`mode.py`](./mode.py) | 回测/实盘判定、暖机切换、K 线时间 |
-| 12 | [`broker.py`](./broker.py) | 资金、持仓可卖、底仓、对账 |
-| 13 | [`orders.py`](./orders.py) | pending、买卖委托、成交落地 |
-| 14 | [`runtime.py`](./runtime.py) | `init` / `handlebar` |
-| 15 | [`strategy.py`](./strategy.py) | `_handle`：信号与下单决策 |
-| 16 | [`_main_guard.py`](./_main_guard.py) | 阻止 simpleRun/doRun 独立启动 |
+| 1 | `_header.py` | 策略总览注释 |
+| 2 | `config.py` | 用户参数 |
+| 3–5 | `common:ctx/time_util/period` | 运行时骨架 |
+| 6 | `state_io.py` | 浮仓 JSON |
+| 7 | `common:backtest` | T+1 影子仓 |
+| 8–9 | `state.py` + `bt_recover.py` | 浮仓语义 / 恢复 |
+| 10 | `indicators.py` | BOLL+KDJ |
+| 11–12 | `common:market_util` + `market.py` | 行情 |
+| 13 | `common:mode` | 暖机/实盘 |
+| 14–15 | `common:broker_base` + `broker.py` | 经纪 |
+| 16–17 | `common:orders_pending` + `orders.py` | 下单 |
+| 18–19 | `runtime.py` + `strategy.py` | 入口与信号 |
+| 20 | `_main_guard.py` | 阻止 simpleRun |
 
----
-
-## 调用链（读代码时可顺着走）
-
-```
-init / handlebar          (runtime.py)
-  └─ _refresh_mode        (mode.py)
-  └─ _handle              (strategy.py)
-       ├─ _process_pending / _order_*   (orders.py)
-       ├─ _get_ohlc / _daily_ma_ok      (market.py)
-       ├─ _calc_indicators              (indicators.py)
-       ├─ 风控门闩 / 浮仓                 (state.py)
-       └─ _max_sell_vol / 对账           (broker.py)
-```
+详见 [`scripts/qmt_common/NAV.md`](../../../../scripts/qmt_common/NAV.md)。

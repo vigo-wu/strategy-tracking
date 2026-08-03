@@ -1,10 +1,7 @@
-# === hongli/backtest.py ===
+# === qmt_common/backtest.py ===
 # 作用: 回测影子持仓与 T+1 锁定
-# 主要符号: _bt_held_*, _bt_locked_*, _bt_roll_t1, _bt_recover_float
-# 拼接序: 6/16 | 上一部: state_io.py | 下一部: state.py
-# 导航: hongli/NAV.md（按改什么找哪里 / 调用链）
-# 国金 QMT 拼接片段。运行时勿跨模块 import；
-# 由 _deploy_qmt_gbk.py 按 MODULE_ORDER 拼成单个 GBK 文件。
+# 主要符号: _bt_held_*, _bt_locked_*, _bt_roll_t1
+# 说明: 仓位恢复（_bt_recover_*）由策略侧实现
 def _bt_held_vol():
     return max(0, int(getattr(A, "bt_held", 0) or 0))
 
@@ -28,7 +25,7 @@ def _bt_roll_t1(day):
     if str(getattr(A, "bt_lock_day", "") or "") == day:
         return
     if _bt_locked_vol() > 0:
-        print("HongliT bt T+1 unlock day=", day, "was_locked=", _bt_locked_vol())
+        print(_strategy_tag(), "bt T+1 unlock day=", day, "was_locked=", _bt_locked_vol())
     A.bt_locked = 0
     A.bt_lock_day = day
 
@@ -52,27 +49,3 @@ def _bt_held_set(vol):
         A.bt_locked = 0
     else:
         A.bt_locked = min(_bt_locked_vol(), A.bt_held)
-
-
-def _bt_recover_float(now=None, last=None):
-    """影子持仓仍在但浮仓腿为空时，重新吸纳以便退出信号仍能触发。"""
-    if not getattr(A, "is_backtest", False):
-        return False
-    held = _bt_held_vol()
-    if held < 100:
-        return False
-    if _sell_float_vol() >= 100:
-        return False
-    px = float(last) if last and last > 0 else 0.0
-    ot = str(getattr(A, "bt_opened_at", "") or "").strip()
-    if not ot:
-        ot = (now or datetime.datetime.now()).strftime("%Y%m%d%H%M%S")
-    A.float_a = {
-        "shares": held,
-        "price": px,
-        "cost": round(held * px, 2) if px > 0 else 0.0,
-        "opened_at": ot,
-    }
-    A.float_b = None
-    print("HongliT bt recover float from held", A.float_a)
-    return True

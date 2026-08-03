@@ -1,7 +1,21 @@
 # QMT 脚本骨架
 
-输出路径：`<主题>/scripts/qmt/qmt_<简名>.py`。  
-完整可参考仓库：`红利T策略/scripts/qmt/qmt_hongli_t.py`。
+## 国金终端模型（现行必遵）
+
+终端策略**不要**再落单文件基础设施。按 [qmt-common-modules](../qmt-common-modules/SKILL.md) + [reference-layout.md](../qmt-common-modules/reference-layout.md)：
+
+- 策略片段：`<主题>/scripts/qmt/<简名>/{config,indicators,market,strategy,runtime}.py`
+- 共用：`scripts/qmt_common/`（`common:` 拼接）
+- 部署：`_deploy_qmt_gbk.py` → 预览 `qmt_terminal_<简名>.py` + QMT `python\` GBK
+- 范本：单仓 `波段3-5天策略/scripts/qmt/`；双浮仓 `红利T策略/scripts/qmt/hongli/`
+
+以下各节主要服务 **外部 xtquant** 脚本（`qmt_<简名>.py`，UTF-8）。
+
+---
+
+# xtquant / 历史骨架说明
+
+输出路径：`<主题>/scripts/qmt/qmt_<简名>.py`。
 
 ## 顶部配置（必须集中、可改）
 

@@ -8,6 +8,9 @@
 # ===================== 用户配置 =====================
 DRY_RUN = True
 
+STRATEGY_NAME = "HongliT"
+STRATEGY_VER = "v2.5"
+
 # 未从模型交易界面启动时的兜底（无 account/accountType 注入）
 ACCOUNT_ID = "39953913"
 ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT

@@ -1,0 +1,31 @@
+---
+description: 国金 QMT 策略必须用 qmt_common 模块拼接；禁止整文件复制基础设施与手改生成物
+alwaysApply: true
+---
+
+# QMT 共用模块约束
+
+本仓库终端策略一律按 `.cursor/skills/qmt-common-modules` 执行。
+
+## 必须
+
+- 策略逻辑放在 `<主题>/scripts/qmt/<简名>/` 片段；基础设施用 `common:` / `common:single:`
+- 用 `_deploy_qmt_gbk.py` + `qmt_common._deploy_lib` 拼接；改完立即 deploy
+- `DRY_RUN=True` 默认；`STATE_FILE` 绝对路径；`handlebar` 调 `_refresh_mode`
+- 日志前缀用 `STRATEGY_NAME` / `_strategy_tag()`
+
+## 禁止
+
+- 手改 `qmt_terminal_*.py` 或 QMT `python\` 下 GBK 文件
+- 片段间 `import`；在策略里重写 pending / T+1 / `series_from_ex` / mode 暖机
+- 用 `__file__` 定位状态文件；片段内重复 `import datetime/numpy`（preamble 已有）
+- 单仓/双浮仓 MODULE_ORDER 混用（错接 `single/orders` 与自研浮仓 orders）
+
+## 改哪里
+
+| 变更 | 位置 |
+| :--- | :--- |
+| 信号/指标/参数 | 策略片段 |
+| 下单/T+1/暖机/行情解析 | `scripts/qmt_common/` 后**全策略** re-deploy |
+
+单仓范本：`波段3-5天策略/scripts/qmt/`。双浮仓范本：`红利T策略/scripts/qmt/hongli/`。
