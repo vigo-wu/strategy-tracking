@@ -1,0 +1,272 @@
+
+【2026-07-31 16:07:18.103】  start back test mode
+【2026-07-31 16:07:18.119】  TrendPB download_history 561580.SH 1d from 20250318
+TrendPB backtest session start barpos= 0
+TrendPB v1.0 init 561580.SH 39953913 STOCK PERIOD= 1d BACKTEST= True DRY_RUN= False budget= 50000.0 EMA= (20, 60) RSI_N= 14 alert= 35.0 overbuy= 70.0 boll= (20, 2.0) entry= close stop_below= 0.01
+TrendPB diag: empty period= 1d end= 20230530 n= 0
+
+【2026-07-31 16:07:18.362】  TrendPB diag: ok source= get_market_data_ex n= 68 end= 20230904 last= 0.9337
+TrendPB 20230904 0000 n=68 close=0.9337 ema20=0.9224 ema60=0.9195 rsi=55.25 boll_up=0.947 buy=False sell=None hold=False trend=False near20=True alert=False div=False cross=False pat=- yang=True vol_ok=True bt_held=0 avail=0 half=-
+TrendPB 20230907 0000 n=71 close=0.9192 ema20=0.9226 ema60=0.9199 rsi=47.69 boll_up=0.9385 buy=False sell=None hold=False trend=False near20=True alert=False div=False cross=False pat=- yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:18.383】  TrendPB 20230914 0000 n=76 close=0.9237 ema20=0.921 ema60=0.9197 rsi=51.18 boll_up=0.9332 buy=False sell=None hold=False trend=False near20=True alert=False div=False cross=False pat=engulf yang=True vol_ok=True bt_held=0 avail=0 half=-
+TrendPB 20230921 0000 n=81 close=0.9164 ema20=0.9202 ema60=0.9195 rsi=46.63 boll_up=0.9312 buy=False sell=None hold=False trend=False near20=True alert=False div=False cross=False pat=- yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:18.412】  TrendPB 20230928 0000 n=86 close=0.9146 ema20=0.9189 ema60=0.9192 rsi=45.51 boll_up=0.9291 buy=False sell=None hold=False trend=False near20=True alert=False div=False cross=False pat=hammer yang=False vol_ok=True bt_held=0 avail=0 half=-
+TrendPB 20231013 0000 n=91 close=0.9009 ema20=0.9116 ema60=0.9163 rsi=40.93 boll_up=0.9309 buy=False sell=None hold=False trend=False near20=True alert=True div=False cross=False pat=- yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:18.451】  TrendPB 20231020 0000 n=96 close=0.8845 ema20=0.9066 ema60=0.9138 rsi=34.14 boll_up=0.9308 buy=False sell=None hold=False trend=False near20=False alert=True div=True cross=False pat=- yang=False vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:18.466】  TrendPB 20231027 0000 n=101 close=0.8882 ema20=0.8961 ema60=0.9085 rsi=42.45 boll_up=0.9297 buy=False sell=None hold=False trend=False near20=True alert=True div=False cross=False pat=- yang=True vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:18.486】  TrendPB 20231103 0000 n=106 close=0.8754 ema20=0.8887 ema60=0.9037 rsi=36.49 boll_up=0.9151 buy=False sell=None hold=False trend=False near20=True alert=False div=False cross=False pat=- yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:18.504】  TrendPB 20231110 0000 n=111 close=0.8718 ema20=0.8824 ema60=0.8989 rsi=35.78 boll_up=0.9065 buy=False sell=None hold=False trend=False near20=False alert=True div=False cross=False pat=hammer yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:18.523】  TrendPB 20231117 0000 n=116 close=0.8827 ema20=0.8815 ema60=0.896 rsi=48.0 boll_up=0.8869 buy=False sell=None hold=False trend=False near20=True alert=True div=False cross=False pat=engulf yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:18.542】  TrendPB 20231124 0000 n=121 close=0.8809 ema20=0.8818 ema60=0.8939 rsi=46.72 boll_up=0.8866 buy=False sell=None hold=False trend=False near20=True alert=False div=False cross=False pat=- yang=False vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:18.559】  TrendPB 20231201 0000 n=126 close=0.8791 ema20=0.8795 ema60=0.8911 rsi=47.47 boll_up=0.8867 buy=False sell=None hold=False trend=False near20=True alert=False div=False cross=False pat=- yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:18.581】  TrendPB 20231208 0000 n=131 close=0.8627 ema20=0.8741 ema60=0.8873 rsi=35.28 boll_up=0.8908 buy=False sell=None hold=False trend=False near20=True alert=True div=False cross=True pat=engulf yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:18.602】  TrendPB 20231215 0000 n=136 close=0.8599 ema20=0.8702 ema60=0.8838 rsi=36.53 boll_up=0.889 buy=False sell=None hold=False trend=False near20=True alert=True div=True cross=False pat=- yang=False vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:18.626】  TrendPB 20231222 0000 n=141 close=0.8536 ema20=0.8635 ema60=0.8791 rsi=34.95 boll_up=0.8832 buy=False sell=None hold=False trend=False near20=True alert=True div=False cross=False pat=- yang=False vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:18.657】  TrendPB 20231229 0000 n=146 close=0.8618 ema20=0.8612 ema60=0.8758 rsi=47.47 boll_up=0.8745 buy=False sell=None hold=False trend=False near20=True alert=True div=False cross=False pat=high_wave yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:18.674】  TrendPB 20240108 0000 n=151 close=0.8654 ema20=0.865 ema60=0.875 rsi=49.33 boll_up=0.877 buy=False sell=None hold=False trend=False near20=True alert=False div=False cross=False pat=- yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:18.699】  TrendPB 20240115 0000 n=156 close=0.8681 ema20=0.8648 ema60=0.8734 rsi=52.39 boll_up=0.8769 buy=False sell=None hold=False trend=False near20=True alert=False div=False cross=False pat=- yang=True vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:18.724】  TrendPB 20240122 0000 n=161 close=0.8281 ema20=0.8589 ema60=0.87 rsi=28.53 boll_up=0.8828 buy=False sell=None hold=False trend=False near20=False alert=True div=False cross=False pat=- yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:18.746】  TrendPB 20240129 0000 n=166 close=0.9164 ema20=0.8702 ema60=0.8723 rsi=69.36 boll_up=0.9091 buy=False sell=None hold=False trend=True near20=False alert=True div=False cross=False pat=- yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:18.798】  TrendPB 20240220 0000 n=176 close=0.9346 ema20=0.8941 ema60=0.8817 rsi=69.23 boll_up=0.9455 buy=False sell=None hold=False trend=True near20=False alert=False div=False cross=False pat=- yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:18.824】  TrendPB 20240227 0000 n=180 close=0.9374 ema20=0.9131 ema60=0.8911 rsi=64.01 boll_up=0.9667 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=True vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:18.853】  TrendPB 20240305 0000 n=180 close=0.9510 ema20=0.9244 ema60=0.8988 rsi=67.66 boll_up=0.968 buy=False sell=None hold=False trend=True near20=False alert=False div=False cross=False pat=- yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:18.881】  TrendPB 20240312 0000 n=180 close=0.9301 ema20=0.9323 ema60=0.9059 rsi=52.52 boll_up=0.9659 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:18.912】  TrendPB 20240319 0000 n=180 close=0.9292 ema20=0.9313 ema60=0.9096 rsi=51.61 boll_up=0.957 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=False vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:18.939】  TrendPB 20240326 0000 n=180 close=0.9355 ema20=0.9319 ema60=0.9132 rsi=54.83 boll_up=0.9537 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=True vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:18.966】  TrendPB 20240402 0000 n=180 close=0.9474 ema20=0.9348 ema60=0.9172 rsi=60.93 boll_up=0.9529 buy=False sell=None hold=False trend=True near20=False alert=False div=False cross=False pat=- yang=True vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.000】  TrendPB 20240411 0000 n=180 close=0.9529 ema20=0.9411 ema60=0.9224 rsi=62.48 boll_up=0.956 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=True vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.031】  TrendPB 20240418 0000 n=180 close=0.9902 ema20=0.9554 ema60=0.9306 rsi=73.5 boll_up=0.9865 buy=False sell=None hold=False trend=True near20=False alert=False div=False cross=False pat=- yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.060】  TrendPB 20240425 0000 n=180 close=0.9683 ema20=0.9617 ema60=0.9371 rsi=56.56 boll_up=0.9962 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.109】  TrendPB 20240514 0000 n=180 close=0.9784 ema20=0.9697 ema60=0.9473 rsi=58.68 boll_up=0.9955 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.139】  TrendPB 20240521 0000 n=180 close=0.9948 ema20=0.9767 ema60=0.9533 rsi=66.2 boll_up=0.9972 buy=False sell=None hold=False trend=True near20=False alert=False div=False cross=False pat=- yang=True vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.169】  TrendPB 20240528 0000 n=180 close=0.9893 ema20=0.9811 ema60=0.9586 rsi=58.15 boll_up=1.0008 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.197】  TrendPB 20240604 0000 n=180 close=0.9838 ema20=0.9822 ema60=0.9625 rsi=53.24 boll_up=0.9985 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=True vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.248】  TrendPB 20240619 0000 n=180 close=0.9574 ema20=0.9704 ema60=0.9633 rsi=41.34 boll_up=1.002 buy=False sell=None hold=False trend=False near20=True alert=True div=False cross=False pat=- yang=True vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.276】  TrendPB 20240626 0000 n=180 close=0.9556 ema20=0.9639 ema60=0.9618 rsi=43.04 boll_up=0.9941 buy=False sell=None hold=False trend=False near20=True alert=True div=False cross=False pat=- yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.303】  TrendPB 20240703 0000 n=180 close=0.9802 ema20=0.9682 ema60=0.9637 rsi=57.12 boll_up=0.9886 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.327】  TrendPB 20240710 0000 n=180 close=0.9647 ema20=0.9696 ema60=0.9649 rsi=47.04 boll_up=0.9867 buy=False sell=None hold=False trend=False near20=True alert=False div=False cross=False pat=- yang=False vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.356】  TrendPB 20240717 0000 n=180 close=0.9802 ema20=0.9734 ema60=0.967 rsi=55.2 boll_up=0.9929 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=False vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.387】  TrendPB 20240724 0000 n=180 close=0.9729 ema20=0.9743 ema60=0.9684 rsi=49.54 boll_up=0.9911 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=True vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.414】  TrendPB 20240731 0000 n=180 close=0.9720 ema20=0.9715 ema60=0.9682 rsi=50.28 boll_up=0.9865 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=engulf yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.440】  TrendPB 20240807 0000 n=180 close=0.9547 ema20=0.9668 ema60=0.9669 rsi=40.18 boll_up=0.9893 buy=False sell=None hold=False trend=False near20=True alert=False div=False cross=False pat=high_wave yang=True vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.468】  TrendPB 20240814 0000 n=180 close=0.9538 ema20=0.962 ema60=0.9649 rsi=41.16 boll_up=0.9841 buy=False sell=None hold=False trend=False near20=True alert=False div=False cross=False pat=- yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.495】  TrendPB 20240821 0000 n=180 close=0.9683 ema20=0.9656 ema60=0.9658 rsi=51.68 boll_up=0.9794 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.522】  TrendPB 20240828 0000 n=180 close=0.9702 ema20=0.9687 ema60=0.9669 rsi=51.48 boll_up=0.9833 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=high_wave yang=False vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.549】  TrendPB 20240904 0000 n=180 close=0.9237 ema20=0.9567 ema60=0.9626 rsi=27.32 boll_up=0.9894 buy=False sell=None hold=False trend=False near20=False alert=True div=False cross=False pat=- yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.578】  TrendPB 20240911 0000 n=180 close=0.8873 ema20=0.9363 ema60=0.9539 rsi=18.01 boll_up=1.0047 buy=False sell=None hold=False trend=False near20=False alert=True div=False cross=False pat=- yang=False vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.601】  TrendPB 20240920 0000 n=180 close=0.9082 ema20=0.922 ema60=0.9455 rsi=36.28 boll_up=0.9913 buy=False sell=None hold=False trend=False near20=False alert=True div=False cross=True pat=- yang=True vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.624】  TrendPB 20240927 0000 n=180 close=0.9975 ema20=0.9434 ema60=0.9499 rsi=68.82 boll_up=0.9981 buy=False sell=None hold=False trend=True near20=False alert=True div=False cross=False pat=- yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.652】  TrendPB 20241011 0000 n=180 close=1.0503 ema20=0.993 ema60=0.9684 rsi=61.9 boll_up=1.107 buy=False sell=None hold=False trend=True near20=False alert=False div=False cross=False pat=- yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.680】  TrendPB 20241018 0000 n=180 close=1.0631 ema20=1.0191 ema60=0.9824 rsi=60.58 boll_up=1.1471 buy=False sell=None hold=False trend=True near20=False alert=False div=False cross=False pat=- yang=True vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.708】  TrendPB 20241025 0000 n=180 close=1.0613 ema20=1.0356 ema60=0.9945 rsi=59.38 boll_up=1.1315 buy=False sell=None hold=False trend=True near20=False alert=False div=False cross=False pat=high_wave yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.745】  TrendPB 20241101 0000 n=180 close=1.0658 ema20=1.0448 ema60=1.0045 rsi=58.81 boll_up=1.0928 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=True vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.762】  TrendPB 20241108 0000 n=180 close=1.0922 ema20=1.0622 ema60=1.0173 rsi=61.11 boll_up=1.0977 buy=False sell=None hold=False trend=True near20=False alert=False div=False cross=False pat=- yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.791】  TrendPB 20241115 0000 n=180 close=1.0585 ema20=1.0644 ema60=1.0252 rsi=50.64 boll_up=1.0977 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.814】  TrendPB 20241122 0000 n=180 close=1.0467 ema20=1.066 ema60=1.0319 rsi=45.78 boll_up=1.1006 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=False vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.840】  TrendPB 20241129 0000 n=180 close=1.0613 ema20=1.0617 ema60=1.0354 rsi=51.05 boll_up=1.1011 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=engulf yang=True vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.872】  TrendPB 20241206 0000 n=180 close=1.0968 ema20=1.0707 ema60=1.0428 rsi=62.84 boll_up=1.096 buy=False sell=None hold=False trend=True near20=False alert=False div=False cross=False pat=- yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.901】  TrendPB 20241213 0000 n=180 close=1.0895 ema20=1.0828 ema60=1.0519 rsi=55.54 boll_up=1.1162 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.928】  TrendPB 20241220 0000 n=180 close=1.0859 ema20=1.0876 ema60=1.0586 rsi=51.41 boll_up=1.1227 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:19.955】  TrendPB 20241227 0000 n=180 close=1.1095 ema20=1.0956 ema60=1.0662 rsi=59.74 boll_up=1.1198 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.006】  TrendPB 20250113 0000 n=180 close=1.0348 ema20=1.0753 ema60=1.0666 rsi=29.12 boll_up=1.1329 buy=False sell=None hold=False trend=False near20=False alert=True div=False cross=False pat=- yang=False vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.034】  TrendPB 20250120 0000 n=180 close=1.0549 ema20=1.0676 ema60=1.0649 rsi=41.46 boll_up=1.1267 buy=False sell=None hold=False trend=False near20=True alert=True div=False cross=False pat=- yang=False vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.062】  TrendPB 20250127 0000 n=180 close=1.0704 ema20=1.0622 ema60=1.0631 rsi=52.45 boll_up=1.1002 buy=False sell=None hold=False trend=False near20=True alert=True div=False cross=False pat=- yang=True vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.093】  TrendPB 20250211 0000 n=180 close=1.0640 ema20=1.0607 ema60=1.0623 rsi=50.47 boll_up=1.0725 buy=False sell=None hold=False trend=False near20=True alert=False div=False cross=False pat=- yang=True vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.119】  TrendPB 20250218 0000 n=180 close=1.0695 ema20=1.0632 ema60=1.063 rsi=53.44 boll_up=1.0747 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=high_wave yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.146】  TrendPB 20250225 0000 n=180 close=1.0503 ema20=1.0621 ema60=1.0626 rsi=41.22 boll_up=1.0766 buy=False sell=None hold=False trend=False near20=True alert=False div=False cross=False pat=- yang=False vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.177】  TrendPB 20250304 0000 n=180 close=1.0603 ema20=1.0627 ema60=1.0628 rsi=47.9 boll_up=1.0735 buy=False sell=None hold=False trend=False near20=True alert=False div=False cross=False pat=- yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.203】  TrendPB 20250311 0000 n=180 close=1.0704 ema20=1.0651 ema60=1.0638 rsi=53.7 boll_up=1.0749 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.232】  TrendPB 20250318 0000 n=180 close=1.0840 ema20=1.0708 ema60=1.0662 rsi=61.35 boll_up=1.0848 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=False vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.258】  TrendPB 20250325 0000 n=180 close=1.0959 ema20=1.0779 ema60=1.0697 rsi=68.2 boll_up=1.0957 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.283】  TrendPB 20250401 0000 n=180 close=1.0786 ema20=1.0799 ema60=1.0718 rsi=50.68 boll_up=1.0979 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=True vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.306】  TrendPB 20250409 0000 n=180 close=1.0385 ema20=1.0675 ema60=1.0683 rsi=37.8 boll_up=1.1165 buy=False sell=None hold=False trend=False near20=False alert=True div=False cross=False pat=- yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.335】  TrendPB 20250416 0000 n=180 close=1.0667 ema20=1.0625 ema60=1.0659 rsi=51.01 boll_up=1.114 buy=False sell=None hold=False trend=False near20=True alert=True div=False cross=False pat=- yang=True vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.363】  TrendPB 20250423 0000 n=180 close=1.0704 ema20=1.0651 ema60=1.0663 rsi=52.47 boll_up=1.1036 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=True vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.390】  TrendPB 20250430 0000 n=180 close=1.0567 ema20=1.0669 ema60=1.0668 rsi=43.85 boll_up=1.0952 buy=False sell=None hold=False trend=False near20=True alert=False div=False cross=False pat=- yang=False vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.416】  TrendPB 20250512 0000 n=180 close=1.0813 ema20=1.0696 ema60=1.0677 rsi=57.82 boll_up=1.0861 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.447】  TrendPB 20250519 0000 n=180 close=1.0922 ema20=1.0803 ema60=1.0722 rsi=58.59 boll_up=1.1031 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.473】  TrendPB 20250526 0000 n=180 close=1.0868 ema20=1.0852 ema60=1.0754 rsi=52.98 boll_up=1.1101 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=high_wave yang=False vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.500】  TrendPB 20250603 0000 n=180 close=1.0877 ema20=1.0861 ema60=1.0772 rsi=53.06 boll_up=1.1086 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.523】  TrendPB 20250610 0000 n=180 close=1.0895 ema20=1.0877 ema60=1.0792 rsi=53.28 boll_up=1.103 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=high_wave yang=False vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.552】  TrendPB 20250617 0000 n=180 close=1.1005 ema20=1.0909 ema60=1.0819 rsi=59.87 boll_up=1.1009 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=False vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.580】  TrendPB 20250624 0000 n=180 close=1.1124 ema20=1.0956 ema60=1.0852 rsi=65.42 boll_up=1.1076 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=hammer yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.608】  TrendPB 20250701 0000 n=180 close=1.1197 ema20=1.1032 ema60=1.0898 rsi=64.78 boll_up=1.1212 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.635】  TrendPB 20250708 0000 n=180 close=1.1491 ema20=1.1172 ema60=1.0972 rsi=76.12 boll_up=1.1469 buy=False sell=None hold=False trend=True near20=False alert=False div=False cross=False pat=- yang=True vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.666】  TrendPB 20250715 0000 n=180 close=1.1546 ema20=1.1334 ema60=1.1067 rsi=69.42 boll_up=1.173 buy=False sell=None hold=False trend=True near20=False alert=False div=False cross=False pat=- yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.693】  TrendPB 20250722 0000 n=180 close=1.1886 ema20=1.1466 ema60=1.1158 rsi=79.5 boll_up=1.1869 buy=False sell=None hold=False trend=True near20=False alert=False div=False cross=False pat=- yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.720】  TrendPB 20250729 0000 n=180 close=1.1721 ema20=1.1594 ema60=1.1257 rsi=63.89 boll_up=1.1956 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=False vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.747】  TrendPB 20250805 0000 n=180 close=1.1693 ema20=1.1607 ema60=1.1314 rsi=58.1 boll_up=1.191 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.777】  TrendPB 20250812 0000 n=180 close=1.1757 ema20=1.1658 ema60=1.1379 rsi=59.54 boll_up=1.1931 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=True vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.798】  TrendPB 20250819 0000 n=180 close=1.1835 ema20=1.1715 ema60=1.1443 rsi=63.04 boll_up=1.1923 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=high_wave yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.821】  TrendPB 20250826 0000 n=180 close=1.2190 ema20=1.1867 ema60=1.1543 rsi=75.28 boll_up=1.2182 buy=False sell=None hold=False trend=True near20=False alert=False div=False cross=False pat=- yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.850】  TrendPB 20250902 0000 n=180 close=1.2013 ema20=1.1921 ema60=1.1614 rsi=59.86 boll_up=1.2217 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=hammer yang=True vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.877】  TrendPB 20250909 0000 n=180 close=1.1966 ema20=1.1917 ema60=1.1658 rsi=56.06 boll_up=1.2197 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=False vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.905】  TrendPB 20250916 0000 n=180 close=1.1861 ema20=1.1924 ema60=1.1701 rsi=47.68 boll_up=1.2175 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.932】  TrendPB 20250923 0000 n=180 close=1.1710 ema20=1.1858 ema60=1.171 rsi=40.34 boll_up=1.2112 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=False vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.962】  TrendPB 20250930 0000 n=180 close=1.1662 ema20=1.1791 ema60=1.1707 rsi=37.73 boll_up=1.2059 buy=False sell=None hold=False trend=False near20=True alert=False div=False cross=False pat=- yang=False vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:20.993】  TrendPB 20251015 0000 n=180 close=1.1909 ema20=1.1813 ema60=1.1728 rsi=57.05 boll_up=1.2027 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=hammer yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.042】  TrendPB 20251029 0000 n=180 close=1.2241 ema20=1.2007 ema60=1.1833 rsi=68.39 boll_up=1.2311 buy=False sell=None hold=False trend=True near20=False alert=False div=False cross=False pat=- yang=True vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.069】  TrendPB 20251105 0000 n=180 close=1.2337 ema20=1.2123 ema60=1.1905 rsi=68.91 boll_up=1.2451 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.102】  TrendPB 20251112 0000 n=180 close=1.2665 ema20=1.2291 ema60=1.2002 rsi=79.85 boll_up=1.2675 buy=False sell=None hold=False trend=True near20=False alert=False div=False cross=False pat=- yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.127】  TrendPB 20251119 0000 n=180 close=1.2425 ema20=1.2375 ema60=1.2081 rsi=55.86 boll_up=1.2734 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.155】  TrendPB 20251126 0000 n=180 close=1.2231 ema20=1.2334 ema60=1.2111 rsi=46.79 boll_up=1.2722 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=False vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.182】  TrendPB 20251203 0000 n=180 close=1.2280 ema20=1.2306 ema60=1.2134 rsi=49.57 boll_up=1.2727 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=False vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.213】  TrendPB 20251210 0000 n=180 close=1.2086 ema20=1.2257 ema60=1.2142 rsi=39.29 boll_up=1.2627 buy=False sell=None hold=False trend=False near20=False alert=False div=False cross=False pat=hammer yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.239】  TrendPB 20251217 0000 n=180 close=1.1987 ema20=1.2146 ema60=1.2116 rsi=39.05 boll_up=1.2448 buy=False sell=None hold=False trend=False near20=True alert=True div=False cross=True pat=- yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.267】  TrendPB 20251224 0000 n=180 close=1.2114 ema20=1.2137 ema60=1.2117 rsi=47.09 boll_up=1.2365 buy=False sell=None hold=False trend=False near20=True alert=True div=False cross=False pat=hammer yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.318】  TrendPB 20260109 0000 n=180 close=1.2241 ema20=1.2163 ema60=1.2131 rsi=56.61 boll_up=1.2281 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=True vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.347】  TrendPB 20260116 0000 n=180 close=1.2036 ema20=1.2164 ema60=1.2138 rsi=39.98 boll_up=1.2278 buy=False sell=None hold=False trend=False near20=True alert=False div=False cross=False pat=- yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.369】  TrendPB 20260123 0000 n=180 close=1.2094 ema20=1.2153 ema60=1.2137 rsi=46.15 boll_up=1.229 buy=False sell=None hold=False trend=False near20=True alert=False div=False cross=False pat=- yang=False vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.400】  TrendPB 20260130 0000 n=180 close=1.2447 ema20=1.2223 ema60=1.2166 rsi=62.49 boll_up=1.2419 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=high_wave yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.427】  TrendPB 20260206 0000 n=180 close=1.2261 ema20=1.2219 ema60=1.2171 rsi=52.1 boll_up=1.2444 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.457】  TrendPB 20260213 0000 n=180 close=1.2143 ema20=1.2249 ema60=1.2191 rsi=46.05 boll_up=1.248 buy=False sell=None hold=False trend=False near20=True alert=False div=False cross=False pat=- yang=False vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.481】  TrendPB 20260302 0000 n=180 close=1.2951 ema20=1.2386 ema60=1.2251 rsi=70.4 boll_up=1.2733 buy=False sell=None hold=False trend=True near20=False alert=False div=False cross=False pat=- yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.515】  TrendPB 20260309 0000 n=180 close=1.2961 ema20=1.2639 ema60=1.2372 rsi=63.01 boll_up=1.3237 buy=False sell=None hold=False trend=True near20=False alert=False div=False cross=False pat=- yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.539】  TrendPB 20260316 0000 n=180 close=1.2902 ema20=1.2769 ema60=1.2464 rsi=57.09 boll_up=1.3379 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=False vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.566】  TrendPB 20260323 0000 n=180 close=1.2368 ema20=1.2734 ema60=1.25 rsi=39.55 boll_up=1.3311 buy=False sell=None hold=False trend=False near20=False alert=False div=False cross=False pat=- yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.592】  TrendPB 20260330 0000 n=180 close=1.2655 ema20=1.2679 ema60=1.2515 rsi=49.92 boll_up=1.3268 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=- yang=True vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.629】  TrendPB 20260407 0000 n=180 close=1.2586 ema20=1.2651 ema60=1.253 rsi=47.6 boll_up=1.3082 buy=False sell=None hold=False trend=True near20=True alert=False div=False cross=False pat=hammer yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.650】  TrendPB 20260414 0000 n=180 close=1.2487 ema20=1.2608 ema60=1.2533 rsi=43.48 boll_up=1.2836 buy=False sell=None hold=False trend=False near20=True alert=False div=False cross=False pat=- yang=False vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.677】  TrendPB 20260421 0000 n=180 close=1.2576 ema20=1.2577 ema60=1.2532 rsi=49.4 boll_up=1.2677 buy=False sell=None hold=False trend=False near20=True alert=False div=False cross=False pat=- yang=True vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.703】  TrendPB 20260428 0000 n=180 close=1.2457 ema20=1.2523 ema60=1.2518 rsi=44.99 boll_up=1.2682 buy=False sell=None hold=False trend=False near20=True alert=False div=False cross=False pat=engulf yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.732】  TrendPB 20260508 0000 n=180 close=1.2378 ema20=1.2486 ema60=1.2505 rsi=41.24 boll_up=1.2629 buy=False sell=None hold=False trend=False near20=True alert=False div=False cross=False pat=high_wave yang=True vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.760】  TrendPB 20260515 0000 n=180 close=1.2259 ema20=1.2432 ema60=1.2481 rsi=34.2 boll_up=1.2594 buy=False sell=None hold=False trend=False near20=True alert=True div=False cross=False pat=- yang=False vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.792】  TrendPB 20260522 0000 n=180 close=1.2178 ema20=1.236 ema60=1.2445 rsi=34.72 boll_up=1.2561 buy=False sell=None hold=False trend=False near20=False alert=True div=True cross=False pat=hammer yang=False vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.819】  TrendPB 20260529 0000 n=180 close=1.2178 ema20=1.226 ema60=1.2393 rsi=42.51 boll_up=1.2565 buy=False sell=None hold=False trend=False near20=True alert=True div=False cross=True pat=engulf yang=True vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.847】  TrendPB 20260605 0000 n=180 close=1.2138 ema20=1.2251 ema60=1.2371 rsi=42.27 boll_up=1.2479 buy=False sell=None hold=False trend=False near20=True alert=True div=False cross=False pat=- yang=True vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.871】  TrendPB 20260612 0000 n=180 close=1.2038 ema20=1.2144 ema60=1.2311 rsi=42.27 boll_up=1.2429 buy=False sell=None hold=False trend=False near20=True alert=True div=False cross=True pat=engulf yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.900】  TrendPB 20260622 0000 n=180 close=1.1569 ema20=1.1955 ema60=1.2215 rsi=31.97 boll_up=1.2484 buy=False sell=None hold=False trend=False near20=False alert=True div=False cross=False pat=- yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.926】  TrendPB 20260629 0000 n=180 close=1.1090 ema20=1.1673 ema60=1.2068 rsi=24.61 boll_up=1.2584 buy=False sell=None hold=False trend=False near20=False alert=True div=False cross=False pat=hammer yang=True vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.954】  TrendPB 20260706 0000 n=180 close=1.1389 ema20=1.1468 ema60=1.1925 rsi=43.33 boll_up=1.2266 buy=False sell=None hold=False trend=False near20=True alert=True div=False cross=False pat=hammer yang=True vol_ok=False bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:21.985】  TrendPB 20260713 0000 n=180 close=1.1409 ema20=1.1396 ema60=1.1827 rsi=47.07 boll_up=1.1867 buy=False sell=None hold=False trend=False near20=True alert=True div=False cross=False pat=- yang=True vol_ok=True bt_held=0 avail=0 half=-
+
+【2026-07-31 16:07:22.010】  TrendPB 20260720 0000 n=180 close=1.2000 ema20=1.1526 ema60=1.181 rsi=63.06 boll_up=1.1881 buy=False sell=None hold=False trend=False near20=False alert=False div=False cross=False pat=- yang=True vol_ok=False bt_held=0 avail=0 half=-

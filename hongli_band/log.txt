@@ -1,0 +1,484 @@
+
+【2026-08-05 17:07:16.342】  0D:\service\GJQMT\python\新建策略文件2.py_SH56158021KeyboardInterrupt:策略被手动停止
+【2026-08-05 17:07:16.342】  Traceback (most recent call last):
+
+  File "<string>", line 1903, in init
+
+  File "<string>", line 1942, in _init_impl
+
+  File "<string>", line 631, in _download_hist
+
+KeyboardInterrupt: 策略被手动停止
+
+【2026-08-05 17:07:16.342】  0D:\service\GJQMT\python\新建策略文件2.py_SH56158021KeyboardInterrupt:策略被手动停止
+【2026-08-05 17:07:18.380】  HlBand downloaded history via download_history_data 1d from 20240527
+
+【2026-08-05 17:07:18.406】  start back test mode
+【2026-08-05 17:07:18.422】  HlBand downloaded history via download_history_data 1w from 20240527
+HlBand backtest session start barpos= 0
+HlBand v1.2 init 561580.SH 39953913 STOCK PERIOD= 1d BACKTEST= True DRY_RUN= False budget= 50000.0 wMA= 5/10/30 dMA= 5/20/60 bias5>= 6.0 stop= 0.08 chase< 0.05
+HlBand diag: d1_empty period= 1d end= 20230530 n= 0
+
+【2026-08-05 17:07:18.674】  HlBand diag: d1_ok source= get_market_data_ex period= 1d n= 70 end= 20230906 last= 0.9246
+
+【2026-08-05 17:07:20.682】  HlBand diag: w1_empty period= 1w end= 20230906 n= 0
+
+【2026-08-05 17:07:21.806】  HlBand diag: w1_ok source= get_market_data_ex period= 1w n= 65 end= 20240909 last= 0.9164
+HlBand 20240909 0000 n1d=180 n1w=65 close=0.9028 w_bull=False w_bear=True w_ma5=0.9525 w_ma30=0.9598 w_hist=-0.0068 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20240910 0000 n1d=180 n1w=65 close=0.9037 w_bull=False w_bear=True w_ma5=0.9525 w_ma30=0.9598 w_hist=-0.0068 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20240911 0000 n1d=180 n1w=65 close=0.8873 w_bull=False w_bear=True w_ma5=0.9525 w_ma30=0.9598 w_hist=-0.0068 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:21.825】  HlBand 20240912 0000 n1d=180 n1w=65 close=0.8909 w_bull=False w_bear=True w_ma5=0.9525 w_ma30=0.9598 w_hist=-0.0068 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20240913 0000 n1d=180 n1w=65 close=0.8918 w_bull=False w_bear=True w_ma5=0.9525 w_ma30=0.9598 w_hist=-0.0068 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20240918 0000 n1d=180 n1w=66 close=0.9009 w_bull=False w_bear=True w_ma5=0.9399 w_ma30=0.9592 w_hist=-0.0098 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20240919 0000 n1d=180 n1w=66 close=0.9037 w_bull=False w_bear=True w_ma5=0.9399 w_ma30=0.9592 w_hist=-0.0098 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:21.846】  HlBand 20240920 0000 n1d=180 n1w=66 close=0.9082 w_bull=False w_bear=True w_ma5=0.9399 w_ma30=0.9592 w_hist=-0.0098 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20240923 0000 n1d=180 n1w=67 close=0.9164 w_bull=False w_bear=True w_ma5=0.9281 w_ma30=0.9578 w_hist=-0.0102 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20240924 0000 n1d=180 n1w=67 close=0.9629 w_bull=False w_bear=True w_ma5=0.9281 w_ma30=0.9578 w_hist=-0.0102 buy=False buyR=chase_skip sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:21.867】  HlBand 20240925 0000 n1d=180 n1w=67 close=0.9756 w_bull=False w_bear=True w_ma5=0.9281 w_ma30=0.9578 w_hist=-0.0102 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20240926 0000 n1d=180 n1w=67 close=1.0093 w_bull=False w_bear=True w_ma5=0.9281 w_ma30=0.9578 w_hist=-0.0102 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20240927 0000 n1d=180 n1w=67 close=0.9975 w_bull=False w_bear=True w_ma5=0.9281 w_ma30=0.9578 w_hist=-0.0102 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:21.880】  HlBand 20240930 0000 n1d=180 n1w=68 close=1.0859 w_bull=False w_bear=False w_ma5=0.9325 w_ma30=0.9597 w_hist=-0.0043 buy=False buyR=chase_skip sell=True sellR=bias5 hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20241008 0000 n1d=180 n1w=69 close=1.1068 w_bull=False w_bear=False w_ma5=0.96 w_ma30=0.9641 w_hist=0.0053 buy=False buyR=- sell=True sellR=bias5 hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:21.956】  HlBand 20241024 0000 n1d=180 n1w=71 close=1.0603 w_bull=True w_bear=False w_ma5=1.021 w_ma30=0.9726 w_hist=0.0111 buy=False buyR=- sell=True sellR=macd_death hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20241025 0000 n1d=180 n1w=71 close=1.0613 w_bull=True w_bear=False w_ma5=1.021 w_ma30=0.9726 w_hist=0.0111 buy=False buyR=- sell=False sellR=- hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:21.987】  HlBand 20241031 0000 n1d=180 n1w=72 close=1.0522 w_bull=True w_bear=False w_ma5=1.0516 w_ma30=0.9767 w_hist=0.0118 buy=True buyR=pullback_vol sell=False sellR=- hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand pending_entry set signal=pullback_vol label=买点1-缩量回踩 all=pullback_vol(买点1-缩量回踩) day=20241031 close=1.0522
+HlBand 20241101 0000 n1d=180 n1w=72 close=1.0658 w_bull=True w_bear=False w_ma5=1.0516 w_ma30=0.9767 w_hist=0.0118 buy=False buyR=- sell=False sellR=- hold=False ret=None pe=True px=False bt_held=0 avail=0
+HlBand BUY by signal=pullback_vol label=买点1-缩量回踩 all=pullback_vol(买点1-缩量回踩) signal_day=20241031 @open=1.0531
+HlBand BUY BUY 561580.SH x47400 20260805170721 @ 1.053062224790427
+HlBand BUY filled {'shares': 47400, 'price': 1.053062224790427, 'cost': 49915.15, 'opened_at': '20241101000000'}
+HlBand bt T+1 unlock day= 20241104 was_locked= 47400
+
+【2026-08-05 17:07:22.004】  HlBand 20241104 0000 n1d=180 n1w=73 close=1.0685 w_bull=True w_bear=False w_ma5=1.0653 w_ma30=0.9806 w_hist=0.0118 buy=False buyR=- sell=False sellR=- hold=True ret=1.47% pe=False px=False bt_held=47400 avail=47400
+HlBand 20241105 0000 n1d=180 n1w=73 close=1.0868 w_bull=True w_bear=False w_ma5=1.0653 w_ma30=0.9806 w_hist=0.0118 buy=False buyR=- sell=False sellR=- hold=True ret=3.20% pe=False px=False bt_held=47400 avail=47400
+HlBand 20241106 0000 n1d=180 n1w=73 close=1.0804 w_bull=True w_bear=False w_ma5=1.0653 w_ma30=0.9806 w_hist=0.0118 buy=False buyR=- sell=False sellR=- hold=True ret=2.60% pe=False px=False bt_held=47400 avail=47400
+
+【2026-08-05 17:07:22.021】  HlBand 20241107 0000 n1d=180 n1w=73 close=1.1095 w_bull=True w_bear=False w_ma5=1.0653 w_ma30=0.9806 w_hist=0.0118 buy=True buyR=macd_2nd_gc sell=False sellR=- hold=True ret=5.36% pe=False px=False bt_held=47400 avail=47400
+HlBand 20241108 0000 n1d=180 n1w=73 close=1.0922 w_bull=True w_bear=False w_ma5=1.0653 w_ma30=0.9806 w_hist=0.0118 buy=False buyR=- sell=True sellR=macd_death hold=True ret=3.72% pe=False px=False bt_held=47400 avail=47400
+HlBand pending_exit set signal=macd_death label=卖点3-MACD死叉 all=macd_death(卖点3-MACD死叉) day=20241108 close=1.0922
+HlBand 20241111 0000 n1d=180 n1w=74 close=1.0795 w_bull=True w_bear=False w_ma5=1.0665 w_ma30=0.9853 w_hist=0.0128 buy=False buyR=- sell=False sellR=- hold=True ret=2.51% pe=False px=True bt_held=47400 avail=47400
+HlBand SELL by signal=macd_death label=卖点3-MACD死叉 all=macd_death(卖点3-MACD死叉) signal_day=20241108 @open=1.0922
+HlBand SELL macd_death 561580.SH x47400 20260805170722 @ 1.0922332245014894
+HlBand SELL done macd_death last= 1.0922332245014894 cleared {'shares': 47400, 'price': 1.053062224790427, 'cost': 49915.15, 'opened_at': '20241101000000'}
+
+【2026-08-05 17:07:22.063】  HlBand 20241118 0000 n1d=180 n1w=75 close=1.0795 w_bull=True w_bear=False w_ma5=1.0682 w_ma30=0.9876 w_hist=0.0103 buy=True buyR=kdj_os sell=False sellR=- hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand pending_entry set signal=kdj_os label=买点3-KDJ超卖拐头 all=kdj_os(买点3-KDJ超卖拐头) day=20241118 close=1.0795
+HlBand 20241119 0000 n1d=180 n1w=75 close=1.0722 w_bull=True w_bear=False w_ma5=1.0682 w_ma30=0.9876 w_hist=0.0103 buy=False buyR=- sell=False sellR=- hold=False ret=None pe=True px=False bt_held=0 avail=0
+HlBand BUY by signal=kdj_os label=买点3-KDJ超卖拐头 all=kdj_os(买点3-KDJ超卖拐头) signal_day=20241118 @open=1.0795
+HlBand BUY BUY 561580.SH x46300 20260805170722 @ 1.0794798757583528
+HlBand BUY filled {'shares': 46300, 'price': 1.0794798757583528, 'cost': 49979.92, 'opened_at': '20241119000000'}
+HlBand bt T+1 unlock day= 20241120 was_locked= 46300
+HlBand 20241120 0000 n1d=180 n1w=75 close=1.0749 w_bull=True w_bear=False w_ma5=1.0682 w_ma30=0.9876 w_hist=0.0103 buy=False buyR=- sell=False sellR=- hold=True ret=-0.42% pe=False px=False bt_held=46300 avail=46300
+
+【2026-08-05 17:07:22.084】  HlBand 20241121 0000 n1d=180 n1w=75 close=1.0749 w_bull=True w_bear=False w_ma5=1.0682 w_ma30=0.9876 w_hist=0.0103 buy=False buyR=- sell=False sellR=- hold=True ret=-0.42% pe=False px=False bt_held=46300 avail=46300
+HlBand 20241122 0000 n1d=180 n1w=75 close=1.0467 w_bull=True w_bear=False w_ma5=1.0682 w_ma30=0.9876 w_hist=0.0103 buy=False buyR=- sell=False sellR=- hold=True ret=-3.04% pe=False px=False bt_held=46300 avail=46300
+HlBand 20241125 0000 n1d=180 n1w=76 close=1.0458 w_bull=True w_bear=False w_ma5=1.0649 w_ma30=0.9902 w_hist=0.0073 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=-3.12% pe=False px=False bt_held=46300 avail=46300
+
+【2026-08-05 17:07:22.097】  HlBand 20241126 0000 n1d=180 n1w=76 close=1.0494 w_bull=True w_bear=False w_ma5=1.0649 w_ma30=0.9902 w_hist=0.0073 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=-2.78% pe=False px=False bt_held=46300 avail=46300
+HlBand 20241127 0000 n1d=180 n1w=76 close=1.0585 w_bull=True w_bear=False w_ma5=1.0649 w_ma30=0.9902 w_hist=0.0073 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=-1.94% pe=False px=False bt_held=46300 avail=46300
+HlBand 20241128 0000 n1d=180 n1w=76 close=1.0567 w_bull=True w_bear=False w_ma5=1.0649 w_ma30=0.9902 w_hist=0.0073 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=-2.11% pe=False px=False bt_held=46300 avail=46300
+
+【2026-08-05 17:07:22.114】  HlBand 20241129 0000 n1d=180 n1w=76 close=1.0613 w_bull=True w_bear=False w_ma5=1.0649 w_ma30=0.9902 w_hist=0.0073 buy=False buyR=- sell=False sellR=- hold=True ret=-1.69% pe=False px=False bt_held=46300 avail=46300
+HlBand 20241202 0000 n1d=180 n1w=77 close=1.0695 w_bull=True w_bear=False w_ma5=1.0649 w_ma30=0.9935 w_hist=0.0058 buy=False buyR=- sell=False sellR=- hold=True ret=-0.93% pe=False px=False bt_held=46300 avail=46300
+HlBand 20241203 0000 n1d=180 n1w=77 close=1.0795 w_bull=True w_bear=False w_ma5=1.0649 w_ma30=0.9935 w_hist=0.0058 buy=False buyR=- sell=False sellR=- hold=True ret=0.00% pe=False px=False bt_held=46300 avail=46300
+
+【2026-08-05 17:07:22.131】  HlBand 20241204 0000 n1d=180 n1w=77 close=1.0859 w_bull=True w_bear=False w_ma5=1.0649 w_ma30=0.9935 w_hist=0.0058 buy=False buyR=- sell=False sellR=- hold=True ret=0.59% pe=False px=False bt_held=46300 avail=46300
+HlBand 20241205 0000 n1d=180 n1w=77 close=1.0849 w_bull=True w_bear=False w_ma5=1.0649 w_ma30=0.9935 w_hist=0.0058 buy=True buyR=macd_2nd_gc sell=False sellR=- hold=True ret=0.51% pe=False px=False bt_held=46300 avail=46300
+HlBand 20241206 0000 n1d=180 n1w=77 close=1.0968 w_bull=True w_bear=False w_ma5=1.0649 w_ma30=0.9935 w_hist=0.0058 buy=False buyR=- sell=False sellR=- hold=True ret=1.60% pe=False px=False bt_held=46300 avail=46300
+
+【2026-08-05 17:07:22.147】  HlBand 20241209 0000 n1d=180 n1w=78 close=1.1004 w_bull=True w_bear=False w_ma5=1.0711 w_ma30=0.9973 w_hist=0.0065 buy=False buyR=- sell=False sellR=- hold=True ret=1.94% pe=False px=False bt_held=46300 avail=46300
+HlBand 20241210 0000 n1d=180 n1w=78 close=1.1013 w_bull=True w_bear=False w_ma5=1.0711 w_ma30=0.9973 w_hist=0.0065 buy=False buyR=- sell=False sellR=- hold=True ret=2.03% pe=False px=False bt_held=46300 avail=46300
+HlBand 20241211 0000 n1d=180 n1w=78 close=1.1077 w_bull=True w_bear=False w_ma5=1.0711 w_ma30=0.9973 w_hist=0.0065 buy=False buyR=- sell=False sellR=- hold=True ret=2.62% pe=False px=False bt_held=46300 avail=46300
+
+【2026-08-05 17:07:22.163】  HlBand 20241212 0000 n1d=180 n1w=78 close=1.1095 w_bull=True w_bear=False w_ma5=1.0711 w_ma30=0.9973 w_hist=0.0065 buy=False buyR=- sell=False sellR=- hold=True ret=2.78% pe=False px=False bt_held=46300 avail=46300
+HlBand 20241213 0000 n1d=180 n1w=78 close=1.0895 w_bull=True w_bear=False w_ma5=1.0711 w_ma30=0.9973 w_hist=0.0065 buy=False buyR=- sell=False sellR=- hold=True ret=0.93% pe=False px=False bt_held=46300 avail=46300
+HlBand 20241216 0000 n1d=180 n1w=79 close=1.0950 w_bull=True w_bear=False w_ma5=1.0706 w_ma30=1.0007 w_hist=0.006 buy=False buyR=- sell=False sellR=- hold=True ret=1.43% pe=False px=False bt_held=46300 avail=46300
+
+【2026-08-05 17:07:22.182】  HlBand 20241217 0000 n1d=180 n1w=79 close=1.0941 w_bull=True w_bear=False w_ma5=1.0706 w_ma30=1.0007 w_hist=0.006 buy=False buyR=- sell=False sellR=- hold=True ret=1.35% pe=False px=False bt_held=46300 avail=46300
+HlBand 20241218 0000 n1d=180 n1w=79 close=1.1059 w_bull=True w_bear=False w_ma5=1.0706 w_ma30=1.0007 w_hist=0.006 buy=False buyR=- sell=False sellR=- hold=True ret=2.45% pe=False px=False bt_held=46300 avail=46300
+HlBand 20241219 0000 n1d=180 n1w=79 close=1.0959 w_bull=True w_bear=False w_ma5=1.0706 w_ma30=1.0007 w_hist=0.006 buy=False buyR=- sell=False sellR=- hold=True ret=1.52% pe=False px=False bt_held=46300 avail=46300
+
+【2026-08-05 17:07:22.197】  HlBand 20241220 0000 n1d=180 n1w=79 close=1.0859 w_bull=True w_bear=False w_ma5=1.0706 w_ma30=1.0007 w_hist=0.006 buy=False buyR=- sell=True sellR=macd_death hold=True ret=0.59% pe=False px=False bt_held=46300 avail=46300
+HlBand pending_exit set signal=macd_death label=卖点3-MACD死叉 all=macd_death(卖点3-MACD死叉) day=20241220 close=1.0859
+HlBand 20241223 0000 n1d=180 n1w=80 close=1.0959 w_bull=True w_bear=False w_ma5=1.076 w_ma30=1.0042 w_hist=0.0048 buy=True buyR=kdj_os sell=False sellR=- hold=True ret=1.52% pe=False px=True bt_held=46300 avail=46300
+HlBand SELL by signal=macd_death label=卖点3-MACD死叉 all=macd_death(卖点3-MACD死叉) signal_day=20241220 @open=1.0859
+HlBand SELL macd_death 561580.SH x46300 20260805170722 @ 1.085856550129921
+HlBand SELL done macd_death last= 1.085856550129921 cleared {'shares': 46300, 'price': 1.0794798757583528, 'cost': 49979.92, 'opened_at': '20241119000000'}
+
+【2026-08-05 17:07:22.218】  HlBand 20241225 0000 n1d=180 n1w=80 close=1.1132 w_bull=True w_bear=False w_ma5=1.076 w_ma30=1.0042 w_hist=0.0048 buy=True buyR=macd_2nd_gc sell=False sellR=- hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand pending_entry set signal=macd_2nd_gc label=买点2-零轴上二次金叉 all=macd_2nd_gc(买点2-零轴上二次金叉) day=20241225 close=1.1132
+HlBand 20241226 0000 n1d=180 n1w=80 close=1.1095 w_bull=True w_bear=False w_ma5=1.076 w_ma30=1.0042 w_hist=0.0048 buy=False buyR=- sell=False sellR=- hold=False ret=None pe=True px=False bt_held=0 avail=0
+HlBand BUY by signal=macd_2nd_gc label=买点2-零轴上二次金叉 all=macd_2nd_gc(买点2-零轴上二次金叉) signal_day=20241225 @open=1.1123
+HlBand BUY BUY 561580.SH x44900 20260805170722 @ 1.112274201097847
+HlBand BUY filled {'shares': 44900, 'price': 1.112274201097847, 'cost': 49941.11, 'opened_at': '20241226000000'}
+HlBand bt T+1 unlock day= 20241227 was_locked= 44900
+HlBand 20241227 0000 n1d=180 n1w=80 close=1.1095 w_bull=True w_bear=False w_ma5=1.076 w_ma30=1.0042 w_hist=0.0048 buy=False buyR=- sell=False sellR=- hold=True ret=-0.25% pe=False px=False bt_held=44900 avail=44900
+
+【2026-08-05 17:07:22.235】  HlBand 20241230 0000 n1d=180 n1w=81 close=1.1132 w_bull=True w_bear=False w_ma5=1.0886 w_ma30=1.0084 w_hist=0.0051 buy=False buyR=- sell=False sellR=- hold=True ret=0.08% pe=False px=False bt_held=44900 avail=44900
+HlBand 20241231 0000 n1d=180 n1w=81 close=1.1059 w_bull=True w_bear=False w_ma5=1.0886 w_ma30=1.0084 w_hist=0.0051 buy=False buyR=- sell=True sellR=macd_death hold=True ret=-0.57% pe=False px=False bt_held=44900 avail=44900
+HlBand pending_exit set signal=macd_death label=卖点3-MACD死叉 all=macd_death(卖点3-MACD死叉) day=20241231 close=1.1059
+HlBand 20250102 0000 n1d=180 n1w=81 close=1.0777 w_bull=True w_bear=False w_ma5=1.0886 w_ma30=1.0084 w_hist=0.0051 buy=False buyR=- sell=False sellR=- hold=True ret=-3.11% pe=False px=True bt_held=44900 avail=44900
+HlBand SELL by signal=macd_death label=卖点3-MACD死叉 all=macd_death(卖点3-MACD死叉) signal_day=20241231 @open=1.1050
+HlBand SELL macd_death 561580.SH x44900 20260805170722 @ 1.1049865732446262
+HlBand SELL done macd_death last= 1.1049865732446262 cleared {'shares': 44900, 'price': 1.112274201097847, 'cost': 49941.11, 'opened_at': '20241226000000'}
+
+【2026-08-05 17:07:22.317】  HlBand 20250120 0000 n1d=180 n1w=84 close=1.0549 w_bull=False w_bear=False w_ma5=1.0731 w_ma30=1.0173 w_hist=-0.0035 buy=False buyR=- sell=False sellR=- hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:22.430】  HlBand 20250225 0000 n1d=180 n1w=89 close=1.0503 w_bull=False w_bear=False w_ma5=1.0631 w_ma30=1.0327 w_hist=-0.0055 buy=False buyR=- sell=False sellR=- hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:22.522】  HlBand 20250319 0000 n1d=180 n1w=92 close=1.0840 w_bull=False w_bear=False w_ma5=1.0689 w_ma30=1.0436 w_hist=-0.0035 buy=False buyR=- sell=True sellR=macd_div hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20250320 0000 n1d=180 n1w=92 close=1.0859 w_bull=False w_bear=False w_ma5=1.0689 w_ma30=1.0436 w_hist=-0.0035 buy=False buyR=- sell=True sellR=macd_div hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:22.546】  HlBand 20250325 0000 n1d=180 n1w=93 close=1.0959 w_bull=False w_bear=False w_ma5=1.0729 w_ma30=1.0473 w_hist=-0.0027 buy=False buyR=- sell=False sellR=- hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:22.568】  HlBand 20250331 0000 n1d=180 n1w=94 close=1.0767 w_bull=False w_bear=False w_ma5=1.0769 w_ma30=1.0517 w_hist=-0.0024 buy=False buyR=- sell=True sellR=macd_death hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:22.626】  HlBand 20250414 0000 n1d=180 n1w=96 close=1.0522 w_bull=False w_bear=True w_ma5=1.0758 w_ma30=1.0624 w_hist=-0.0045 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20250415 0000 n1d=180 n1w=96 close=1.0567 w_bull=False w_bear=True w_ma5=1.0758 w_ma30=1.0624 w_hist=-0.0045 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20250416 0000 n1d=180 n1w=96 close=1.0667 w_bull=False w_bear=True w_ma5=1.0758 w_ma30=1.0624 w_hist=-0.0045 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:22.637】  HlBand 20250417 0000 n1d=180 n1w=96 close=1.0676 w_bull=False w_bear=True w_ma5=1.0758 w_ma30=1.0624 w_hist=-0.0045 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20250418 0000 n1d=180 n1w=96 close=1.0722 w_bull=False w_bear=True w_ma5=1.0758 w_ma30=1.0624 w_hist=-0.0045 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:22.661】  HlBand 20250423 0000 n1d=180 n1w=97 close=1.0704 w_bull=False w_bear=False w_ma5=1.0735 w_ma30=1.0679 w_hist=-0.0041 buy=False buyR=- sell=False sellR=- hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:22.696】  HlBand 20250506 0000 n1d=180 n1w=99 close=1.0622 w_bull=False w_bear=True w_ma5=1.0665 w_ma30=1.0695 w_hist=-0.0045 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20250507 0000 n1d=180 n1w=99 close=1.0722 w_bull=False w_bear=True w_ma5=1.0665 w_ma30=1.0695 w_hist=-0.0045 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20250508 0000 n1d=180 n1w=99 close=1.0731 w_bull=False w_bear=True w_ma5=1.0665 w_ma30=1.0695 w_hist=-0.0045 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:22.712】  HlBand 20250509 0000 n1d=180 n1w=99 close=1.0758 w_bull=False w_bear=True w_ma5=1.0665 w_ma30=1.0695 w_hist=-0.0045 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:22.777】  HlBand 20250526 0000 n1d=180 n1w=102 close=1.0868 w_bull=False w_bear=False w_ma5=1.0778 w_ma30=1.0722 w_hist=-0.0013 buy=False buyR=- sell=False sellR=- hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20250527 0000 n1d=180 n1w=102 close=1.0831 w_bull=False w_bear=False w_ma5=1.0778 w_ma30=1.0722 w_hist=-0.0013 buy=False buyR=- sell=True sellR=macd_death hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:22.876】  HlBand 20250619 0000 n1d=180 n1w=105 close=1.0932 w_bull=False w_bear=False w_ma5=1.091 w_ma30=1.0741 w_hist=-0.0003 buy=False buyR=- sell=True sellR=macd_death hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:22.893】  HlBand 20250624 0000 n1d=180 n1w=106 close=1.1124 w_bull=True w_bear=False w_ma5=1.0922 w_ma30=1.0759 w_hist=0.0002 buy=False buyR=- sell=False sellR=- hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:22.978】  HlBand 20250714 0000 n1d=180 n1w=109 close=1.1629 w_bull=True w_bear=False w_ma5=1.1188 w_ma30=1.0811 w_hist=0.0055 buy=False buyR=- sell=True sellR=macd_div hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:23.013】  HlBand 20250722 0000 n1d=180 n1w=110 close=1.1886 w_bull=True w_bear=False w_ma5=1.1322 w_ma30=1.0835 w_hist=0.0066 buy=False buyR=- sell=False sellR=- hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:23.041】  HlBand 20250729 0000 n1d=180 n1w=111 close=1.1721 w_bull=True w_bear=False w_ma5=1.1482 w_ma30=1.0858 w_hist=0.0081 buy=False buyR=- sell=True sellR=macd_death hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:23.067】  HlBand 20250804 0000 n1d=180 n1w=112 close=1.1574 w_bull=True w_bear=False w_ma5=1.157 w_ma30=1.0886 w_hist=0.0068 buy=True buyR=kdj_os sell=False sellR=- hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand pending_entry set signal=kdj_os label=买点3-KDJ超卖拐头 all=kdj_os(买点3-KDJ超卖拐头) day=20250804 close=1.1574
+HlBand 20250805 0000 n1d=180 n1w=112 close=1.1693 w_bull=True w_bear=False w_ma5=1.157 w_ma30=1.0886 w_hist=0.0068 buy=False buyR=- sell=False sellR=- hold=False ret=None pe=True px=False bt_held=0 avail=0
+HlBand BUY by signal=kdj_os label=买点3-KDJ超卖拐头 all=kdj_os(买点3-KDJ超卖拐头) signal_day=20250804 @open=1.1574
+HlBand BUY BUY 561580.SH x43200 20260805170723 @ 1.1573779012475829
+HlBand BUY filled {'shares': 43200, 'price': 1.1573779012475829, 'cost': 49998.73, 'opened_at': '20250805000000'}
+HlBand bt T+1 unlock day= 20250806 was_locked= 43200
+
+【2026-08-05 17:07:23.087】  HlBand 20250806 0000 n1d=180 n1w=112 close=1.1721 w_bull=True w_bear=False w_ma5=1.157 w_ma30=1.0886 w_hist=0.0068 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=1.27% pe=False px=False bt_held=43200 avail=43200
+HlBand 20250807 0000 n1d=180 n1w=112 close=1.1702 w_bull=True w_bear=False w_ma5=1.157 w_ma30=1.0886 w_hist=0.0068 buy=False buyR=- sell=False sellR=- hold=True ret=1.11% pe=False px=False bt_held=43200 avail=43200
+HlBand 20250808 0000 n1d=180 n1w=112 close=1.1776 w_bull=True w_bear=False w_ma5=1.157 w_ma30=1.0886 w_hist=0.0068 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=1.74% pe=False px=False bt_held=43200 avail=43200
+
+【2026-08-05 17:07:23.105】  HlBand 20250811 0000 n1d=180 n1w=113 close=1.1721 w_bull=True w_bear=False w_ma5=1.1649 w_ma30=1.093 w_hist=0.007 buy=False buyR=- sell=False sellR=- hold=True ret=1.27% pe=False px=False bt_held=43200 avail=43200
+HlBand 20250812 0000 n1d=180 n1w=113 close=1.1757 w_bull=True w_bear=False w_ma5=1.1649 w_ma30=1.093 w_hist=0.007 buy=False buyR=- sell=False sellR=- hold=True ret=1.59% pe=False px=False bt_held=43200 avail=43200
+HlBand 20250813 0000 n1d=180 n1w=113 close=1.1757 w_bull=True w_bear=False w_ma5=1.1649 w_ma30=1.093 w_hist=0.007 buy=False buyR=- sell=False sellR=- hold=True ret=1.59% pe=False px=False bt_held=43200 avail=43200
+
+【2026-08-05 17:07:23.122】  HlBand 20250814 0000 n1d=180 n1w=113 close=1.1739 w_bull=True w_bear=False w_ma5=1.1649 w_ma30=1.093 w_hist=0.007 buy=False buyR=- sell=False sellR=- hold=True ret=1.43% pe=False px=False bt_held=43200 avail=43200
+HlBand 20250815 0000 n1d=180 n1w=113 close=1.1831 w_bull=True w_bear=False w_ma5=1.1649 w_ma30=1.093 w_hist=0.007 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=2.22% pe=False px=False bt_held=43200 avail=43200
+HlBand 20250818 0000 n1d=180 n1w=114 close=1.1826 w_bull=True w_bear=False w_ma5=1.1699 w_ma30=1.0972 w_hist=0.0069 buy=False buyR=- sell=False sellR=- hold=True ret=2.18% pe=False px=False bt_held=43200 avail=43200
+
+【2026-08-05 17:07:23.140】  HlBand 20250819 0000 n1d=180 n1w=114 close=1.1835 w_bull=True w_bear=False w_ma5=1.1699 w_ma30=1.0972 w_hist=0.0069 buy=False buyR=- sell=False sellR=- hold=True ret=2.26% pe=False px=False bt_held=43200 avail=43200
+HlBand 20250820 0000 n1d=180 n1w=114 close=1.1947 w_bull=True w_bear=False w_ma5=1.1699 w_ma30=1.0972 w_hist=0.0069 buy=True buyR=macd_2nd_gc sell=False sellR=- hold=True ret=3.23% pe=False px=False bt_held=43200 avail=43200
+HlBand 20250821 0000 n1d=180 n1w=114 close=1.2032 w_bull=True w_bear=False w_ma5=1.1699 w_ma30=1.0972 w_hist=0.0069 buy=False buyR=- sell=False sellR=- hold=True ret=3.95% pe=False px=False bt_held=43200 avail=43200
+
+【2026-08-05 17:07:23.173】  HlBand 20250822 0000 n1d=180 n1w=114 close=1.2050 w_bull=True w_bear=False w_ma5=1.1699 w_ma30=1.0972 w_hist=0.0069 buy=False buyR=- sell=False sellR=- hold=True ret=4.12% pe=False px=False bt_held=43200 avail=43200
+HlBand 20250825 0000 n1d=180 n1w=115 close=1.2218 w_bull=True w_bear=False w_ma5=1.1794 w_ma30=1.1021 w_hist=0.0077 buy=False buyR=- sell=False sellR=- hold=True ret=5.57% pe=False px=False bt_held=43200 avail=43200
+HlBand 20250826 0000 n1d=180 n1w=115 close=1.2190 w_bull=True w_bear=False w_ma5=1.1794 w_ma30=1.1021 w_hist=0.0077 buy=False buyR=- sell=False sellR=- hold=True ret=5.33% pe=False px=False bt_held=43200 avail=43200
+
+【2026-08-05 17:07:23.176】  HlBand 20250827 0000 n1d=180 n1w=115 close=1.1975 w_bull=True w_bear=False w_ma5=1.1794 w_ma30=1.1021 w_hist=0.0077 buy=False buyR=- sell=False sellR=- hold=True ret=3.47% pe=False px=False bt_held=43200 avail=43200
+HlBand 20250828 0000 n1d=180 n1w=115 close=1.2013 w_bull=True w_bear=False w_ma5=1.1794 w_ma30=1.1021 w_hist=0.0077 buy=False buyR=- sell=False sellR=- hold=True ret=3.79% pe=False px=False bt_held=43200 avail=43200
+HlBand 20250829 0000 n1d=180 n1w=115 close=1.2022 w_bull=True w_bear=False w_ma5=1.1794 w_ma30=1.1021 w_hist=0.0077 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=3.87% pe=False px=False bt_held=43200 avail=43200
+
+【2026-08-05 17:07:23.197】  HlBand 20250901 0000 n1d=180 n1w=116 close=1.1994 w_bull=True w_bear=False w_ma5=1.184 w_ma30=1.1065 w_hist=0.0074 buy=True buyR=pullback_vol sell=True sellR=macd_death hold=True ret=3.63% pe=False px=False bt_held=43200 avail=43200
+HlBand pending_exit set signal=macd_death label=卖点3-MACD死叉 all=macd_death(卖点3-MACD死叉) day=20250901 close=1.1994
+HlBand 20250902 0000 n1d=180 n1w=116 close=1.2013 w_bull=True w_bear=False w_ma5=1.184 w_ma30=1.1065 w_hist=0.0074 buy=False buyR=- sell=False sellR=- hold=True ret=3.79% pe=False px=True bt_held=43200 avail=43200
+HlBand SELL by signal=macd_death label=卖点3-MACD死叉 all=macd_death(卖点3-MACD死叉) signal_day=20250901 @open=1.1994
+HlBand SELL macd_death 561580.SH x43200 20260805170723 @ 1.1994116307980818
+HlBand SELL done macd_death last= 1.1994116307980818 cleared {'shares': 43200, 'price': 1.1573779012475829, 'cost': 49998.73, 'opened_at': '20250805000000'}
+HlBand 20250903 0000 n1d=180 n1w=116 close=1.1882 w_bull=True w_bear=False w_ma5=1.184 w_ma30=1.1065 w_hist=0.0074 buy=True buyR=pullback_vol sell=False sellR=- hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand pending_entry set signal=pullback_vol label=买点1-缩量回踩 all=pullback_vol(买点1-缩量回踩) day=20250903 close=1.1882
+
+【2026-08-05 17:07:23.220】  HlBand 20250904 0000 n1d=180 n1w=116 close=1.1854 w_bull=True w_bear=False w_ma5=1.184 w_ma30=1.1065 w_hist=0.0074 buy=False buyR=- sell=False sellR=- hold=False ret=None pe=True px=False bt_held=0 avail=0
+HlBand BUY by signal=pullback_vol label=买点1-缩量回踩 all=pullback_vol(买点1-缩量回踩) signal_day=20250903 @open=1.1863
+HlBand BUY BUY 561580.SH x42100 20260805170723 @ 1.1863237408283447
+HlBand BUY filled {'shares': 42100, 'price': 1.1863237408283447, 'cost': 49944.23, 'opened_at': '20250904000000'}
+HlBand bt T+1 unlock day= 20250905 was_locked= 42100
+HlBand 20250905 0000 n1d=180 n1w=116 close=1.1854 w_bull=True w_bear=False w_ma5=1.184 w_ma30=1.1065 w_hist=0.0074 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=-0.08% pe=False px=False bt_held=42100 avail=42100
+HlBand 20250908 0000 n1d=180 n1w=117 close=1.1966 w_bull=True w_bear=False w_ma5=1.1907 w_ma30=1.1107 w_hist=0.0055 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=0.87% pe=False px=False bt_held=42100 avail=42100
+
+【2026-08-05 17:07:23.239】  HlBand 20250909 0000 n1d=180 n1w=117 close=1.1966 w_bull=True w_bear=False w_ma5=1.1907 w_ma30=1.1107 w_hist=0.0055 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=0.87% pe=False px=False bt_held=42100 avail=42100
+HlBand 20250910 0000 n1d=180 n1w=117 close=1.1947 w_bull=True w_bear=False w_ma5=1.1907 w_ma30=1.1107 w_hist=0.0055 buy=False buyR=- sell=False sellR=- hold=True ret=0.71% pe=False px=False bt_held=42100 avail=42100
+HlBand 20250911 0000 n1d=180 n1w=117 close=1.2041 w_bull=True w_bear=False w_ma5=1.1907 w_ma30=1.1107 w_hist=0.0055 buy=False buyR=- sell=False sellR=- hold=True ret=1.50% pe=False px=False bt_held=42100 avail=42100
+
+【2026-08-05 17:07:23.258】  HlBand 20250912 0000 n1d=180 n1w=117 close=1.1966 w_bull=True w_bear=False w_ma5=1.1907 w_ma30=1.1107 w_hist=0.0055 buy=False buyR=- sell=False sellR=- hold=True ret=0.87% pe=False px=False bt_held=42100 avail=42100
+HlBand 20250915 0000 n1d=180 n1w=118 close=1.1890 w_bull=True w_bear=False w_ma5=1.1945 w_ma30=1.115 w_hist=0.0045 buy=False buyR=- sell=False sellR=- hold=True ret=0.22% pe=False px=False bt_held=42100 avail=42100
+HlBand 20250916 0000 n1d=180 n1w=118 close=1.1861 w_bull=True w_bear=False w_ma5=1.1945 w_ma30=1.115 w_hist=0.0045 buy=False buyR=- sell=False sellR=- hold=True ret=-0.02% pe=False px=False bt_held=42100 avail=42100
+
+【2026-08-05 17:07:23.282】  HlBand 20250917 0000 n1d=180 n1w=118 close=1.1918 w_bull=True w_bear=False w_ma5=1.1945 w_ma30=1.115 w_hist=0.0045 buy=False buyR=- sell=False sellR=- hold=True ret=0.46% pe=False px=False bt_held=42100 avail=42100
+HlBand 20250918 0000 n1d=180 n1w=118 close=1.1757 w_bull=True w_bear=False w_ma5=1.1945 w_ma30=1.115 w_hist=0.0045 buy=False buyR=- sell=False sellR=- hold=True ret=-0.89% pe=False px=False bt_held=42100 avail=42100
+HlBand 20250919 0000 n1d=180 n1w=118 close=1.1757 w_bull=True w_bear=False w_ma5=1.1945 w_ma30=1.115 w_hist=0.0045 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=-0.89% pe=False px=False bt_held=42100 avail=42100
+
+【2026-08-05 17:07:23.301】  HlBand 20250922 0000 n1d=180 n1w=119 close=1.1691 w_bull=True w_bear=False w_ma5=1.193 w_ma30=1.1189 w_hist=0.002 buy=False buyR=- sell=False sellR=- hold=True ret=-1.45% pe=False px=False bt_held=42100 avail=42100
+HlBand 20250923 0000 n1d=180 n1w=119 close=1.1710 w_bull=True w_bear=False w_ma5=1.193 w_ma30=1.1189 w_hist=0.002 buy=False buyR=- sell=False sellR=- hold=True ret=-1.29% pe=False px=False bt_held=42100 avail=42100
+HlBand 20250924 0000 n1d=180 n1w=119 close=1.1710 w_bull=True w_bear=False w_ma5=1.193 w_ma30=1.1189 w_hist=0.002 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=-1.29% pe=False px=False bt_held=42100 avail=42100
+
+【2026-08-05 17:07:23.319】  HlBand 20250925 0000 n1d=180 n1w=119 close=1.1710 w_bull=True w_bear=False w_ma5=1.193 w_ma30=1.1189 w_hist=0.002 buy=False buyR=- sell=False sellR=- hold=True ret=-1.29% pe=False px=False bt_held=42100 avail=42100
+HlBand 20250926 0000 n1d=180 n1w=119 close=1.1681 w_bull=True w_bear=False w_ma5=1.193 w_ma30=1.1189 w_hist=0.002 buy=False buyR=- sell=False sellR=- hold=True ret=-1.53% pe=False px=False bt_held=42100 avail=42100
+HlBand 20250929 0000 n1d=180 n1w=120 close=1.1691 w_bull=False w_bear=False w_ma5=1.1856 w_ma30=1.1224 w_hist=-0.0004 buy=False buyR=- sell=False sellR=- hold=True ret=-1.45% pe=False px=False bt_held=42100 avail=42100
+
+【2026-08-05 17:07:23.337】  HlBand 20250930 0000 n1d=180 n1w=120 close=1.1662 w_bull=False w_bear=False w_ma5=1.1856 w_ma30=1.1224 w_hist=-0.0004 buy=False buyR=- sell=False sellR=- hold=True ret=-1.69% pe=False px=False bt_held=42100 avail=42100
+HlBand 20251009 0000 n1d=180 n1w=120 close=1.1767 w_bull=False w_bear=False w_ma5=1.1784 w_ma30=1.1255 w_hist=-0.0023 buy=False buyR=- sell=False sellR=- hold=True ret=-0.81% pe=False px=False bt_held=42100 avail=42100
+HlBand 20251010 0000 n1d=180 n1w=120 close=1.1861 w_bull=False w_bear=False w_ma5=1.1784 w_ma30=1.1255 w_hist=-0.0023 buy=False buyR=- sell=False sellR=- hold=True ret=-0.02% pe=False px=False bt_held=42100 avail=42100
+
+【2026-08-05 17:07:23.355】  HlBand 20251013 0000 n1d=180 n1w=120 close=1.1814 w_bull=False w_bear=False w_ma5=1.1786 w_ma30=1.1289 w_hist=-0.0024 buy=False buyR=- sell=False sellR=- hold=True ret=-0.42% pe=False px=False bt_held=42100 avail=42100
+HlBand 20251014 0000 n1d=180 n1w=120 close=1.1852 w_bull=False w_bear=False w_ma5=1.1786 w_ma30=1.1289 w_hist=-0.0024 buy=False buyR=- sell=False sellR=- hold=True ret=-0.10% pe=False px=False bt_held=42100 avail=42100
+HlBand 20251015 0000 n1d=180 n1w=120 close=1.1909 w_bull=False w_bear=False w_ma5=1.1786 w_ma30=1.1289 w_hist=-0.0024 buy=False buyR=- sell=False sellR=- hold=True ret=0.38% pe=False px=False bt_held=42100 avail=42100
+
+【2026-08-05 17:07:23.375】  HlBand 20251016 0000 n1d=180 n1w=120 close=1.1956 w_bull=False w_bear=False w_ma5=1.1786 w_ma30=1.1289 w_hist=-0.0024 buy=False buyR=- sell=False sellR=- hold=True ret=0.78% pe=False px=False bt_held=42100 avail=42100
+HlBand 20251017 0000 n1d=180 n1w=120 close=1.1890 w_bull=False w_bear=False w_ma5=1.1786 w_ma30=1.1289 w_hist=-0.0024 buy=False buyR=- sell=False sellR=- hold=True ret=0.22% pe=False px=False bt_held=42100 avail=42100
+HlBand 20251020 0000 n1d=180 n1w=120 close=1.1932 w_bull=False w_bear=False w_ma5=1.177 w_ma30=1.1324 w_hist=-0.0024 buy=False buyR=- sell=False sellR=- hold=True ret=0.58% pe=False px=False bt_held=42100 avail=42100
+
+【2026-08-05 17:07:23.400】  HlBand 20251021 0000 n1d=180 n1w=120 close=1.2048 w_bull=False w_bear=False w_ma5=1.177 w_ma30=1.1324 w_hist=-0.0024 buy=False buyR=- sell=False sellR=- hold=True ret=1.56% pe=False px=False bt_held=42100 avail=42100
+HlBand 20251022 0000 n1d=180 n1w=120 close=1.2077 w_bull=False w_bear=False w_ma5=1.177 w_ma30=1.1324 w_hist=-0.0024 buy=False buyR=pullback_vol sell=False sellR=- hold=True ret=1.80% pe=False px=False bt_held=42100 avail=42100
+HlBand 20251023 0000 n1d=180 n1w=120 close=1.2154 w_bull=False w_bear=False w_ma5=1.177 w_ma30=1.1324 w_hist=-0.0024 buy=False buyR=- sell=False sellR=- hold=True ret=2.45% pe=False px=False bt_held=42100 avail=42100
+
+【2026-08-05 17:07:23.421】  HlBand 20251024 0000 n1d=180 n1w=120 close=1.2125 w_bull=False w_bear=False w_ma5=1.177 w_ma30=1.1324 w_hist=-0.0024 buy=False buyR=- sell=False sellR=- hold=True ret=2.21% pe=False px=False bt_held=42100 avail=42100
+HlBand 20251027 0000 n1d=180 n1w=120 close=1.2250 w_bull=False w_bear=False w_ma5=1.1844 w_ma30=1.1368 w_hist=-0.001 buy=False buyR=- sell=False sellR=- hold=True ret=3.26% pe=False px=False bt_held=42100 avail=42100
+HlBand 20251028 0000 n1d=180 n1w=120 close=1.2202 w_bull=False w_bear=False w_ma5=1.1844 w_ma30=1.1368 w_hist=-0.001 buy=False buyR=- sell=False sellR=- hold=True ret=2.86% pe=False px=False bt_held=42100 avail=42100
+
+【2026-08-05 17:07:23.439】  HlBand 20251029 0000 n1d=180 n1w=120 close=1.2241 w_bull=False w_bear=False w_ma5=1.1844 w_ma30=1.1368 w_hist=-0.001 buy=False buyR=- sell=False sellR=- hold=True ret=3.18% pe=False px=False bt_held=42100 avail=42100
+HlBand 20251030 0000 n1d=180 n1w=120 close=1.2289 w_bull=False w_bear=False w_ma5=1.1844 w_ma30=1.1368 w_hist=-0.001 buy=False buyR=- sell=True sellR=macd_div hold=True ret=3.59% pe=False px=False bt_held=42100 avail=42100
+HlBand pending_exit set signal=macd_div label=卖点3-MACD红柱背离 all=macd_div(卖点3-MACD红柱背离) day=20251030 close=1.2289
+HlBand 20251031 0000 n1d=180 n1w=120 close=1.2212 w_bull=False w_bear=False w_ma5=1.1844 w_ma30=1.1368 w_hist=-0.001 buy=False buyR=- sell=False sellR=- hold=True ret=2.94% pe=False px=True bt_held=42100 avail=42100
+HlBand SELL by signal=macd_div label=卖点3-MACD红柱背离 all=macd_div(卖点3-MACD红柱背离) signal_day=20251030 @open=1.2327
+HlBand SELL macd_div 561580.SH x42100 20260805170723 @ 1.2327476911794686
+HlBand SELL done macd_div last= 1.2327476911794686 cleared {'shares': 42100, 'price': 1.1863237408283447, 'cost': 49944.23, 'opened_at': '20250904000000'}
+
+【2026-08-05 17:07:23.459】  HlBand 20251103 0000 n1d=180 n1w=120 close=1.2318 w_bull=True w_bear=False w_ma5=1.195 w_ma30=1.1414 w_hist=0.0002 buy=False buyR=- sell=True sellR=macd_div hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20251104 0000 n1d=180 n1w=120 close=1.2327 w_bull=True w_bear=False w_ma5=1.195 w_ma30=1.1414 w_hist=0.0002 buy=False buyR=- sell=True sellR=macd_div hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20251105 0000 n1d=180 n1w=120 close=1.2337 w_bull=True w_bear=False w_ma5=1.195 w_ma30=1.1414 w_hist=0.0002 buy=False buyR=- sell=True sellR=macd_div hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:23.486】  HlBand 20251107 0000 n1d=180 n1w=120 close=1.2453 w_bull=True w_bear=False w_ma5=1.195 w_ma30=1.1414 w_hist=0.0002 buy=False buyR=- sell=True sellR=macd_div hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:23.530】  HlBand 20251118 0000 n1d=180 n1w=120 close=1.2328 w_bull=True w_bear=False w_ma5=1.2261 w_ma30=1.1544 w_hist=0.0042 buy=False buyR=- sell=True sellR=macd_death hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20251119 0000 n1d=180 n1w=120 close=1.2425 w_bull=True w_bear=False w_ma5=1.2261 w_ma30=1.1544 w_hist=0.0042 buy=False buyR=- sell=False sellR=- hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:23.562】  HlBand 20251125 0000 n1d=180 n1w=120 close=1.2289 w_bull=True w_bear=False w_ma5=1.2333 w_ma30=1.1594 w_hist=0.0026 buy=True buyR=kdj_os sell=False sellR=- hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand pending_entry set signal=kdj_os label=买点3-KDJ超卖拐头 all=kdj_os(买点3-KDJ超卖拐头) day=20251125 close=1.2289
+HlBand 20251126 0000 n1d=180 n1w=120 close=1.2231 w_bull=True w_bear=False w_ma5=1.2333 w_ma30=1.1594 w_hist=0.0026 buy=False buyR=- sell=False sellR=- hold=False ret=None pe=True px=False bt_held=0 avail=0
+HlBand BUY by signal=kdj_os label=买点3-KDJ超卖拐头 all=kdj_os(买点3-KDJ超卖拐头) signal_day=20251125 @open=1.2299
+HlBand BUY BUY 561580.SH x40600 20260805170723 @ 1.2299036921363866
+HlBand BUY filled {'shares': 40600, 'price': 1.2299036921363866, 'cost': 49934.09, 'opened_at': '20251126000000'}
+HlBand bt T+1 unlock day= 20251127 was_locked= 40600
+HlBand 20251127 0000 n1d=180 n1w=120 close=1.2212 w_bull=True w_bear=False w_ma5=1.2333 w_ma30=1.1594 w_hist=0.0026 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=-0.71% pe=False px=False bt_held=40600 avail=40600
+
+【2026-08-05 17:07:23.580】  HlBand 20251128 0000 n1d=180 n1w=120 close=1.2212 w_bull=True w_bear=False w_ma5=1.2333 w_ma30=1.1594 w_hist=0.0026 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=-0.71% pe=False px=False bt_held=40600 avail=40600
+HlBand 20251201 0000 n1d=180 n1w=120 close=1.2289 w_bull=True w_bear=False w_ma5=1.2351 w_ma30=1.1649 w_hist=0.0009 buy=False buyR=- sell=False sellR=- hold=True ret=-0.08% pe=False px=False bt_held=40600 avail=40600
+HlBand 20251202 0000 n1d=180 n1w=120 close=1.2299 w_bull=True w_bear=False w_ma5=1.2351 w_ma30=1.1649 w_hist=0.0009 buy=False buyR=- sell=False sellR=- hold=True ret=0.00% pe=False px=False bt_held=40600 avail=40600
+
+【2026-08-05 17:07:23.612】  HlBand 20251203 0000 n1d=180 n1w=120 close=1.2280 w_bull=True w_bear=False w_ma5=1.2351 w_ma30=1.1649 w_hist=0.0009 buy=False buyR=- sell=False sellR=- hold=True ret=-0.16% pe=False px=False bt_held=40600 avail=40600
+HlBand 20251204 0000 n1d=180 n1w=120 close=1.2241 w_bull=True w_bear=False w_ma5=1.2351 w_ma30=1.1649 w_hist=0.0009 buy=False buyR=- sell=False sellR=- hold=True ret=-0.47% pe=False px=False bt_held=40600 avail=40600
+HlBand 20251205 0000 n1d=180 n1w=120 close=1.2280 w_bull=True w_bear=False w_ma5=1.2351 w_ma30=1.1649 w_hist=0.0009 buy=False buyR=- sell=False sellR=- hold=True ret=-0.16% pe=False px=False bt_held=40600 avail=40600
+
+【2026-08-05 17:07:23.622】  HlBand 20251208 0000 n1d=180 n1w=120 close=1.2231 w_bull=False w_bear=False w_ma5=1.2364 w_ma30=1.1699 w_hist=-0.0 buy=False buyR=- sell=False sellR=- hold=True ret=-0.55% pe=False px=False bt_held=40600 avail=40600
+HlBand 20251209 0000 n1d=180 n1w=120 close=1.2115 w_bull=False w_bear=False w_ma5=1.2364 w_ma30=1.1699 w_hist=-0.0 buy=False buyR=- sell=False sellR=- hold=True ret=-1.50% pe=False px=False bt_held=40600 avail=40600
+
+【2026-08-05 17:07:23.639】  HlBand 20251210 0000 n1d=180 n1w=120 close=1.2086 w_bull=False w_bear=False w_ma5=1.2364 w_ma30=1.1699 w_hist=-0.0 buy=False buyR=- sell=False sellR=- hold=True ret=-1.73% pe=False px=False bt_held=40600 avail=40600
+HlBand 20251211 0000 n1d=180 n1w=120 close=1.1999 w_bull=False w_bear=False w_ma5=1.2364 w_ma30=1.1699 w_hist=-0.0 buy=False buyR=- sell=False sellR=- hold=True ret=-2.44% pe=False px=False bt_held=40600 avail=40600
+HlBand 20251212 0000 n1d=180 n1w=120 close=1.1960 w_bull=False w_bear=False w_ma5=1.2364 w_ma30=1.1699 w_hist=-0.0 buy=False buyR=- sell=False sellR=- hold=True ret=-2.76% pe=False px=False bt_held=40600 avail=40600
+
+【2026-08-05 17:07:23.657】  HlBand 20251215 0000 n1d=180 n1w=120 close=1.2016 w_bull=False w_bear=False w_ma5=1.2266 w_ma30=1.1734 w_hist=-0.0029 buy=False buyR=- sell=False sellR=- hold=True ret=-2.30% pe=False px=False bt_held=40600 avail=40600
+HlBand 20251216 0000 n1d=180 n1w=120 close=1.1919 w_bull=False w_bear=False w_ma5=1.2266 w_ma30=1.1734 w_hist=-0.0029 buy=False buyR=- sell=False sellR=- hold=True ret=-3.09% pe=False px=False bt_held=40600 avail=40600
+HlBand 20251217 0000 n1d=180 n1w=120 close=1.1987 w_bull=False w_bear=False w_ma5=1.2266 w_ma30=1.1734 w_hist=-0.0029 buy=False buyR=- sell=False sellR=- hold=True ret=-2.54% pe=False px=False bt_held=40600 avail=40600
+
+【2026-08-05 17:07:23.675】  HlBand 20251218 0000 n1d=180 n1w=120 close=1.2124 w_bull=False w_bear=False w_ma5=1.2266 w_ma30=1.1734 w_hist=-0.0029 buy=False buyR=- sell=False sellR=- hold=True ret=-1.42% pe=False px=False bt_held=40600 avail=40600
+HlBand 20251219 0000 n1d=180 n1w=120 close=1.2124 w_bull=False w_bear=False w_ma5=1.2266 w_ma30=1.1734 w_hist=-0.0029 buy=False buyR=- sell=False sellR=- hold=True ret=-1.42% pe=False px=False bt_held=40600 avail=40600
+HlBand 20251222 0000 n1d=180 n1w=120 close=1.2124 w_bull=False w_bear=False w_ma5=1.2165 w_ma30=1.1775 w_hist=-0.0038 buy=False buyR=- sell=False sellR=- hold=True ret=-1.42% pe=False px=False bt_held=40600 avail=40600
+
+【2026-08-05 17:07:23.694】  HlBand 20251223 0000 n1d=180 n1w=120 close=1.2134 w_bull=False w_bear=False w_ma5=1.2165 w_ma30=1.1775 w_hist=-0.0038 buy=False buyR=- sell=False sellR=- hold=True ret=-1.34% pe=False px=False bt_held=40600 avail=40600
+HlBand 20251224 0000 n1d=180 n1w=120 close=1.2114 w_bull=False w_bear=False w_ma5=1.2165 w_ma30=1.1775 w_hist=-0.0038 buy=False buyR=- sell=False sellR=- hold=True ret=-1.50% pe=False px=False bt_held=40600 avail=40600
+HlBand 20251225 0000 n1d=180 n1w=120 close=1.2114 w_bull=False w_bear=False w_ma5=1.2165 w_ma30=1.1775 w_hist=-0.0038 buy=False buyR=- sell=False sellR=- hold=True ret=-1.50% pe=False px=False bt_held=40600 avail=40600
+
+【2026-08-05 17:07:23.715】  HlBand 20251226 0000 n1d=180 n1w=120 close=1.2124 w_bull=False w_bear=False w_ma5=1.2165 w_ma30=1.1775 w_hist=-0.0038 buy=False buyR=pullback_vol sell=False sellR=- hold=True ret=-1.42% pe=False px=False bt_held=40600 avail=40600
+HlBand 20251229 0000 n1d=180 n1w=120 close=1.2134 w_bull=False w_bear=False w_ma5=1.214 w_ma30=1.1816 w_hist=-0.0045 buy=False buyR=- sell=False sellR=- hold=True ret=-1.34% pe=False px=False bt_held=40600 avail=40600
+HlBand 20251230 0000 n1d=180 n1w=120 close=1.2143 w_bull=False w_bear=False w_ma5=1.214 w_ma30=1.1816 w_hist=-0.0045 buy=False buyR=- sell=False sellR=- hold=True ret=-1.27% pe=False px=False bt_held=40600 avail=40600
+
+【2026-08-05 17:07:23.736】  HlBand 20251231 0000 n1d=180 n1w=120 close=1.2163 w_bull=False w_bear=False w_ma5=1.214 w_ma30=1.1816 w_hist=-0.0045 buy=False buyR=- sell=False sellR=- hold=True ret=-1.11% pe=False px=False bt_held=40600 avail=40600
+HlBand 20260105 0000 n1d=180 n1w=120 close=1.2124 w_bull=False w_bear=False w_ma5=1.213 w_ma30=1.1857 w_hist=-0.0046 buy=False buyR=- sell=False sellR=- hold=True ret=-1.42% pe=False px=False bt_held=40600 avail=40600
+HlBand 20260106 0000 n1d=180 n1w=120 close=1.2241 w_bull=False w_bear=False w_ma5=1.213 w_ma30=1.1857 w_hist=-0.0046 buy=False buyR=- sell=False sellR=- hold=True ret=-0.47% pe=False px=False bt_held=40600 avail=40600
+
+【2026-08-05 17:07:23.755】  HlBand 20260107 0000 n1d=180 n1w=120 close=1.2202 w_bull=False w_bear=False w_ma5=1.213 w_ma30=1.1857 w_hist=-0.0046 buy=False buyR=- sell=False sellR=- hold=True ret=-0.79% pe=False px=False bt_held=40600 avail=40600
+HlBand 20260108 0000 n1d=180 n1w=120 close=1.2183 w_bull=False w_bear=False w_ma5=1.213 w_ma30=1.1857 w_hist=-0.0046 buy=False buyR=pullback_vol sell=False sellR=- hold=True ret=-0.95% pe=False px=False bt_held=40600 avail=40600
+HlBand 20260109 0000 n1d=180 n1w=120 close=1.2241 w_bull=False w_bear=False w_ma5=1.213 w_ma30=1.1857 w_hist=-0.0046 buy=False buyR=- sell=False sellR=- hold=True ret=-0.47% pe=False px=False bt_held=40600 avail=40600
+
+【2026-08-05 17:07:23.773】  HlBand 20260112 0000 n1d=180 n1w=120 close=1.2251 w_bull=False w_bear=False w_ma5=1.2122 w_ma30=1.1901 w_hist=-0.0042 buy=False buyR=pullback_vol sell=False sellR=- hold=True ret=-0.39% pe=False px=False bt_held=40600 avail=40600
+HlBand 20260113 0000 n1d=180 n1w=120 close=1.2290 w_bull=False w_bear=False w_ma5=1.2122 w_ma30=1.1901 w_hist=-0.0042 buy=False buyR=- sell=False sellR=- hold=True ret=-0.07% pe=False px=False bt_held=40600 avail=40600
+HlBand 20260114 0000 n1d=180 n1w=120 close=1.2192 w_bull=False w_bear=False w_ma5=1.2122 w_ma30=1.1901 w_hist=-0.0042 buy=False buyR=- sell=False sellR=- hold=True ret=-0.87% pe=False px=False bt_held=40600 avail=40600
+
+【2026-08-05 17:07:23.792】  HlBand 20260115 0000 n1d=180 n1w=120 close=1.2124 w_bull=False w_bear=False w_ma5=1.2122 w_ma30=1.1901 w_hist=-0.0042 buy=False buyR=- sell=False sellR=- hold=True ret=-1.42% pe=False px=False bt_held=40600 avail=40600
+HlBand 20260116 0000 n1d=180 n1w=120 close=1.2036 w_bull=False w_bear=False w_ma5=1.2122 w_ma30=1.1901 w_hist=-0.0042 buy=False buyR=- sell=False sellR=- hold=True ret=-2.14% pe=False px=False bt_held=40600 avail=40600
+HlBand 20260119 0000 n1d=180 n1w=120 close=1.2114 w_bull=False w_bear=False w_ma5=1.2138 w_ma30=1.1936 w_hist=-0.0053 buy=False buyR=kdj_os sell=False sellR=- hold=True ret=-1.50% pe=False px=False bt_held=40600 avail=40600
+
+【2026-08-05 17:07:23.814】  HlBand 20260120 0000 n1d=180 n1w=120 close=1.2241 w_bull=False w_bear=False w_ma5=1.2138 w_ma30=1.1936 w_hist=-0.0053 buy=False buyR=- sell=False sellR=- hold=True ret=-0.47% pe=False px=False bt_held=40600 avail=40600
+HlBand 20260121 0000 n1d=180 n1w=120 close=1.2094 w_bull=False w_bear=False w_ma5=1.2138 w_ma30=1.1936 w_hist=-0.0053 buy=False buyR=- sell=False sellR=- hold=True ret=-1.66% pe=False px=False bt_held=40600 avail=40600
+HlBand 20260122 0000 n1d=180 n1w=120 close=1.2153 w_bull=False w_bear=False w_ma5=1.2138 w_ma30=1.1936 w_hist=-0.0053 buy=False buyR=- sell=False sellR=- hold=True ret=-1.19% pe=False px=False bt_held=40600 avail=40600
+
+【2026-08-05 17:07:23.826】  HlBand 20260123 0000 n1d=180 n1w=120 close=1.2094 w_bull=False w_bear=False w_ma5=1.2138 w_ma30=1.1936 w_hist=-0.0053 buy=False buyR=- sell=False sellR=- hold=True ret=-1.66% pe=False px=False bt_held=40600 avail=40600
+HlBand 20260126 0000 n1d=180 n1w=120 close=1.2222 w_bull=False w_bear=False w_ma5=1.2132 w_ma30=1.197 w_hist=-0.0055 buy=False buyR=- sell=False sellR=- hold=True ret=-0.63% pe=False px=False bt_held=40600 avail=40600
+HlBand 20260127 0000 n1d=180 n1w=120 close=1.2153 w_bull=False w_bear=False w_ma5=1.2132 w_ma30=1.197 w_hist=-0.0055 buy=False buyR=- sell=False sellR=- hold=True ret=-1.19% pe=False px=False bt_held=40600 avail=40600
+
+【2026-08-05 17:07:23.847】  HlBand 20260128 0000 n1d=180 n1w=120 close=1.2310 w_bull=False w_bear=False w_ma5=1.2132 w_ma30=1.197 w_hist=-0.0055 buy=False buyR=- sell=False sellR=- hold=True ret=0.09% pe=False px=False bt_held=40600 avail=40600
+HlBand 20260129 0000 n1d=180 n1w=120 close=1.2447 w_bull=False w_bear=False w_ma5=1.2132 w_ma30=1.197 w_hist=-0.0055 buy=False buyR=- sell=False sellR=- hold=True ret=1.21% pe=False px=False bt_held=40600 avail=40600
+HlBand 20260130 0000 n1d=180 n1w=120 close=1.2447 w_bull=False w_bear=False w_ma5=1.2132 w_ma30=1.197 w_hist=-0.0055 buy=False buyR=- sell=False sellR=- hold=True ret=1.21% pe=False px=False bt_held=40600 avail=40600
+
+【2026-08-05 17:07:23.865】  HlBand 20260202 0000 n1d=180 n1w=120 close=1.2035 w_bull=False w_bear=False w_ma5=1.2196 w_ma30=1.2006 w_hist=-0.0034 buy=False buyR=- sell=False sellR=- hold=True ret=-2.14% pe=False px=False bt_held=40600 avail=40600
+HlBand 20260203 0000 n1d=180 n1w=120 close=1.2094 w_bull=False w_bear=False w_ma5=1.2196 w_ma30=1.2006 w_hist=-0.0034 buy=False buyR=- sell=True sellR=macd_death hold=True ret=-1.66% pe=False px=False bt_held=40600 avail=40600
+HlBand pending_exit set signal=macd_death label=卖点3-MACD死叉 all=macd_death(卖点3-MACD死叉) day=20260203 close=1.2094
+HlBand 20260204 0000 n1d=180 n1w=120 close=1.2320 w_bull=False w_bear=False w_ma5=1.2196 w_ma30=1.2006 w_hist=-0.0034 buy=False buyR=macd_2nd_gc sell=False sellR=- hold=True ret=0.17% pe=False px=True bt_held=40600 avail=40600
+HlBand SELL by signal=macd_death label=卖点3-MACD死叉 all=macd_death(卖点3-MACD死叉) signal_day=20260203 @open=1.2075
+HlBand SELL macd_death 561580.SH x40600 20260805170723 @ 1.2074679800469206
+HlBand SELL done macd_death last= 1.2074679800469206 cleared {'shares': 40600, 'price': 1.2299036921363866, 'cost': 49934.09, 'opened_at': '20251126000000'}
+
+【2026-08-05 17:07:23.919】  HlBand 20260213 0000 n1d=180 n1w=120 close=1.2143 w_bull=False w_bear=False w_ma5=1.2216 w_ma30=1.2028 w_hist=-0.0032 buy=False buyR=- sell=True sellR=macd_death hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:24.021】  HlBand 20260317 0000 n1d=180 n1w=120 close=1.2852 w_bull=True w_bear=False w_ma5=1.2592 w_ma30=1.2163 w_hist=0.0048 buy=False buyR=- sell=True sellR=macd_death hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:24.044】  HlBand 20260323 0000 n1d=180 n1w=120 close=1.2368 w_bull=True w_bear=False w_ma5=1.2677 w_ma30=1.2191 w_hist=0.0037 buy=False buyR=- sell=False sellR=- hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260324 0000 n1d=180 n1w=120 close=1.2536 w_bull=True w_bear=False w_ma5=1.2677 w_ma30=1.2191 w_hist=0.0037 buy=True buyR=kdj_os sell=False sellR=- hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand pending_entry set signal=kdj_os label=买点3-KDJ超卖拐头 all=kdj_os(买点3-KDJ超卖拐头) day=20260324 close=1.2536
+HlBand 20260325 0000 n1d=180 n1w=120 close=1.2576 w_bull=True w_bear=False w_ma5=1.2677 w_ma30=1.2191 w_hist=0.0037 buy=True buyR=pullback_vol sell=False sellR=- hold=False ret=None pe=True px=False bt_held=0 avail=0
+HlBand BUY by signal=kdj_os label=买点3-KDJ超卖拐头 all=kdj_os(买点3-KDJ超卖拐头) signal_day=20260324 @open=1.2536
+HlBand BUY BUY 561580.SH x39800 20260805170724 @ 1.253625836931545
+HlBand BUY filled {'shares': 39800, 'price': 1.253625836931545, 'cost': 49894.31, 'opened_at': '20260325000000'}
+HlBand bt T+1 unlock day= 20260326 was_locked= 39800
+
+【2026-08-05 17:07:24.063】  HlBand 20260326 0000 n1d=180 n1w=120 close=1.2596 w_bull=True w_bear=False w_ma5=1.2677 w_ma30=1.2191 w_hist=0.0037 buy=False buyR=- sell=False sellR=- hold=True ret=0.47% pe=False px=False bt_held=39800 avail=39800
+HlBand 20260327 0000 n1d=180 n1w=120 close=1.2586 w_bull=True w_bear=False w_ma5=1.2677 w_ma30=1.2191 w_hist=0.0037 buy=False buyR=- sell=False sellR=- hold=True ret=0.39% pe=False px=False bt_held=39800 avail=39800
+HlBand 20260330 0000 n1d=180 n1w=120 close=1.2655 w_bull=True w_bear=False w_ma5=1.2766 w_ma30=1.2209 w_hist=0.002 buy=False buyR=- sell=False sellR=- hold=True ret=0.95% pe=False px=False bt_held=39800 avail=39800
+
+【2026-08-05 17:07:24.082】  HlBand 20260331 0000 n1d=180 n1w=120 close=1.2576 w_bull=True w_bear=False w_ma5=1.2766 w_ma30=1.2209 w_hist=0.002 buy=False buyR=- sell=False sellR=- hold=True ret=0.32% pe=False px=False bt_held=39800 avail=39800
+HlBand 20260401 0000 n1d=180 n1w=120 close=1.2615 w_bull=True w_bear=False w_ma5=1.2766 w_ma30=1.2209 w_hist=0.002 buy=False buyR=- sell=False sellR=- hold=True ret=0.63% pe=False px=False bt_held=39800 avail=39800
+HlBand 20260402 0000 n1d=180 n1w=120 close=1.2695 w_bull=True w_bear=False w_ma5=1.2766 w_ma30=1.2209 w_hist=0.002 buy=False buyR=- sell=False sellR=- hold=True ret=1.26% pe=False px=False bt_held=39800 avail=39800
+
+【2026-08-05 17:07:24.099】  HlBand 20260403 0000 n1d=180 n1w=120 close=1.2566 w_bull=True w_bear=False w_ma5=1.2766 w_ma30=1.2209 w_hist=0.002 buy=False buyR=- sell=False sellR=- hold=True ret=0.24% pe=False px=False bt_held=39800 avail=39800
+HlBand 20260407 0000 n1d=180 n1w=120 close=1.2586 w_bull=True w_bear=False w_ma5=1.2766 w_ma30=1.2227 w_hist=0.0006 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=0.39% pe=False px=False bt_held=39800 avail=39800
+HlBand 20260408 0000 n1d=180 n1w=120 close=1.2635 w_bull=True w_bear=False w_ma5=1.2766 w_ma30=1.2227 w_hist=0.0006 buy=False buyR=- sell=False sellR=- hold=True ret=0.79% pe=False px=False bt_held=39800 avail=39800
+
+【2026-08-05 17:07:24.116】  HlBand 20260409 0000 n1d=180 n1w=120 close=1.2576 w_bull=True w_bear=False w_ma5=1.2766 w_ma30=1.2227 w_hist=0.0006 buy=False buyR=- sell=False sellR=- hold=True ret=0.32% pe=False px=False bt_held=39800 avail=39800
+HlBand 20260410 0000 n1d=180 n1w=120 close=1.2556 w_bull=True w_bear=False w_ma5=1.2766 w_ma30=1.2227 w_hist=0.0006 buy=False buyR=- sell=False sellR=- hold=True ret=0.16% pe=False px=False bt_held=39800 avail=39800
+HlBand 20260413 0000 n1d=180 n1w=120 close=1.2497 w_bull=False w_bear=False w_ma5=1.2681 w_ma30=1.2251 w_hist=-0.0007 buy=False buyR=- sell=False sellR=- hold=True ret=-0.32% pe=False px=False bt_held=39800 avail=39800
+
+【2026-08-05 17:07:24.132】  HlBand 20260414 0000 n1d=180 n1w=120 close=1.2487 w_bull=False w_bear=False w_ma5=1.2681 w_ma30=1.2251 w_hist=-0.0007 buy=False buyR=- sell=False sellR=- hold=True ret=-0.39% pe=False px=False bt_held=39800 avail=39800
+HlBand 20260415 0000 n1d=180 n1w=120 close=1.2536 w_bull=False w_bear=False w_ma5=1.2681 w_ma30=1.2251 w_hist=-0.0007 buy=False buyR=- sell=False sellR=- hold=True ret=0.00% pe=False px=False bt_held=39800 avail=39800
+HlBand 20260416 0000 n1d=180 n1w=120 close=1.2546 w_bull=False w_bear=False w_ma5=1.2681 w_ma30=1.2251 w_hist=-0.0007 buy=False buyR=- sell=False sellR=- hold=True ret=0.08% pe=False px=False bt_held=39800 avail=39800
+
+【2026-08-05 17:07:24.153】  HlBand 20260417 0000 n1d=180 n1w=120 close=1.2497 w_bull=False w_bear=False w_ma5=1.2681 w_ma30=1.2251 w_hist=-0.0007 buy=False buyR=- sell=False sellR=- hold=True ret=-0.32% pe=False px=False bt_held=39800 avail=39800
+HlBand 20260420 0000 n1d=180 n1w=120 close=1.2487 w_bull=False w_bear=False w_ma5=1.2578 w_ma30=1.2268 w_hist=-0.002 buy=False buyR=- sell=False sellR=- hold=True ret=-0.40% pe=False px=False bt_held=39800 avail=39800
+HlBand 20260421 0000 n1d=180 n1w=120 close=1.2576 w_bull=False w_bear=False w_ma5=1.2578 w_ma30=1.2268 w_hist=-0.002 buy=False buyR=- sell=False sellR=- hold=True ret=0.32% pe=False px=False bt_held=39800 avail=39800
+
+【2026-08-05 17:07:24.169】  HlBand 20260422 0000 n1d=180 n1w=120 close=1.2487 w_bull=False w_bear=False w_ma5=1.2578 w_ma30=1.2268 w_hist=-0.002 buy=False buyR=- sell=False sellR=- hold=True ret=-0.40% pe=False px=False bt_held=39800 avail=39800
+HlBand 20260423 0000 n1d=180 n1w=120 close=1.2487 w_bull=False w_bear=False w_ma5=1.2578 w_ma30=1.2268 w_hist=-0.002 buy=False buyR=- sell=False sellR=- hold=True ret=-0.40% pe=False px=False bt_held=39800 avail=39800
+HlBand 20260424 0000 n1d=180 n1w=120 close=1.2427 w_bull=False w_bear=False w_ma5=1.2578 w_ma30=1.2268 w_hist=-0.002 buy=False buyR=- sell=False sellR=- hold=True ret=-0.87% pe=False px=False bt_held=39800 avail=39800
+
+【2026-08-05 17:07:24.187】  HlBand 20260427 0000 n1d=180 n1w=120 close=1.2358 w_bull=False w_bear=False w_ma5=1.2526 w_ma30=1.2291 w_hist=-0.0034 buy=False buyR=- sell=False sellR=- hold=True ret=-1.42% pe=False px=False bt_held=39800 avail=39800
+HlBand 20260428 0000 n1d=180 n1w=120 close=1.2457 w_bull=False w_bear=False w_ma5=1.2526 w_ma30=1.2291 w_hist=-0.0034 buy=False buyR=- sell=False sellR=- hold=True ret=-0.63% pe=False px=False bt_held=39800 avail=39800
+HlBand 20260429 0000 n1d=180 n1w=120 close=1.2507 w_bull=False w_bear=False w_ma5=1.2526 w_ma30=1.2291 w_hist=-0.0034 buy=False buyR=- sell=False sellR=- hold=True ret=-0.24% pe=False px=False bt_held=39800 avail=39800
+
+【2026-08-05 17:07:24.205】  HlBand 20260430 0000 n1d=180 n1w=120 close=1.2467 w_bull=False w_bear=False w_ma5=1.2526 w_ma30=1.2291 w_hist=-0.0034 buy=False buyR=- sell=False sellR=- hold=True ret=-0.55% pe=False px=False bt_held=39800 avail=39800
+HlBand 20260506 0000 n1d=180 n1w=120 close=1.2457 w_bull=False w_bear=False w_ma5=1.2503 w_ma30=1.2317 w_hist=-0.004 buy=False buyR=- sell=False sellR=- hold=True ret=-0.63% pe=False px=False bt_held=39800 avail=39800
+HlBand 20260507 0000 n1d=180 n1w=120 close=1.2368 w_bull=False w_bear=False w_ma5=1.2503 w_ma30=1.2317 w_hist=-0.004 buy=False buyR=- sell=False sellR=- hold=True ret=-1.34% pe=False px=False bt_held=39800 avail=39800
+
+【2026-08-05 17:07:24.222】  HlBand 20260508 0000 n1d=180 n1w=120 close=1.2378 w_bull=False w_bear=False w_ma5=1.2503 w_ma30=1.2317 w_hist=-0.004 buy=False buyR=- sell=False sellR=- hold=True ret=-1.26% pe=False px=False bt_held=39800 avail=39800
+HlBand 20260511 0000 n1d=180 n1w=120 close=1.2388 w_bull=False w_bear=False w_ma5=1.2465 w_ma30=1.2341 w_hist=-0.005 buy=False buyR=- sell=False sellR=- hold=True ret=-1.19% pe=False px=False bt_held=39800 avail=39800
+HlBand 20260512 0000 n1d=180 n1w=120 close=1.2388 w_bull=False w_bear=False w_ma5=1.2465 w_ma30=1.2341 w_hist=-0.005 buy=False buyR=- sell=False sellR=- hold=True ret=-1.19% pe=False px=False bt_held=39800 avail=39800
+
+【2026-08-05 17:07:24.241】  HlBand 20260513 0000 n1d=180 n1w=120 close=1.2388 w_bull=False w_bear=False w_ma5=1.2465 w_ma30=1.2341 w_hist=-0.005 buy=False buyR=- sell=False sellR=- hold=True ret=-1.19% pe=False px=False bt_held=39800 avail=39800
+HlBand 20260514 0000 n1d=180 n1w=120 close=1.2358 w_bull=False w_bear=False w_ma5=1.2465 w_ma30=1.2341 w_hist=-0.005 buy=False buyR=- sell=False sellR=- hold=True ret=-1.42% pe=False px=False bt_held=39800 avail=39800
+HlBand 20260515 0000 n1d=180 n1w=120 close=1.2259 w_bull=False w_bear=False w_ma5=1.2465 w_ma30=1.2341 w_hist=-0.005 buy=False buyR=- sell=False sellR=- hold=True ret=-2.21% pe=False px=False bt_held=39800 avail=39800
+
+【2026-08-05 17:07:24.258】  HlBand 20260518 0000 n1d=180 n1w=120 close=1.2228 w_bull=False w_bear=True w_ma5=1.2406 w_ma30=1.2354 w_hist=-0.0062 buy=False buyR=- sell=True sellR=weekly_bear hold=True ret=-2.46% pe=False px=False bt_held=39800 avail=39800
+HlBand pending_exit set signal=weekly_bear label=周线转空强制清仓 all=weekly_bear(周线转空强制清仓) day=20260518 close=1.2228
+HlBand 20260519 0000 n1d=180 n1w=120 close=1.2357 w_bull=False w_bear=True w_ma5=1.2406 w_ma30=1.2354 w_hist=-0.0062 buy=False buyR=- sell=True sellR=weekly_bear hold=True ret=-1.43% pe=False px=True bt_held=39800 avail=39800
+HlBand SELL by signal=weekly_bear label=周线转空强制清仓 all=weekly_bear(周线转空强制清仓) signal_day=20260518 @open=1.2208
+HlBand SELL weekly_bear 561580.SH x39800 20260805170724 @ 1.2207594914323192
+HlBand SELL done weekly_bear last= 1.2207594914323192 cleared {'shares': 39800, 'price': 1.253625836931545, 'cost': 49894.31, 'opened_at': '20260325000000'}
+HlBand 20260520 0000 n1d=180 n1w=120 close=1.2307 w_bull=False w_bear=True w_ma5=1.2406 w_ma30=1.2354 w_hist=-0.0062 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:24.276】  HlBand 20260521 0000 n1d=180 n1w=120 close=1.2198 w_bull=False w_bear=True w_ma5=1.2406 w_ma30=1.2354 w_hist=-0.0062 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260522 0000 n1d=180 n1w=120 close=1.2178 w_bull=False w_bear=True w_ma5=1.2406 w_ma30=1.2354 w_hist=-0.0062 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:24.292】  HlBand 20260525 0000 n1d=180 n1w=120 close=1.2188 w_bull=False w_bear=True w_ma5=1.2342 w_ma30=1.2364 w_hist=-0.0074 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260526 0000 n1d=180 n1w=120 close=1.2168 w_bull=False w_bear=True w_ma5=1.2342 w_ma30=1.2364 w_hist=-0.0074 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260527 0000 n1d=180 n1w=120 close=1.2038 w_bull=False w_bear=True w_ma5=1.2342 w_ma30=1.2364 w_hist=-0.0074 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:24.311】  HlBand 20260528 0000 n1d=180 n1w=120 close=1.1978 w_bull=False w_bear=True w_ma5=1.2342 w_ma30=1.2364 w_hist=-0.0074 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260529 0000 n1d=180 n1w=120 close=1.2178 w_bull=False w_bear=True w_ma5=1.2342 w_ma30=1.2364 w_hist=-0.0074 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260601 0000 n1d=180 n1w=120 close=1.2387 w_bull=False w_bear=True w_ma5=1.2292 w_ma30=1.2365 w_hist=-0.0079 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:24.328】  HlBand 20260602 0000 n1d=180 n1w=120 close=1.2327 w_bull=False w_bear=True w_ma5=1.2292 w_ma30=1.2365 w_hist=-0.0079 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260603 0000 n1d=180 n1w=120 close=1.2277 w_bull=False w_bear=True w_ma5=1.2292 w_ma30=1.2365 w_hist=-0.0079 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260604 0000 n1d=180 n1w=120 close=1.2128 w_bull=False w_bear=True w_ma5=1.2292 w_ma30=1.2365 w_hist=-0.0079 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:24.346】  HlBand 20260605 0000 n1d=180 n1w=120 close=1.2138 w_bull=False w_bear=True w_ma5=1.2292 w_ma30=1.2365 w_hist=-0.0079 buy=False buyR=pullback_vol sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260608 0000 n1d=180 n1w=120 close=1.2078 w_bull=False w_bear=True w_ma5=1.2226 w_ma30=1.2363 w_hist=-0.0081 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260609 0000 n1d=180 n1w=120 close=1.1978 w_bull=False w_bear=True w_ma5=1.2226 w_ma30=1.2363 w_hist=-0.0081 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:24.363】  HlBand 20260610 0000 n1d=180 n1w=120 close=1.1928 w_bull=False w_bear=True w_ma5=1.2226 w_ma30=1.2363 w_hist=-0.0081 buy=False buyR=pullback_vol sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260611 0000 n1d=180 n1w=120 close=1.1888 w_bull=False w_bear=True w_ma5=1.2226 w_ma30=1.2363 w_hist=-0.0081 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260612 0000 n1d=180 n1w=120 close=1.2038 w_bull=False w_bear=True w_ma5=1.2226 w_ma30=1.2363 w_hist=-0.0081 buy=False buyR=kdj_os sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:24.382】  HlBand 20260615 0000 n1d=180 n1w=120 close=1.1958 w_bull=False w_bear=True w_ma5=1.2158 w_ma30=1.2349 w_hist=-0.0086 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260616 0000 n1d=180 n1w=120 close=1.1768 w_bull=False w_bear=True w_ma5=1.2158 w_ma30=1.2349 w_hist=-0.0086 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260617 0000 n1d=180 n1w=120 close=1.1699 w_bull=False w_bear=True w_ma5=1.2158 w_ma30=1.2349 w_hist=-0.0086 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:24.401】  HlBand 20260618 0000 n1d=180 n1w=120 close=1.1439 w_bull=False w_bear=True w_ma5=1.2158 w_ma30=1.2349 w_hist=-0.0086 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260622 0000 n1d=180 n1w=120 close=1.1569 w_bull=False w_bear=True w_ma5=1.1994 w_ma30=1.2309 w_hist=-0.0124 buy=False buyR=kdj_os sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260623 0000 n1d=180 n1w=120 close=1.1529 w_bull=False w_bear=True w_ma5=1.1994 w_ma30=1.2309 w_hist=-0.0124 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:24.418】  HlBand 20260624 0000 n1d=180 n1w=120 close=1.1439 w_bull=False w_bear=True w_ma5=1.1994 w_ma30=1.2309 w_hist=-0.0124 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260625 0000 n1d=180 n1w=120 close=1.1229 w_bull=False w_bear=True w_ma5=1.1994 w_ma30=1.2309 w_hist=-0.0124 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260626 0000 n1d=180 n1w=120 close=1.1030 w_bull=False w_bear=True w_ma5=1.1994 w_ma30=1.2309 w_hist=-0.0124 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:24.437】  HlBand 20260629 0000 n1d=180 n1w=120 close=1.1090 w_bull=False w_bear=True w_ma5=1.1764 w_ma30=1.2269 w_hist=-0.0168 buy=False buyR=kdj_os sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260630 0000 n1d=180 n1w=120 close=1.0900 w_bull=False w_bear=True w_ma5=1.1764 w_ma30=1.2269 w_hist=-0.0168 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260701 0000 n1d=180 n1w=120 close=1.1030 w_bull=False w_bear=True w_ma5=1.1764 w_ma30=1.2269 w_hist=-0.0168 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:24.455】  HlBand 20260702 0000 n1d=180 n1w=120 close=1.1080 w_bull=False w_bear=True w_ma5=1.1764 w_ma30=1.2269 w_hist=-0.0168 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260703 0000 n1d=180 n1w=120 close=1.1239 w_bull=False w_bear=True w_ma5=1.1764 w_ma30=1.2269 w_hist=-0.0168 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260706 0000 n1d=180 n1w=120 close=1.1389 w_bull=False w_bear=True w_ma5=1.1577 w_ma30=1.2236 w_hist=-0.0173 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:24.472】  HlBand 20260707 0000 n1d=180 n1w=120 close=1.1219 w_bull=False w_bear=True w_ma5=1.1577 w_ma30=1.2236 w_hist=-0.0173 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260708 0000 n1d=180 n1w=120 close=1.1259 w_bull=False w_bear=True w_ma5=1.1577 w_ma30=1.2236 w_hist=-0.0173 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260709 0000 n1d=180 n1w=120 close=1.1179 w_bull=False w_bear=True w_ma5=1.1577 w_ma30=1.2236 w_hist=-0.0173 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:24.497】  HlBand 20260710 0000 n1d=180 n1w=120 close=1.1319 w_bull=False w_bear=True w_ma5=1.1577 w_ma30=1.2236 w_hist=-0.0173 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260713 0000 n1d=180 n1w=120 close=1.1409 w_bull=False w_bear=True w_ma5=1.1413 w_ma30=1.2204 w_hist=-0.0162 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:24.509】  HlBand 20260714 0000 n1d=180 n1w=120 close=1.1599 w_bull=False w_bear=True w_ma5=1.1413 w_ma30=1.2204 w_hist=-0.0162 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260715 0000 n1d=180 n1w=120 close=1.1709 w_bull=False w_bear=True w_ma5=1.1413 w_ma30=1.2204 w_hist=-0.0162 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260716 0000 n1d=180 n1w=120 close=1.1599 w_bull=False w_bear=True w_ma5=1.1413 w_ma30=1.2204 w_hist=-0.0162 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:24.528】  HlBand 20260717 0000 n1d=180 n1w=120 close=1.1649 w_bull=False w_bear=True w_ma5=1.1413 w_ma30=1.2204 w_hist=-0.0162 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260720 0000 n1d=180 n1w=120 close=1.2000 w_bull=False w_bear=True w_ma5=1.1335 w_ma30=1.2194 w_hist=-0.0125 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260721 0000 n1d=180 n1w=120 close=1.1920 w_bull=False w_bear=True w_ma5=1.1335 w_ma30=1.2194 w_hist=-0.0125 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:24.547】  HlBand 20260722 0000 n1d=180 n1w=120 close=1.2060 w_bull=False w_bear=True w_ma5=1.1335 w_ma30=1.2194 w_hist=-0.0125 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260723 0000 n1d=180 n1w=120 close=1.2140 w_bull=False w_bear=True w_ma5=1.1335 w_ma30=1.2194 w_hist=-0.0125 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260724 0000 n1d=180 n1w=120 close=1.1990 w_bull=False w_bear=True w_ma5=1.1335 w_ma30=1.2194 w_hist=-0.0125 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:24.562】  HlBand 20260727 0000 n1d=180 n1w=120 close=1.2060 w_bull=False w_bear=True w_ma5=1.1445 w_ma30=1.2189 w_hist=-0.0073 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260728 0000 n1d=180 n1w=120 close=1.2140 w_bull=False w_bear=True w_ma5=1.1445 w_ma30=1.2189 w_hist=-0.0073 buy=False buyR=- sell=True sellR=weekly_bear,macd_div hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260729 0000 n1d=180 n1w=120 close=1.2310 w_bull=False w_bear=True w_ma5=1.1445 w_ma30=1.2189 w_hist=-0.0073 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+
+【2026-08-05 17:07:24.589】  HlBand 20260730 0000 n1d=180 n1w=120 close=1.2490 w_bull=False w_bear=True w_ma5=1.1445 w_ma30=1.2189 w_hist=-0.0073 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260731 0000 n1d=180 n1w=120 close=1.2450 w_bull=False w_bear=True w_ma5=1.1445 w_ma30=1.2189 w_hist=-0.0073 buy=False buyR=- sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=0 avail=0
