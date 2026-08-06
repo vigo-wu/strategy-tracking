@@ -30,7 +30,7 @@
     "sell_skip": 0,
     "sticky_pe": 0,
     "sticky_px": 0,
-    "interrupt_noise": false
+    "interrupt_noise": true
   },
   "n_buy": 16,
   "n_sell": 16,

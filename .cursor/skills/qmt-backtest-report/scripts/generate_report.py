@@ -408,7 +408,7 @@ def plot_kline(
         print("skip kline: empty OHLC", file=sys.stderr)
         return
     fig, (ax, axv) = plt.subplots(
-        2, 1, figsize=(14, 7), sharex=True, gridspec_kw={"height_ratios": [3.2, 1], "hspace": 0.05}
+        2, 1, figsize=(48, 7), sharex=True, gridspec_kw={"height_ratios": [3.2, 1], "hspace": 0.05}
     )
     width = 0.6
     for i, (_, row) in enumerate(df.iterrows()):
@@ -426,39 +426,46 @@ def plot_kline(
             )
         )
     ax.set_xlim(-1, len(df))
+    y_lo = float(df["Low"].min())
+    y_hi = float(df["High"].max())
+    y_pad = (y_hi - y_lo) * 0.08
+    # 为下方 B/S 标注（约 20pt）预留下方空间
+    ax.set_ylim(y_lo - y_pad * 1.2, y_hi + y_pad)
 
     date_to_i = {d: i for i, d in enumerate(df.index)}
+    mark_offset_pts = -20  # B/S 在 K 线最低点下方约 20 点
+
+    def _mark_bs(ax_, idx, label, color):
+        low_px = float(df.iloc[idx]["Low"])
+        # 虚线：K 线最低点 → 标注位置；标注落在最低点正下方
+        ax_.annotate(
+            label,
+            xy=(idx, low_px),
+            xytext=(0, mark_offset_pts),
+            textcoords="offset points",
+            ha="center",
+            va="top",
+            color=color,
+            fontsize=10,
+            fontweight="bold",
+            zorder=6,
+            arrowprops={
+                "arrowstyle": "-",
+                "linestyle": "--",
+                "color": color,
+                "linewidth": 0.9,
+                "shrinkA": 0,
+                "shrinkB": 2,
+            },
+        )
+
     for t in trades:
         bd = nearest_bar(df, _ts(t["buy_open_day"]))
         sd = nearest_bar(df, _ts(t["sell_exec_day"] or t["sell_signal_day"]))
         if bd is not None and bd in date_to_i:
-            i = date_to_i[bd]
-            ax.annotate(
-                "B",
-                xy=(i, t["buy_price"]),
-                xytext=(0, 10),
-                textcoords="offset points",
-                ha="center",
-                va="bottom",
-                color=COLOR_BUY_MARK,
-                fontsize=9,
-                fontweight="bold",
-                zorder=5,
-            )
+            _mark_bs(ax, date_to_i[bd], "B", COLOR_BUY_MARK)
         if sd is not None and sd in date_to_i:
-            i = date_to_i[sd]
-            ax.annotate(
-                "S",
-                xy=(i, t["sell_price"]),
-                xytext=(0, -10),
-                textcoords="offset points",
-                ha="center",
-                va="top",
-                color=COLOR_SELL_MARK,
-                fontsize=9,
-                fontweight="bold",
-                zorder=5,
-            )
+            _mark_bs(ax, date_to_i[sd], "S", COLOR_SELL_MARK)
 
     x = np.arange(len(df))
     axv.bar(x, df["Volume"].values, width=0.7, color=[COLOR_HOLD if h else COLOR_FLAT for h in held], alpha=0.75)
