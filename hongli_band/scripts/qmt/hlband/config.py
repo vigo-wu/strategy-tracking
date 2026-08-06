@@ -1,12 +1,12 @@
 # === hlband/config.py ===
 # ===================== 用户配置 =====================
-DRY_RUN = True
+DRY_RUN = False
 
 ACCOUNT_ID = "39953913"
 ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 
 TRADE_BUDGET = 50000.0
-CASH_RATIO = 0.15
+CASH_RATIO = 0.7
 
 # ---- 周线过滤 ----
 W_MA_FAST = 5
