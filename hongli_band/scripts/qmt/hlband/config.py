@@ -18,6 +18,9 @@ MACD_SLOW = 26
 MACD_SIGNAL = 9
 # 周线 (MA5-MA30)/MA30 >= 此值禁开
 W_BIAS_HARD = 0.08
+# 低位区：周线乖离 < 此值时，要求 MA30 连续 2 周向上，否则禁开
+W_BIAS_LOW = 0.02
+W_MA30_SLOPE_WEEKS = 2
 
 # ---- 日线买卖 ----
 D_MA_FAST = 5
@@ -35,12 +38,13 @@ VOL_PULLBACK_RATIO = 0.9
 VOL_DRY_N = 20
 VOL_DRY_RATIO = 0.70
 
-# 卖① BIAS5(%)；卖② 移动止盈；卖③ 时间成本
+# 卖① BIAS5(%)；卖② 移动止盈；卖③ 时间成本无条件平仓
 BIAS5_SELL = 6.0
 TRAIL_ACTIVATE = 0.03
 TRAIL_GIVEBACK = 0.015
-TIME_FLAT_BARS = 15
-TIME_FLAT_BAND = 0.01
+# 持仓交易日 > TIME_FORCE_BARS 且当前浮盈 < TIME_FORCE_RET_CAP → 无条件平仓
+TIME_FORCE_BARS = 20
+TIME_FORCE_RET_CAP = 0.025
 
 # 兜底：追高过滤、硬止损、周线空头强平
 CHASE_MAX_PCT = 0.05
@@ -67,7 +71,7 @@ PENDING_ORPHAN_SEC = 60
 STATE_FILE = r"D:\service\GJQMT\python\hlband_qmt_state.json"
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.5"
+STRATEGY_VER = "v1.6"
 # =======================================================
 
 _ORDER_FILLED = (56, 8)

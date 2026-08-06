@@ -28,6 +28,9 @@ MACD_SLOW = 26
 MACD_SIGNAL = 9
 # 周线 (MA5-MA30)/MA30 >= 此值禁开
 W_BIAS_HARD = 0.08
+# 低位区：周线乖离 < 此值时，要求 MA30 连续 2 周向上，否则禁开
+W_BIAS_LOW = 0.02
+W_MA30_SLOPE_WEEKS = 2
 
 # ---- 日线买卖 ----
 D_MA_FAST = 5
@@ -45,12 +48,13 @@ VOL_PULLBACK_RATIO = 0.9
 VOL_DRY_N = 20
 VOL_DRY_RATIO = 0.70
 
-# 卖① BIAS5(%)；卖② 移动止盈；卖③ 时间成本
+# 卖① BIAS5(%)；卖② 移动止盈；卖③ 时间成本无条件平仓
 BIAS5_SELL = 6.0
 TRAIL_ACTIVATE = 0.03
 TRAIL_GIVEBACK = 0.015
-TIME_FLAT_BARS = 15
-TIME_FLAT_BAND = 0.01
+# 持仓交易日 > TIME_FORCE_BARS 且当前浮盈 < TIME_FORCE_RET_CAP → 无条件平仓
+TIME_FORCE_BARS = 20
+TIME_FORCE_RET_CAP = 0.025
 
 # 兜底：追高过滤、硬止损、周线空头强平
 CHASE_MAX_PCT = 0.05
@@ -77,7 +81,7 @@ PENDING_ORPHAN_SEC = 60
 STATE_FILE = r"D:\service\GJQMT\python\hlband_qmt_state.json"
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.5"
+STRATEGY_VER = "v1.6"
 # =======================================================
 
 _ORDER_FILLED = (56, 8)
@@ -1494,11 +1498,18 @@ def _eval_weekly(closes_w):
     h1 = _last_valid(hist, i - 1)
     d1 = _last_valid(dif, i - 1)
     e1 = _last_valid(dea, i - 1)
+    m30_prev2 = _last_valid(ma30, i - 2) if i >= 2 else None
+    slope_up_n = False
+    if m30 is not None and m30_prev is not None and m30_prev2 is not None:
+        # 连续 2 周向上：ma30[t]>ma30[t-1] 且 ma30[t-1]>ma30[t-2]
+        slope_up_n = (m30 > m30_prev) and (m30_prev > m30_prev2)
     detail.update(
         {
             "ma5": m5,
             "ma10": m10,
             "ma30": m30,
+            "ma30_prev": m30_prev,
+            "ma30_slope_up2": slope_up_n,
             "dif": d0,
             "dea": e0,
             "hist": h0,
@@ -1611,6 +1622,19 @@ def _weekly_bias_guard(w_detail):
     return bias >= float(W_BIAS_HARD), bias
 
 
+def _weekly_low_slope_guard(w_detail):
+    """低位 (MA5-MA30)/MA30 < W_BIAS_LOW 且 MA30 未连续 2 周向上 → 禁开。"""
+    m5 = w_detail.get("ma5")
+    m30 = w_detail.get("ma30")
+    if m5 is None or m30 is None or m30 <= 0:
+        return False, None
+    bias = (float(m5) - float(m30)) / float(m30)
+    if bias >= float(W_BIAS_LOW):
+        return False, bias
+    slope_ok = bool(w_detail.get("ma30_slope_up2"))
+    return (not slope_ok), bias
+
+
 def _update_hold_peak(high_px, cost):
     """持仓期跟踪最高价（移动止盈用）。"""
     hi = float(high_px)
@@ -1637,13 +1661,13 @@ def _trail_stop_hit(price, cost):
     return (max_profit >= float(TRAIL_ACTIVATE)) and (giveback > float(TRAIL_GIVEBACK))
 
 
-def _time_flat_hit(ret_pct, hold_bars):
-    """持仓 >= TIME_FLAT_BARS 且盈亏落在 ±TIME_FLAT_BAND 内。"""
-    if hold_bars is None or int(hold_bars) < int(TIME_FLAT_BARS):
+def _time_force_hit(ret_pct, hold_bars):
+    """持仓 > TIME_FORCE_BARS 且当前浮盈 < TIME_FORCE_RET_CAP → 无条件时间平仓。"""
+    if hold_bars is None or int(hold_bars) <= int(TIME_FORCE_BARS):
         return False
     if ret_pct is None:
         return False
-    return abs(float(ret_pct)) <= float(TIME_FLAT_BAND)
+    return float(ret_pct) < float(TIME_FORCE_RET_CAP)
 
 
 def _bump_hold_bars(day):
@@ -1671,7 +1695,7 @@ def _pending_ready(pend, day, bar_tag, mode):
 _SELL_LABELS = {
     "bias5": "卖点1-5日乖离过大",
     "trail_stop": "卖点2-移动止盈回撤",
-    "time_flat": "卖点3-时间成本止损",
+    "time_force": "卖点3-时间成本无条件平仓",
     "weekly_bear": "周线转空强制清仓",
     "stop_loss": "硬止损",
 }
@@ -1680,6 +1704,7 @@ _BUY_LABELS = {
     "kdj_os": "买点2-MA20上KDJ超卖",
     "chase_skip": "追高过滤跳过",
     "w_bias_skip": "周线高位乖离禁开",
+    "w_slope_skip": "低位周线MA30未连升禁开",
     "vol_dry_skip": "无量阴跌禁开",
 }
 
@@ -1753,6 +1778,7 @@ def _handle(C):
 
     weekly_bull, weekly_bear, w_detail = _eval_weekly(closes_w)
     w_bias_block, w_bias = _weekly_bias_guard(w_detail)
+    w_slope_block, _w_bias_low = _weekly_low_slope_guard(w_detail)
     buy_ok, buy_reasons, b_detail = _eval_daily_buy(
         opens_d, highs_d, lows_d, closes_d, vols_d
     )
@@ -1760,6 +1786,11 @@ def _handle(C):
         buy_ok = False
         buy_reasons = ["w_bias_skip"] + [
             r for r in buy_reasons if r not in ("w_bias_skip",)
+        ]
+    elif w_slope_block:
+        buy_ok = False
+        buy_reasons = ["w_slope_skip"] + [
+            r for r in buy_reasons if r not in ("w_slope_skip",)
         ]
     sell_ok, sell_reasons, s_detail = _eval_daily_sell(
         opens_d, highs_d, lows_d, closes_d, vols_d
@@ -1793,18 +1824,20 @@ def _handle(C):
     if holding and cost > 0:
         ret_pct = (price - cost) / cost
 
-    time_flat_hit = False
-    if holding and (not stop_hit) and (not trail_hit) and _time_flat_hit(
+    time_force_hit = False
+    if holding and (not stop_hit) and (not trail_hit) and _time_force_hit(
         ret_pct, getattr(A, "hold_bars", 0)
     ):
-        time_flat_hit = True
-        sell_reasons = list(sell_reasons) + ["time_flat"]
+        time_force_hit = True
+        sell_reasons = list(sell_reasons) + ["time_force"]
         sell_ok = True
 
-    skip_codes = ("chase_skip", "w_bias_skip", "vol_dry_skip")
+    skip_codes = ("chase_skip", "w_bias_skip", "w_slope_skip", "vol_dry_skip")
     real_buys = [r for r in buy_reasons if r not in skip_codes]
-    # v1.5：周线仅用乖离门控，不再要求旧版 weekly_bull
-    buy_sig = bool((not w_bias_block) and buy_ok and real_buys)
+    # v1.6：高位乖离 + 低位 MA30 斜率门控；不再要求旧版 weekly_bull
+    buy_sig = bool(
+        (not w_bias_block) and (not w_slope_block) and buy_ok and real_buys
+    )
     force_empty = bool(weekly_bear)
     vol_dry_block = "vol_dry_skip" in buy_reasons
 
@@ -1883,14 +1916,16 @@ def _handle(C):
         and ("BUY" not in getattr(A, "acted", set()))
         and _pending_ready(pe_entry, day, tag, "day")
     ):
-        # 执行日再校验：周线空头 / 高位乖离 / 无量阴跌
-        if weekly_bear or w_bias_block or vol_dry_block:
+        # 执行日再校验：周线空头 / 高位乖离 / 低位斜率 / 无量阴跌
+        if weekly_bear or w_bias_block or w_slope_block or vol_dry_block:
             A.pending_entry = None
             _save_state()
             if weekly_bear:
                 why = "weekly_bear"
             elif w_bias_block:
                 why = "w_bias_skip"
+            elif w_slope_block:
+                why = "w_slope_skip"
             else:
                 why = "vol_dry_skip"
             print("%s pending_entry cancel %s" % (STRATEGY_NAME, why))
@@ -1924,7 +1959,7 @@ def _handle(C):
     # ---- 评估新信号（收盘确认 → 次日开盘）----
     if holding:
         cur_ex = getattr(A, "pending_exit", None)
-        if force_empty or sell_ok or stop_hit or trail_hit or time_flat_hit:
+        if force_empty or sell_ok or stop_hit or trail_hit or time_force_hit:
             if isinstance(cur_ex, dict):
                 return
             if force_empty:
@@ -1933,8 +1968,8 @@ def _handle(C):
                 reason = "stop_loss"
             elif trail_hit:
                 reason = "trail_stop"
-            elif time_flat_hit:
-                reason = "time_flat"
+            elif time_force_hit:
+                reason = "time_force"
             else:
                 reason = sell_reasons[0] if sell_reasons else "SELL"
             reasons = (["weekly_bear"] if force_empty else []) + list(sell_reasons)

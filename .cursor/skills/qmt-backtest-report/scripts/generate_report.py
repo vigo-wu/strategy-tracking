@@ -99,77 +99,105 @@ def parse_meta(seg: str, tag: str) -> dict:
 
 
 def parse_trades(seg: str, tag: str, stock: str) -> list[dict]:
-    """配对 BUY filled / SELL done，附带 signal/label/执行日。"""
+    """按 opened_at 配对 BUY filled / SELL done，再回填 signal/label/执行日。"""
+    tag_esc = re.escape(tag)
     stock_esc = re.escape(stock)
-    buys_sig = re.findall(
-        rf"BUY by signal=(\S+)\s+label=([^\s]+)\s+all=([^\s]+)\s+"
-        rf"signal_day=(\d+)\s+@open=([0-9.]+)\r?\n"
-        rf"{re.escape(tag)}\s+BUY BUY[^\n]*\r?\n"
-        rf"{re.escape(tag)}\s+BUY filled \{{'shares': (\d+), 'price': ([0-9.]+), "
-        rf"'cost': ([0-9.]+), 'opened_at': '(\d+)'\}}",
-        seg,
-    )
-    if not buys_sig:
-        # 无 label 的旧格式
-        fills = re.findall(
-            rf"BUY filled \{{'shares': (\d+), 'price': ([0-9.]+),[^}}]*'opened_at': '(\d+)'\}}",
-            seg,
-        )
-        buys_sig = [("-", "-", "-", f[2][:8], "0", f[0], f[1], "0", f[2]) for f in fills]
 
-    sells_sig = re.findall(
-        rf"SELL by signal=(\S+)\s+label=([^\s]+)\s+all=([^\s]+)\s+"
-        rf"signal_day=(\d+)\s+@open=([0-9.]+)\r?\n"
-        rf"{re.escape(tag)}\s+SELL (\S+)\s+{stock_esc}[^\n]*\r?\n"
-        rf"{re.escape(tag)}\s+SELL done (\S+)\s+last=\s*([0-9.]+)\s+"
-        rf"cleared \{{'shares': (\d+), 'price': ([0-9.]+)",
-        seg,
-    )
-    sell_exec = []
+    buy_meta = []
     for m in re.finditer(
-        rf"{re.escape(tag)}\s+(20\d{{6}})[^\n]*\n"
-        rf"{re.escape(tag)}\s+SELL by signal=\S+[^\n]*\n"
-        rf"{re.escape(tag)}\s+SELL (\S+)\s+{stock_esc}",
+        rf"{tag_esc}\s+BUY by signal=(\S+)\s+label=([^\s]+)\s+all=([^\s]+)\s+"
+        rf"signal_day=(\d+)\s+@open=([0-9.]+)",
         seg,
     ):
-        sell_exec.append(m.group(1))
-    if not sell_exec:
+        buy_meta.append(
+            {
+                "pos": m.start(),
+                "signal": m.group(1),
+                "label": m.group(2),
+                "signal_day": m.group(4),
+            }
+        )
+
+    sell_meta = []
+    for m in re.finditer(
+        rf"{tag_esc}\s+(20\d{{6}})\s+[^\n]*\r?\n"
+        rf"{tag_esc}\s+SELL by signal=(\S+)\s+label=([^\s]+)\s+all=([^\s]+)\s+"
+        rf"signal_day=(\d+)\s+@open=([0-9.]+)",
+        seg,
+    ):
+        sell_meta.append(
+            {
+                "pos": m.start(),
+                "exec_day": m.group(1),
+                "signal": m.group(2),
+                "label": m.group(3),
+                "signal_day": m.group(5),
+            }
+        )
+    if not sell_meta:
         for m in re.finditer(
-            rf"{re.escape(tag)}\s+(20\d{{6}})[^\n]*\n"
-            rf"{re.escape(tag)}\s+SELL (\S+)\s+{stock_esc}",
+            rf"{tag_esc}\s+(20\d{{6}})\s+[^\n]*\r?\n"
+            rf"{tag_esc}\s+SELL (\S+)\s+{stock_esc}",
             seg,
         ):
-            sell_exec.append(m.group(1))
-
-    if not sells_sig:
-        dones = re.findall(
-            rf"SELL done (\S+)\s+last=\s*([0-9.]+)\s+"
-            rf"cleared \{{'shares': (\d+), 'price': ([0-9.]+)",
-            seg,
-        )
-        sells_sig = [
-            (d[0], d[0], d[0], sell_exec[i] if i < len(sell_exec) else "", "0", d[0], d[0], d[1], d[2], d[3])
-            for i, d in enumerate(dones)
-        ]
-
-    trades = []
-    n = min(len(buys_sig), len(sells_sig))
-    for i in range(n):
-        b = buys_sig[i]
-        s = sells_sig[i]
-        b_price = float(b[6])
-        s_price = float(s[7]) if len(s) > 7 else float(s[1])
-        shares = int(b[5])
-        # normalize sell tuple shapes
-        if len(s) >= 10:
-            s_sig, s_lab, s_all, s_sday, s_open, _sord, _sdone, s_price, s_sh, _bp = (
-                s[0], s[1], s[2], s[3], s[4], s[5], s[6], float(s[7]), int(s[8]), float(s[9])
+            sell_meta.append(
+                {
+                    "pos": m.start(),
+                    "exec_day": m.group(1),
+                    "signal": m.group(2),
+                    "label": m.group(2),
+                    "signal_day": m.group(1),
+                }
             )
-        else:
-            s_sig, s_lab, s_sday, s_price = s[0], s[1], s[3], float(s[7]) if len(s) > 7 else float(s[1])
-            s_sh = shares
-        exec_day = sell_exec[i] if i < len(sell_exec) else s_sday
-        open_day = b[8][:8]
+
+    fills = []
+    for m in re.finditer(
+        rf"{tag_esc}\s+BUY filled \{{'shares': (\d+), 'price': ([0-9.]+), "
+        rf"'cost': ([0-9.]+), 'opened_at': '(\d+)'\}}",
+        seg,
+    ):
+        fills.append(
+            {
+                "pos": m.start(),
+                "shares": int(m.group(1)),
+                "price": float(m.group(2)),
+                "cost": float(m.group(3)),
+                "opened_at": m.group(4),
+            }
+        )
+
+    dones = []
+    for m in re.finditer(
+        rf"{tag_esc}\s+SELL done (\S+)\s+last=\s*([0-9.]+)\s+"
+        rf"cleared \{{'shares': (\d+), 'price': ([0-9.]+), 'cost': ([0-9.]+), "
+        rf"'opened_at': '(\d+)'\}}",
+        seg,
+    ):
+        dones.append(
+            {
+                "pos": m.start(),
+                "signal": m.group(1),
+                "price": float(m.group(2)),
+                "shares": int(m.group(3)),
+                "buy_price": float(m.group(4)),
+                "cost": float(m.group(5)),
+                "opened_at": m.group(6),
+            }
+        )
+
+    sell_by_open = {d["opened_at"]: d for d in dones}
+    trades = []
+    for i, b in enumerate(fills, 1):
+        s = sell_by_open.get(b["opened_at"])
+        if s is None:
+            continue
+        bm = next((x for x in reversed(buy_meta) if x["pos"] < b["pos"]), None)
+        sm = next((x for x in reversed(sell_meta) if x["pos"] < s["pos"]), None)
+        open_day = b["opened_at"][:8]
+        exec_day = (sm or {}).get("exec_day") or open_day
+        s_sig = (sm or {}).get("signal") or s["signal"]
+        s_lab = (sm or {}).get("label") or s_sig
+        s_sday = (sm or {}).get("signal_day") or exec_day
         hold_days = None
         try:
             hold_days = (
@@ -178,22 +206,25 @@ def parse_trades(seg: str, tag: str, stock: str) -> list[dict]:
             ).days
         except Exception:
             pass
+        b_price = float(b["price"])
+        s_price = float(s["price"])
+        shares = int(b["shares"])
         pnl = (s_price - b_price) * shares
         ret = (s_price - b_price) / b_price * 100.0 if b_price else 0.0
         trades.append(
             {
-                "i": i + 1,
-                "buy_signal": b[0],
-                "buy_label": b[1],
-                "buy_signal_day": b[3],
+                "i": i,
+                "buy_signal": (bm or {}).get("signal") or "-",
+                "buy_label": (bm or {}).get("label") or "-",
+                "buy_signal_day": (bm or {}).get("signal_day") or open_day,
                 "buy_open_day": open_day,
                 "buy_price": b_price,
                 "shares": shares,
-                "cost": float(b[7]) if b[7] not in ("0", 0) else round(b_price * shares, 2),
+                "cost": float(b["cost"]),
                 "sell_signal": s_sig,
                 "sell_label": s_lab,
                 "sell_signal_day": s_sday,
-                "sell_exec_day": str(exec_day)[:8] if exec_day else "",
+                "sell_exec_day": str(exec_day)[:8],
                 "sell_price": s_price,
                 "hold_calendar_days": hold_days,
                 "ret_pct": ret,
