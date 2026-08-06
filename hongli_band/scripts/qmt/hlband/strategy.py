@@ -17,12 +17,6 @@ def _bar_tag(dt):
     return dt.strftime("%Y%m%d%H%M%S")
 
 
-def _cross_up(a_prev, b_prev, a_now, b_now):
-    if None in (a_prev, b_prev, a_now, b_now):
-        return False
-    return (a_prev <= b_prev) and (a_now > b_now)
-
-
 def _cross_down(a_prev, b_prev, a_now, b_now):
     if None in (a_prev, b_prev, a_now, b_now):
         return False
@@ -90,35 +84,29 @@ def _eval_weekly(closes_w):
     return bull, bear, detail
 
 
-def _eval_daily_buy(opens, highs, lows, closes, volumes):
-    """买①缩量回踩 MA20/60；买② MA20 上方 KDJ 超卖。"""
+def _eval_daily_buy(closes, volumes):
+    """买点：缩量回踩 MA20/MA60。"""
     reasons = []
     ma20 = _sma(closes, D_MA_MID)
     ma60 = _sma(closes, D_MA_SLOW)
     vol10 = _sma(volumes, VOL_PULLBACK_N)
     vol20 = _sma(volumes, VOL_DRY_N)
-    kdj = _calc_kdj(highs, lows, closes)
-    if ma20 is None or ma60 is None or vol10 is None or vol20 is None or kdj is None:
+    if ma20 is None or ma60 is None or vol10 is None or vol20 is None:
         return False, reasons, {}
     i = len(closes) - 1
     if i < 2:
         return False, reasons, {}
     price = float(closes[i])
-    open_px = float(opens[i])
     vol = float(volumes[i])
     m20 = _last_valid(ma20, i)
     m60 = _last_valid(ma60, i)
     v10 = _last_valid(vol10, i)
     v20 = _last_valid(vol20, i)
-    _k, _d, j_arr = kdj
-    j0 = _last_valid(j_arr, i)
-    j1 = _last_valid(j_arr, i - 1)
     detail = {
         "ma20": m20,
         "ma60": m60,
         "vol10": v10,
         "vol20": v20,
-        "j": j0,
     }
 
     prev = float(closes[i - 1]) if closes[i - 1] else 0.0
@@ -136,42 +124,12 @@ def _eval_daily_buy(opens, highs, lows, closes, volumes):
     if dry_below:
         return False, ["vol_dry_skip"], detail
 
-    # 买①：回踩 MA20/MA60 + 量 < 10 日均量 * 0.9
+    # 缩量回踩 MA20/MA60 + 量 < 10 日均量 * 0.9
     near = _near_ma(price, m20) or _near_ma(price, m60)
     shrink = v10 is not None and v10 > 0 and vol < v10 * float(VOL_PULLBACK_RATIO)
     if near and shrink:
         reasons.append("pullback_vol")
 
-    # 买②：KDJ 超卖拐头，且收盘仍站上 MA20
-    if (
-        j0 is not None
-        and j1 is not None
-        and j1 < 0
-        and j0 > j1
-        and price > open_px
-        and m20 is not None
-        and price >= m20
-    ):
-        reasons.append("kdj_os")
-
-    return bool(reasons), reasons, detail
-
-
-def _eval_daily_sell(opens, highs, lows, closes, volumes):
-    """卖① BIAS5 过大（放量滞涨/MACD 卖点已按 v1.5 规则移除）。"""
-    reasons = []
-    ma5 = _sma(closes, D_MA_FAST)
-    if ma5 is None:
-        return False, reasons, {}
-    i = len(closes) - 1
-    if i < 1:
-        return False, reasons, {}
-    c = float(closes[i])
-    m5 = _last_valid(ma5, i)
-    bias = _bias_pct(c, m5)
-    detail = {"bias5": bias}
-    if bias is not None and bias >= float(BIAS5_SELL):
-        reasons.append("bias5")
     return bool(reasons), reasons, detail
 
 
@@ -285,15 +243,13 @@ def _pending_ready(pend, day, bar_tag, mode):
 
 
 _SELL_LABELS = {
-    "bias5": "卖点1-5日乖离过大",
-    "trail_stop": "卖点2-移动止盈回撤",
-    "time_force": "卖点3-时间成本智能平仓",
+    "trail_stop": "卖点1-移动止盈回撤",
+    "time_force": "卖点2-时间成本智能平仓",
     "weekly_bear": "周线转空强制清仓",
     "stop_loss": "硬止损",
 }
 _BUY_LABELS = {
     "pullback_vol": "买点1-缩量回踩强支撑",
-    "kdj_os": "买点2-MA20上KDJ超卖",
     "chase_skip": "追高过滤跳过",
     "w_bias_skip": "周线高位乖离禁开",
     "w_slope_skip": "低位周线MA30未连升禁开",
@@ -371,9 +327,7 @@ def _handle(C):
     weekly_bull, weekly_bear, w_detail = _eval_weekly(closes_w)
     w_bias_block, w_bias = _weekly_bias_guard(w_detail)
     w_slope_block, _w_bias_low = _weekly_low_slope_guard(w_detail)
-    buy_ok, buy_reasons, b_detail = _eval_daily_buy(
-        opens_d, highs_d, lows_d, closes_d, vols_d
-    )
+    buy_ok, buy_reasons, b_detail = _eval_daily_buy(closes_d, vols_d)
     if w_bias_block:
         buy_ok = False
         buy_reasons = ["w_bias_skip"] + [
@@ -384,9 +338,8 @@ def _handle(C):
         buy_reasons = ["w_slope_skip"] + [
             r for r in buy_reasons if r not in ("w_slope_skip",)
         ]
-    sell_ok, sell_reasons, s_detail = _eval_daily_sell(
-        opens_d, highs_d, lows_d, closes_d, vols_d
-    )
+    sell_ok = False
+    sell_reasons = []
 
     holding = _has_position() or (bt and _bt_held_vol() >= 100)
     cost = _pos_cost_price()

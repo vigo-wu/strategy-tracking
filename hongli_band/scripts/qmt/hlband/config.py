@@ -9,7 +9,7 @@ ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 # 单笔下单资金上限（元）；实际股数 = floor(预算/开盘价/100)*100
 TRADE_BUDGET = 50000.0
 # 可用现金占用比例（预留下单缓冲，避免满仓打满失败）
-CASH_RATIO = 0.7
+CASH_RATIO = 0.8
 
 # ---- 周线过滤（跨周期；主图仍是日线）----
 # 周线均线周期：快/中/生命线/慢线
@@ -34,16 +34,11 @@ W_BIAS_LOW = 0.02
 W_MA30_SLOPE_WEEKS = 2
 
 # ---- 日线买卖 ----
-# 日线均线：MA5→BIAS5 卖点；MA20→回踩/站上/无量阴跌；MA60→回踩支撑 + 时间成本线
-D_MA_FAST = 5
+# 日线均线：MA20→回踩/站上/无量阴跌；MA60→回踩支撑 + 时间成本线
 D_MA_MID = 20
 D_MA_SLOW = 60
-# KDJ 参数（买②超卖拐头用 J 值；N=RSV 窗口，M1/M2=平滑）
-KDJ_N = 9
-KDJ_M1 = 3
-KDJ_M2 = 3
 
-# 买① pullback_vol：缩量回踩强支撑
+# 买点 pullback_vol：缩量回踩强支撑
 #   价格贴近 MA20 或 MA60（|价-均线|/均线 <= 容差）且当日量 < N 日均量 * 比例
 MA_TOUCH_TOL = 0.025          # 0.025 = 距均线 ±2.5% 内算「回踩到位」
 VOL_PULLBACK_N = 10           # 缩量比较的均量窗口（日）
@@ -54,15 +49,12 @@ VOL_PULLBACK_RATIO = 0.9      # 量 < 均量*0.9 视为缩量
 VOL_DRY_N = 20
 VOL_DRY_RATIO = 0.70          # 0.70 = 量不足 20 日均量的 70%
 
-# 卖① bias5：日线 BIAS5(%) = (收盘-MA5)/MA5*100 >= 此值 → 过热卖出
-#   注意单位是「百分点」，6.0 表示偏离 MA5 达 6%
-BIAS5_SELL = 6.0
-# 卖② trail_stop：移动止盈
+# 卖① trail_stop：移动止盈
 #   持仓最高浮盈曾 >= ACTIVATE 后，自峰值回撤 > GIVEBACK → 平仓
 #   例：浮盈曾到 3%，再从峰值回落超过 1.5% 触发
 TRAIL_ACTIVATE = 0.03
 TRAIL_GIVEBACK = 0.015
-# 卖③ time_force：智能时间成本（防长期磨人）
+# 卖② time_force：智能时间成本（防长期磨人）
 #   持仓 bar 数 > BARS 后：收盘破日线 MA60 → 立即强制平仓；
 #   仍站上 MA60 → 豁免一次，再观察 GRACE_BARS 日，期满仍强制平仓
 TIME_FORCE_BARS = 30
@@ -103,7 +95,7 @@ PENDING_ORPHAN_SEC = 60
 STATE_FILE = r"D:\service\GJQMT\python\hlband_qmt_state.json"
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.7"
+STRATEGY_VER = "v1.8"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）

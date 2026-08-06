@@ -10,71 +10,94 @@ import numpy as np
 
 # === hlband/config.py ===
 # ===================== 用户配置 =====================
+# True=只打日志不下单；回测/实盘真下单前务必确认
 DRY_RUN = False
 
 ACCOUNT_ID = "39953913"
 ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 
+# 单笔下单资金上限（元）；实际股数 = floor(预算/开盘价/100)*100
 TRADE_BUDGET = 50000.0
-CASH_RATIO = 0.7
+# 可用现金占用比例（预留下单缓冲，避免满仓打满失败）
+CASH_RATIO = 0.8
 
-# ---- 周线过滤 ----
+# ---- 周线过滤（跨周期；主图仍是日线）----
+# 周线均线周期：快/中/生命线/慢线
+#   MA5 vs MA10 + MACD → 多头/空头判定
+#   MA30 → 生命线（收盘跌破即周线空，强制清仓）；乖离/斜率过滤也用它
+#   MA60 → 数据暖机长度参考（market 取数 need）
 W_MA_FAST = 5
 W_MA_MID = 10
 W_MA_LIFE = 30
 W_MA_SLOW = 60
+# 周线 MACD 参数（DIF/DEA/柱）；多头要求 DIF>0 且柱>0；死叉且双线在零轴下 → 空
 MACD_FAST = 12
 MACD_SLOW = 26
 MACD_SIGNAL = 9
-# 周线 (MA5-MA30)/MA30 >= 此值禁开
+# 高位禁开：周线乖离 (MA5-MA30)/MA30 >= 此值 → 不做新开（追高风险）
+# 例 0.08 = MA5 相对 MA30 高 8% 以上禁开
 W_BIAS_HARD = 0.08
-# 低位区：周线乖离 < 此值时，要求 MA30 连续 2 周向上，否则禁开
+# 低位斜率过滤：乖离 < 此值视为「低位区」；此时若 MA30 未连续向上则禁开
+# 例 0.02 = 乖离不足 2% 时要求生命线已拐头向上
 W_BIAS_LOW = 0.02
+# 低位区判定「连续向上」的周数：需 ma30[t]>ma30[t-1]>ma30[t-2]（即 2 周斜率）
 W_MA30_SLOPE_WEEKS = 2
 
 # ---- 日线买卖 ----
-D_MA_FAST = 5
+# 日线均线：MA20→回踩/站上/无量阴跌；MA60→回踩支撑 + 时间成本线
 D_MA_MID = 20
 D_MA_SLOW = 60
-KDJ_N = 9
-KDJ_M1 = 3
-KDJ_M2 = 3
 
-# 买①：回踩 MA20/MA60 容差；量 < 10 日均量 * 0.9
-MA_TOUCH_TOL = 0.025
-VOL_PULLBACK_N = 10
-VOL_PULLBACK_RATIO = 0.9
-# 买② 反面：跌破 MA20 且量 < 20 日均量 * 0.7 → 禁开
+# 买点 pullback_vol：缩量回踩强支撑
+#   价格贴近 MA20 或 MA60（|价-均线|/均线 <= 容差）且当日量 < N 日均量 * 比例
+MA_TOUCH_TOL = 0.025          # 0.025 = 距均线 ±2.5% 内算「回踩到位」
+VOL_PULLBACK_N = 10           # 缩量比较的均量窗口（日）
+VOL_PULLBACK_RATIO = 0.9      # 量 < 均量*0.9 视为缩量
+
+# 全局禁开 vol_dry_skip（无量阴跌不言底）：
+#   收盘跌破 MA20 且量 < N 日均量 * 比例 → 当天任何买点失效
 VOL_DRY_N = 20
-VOL_DRY_RATIO = 0.70
+VOL_DRY_RATIO = 0.70          # 0.70 = 量不足 20 日均量的 70%
 
-# 卖① BIAS5(%)；卖② 移动止盈；卖③ 智能时间成本（MA60 缓冲）
-BIAS5_SELL = 6.0
+# 卖① trail_stop：移动止盈
+#   持仓最高浮盈曾 >= ACTIVATE 后，自峰值回撤 > GIVEBACK → 平仓
+#   例：浮盈曾到 3%，再从峰值回落超过 1.5% 触发
 TRAIL_ACTIVATE = 0.03
 TRAIL_GIVEBACK = 0.015
-# 持仓 > TIME_FORCE_BARS：破日线 MA60 → 强制平仓；
-# 仍站上 MA60 → 豁免一次并再观察 TIME_FORCE_GRACE_BARS 日，期满强制平仓
+# 卖② time_force：智能时间成本（防长期磨人）
+#   持仓 bar 数 > BARS 后：收盘破日线 MA60 → 立即强制平仓；
+#   仍站上 MA60 → 豁免一次，再观察 GRACE_BARS 日，期满仍强制平仓
 TIME_FORCE_BARS = 30
 TIME_FORCE_GRACE_BARS = 5
 
-# 兜底：追高过滤、硬止损、周线空头强平
+# 兜底风控（优先级高）
+# chase_skip：当日涨幅 (收-昨收)/昨收 >= 此值 → 禁开（防追高）
 CHASE_MAX_PCT = 0.05
+# stop_loss：收盘价 <= 成本 * (1 - 此值) → 硬止损清仓
 STOP_LOSS = 0.08
+# （另有 weekly_bear：周线空头时强制清仓，无独立阈值，见周线 bull/bear 判定）
 
-# 主图日线；周线跨周期拉取
+# ---- 行情与运行 ----
+# 主图周期；周线另拉 1w 跨周期
 PERIOD = "1d"
+# 日/周 K 拉取根数（须覆盖最慢均线 + 指标暖机）
 OHLC_COUNT = 180
 WEEKLY_OHLC_COUNT = 120
 
+# 实盘只在最新一根 bar 决策；回测逐 bar 扫
 LIVE_ONLY_LAST_BAR = True
+# 实盘决策时窗（HHmmss）；窗外不交易
 DECISION_START = "093000"
 DECISION_END = "150000"
+# 实盘心跳日志间隔（秒）
 LIVE_HEARTBEAT_SEC = 60
 
+# download_history_data 最长回溯（自然日）；回测暖机用
 HIST_MAX_LOOKBACK_DAYS = 800
 DOWNLOAD_HIST_LIVE = False
 DOWNLOAD_HIST_BACKTEST = True
 
+# pending 委托超时/孤儿清理（秒）
 PENDING_TIMEOUT_SEC = 180
 PENDING_ORPHAN_SEC = 60
 
@@ -82,9 +105,10 @@ PENDING_ORPHAN_SEC = 60
 STATE_FILE = r"D:\service\GJQMT\python\hlband_qmt_state.json"
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.7"
+STRATEGY_VER = "v1.8"
 # =======================================================
 
+# 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
 _ORDER_FILLED = (56, 8)
 _ORDER_DEAD = (54, 57, 53, 5, 6, 9)
 
@@ -520,39 +544,6 @@ def _calc_macd(closes, fast=None, slow=None, signal=None):
     return dif, dea, hist
 
 
-def _calc_kdj(high, low, close, n=None, m1=None, m2=None):
-    """返回 (K, D, J) 或 None。"""
-    n = int(n if n is not None else KDJ_N)
-    m1 = int(m1 if m1 is not None else KDJ_M1)
-    m2 = int(m2 if m2 is not None else KDJ_M2)
-    c = np.asarray(close, dtype=float)
-    h = np.asarray(high, dtype=float)
-    l = np.asarray(low, dtype=float)
-    length = len(c)
-    if length < n + 2:
-        return None
-    rsv = np.zeros(length, dtype=float)
-    for i in range(length):
-        i0 = max(0, i - n + 1)
-        hn = np.max(h[i0 : i + 1])
-        ln = np.min(l[i0 : i + 1])
-        if hn <= ln:
-            rsv[i] = 50.0
-        else:
-            rsv[i] = (c[i] - ln) / (hn - ln) * 100.0
-    k = np.zeros(length, dtype=float)
-    d = np.zeros(length, dtype=float)
-    alpha_k = 1.0 / float(m1)
-    alpha_d = 1.0 / float(m2)
-    k[0] = rsv[0]
-    d[0] = k[0]
-    for i in range(1, length):
-        k[i] = (1.0 - alpha_k) * k[i - 1] + alpha_k * rsv[i]
-        d[i] = (1.0 - alpha_d) * d[i - 1] + alpha_d * k[i]
-    j = 3.0 * k - 2.0 * d
-    return k, d, j
-
-
 def _last_valid(arr, i=-1):
     if arr is None:
         return None
@@ -567,21 +558,6 @@ def _near_ma(price, ma, tol=None):
     if price is None or ma is None or ma <= 0:
         return False
     return abs(float(price) - float(ma)) / float(ma) <= tol
-
-
-def _bias_pct(price, ma):
-    if price is None or ma is None or ma <= 0:
-        return None
-    return (float(price) - float(ma)) / float(ma) * 100.0
-
-
-def _candle_metrics(o, h, l, c):
-    """返回 (body_ratio, upper_shadow_ratio, is_yang)。"""
-    o, h, l, c = float(o), float(h), float(l), float(c)
-    rng = max(h - l, 1e-8)
-    body = abs(c - o)
-    upper = h - max(o, c)
-    return body / rng, upper / rng, c > o
 
 # === qmt_common/market_util.py ===
 # 作用: 行情辅助：诊断、序列解析、补历史、心跳
@@ -808,13 +784,7 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
 
 
 def _get_ohlcv_1d(C, stock):
-    need = max(
-        int(D_MA_SLOW),
-        int(VOL_PULLBACK_N),
-        int(VOL_DRY_N),
-        int(MACD_SLOW) + int(MACD_SIGNAL),
-        int(KDJ_N),
-    ) + 10
+    need = max(int(D_MA_SLOW), int(VOL_PULLBACK_N), int(VOL_DRY_N)) + 10
     return _get_ohlcv_period(
         C, stock, getattr(A, "period", "1d"), int(OHLC_COUNT), need, "d1"
     )
@@ -1462,12 +1432,6 @@ def _bar_tag(dt):
     return dt.strftime("%Y%m%d%H%M%S")
 
 
-def _cross_up(a_prev, b_prev, a_now, b_now):
-    if None in (a_prev, b_prev, a_now, b_now):
-        return False
-    return (a_prev <= b_prev) and (a_now > b_now)
-
-
 def _cross_down(a_prev, b_prev, a_now, b_now):
     if None in (a_prev, b_prev, a_now, b_now):
         return False
@@ -1535,35 +1499,29 @@ def _eval_weekly(closes_w):
     return bull, bear, detail
 
 
-def _eval_daily_buy(opens, highs, lows, closes, volumes):
-    """买①缩量回踩 MA20/60；买② MA20 上方 KDJ 超卖。"""
+def _eval_daily_buy(closes, volumes):
+    """买点：缩量回踩 MA20/MA60。"""
     reasons = []
     ma20 = _sma(closes, D_MA_MID)
     ma60 = _sma(closes, D_MA_SLOW)
     vol10 = _sma(volumes, VOL_PULLBACK_N)
     vol20 = _sma(volumes, VOL_DRY_N)
-    kdj = _calc_kdj(highs, lows, closes)
-    if ma20 is None or ma60 is None or vol10 is None or vol20 is None or kdj is None:
+    if ma20 is None or ma60 is None or vol10 is None or vol20 is None:
         return False, reasons, {}
     i = len(closes) - 1
     if i < 2:
         return False, reasons, {}
     price = float(closes[i])
-    open_px = float(opens[i])
     vol = float(volumes[i])
     m20 = _last_valid(ma20, i)
     m60 = _last_valid(ma60, i)
     v10 = _last_valid(vol10, i)
     v20 = _last_valid(vol20, i)
-    _k, _d, j_arr = kdj
-    j0 = _last_valid(j_arr, i)
-    j1 = _last_valid(j_arr, i - 1)
     detail = {
         "ma20": m20,
         "ma60": m60,
         "vol10": v10,
         "vol20": v20,
-        "j": j0,
     }
 
     prev = float(closes[i - 1]) if closes[i - 1] else 0.0
@@ -1581,42 +1539,12 @@ def _eval_daily_buy(opens, highs, lows, closes, volumes):
     if dry_below:
         return False, ["vol_dry_skip"], detail
 
-    # 买①：回踩 MA20/MA60 + 量 < 10 日均量 * 0.9
+    # 缩量回踩 MA20/MA60 + 量 < 10 日均量 * 0.9
     near = _near_ma(price, m20) or _near_ma(price, m60)
     shrink = v10 is not None and v10 > 0 and vol < v10 * float(VOL_PULLBACK_RATIO)
     if near and shrink:
         reasons.append("pullback_vol")
 
-    # 买②：KDJ 超卖拐头，且收盘仍站上 MA20
-    if (
-        j0 is not None
-        and j1 is not None
-        and j1 < 0
-        and j0 > j1
-        and price > open_px
-        and m20 is not None
-        and price >= m20
-    ):
-        reasons.append("kdj_os")
-
-    return bool(reasons), reasons, detail
-
-
-def _eval_daily_sell(opens, highs, lows, closes, volumes):
-    """卖① BIAS5 过大（放量滞涨/MACD 卖点已按 v1.5 规则移除）。"""
-    reasons = []
-    ma5 = _sma(closes, D_MA_FAST)
-    if ma5 is None:
-        return False, reasons, {}
-    i = len(closes) - 1
-    if i < 1:
-        return False, reasons, {}
-    c = float(closes[i])
-    m5 = _last_valid(ma5, i)
-    bias = _bias_pct(c, m5)
-    detail = {"bias5": bias}
-    if bias is not None and bias >= float(BIAS5_SELL):
-        reasons.append("bias5")
     return bool(reasons), reasons, detail
 
 
@@ -1730,15 +1658,13 @@ def _pending_ready(pend, day, bar_tag, mode):
 
 
 _SELL_LABELS = {
-    "bias5": "卖点1-5日乖离过大",
-    "trail_stop": "卖点2-移动止盈回撤",
-    "time_force": "卖点3-时间成本智能平仓",
+    "trail_stop": "卖点1-移动止盈回撤",
+    "time_force": "卖点2-时间成本智能平仓",
     "weekly_bear": "周线转空强制清仓",
     "stop_loss": "硬止损",
 }
 _BUY_LABELS = {
     "pullback_vol": "买点1-缩量回踩强支撑",
-    "kdj_os": "买点2-MA20上KDJ超卖",
     "chase_skip": "追高过滤跳过",
     "w_bias_skip": "周线高位乖离禁开",
     "w_slope_skip": "低位周线MA30未连升禁开",
@@ -1816,9 +1742,7 @@ def _handle(C):
     weekly_bull, weekly_bear, w_detail = _eval_weekly(closes_w)
     w_bias_block, w_bias = _weekly_bias_guard(w_detail)
     w_slope_block, _w_bias_low = _weekly_low_slope_guard(w_detail)
-    buy_ok, buy_reasons, b_detail = _eval_daily_buy(
-        opens_d, highs_d, lows_d, closes_d, vols_d
-    )
+    buy_ok, buy_reasons, b_detail = _eval_daily_buy(closes_d, vols_d)
     if w_bias_block:
         buy_ok = False
         buy_reasons = ["w_bias_skip"] + [
@@ -1829,9 +1753,8 @@ def _handle(C):
         buy_reasons = ["w_slope_skip"] + [
             r for r in buy_reasons if r not in ("w_slope_skip",)
         ]
-    sell_ok, sell_reasons, s_detail = _eval_daily_sell(
-        opens_d, highs_d, lows_d, closes_d, vols_d
-    )
+    sell_ok = False
+    sell_reasons = []
 
     holding = _has_position() or (bt and _bt_held_vol() >= 100)
     cost = _pos_cost_price()
@@ -2215,9 +2138,7 @@ def _init_impl(C):
         "wMA=",
         "%d/%d/%d" % (W_MA_FAST, W_MA_MID, W_MA_LIFE),
         "dMA=",
-        "%d/%d/%d" % (D_MA_FAST, D_MA_MID, D_MA_SLOW),
-        "bias5>=",
-        BIAS5_SELL,
+        "%d/%d" % (D_MA_MID, D_MA_SLOW),
         "stop=",
         STOP_LOSS,
         "chase<",
