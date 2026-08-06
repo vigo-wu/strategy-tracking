@@ -19,6 +19,7 @@ def _state_extra_load(raw):
         A.time_force_grace_until = None if gu is None else int(gu)
     except Exception:
         A.time_force_grace_until = None
+    A._confirmed_eval_day = str(raw.get("confirmed_eval_day", "") or "")
 
 
 def _state_extra_save(data):
@@ -30,3 +31,4 @@ def _state_extra_save(data):
     data["hold_count_day"] = str(getattr(A, "_hold_count_day", "") or "")
     gu = getattr(A, "time_force_grace_until", None)
     data["time_force_grace_until"] = None if gu is None else int(gu)
+    data["confirmed_eval_day"] = str(getattr(A, "_confirmed_eval_day", "") or "")

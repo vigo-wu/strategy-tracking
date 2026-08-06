@@ -76,9 +76,16 @@ WEEKLY_OHLC_COUNT = 120
 
 # 实盘只在最新一根 bar 决策；回测逐 bar 扫
 LIVE_ONLY_LAST_BAR = True
-# 实盘决策时窗（HHmmss）；窗外不交易
+# 实盘：盘中(DECISION_*)只执行 pending；收盘后(SIGNAL_CONFIRM_*)用当日完整日/周 K 确认信号并挂起 → 次日开盘成交
+# 若收盘窗口未跑到，次日开盘用已确认昨 K 兜底挂起（同日可成交）
+LIVE_CLOSE_CONFIRM = True
+# 实盘决策时窗（HHmmss）：执行挂起买卖
 DECISION_START = "093000"
 DECISION_END = "150000"
+# 收盘确认信号时窗（须与 DECISION 衔接；含尾盘近似收盘 + 盘后）
+# 日线盘后常无新 tick，故从 14:55 起用当日 K 确认；16:00 前仍可确认
+SIGNAL_CONFIRM_START = "145500"
+SIGNAL_CONFIRM_END = "160000"
 # 实盘心跳日志间隔（秒）
 LIVE_HEARTBEAT_SEC = 60
 
@@ -95,7 +102,7 @@ PENDING_ORPHAN_SEC = 60
 STATE_FILE = r"D:\service\GJQMT\python\hlband_qmt_state.json"
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.8"
+STRATEGY_VER = "v1.10"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）

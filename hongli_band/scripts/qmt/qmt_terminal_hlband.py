@@ -86,9 +86,16 @@ WEEKLY_OHLC_COUNT = 120
 
 # 实盘只在最新一根 bar 决策；回测逐 bar 扫
 LIVE_ONLY_LAST_BAR = True
-# 实盘决策时窗（HHmmss）；窗外不交易
+# 实盘：盘中(DECISION_*)只执行 pending；收盘后(SIGNAL_CONFIRM_*)用当日完整日/周 K 确认信号并挂起 → 次日开盘成交
+# 若收盘窗口未跑到，次日开盘用已确认昨 K 兜底挂起（同日可成交）
+LIVE_CLOSE_CONFIRM = True
+# 实盘决策时窗（HHmmss）：执行挂起买卖
 DECISION_START = "093000"
 DECISION_END = "150000"
+# 收盘确认信号时窗（须与 DECISION 衔接；含尾盘近似收盘 + 盘后）
+# 日线盘后常无新 tick，故从 14:55 起用当日 K 确认；16:00 前仍可确认
+SIGNAL_CONFIRM_START = "145500"
+SIGNAL_CONFIRM_END = "160000"
 # 实盘心跳日志间隔（秒）
 LIVE_HEARTBEAT_SEC = 60
 
@@ -105,7 +112,7 @@ PENDING_ORPHAN_SEC = 60
 STATE_FILE = r"D:\service\GJQMT\python\hlband_qmt_state.json"
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.8"
+STRATEGY_VER = "v1.10"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
@@ -285,6 +292,7 @@ def _state_extra_load(raw):
         A.time_force_grace_until = None if gu is None else int(gu)
     except Exception:
         A.time_force_grace_until = None
+    A._confirmed_eval_day = str(raw.get("confirmed_eval_day", "") or "")
 
 
 def _state_extra_save(data):
@@ -296,6 +304,7 @@ def _state_extra_save(data):
     data["hold_count_day"] = str(getattr(A, "_hold_count_day", "") or "")
     gu = getattr(A, "time_force_grace_until", None)
     data["time_force_grace_until"] = None if gu is None else int(gu)
+    data["confirmed_eval_day"] = str(getattr(A, "_confirmed_eval_day", "") or "")
 
 # === qmt_common/single/state_io.py ===
 # 作用: 单仓 JSON 状态读写（回测不落盘）
@@ -1643,6 +1652,37 @@ def _bump_hold_bars(day):
     A._hold_count_day = day
 
 
+def _drop_forming_bar(seq):
+    """去掉正在形成的最新一根（实盘未收盘 K）。"""
+    if seq is None:
+        return None
+    if len(seq) < 2:
+        return list(seq) if seq else seq
+    return list(seq[:-1])
+
+
+def _live_close_confirm_on():
+    return (not getattr(A, "is_backtest", False)) and bool(
+        globals().get("LIVE_CLOSE_CONFIRM", True)
+    )
+
+
+def _live_signal_day(today):
+    """开盘兜底挂起用的信号日：墙钟昨日历日，保证 signal_day < 今日可成交。"""
+    try:
+        d = datetime.datetime.strptime(str(today), "%Y%m%d") - datetime.timedelta(
+            days=1
+        )
+        return d.strftime("%Y%m%d")
+    except Exception:
+        return str(today)
+
+
+def _mark_confirmed_eval(day):
+    A._confirmed_eval_day = str(day)
+    _save_state()
+
+
 def _pending_ready(pend, day, bar_tag, mode):
     if not isinstance(pend, dict):
         return False
@@ -1694,22 +1734,37 @@ def _handle(C):
     day = now.strftime("%Y%m%d")
     tag = _bar_tag(bar_dt)
     hhmm = _bar_hhmm(bar_dt if bt else now)
+    live_cc = _live_close_confirm_on()
+    conf_start = str(globals().get("SIGNAL_CONFIRM_START", "150000") or "150000")
+    conf_end = str(globals().get("SIGNAL_CONFIRM_END", "160000") or "160000")
+    in_exec = (not bt) and (DECISION_START <= now_s < conf_start)
+    in_confirm = (not bt) and (conf_start <= now_s <= conf_end)
+    # 收盘确认：用当日完整 K；开盘兜底：用昨收（去未收盘根）
+    use_prev_bar = False
+    phase = "bt" if bt else "live"
 
     if not bt:
         if getattr(A, "pending", None):
             if _process_pending(C, now):
                 _live_heartbeat("pending")
                 return
-        if now_s < DECISION_START or now_s > DECISION_END:
-            _live_heartbeat("outside_session")
-            return
+        if live_cc:
+            if (not in_exec) and (not in_confirm):
+                _live_heartbeat("outside_session")
+                return
+            phase = "confirm" if in_confirm else "exec"
+        else:
+            if now_s < DECISION_START or now_s > DECISION_END:
+                _live_heartbeat("outside_session")
+                return
+            phase = "session"
         if LIVE_ONLY_LAST_BAR:
             try:
                 if hasattr(C, "is_last_bar") and (not C.is_last_bar()):
                     return
             except Exception:
                 pass
-        _live_heartbeat("in_session")
+        _live_heartbeat(phase)
     else:
         _bt_roll_t1(day)
         _bt_recover_position(now=now)
@@ -1733,16 +1788,44 @@ def _handle(C):
         return
     _ow, _hw, _lw, closes_w, _vw = ohlcv_w
 
-    price = float(closes_d[-1])
     open_px = float(opens_d[-1])
-    high_px = float(highs_d[-1])
-    if bt:
-        _bt_recover_position(now=now, last=price)
+    # 开盘兜底：仅当完全没有确认记录且无挂起（收盘窗口未跑到）
+    need_fallback = (
+        live_cc
+        and phase == "exec"
+        and (not str(getattr(A, "_confirmed_eval_day", "") or ""))
+        and (not isinstance(getattr(A, "pending_entry", None), dict))
+        and (not isinstance(getattr(A, "pending_exit", None), dict))
+    )
+    if live_cc and phase == "confirm":
+        highs_s, closes_s, vols_s = highs_d, closes_d, vols_d
+        closes_ws = closes_w
+        sig_day = day
+    elif need_fallback:
+        use_prev_bar = True
+        highs_s = _drop_forming_bar(highs_d)
+        closes_s = _drop_forming_bar(closes_d)
+        vols_s = _drop_forming_bar(vols_d)
+        closes_ws = _drop_forming_bar(closes_w)
+        if closes_s is None or len(closes_s) < 3 or closes_ws is None or len(closes_ws) < 3:
+            _live_heartbeat("ohlcv_confirm_short")
+            return
+        sig_day = _live_signal_day(day)
+    else:
+        # 回测 / 盘中执行：信号评估用完整序列（盘中不新挂，仅供撤单校验与日志）
+        highs_s, closes_s, vols_s = highs_d, closes_d, vols_d
+        closes_ws = closes_w
+        sig_day = day
 
-    weekly_bull, weekly_bear, w_detail = _eval_weekly(closes_w)
+    price = float(closes_s[-1])
+    high_px = float(highs_s[-1])
+    if bt:
+        _bt_recover_position(now=now, last=float(closes_d[-1]))
+
+    weekly_bull, weekly_bear, w_detail = _eval_weekly(closes_ws)
     w_bias_block, w_bias = _weekly_bias_guard(w_detail)
     w_slope_block, _w_bias_low = _weekly_low_slope_guard(w_detail)
-    buy_ok, buy_reasons, b_detail = _eval_daily_buy(closes_d, vols_d)
+    buy_ok, buy_reasons, b_detail = _eval_daily_buy(closes_s, vols_s)
     if w_bias_block:
         buy_ok = False
         buy_reasons = ["w_bias_skip"] + [
@@ -1789,7 +1872,7 @@ def _handle(C):
     time_force_hit = False
     grace_before = getattr(A, "time_force_grace_until", None)
     if holding and (not stop_hit) and (not trail_hit) and _time_force_hit(
-        price, closes_d, getattr(A, "hold_bars", 0)
+        price, closes_s, getattr(A, "hold_bars", 0)
     ):
         time_force_hit = True
         sell_reasons = list(sell_reasons) + ["time_force"]
@@ -1803,7 +1886,6 @@ def _handle(C):
 
     skip_codes = ("chase_skip", "w_bias_skip", "w_slope_skip", "vol_dry_skip")
     real_buys = [r for r in buy_reasons if r not in skip_codes]
-    # v1.6：高位乖离 + 低位 MA30 斜率门控；不再要求旧版 weekly_bull
     buy_sig = bool(
         (not w_bias_block) and (not w_slope_block) and buy_ok and real_buys
     )
@@ -1823,14 +1905,17 @@ def _handle(C):
             "%s" % STRATEGY_NAME,
             day,
             hhmm,
-            "n1d=%d n1w=%d close=%.4f "
+            "n1d=%d n1w=%d close=%.4f sig_day=%s phase=%s prev=%s "
             "w_bull=%s w_bear=%s w_ma5=%s w_ma30=%s w_hist=%s "
             "buy=%s buyR=%s sell=%s sellR=%s "
             "hold=%s ret=%s pe=%s px=%s bt_held=%s avail=%s"
             % (
-                len(closes_d),
-                len(closes_w),
+                len(closes_s),
+                len(closes_ws),
                 price,
+                sig_day,
+                phase,
+                use_prev_bar,
                 weekly_bull,
                 weekly_bear,
                 None if w_detail.get("ma5") is None else round(w_detail["ma5"], 4),
@@ -1849,7 +1934,7 @@ def _handle(C):
             ),
         )
 
-    # ---- 先执行挂起的卖/买（本根开盘）----
+    # ---- 先执行挂起的卖/买（开盘时段）----
     pe_exit = getattr(A, "pending_exit", None)
     if holding and isinstance(pe_exit, dict):
         if _pending_ready(pe_exit, day, tag, "day"):
@@ -1867,7 +1952,6 @@ def _handle(C):
                 )
             )
             ok = _order_sell(C, reason, open_px, now)
-            # 成交或提交后清掉信号挂起，避免 pe/px 粘滞
             A.pending_exit = None
             A.pending_entry = None
             _clear_hold_meta()
@@ -1883,7 +1967,6 @@ def _handle(C):
         and ("BUY" not in getattr(A, "acted", set()))
         and _pending_ready(pe_entry, day, tag, "day")
     ):
-        # 执行日再校验：周线空头 / 高位乖离 / 低位斜率 / 无量阴跌
         if weekly_bear or w_bias_block or w_slope_block or vol_dry_block:
             A.pending_entry = None
             _save_state()
@@ -1924,11 +2007,25 @@ def _handle(C):
             print("%s pending_entry cleared after buy fail/skip" % STRATEGY_NAME)
         return
 
-    # ---- 评估新信号（收盘确认 → 次日开盘）----
+    # ---- 新信号：回测当根；实盘仅收盘确认或开盘兜底 ----
+    allow_new = True
+    if live_cc:
+        if phase == "confirm":
+            if getattr(A, "_confirmed_eval_day", "") == day:
+                allow_new = False
+        elif need_fallback:
+            allow_new = True
+        else:
+            allow_new = False
+    if not allow_new:
+        return
+
     if holding:
         cur_ex = getattr(A, "pending_exit", None)
         if force_empty or sell_ok or stop_hit or trail_hit or time_force_hit:
             if isinstance(cur_ex, dict):
+                if live_cc:
+                    _mark_confirmed_eval(day)
                 return
             if force_empty:
                 reason = "weekly_bear"
@@ -1941,7 +2038,6 @@ def _handle(C):
             else:
                 reason = sell_reasons[0] if sell_reasons else "SELL"
             reasons = (["weekly_bear"] if force_empty else []) + list(sell_reasons)
-            # 去重保序
             seen = set()
             uniq = []
             for r in reasons:
@@ -1951,49 +2047,61 @@ def _handle(C):
             A.pending_exit = {
                 "mode": "day",
                 "reason": reason,
-                "signal_day": day,
+                "signal_day": sig_day,
                 "signal_tag": tag,
                 "close": price,
                 "reasons": uniq,
             }
             A.pending_entry = None
+            if live_cc:
+                A._confirmed_eval_day = day
             _save_state()
             print(
-                "%s pending_exit set signal=%s label=%s all=%s day=%s close=%.4f"
+                "%s pending_exit set signal=%s label=%s all=%s day=%s close=%.4f phase=%s"
                 % (
                     STRATEGY_NAME,
                     reason,
                     _reason_label(reason, "sell"),
                     _format_reasons(uniq, "sell"),
-                    day,
+                    sig_day,
                     price,
+                    phase,
                 )
             )
+        elif live_cc:
+            _mark_confirmed_eval(day)
         return
 
     if buy_sig and ("BUY" not in getattr(A, "acted", set())):
         if isinstance(getattr(A, "pending_entry", None), dict):
+            if live_cc:
+                _mark_confirmed_eval(day)
             return
         A.pending_entry = {
-            "signal_day": day,
+            "signal_day": sig_day,
             "signal_tag": tag,
             "close": price,
             "reasons": list(real_buys),
         }
         A.pending_exit = None
+        if live_cc:
+            A._confirmed_eval_day = day
         _save_state()
         primary = real_buys[0] if real_buys else "entry"
         print(
-            "%s pending_entry set signal=%s label=%s all=%s day=%s close=%.4f"
+            "%s pending_entry set signal=%s label=%s all=%s day=%s close=%.4f phase=%s"
             % (
                 STRATEGY_NAME,
                 primary,
                 _reason_label(primary, "buy"),
                 _format_reasons(real_buys, "buy"),
-                day,
+                sig_day,
                 price,
+                phase,
             )
         )
+    elif live_cc:
+        _mark_confirmed_eval(day)
 
 # === hlband/runtime.py ===
 def init(C):
@@ -2064,6 +2172,7 @@ def _init_impl(C):
             A.hold_bars = 0
             A._hold_count_day = ""
             A.time_force_grace_until = None
+            A._confirmed_eval_day = ""
             A.bt_held = 0
             A.bt_locked = 0
             A.bt_lock_day = ""
@@ -2090,6 +2199,8 @@ def _init_impl(C):
                 A._hold_count_day = ""
             if not hasattr(A, "time_force_grace_until"):
                 A.time_force_grace_until = None
+            if not hasattr(A, "_confirmed_eval_day"):
+                A._confirmed_eval_day = ""
             _bt_recover_position()
             print(
                 "%s backtest re-init preserve barpos=" % STRATEGY_NAME,
@@ -2116,6 +2227,8 @@ def _init_impl(C):
             A._hold_count_day = ""
         if not hasattr(A, "time_force_grace_until"):
             A.time_force_grace_until = None
+        if not hasattr(A, "_confirmed_eval_day"):
+            A._confirmed_eval_day = ""
 
     try:
         C.set_universe([A.stock])
