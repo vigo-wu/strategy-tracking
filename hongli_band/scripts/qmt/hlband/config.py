@@ -8,7 +8,7 @@ ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 TRADE_BUDGET = 50000.0
 CASH_RATIO = 0.15
 
-# ---- 周线方向 ----
+# ---- 周线过滤 ----
 W_MA_FAST = 5
 W_MA_MID = 10
 W_MA_LIFE = 30
@@ -16,6 +16,8 @@ W_MA_SLOW = 60
 MACD_FAST = 12
 MACD_SLOW = 26
 MACD_SIGNAL = 9
+# 周线 (MA5-MA30)/MA30 >= 此值禁开
+W_BIAS_HARD = 0.08
 
 # ---- 日线买卖 ----
 D_MA_FAST = 5
@@ -25,19 +27,22 @@ KDJ_N = 9
 KDJ_M1 = 3
 KDJ_M2 = 3
 
-# 缩量回踩：价距均线容差、量相对 20 日均量
+# 买①：回踩 MA20/MA60 容差；量 < 10 日均量 * 0.9
 MA_TOUCH_TOL = 0.025
-VOL_SHRINK_RATIO = 0.65
-VOL_MA_N = 20
+VOL_PULLBACK_N = 10
+VOL_PULLBACK_RATIO = 0.9
+# 买② 反面：跌破 MA20 且量 < 20 日均量 * 0.7 → 禁开
+VOL_DRY_N = 20
+VOL_DRY_RATIO = 0.70
 
-# 卖点：5 日乖离率(%)、放量倍数、新高窗口、上影/十字星
+# 卖① BIAS5(%)；卖② 移动止盈；卖③ 时间成本
 BIAS5_SELL = 6.0
-VOL_SPIKE_RATIO = 1.8
-HIGH_LOOKBACK = 20
-UPPER_SHADOW_RATIO = 0.45
-DOJI_BODY_RATIO = 0.12
+TRAIL_ACTIVATE = 0.03
+TRAIL_GIVEBACK = 0.015
+TIME_FLAT_BARS = 15
+TIME_FLAT_BAND = 0.01
 
-# 风控：当日涨幅过大不追
+# 兜底：追高过滤、硬止损、周线空头强平
 CHASE_MAX_PCT = 0.05
 STOP_LOSS = 0.08
 
@@ -62,7 +67,7 @@ PENDING_ORPHAN_SEC = 60
 STATE_FILE = r"D:\service\GJQMT\python\hlband_qmt_state.json"
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.2"
+STRATEGY_VER = "v1.5"
 # =======================================================
 
 _ORDER_FILLED = (56, 8)

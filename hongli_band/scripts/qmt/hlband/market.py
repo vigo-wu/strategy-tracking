@@ -108,7 +108,13 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
 
 
 def _get_ohlcv_1d(C, stock):
-    need = max(int(D_MA_SLOW), int(VOL_MA_N), int(MACD_SLOW) + int(MACD_SIGNAL), int(KDJ_N)) + 10
+    need = max(
+        int(D_MA_SLOW),
+        int(VOL_PULLBACK_N),
+        int(VOL_DRY_N),
+        int(MACD_SLOW) + int(MACD_SIGNAL),
+        int(KDJ_N),
+    ) + 10
     return _get_ohlcv_period(
         C, stock, getattr(A, "period", "1d"), int(OHLC_COUNT), need, "d1"
     )

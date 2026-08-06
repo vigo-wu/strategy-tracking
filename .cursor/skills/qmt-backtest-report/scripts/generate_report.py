@@ -402,12 +402,32 @@ def plot_kline(
         sd = nearest_bar(df, _ts(t["sell_exec_day"] or t["sell_signal_day"]))
         if bd is not None and bd in date_to_i:
             i = date_to_i[bd]
-            ax.scatter(i, t["buy_price"], marker="^", s=110, c=COLOR_BUY_MARK, zorder=5, edgecolors="white", linewidths=0.5)
-            ax.annotate("B", xy=(i, t["buy_price"]), xytext=(0, 12), textcoords="offset points", ha="center", color=COLOR_BUY_MARK, fontsize=8, fontweight="bold")
+            ax.annotate(
+                "B",
+                xy=(i, t["buy_price"]),
+                xytext=(0, 10),
+                textcoords="offset points",
+                ha="center",
+                va="bottom",
+                color=COLOR_BUY_MARK,
+                fontsize=9,
+                fontweight="bold",
+                zorder=5,
+            )
         if sd is not None and sd in date_to_i:
             i = date_to_i[sd]
-            ax.scatter(i, t["sell_price"], marker="v", s=110, c=COLOR_SELL_MARK, zorder=5, edgecolors="white", linewidths=0.5)
-            ax.annotate(str(t["sell_signal"])[:10], xy=(i, t["sell_price"]), xytext=(0, -16), textcoords="offset points", ha="center", color=COLOR_SELL_MARK, fontsize=7)
+            ax.annotate(
+                "S",
+                xy=(i, t["sell_price"]),
+                xytext=(0, -10),
+                textcoords="offset points",
+                ha="center",
+                va="top",
+                color=COLOR_SELL_MARK,
+                fontsize=9,
+                fontweight="bold",
+                zorder=5,
+            )
 
     x = np.arange(len(df))
     axv.bar(x, df["Volume"].values, width=0.7, color=[COLOR_HOLD if h else COLOR_FLAT for h in held], alpha=0.75)
@@ -423,8 +443,26 @@ def plot_kline(
         handles=[
             mpatches.Patch(color=COLOR_HOLD, label="持仓区间 K 线"),
             mpatches.Patch(color=COLOR_FLAT, label="空仓区间 K 线"),
-            Line2D([0], [0], marker="^", color="w", markerfacecolor=COLOR_BUY_MARK, markersize=10, label="买入"),
-            Line2D([0], [0], marker="v", color="w", markerfacecolor=COLOR_SELL_MARK, markersize=10, label="卖出"),
+            Line2D(
+                [0],
+                [0],
+                marker="$B$",
+                color=COLOR_BUY_MARK,
+                markerfacecolor=COLOR_BUY_MARK,
+                markersize=12,
+                linestyle="None",
+                label="B 买入",
+            ),
+            Line2D(
+                [0],
+                [0],
+                marker="$S$",
+                color=COLOR_SELL_MARK,
+                markerfacecolor=COLOR_SELL_MARK,
+                markersize=12,
+                linestyle="None",
+                label="S 卖出",
+            ),
         ],
         loc="upper left",
         fontsize=8,

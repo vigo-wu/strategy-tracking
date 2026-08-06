@@ -18,7 +18,7 @@ ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 TRADE_BUDGET = 50000.0
 CASH_RATIO = 0.15
 
-# ---- 周线方向 ----
+# ---- 周线过滤 ----
 W_MA_FAST = 5
 W_MA_MID = 10
 W_MA_LIFE = 30
@@ -26,6 +26,8 @@ W_MA_SLOW = 60
 MACD_FAST = 12
 MACD_SLOW = 26
 MACD_SIGNAL = 9
+# 周线 (MA5-MA30)/MA30 >= 此值禁开
+W_BIAS_HARD = 0.08
 
 # ---- 日线买卖 ----
 D_MA_FAST = 5
@@ -35,19 +37,22 @@ KDJ_N = 9
 KDJ_M1 = 3
 KDJ_M2 = 3
 
-# 缩量回踩：价距均线容差、量相对 20 日均量
+# 买①：回踩 MA20/MA60 容差；量 < 10 日均量 * 0.9
 MA_TOUCH_TOL = 0.025
-VOL_SHRINK_RATIO = 0.65
-VOL_MA_N = 20
+VOL_PULLBACK_N = 10
+VOL_PULLBACK_RATIO = 0.9
+# 买② 反面：跌破 MA20 且量 < 20 日均量 * 0.7 → 禁开
+VOL_DRY_N = 20
+VOL_DRY_RATIO = 0.70
 
-# 卖点：5 日乖离率(%)、放量倍数、新高窗口、上影/十字星
+# 卖① BIAS5(%)；卖② 移动止盈；卖③ 时间成本
 BIAS5_SELL = 6.0
-VOL_SPIKE_RATIO = 1.8
-HIGH_LOOKBACK = 20
-UPPER_SHADOW_RATIO = 0.45
-DOJI_BODY_RATIO = 0.12
+TRAIL_ACTIVATE = 0.03
+TRAIL_GIVEBACK = 0.015
+TIME_FLAT_BARS = 15
+TIME_FLAT_BAND = 0.01
 
-# 风控：当日涨幅过大不追
+# 兜底：追高过滤、硬止损、周线空头强平
 CHASE_MAX_PCT = 0.05
 STOP_LOSS = 0.08
 
@@ -72,7 +77,7 @@ PENDING_ORPHAN_SEC = 60
 STATE_FILE = r"D:\service\GJQMT\python\hlband_qmt_state.json"
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.2"
+STRATEGY_VER = "v1.5"
 # =======================================================
 
 _ORDER_FILLED = (56, 8)
@@ -236,11 +241,25 @@ def _state_extra_load(raw):
     A.pending_entry = pe if isinstance(pe, dict) else None
     px = raw.get("pending_exit")
     A.pending_exit = px if isinstance(px, dict) else None
+    peak = raw.get("hold_peak")
+    try:
+        A.hold_peak = float(peak) if peak is not None else None
+    except Exception:
+        A.hold_peak = None
+    try:
+        A.hold_bars = int(raw.get("hold_bars", 0) or 0)
+    except Exception:
+        A.hold_bars = 0
+    A._hold_count_day = str(raw.get("hold_count_day", "") or "")
 
 
 def _state_extra_save(data):
     data["pending_entry"] = getattr(A, "pending_entry", None)
     data["pending_exit"] = getattr(A, "pending_exit", None)
+    peak = getattr(A, "hold_peak", None)
+    data["hold_peak"] = None if peak is None else float(peak)
+    data["hold_bars"] = int(getattr(A, "hold_bars", 0) or 0)
+    data["hold_count_day"] = str(getattr(A, "_hold_count_day", "") or "")
 
 # === qmt_common/single/state_io.py ===
 # 作用: 单仓 JSON 状态读写（回测不落盘）
@@ -777,7 +796,13 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
 
 
 def _get_ohlcv_1d(C, stock):
-    need = max(int(D_MA_SLOW), int(VOL_MA_N), int(MACD_SLOW) + int(MACD_SIGNAL), int(KDJ_N)) + 10
+    need = max(
+        int(D_MA_SLOW),
+        int(VOL_PULLBACK_N),
+        int(VOL_DRY_N),
+        int(MACD_SLOW) + int(MACD_SIGNAL),
+        int(KDJ_N),
+    ) + 10
     return _get_ohlcv_period(
         C, stock, getattr(A, "period", "1d"), int(OHLC_COUNT), need, "d1"
     )
@@ -1466,6 +1491,7 @@ def _eval_weekly(closes_w):
     d0 = _last_valid(dif, i)
     e0 = _last_valid(dea, i)
     h0 = _last_valid(hist, i)
+    h1 = _last_valid(hist, i - 1)
     d1 = _last_valid(dif, i - 1)
     e1 = _last_valid(dea, i - 1)
     detail.update(
@@ -1476,6 +1502,7 @@ def _eval_weekly(closes_w):
             "dif": d0,
             "dea": e0,
             "hist": h0,
+            "hist_prev": h1,
             "close": c,
         }
     )
@@ -1490,14 +1517,14 @@ def _eval_weekly(closes_w):
 
 
 def _eval_daily_buy(opens, highs, lows, closes, volumes):
-    """周线多头前提下: 买①缩量回踩 OR 买②零轴上二次金叉 OR 买③KDJ超卖拐头。"""
+    """买①缩量回踩 MA20/60；买② MA20 上方 KDJ 超卖。"""
     reasons = []
     ma20 = _sma(closes, D_MA_MID)
     ma60 = _sma(closes, D_MA_SLOW)
-    vol_ma = _sma(volumes, VOL_MA_N)
-    macd = _calc_macd(closes)
+    vol10 = _sma(volumes, VOL_PULLBACK_N)
+    vol20 = _sma(volumes, VOL_DRY_N)
     kdj = _calc_kdj(highs, lows, closes)
-    if ma20 is None or ma60 is None or vol_ma is None or macd is None or kdj is None:
+    if ma20 is None or ma60 is None or vol10 is None or vol20 is None or kdj is None:
         return False, reasons, {}
     i = len(closes) - 1
     if i < 2:
@@ -1507,52 +1534,49 @@ def _eval_daily_buy(opens, highs, lows, closes, volumes):
     vol = float(volumes[i])
     m20 = _last_valid(ma20, i)
     m60 = _last_valid(ma60, i)
-    vma = _last_valid(vol_ma, i)
-    dif, dea, hist = macd
-    d0 = _last_valid(dif, i)
-    e0 = _last_valid(dea, i)
-    d1 = _last_valid(dif, i - 1)
-    e1 = _last_valid(dea, i - 1)
+    v10 = _last_valid(vol10, i)
+    v20 = _last_valid(vol20, i)
     _k, _d, j_arr = kdj
     j0 = _last_valid(j_arr, i)
     j1 = _last_valid(j_arr, i - 1)
     detail = {
         "ma20": m20,
         "ma60": m60,
-        "vol_ma": vma,
-        "dif": d0,
-        "dea": e0,
+        "vol10": v10,
+        "vol20": v20,
         "j": j0,
     }
 
-    # 风控: 不追高
     prev = float(closes[i - 1]) if closes[i - 1] else 0.0
     if prev > 0 and (price - prev) / prev >= float(CHASE_MAX_PCT):
         return False, ["chase_skip"], detail
 
-    # 买① 缩量回踩 20/60
+    # 无量阴跌不言底：跌破 MA20 且量 < 20 日均量 * 0.7 → 全局禁开
+    dry_below = (
+        m20 is not None
+        and price < m20
+        and v20 is not None
+        and v20 > 0
+        and vol < v20 * float(VOL_DRY_RATIO)
+    )
+    if dry_below:
+        return False, ["vol_dry_skip"], detail
+
+    # 买①：回踩 MA20/MA60 + 量 < 10 日均量 * 0.9
     near = _near_ma(price, m20) or _near_ma(price, m60)
-    shrink = (vma is not None and vma > 0 and vol <= vma * float(VOL_SHRINK_RATIO))
+    shrink = v10 is not None and v10 > 0 and vol < v10 * float(VOL_PULLBACK_RATIO)
     if near and shrink:
         reasons.append("pullback_vol")
 
-    # 买② 零轴上二次金叉
-    if (
-        d0 is not None
-        and e0 is not None
-        and d0 > 0
-        and e0 > 0
-        and _cross_up(d1, e1, d0, e0)
-    ):
-        reasons.append("macd_2nd_gc")
-
-    # 买③ KDJ J<0 后拐头 + 止跌阳线
+    # 买②：KDJ 超卖拐头，且收盘仍站上 MA20
     if (
         j0 is not None
         and j1 is not None
         and j1 < 0
         and j0 > j1
         and price > open_px
+        and m20 is not None
+        and price >= m20
     ):
         reasons.append("kdj_os")
 
@@ -1560,54 +1584,74 @@ def _eval_daily_buy(opens, highs, lows, closes, volumes):
 
 
 def _eval_daily_sell(opens, highs, lows, closes, volumes):
-    """卖①乖离 OR 卖②放量滞涨 OR 卖③动能死叉/柱缩短背离。"""
+    """卖① BIAS5 过大（放量滞涨/MACD 卖点已按 v1.5 规则移除）。"""
     reasons = []
     ma5 = _sma(closes, D_MA_FAST)
-    vol_ma = _sma(volumes, VOL_MA_N)
-    macd = _calc_macd(closes)
-    if ma5 is None or vol_ma is None or macd is None:
+    if ma5 is None:
         return False, reasons, {}
     i = len(closes) - 1
-    if i < 2:
+    if i < 1:
         return False, reasons, {}
-    o, h, l, c = float(opens[i]), float(highs[i]), float(lows[i]), float(closes[i])
-    vol = float(volumes[i])
+    c = float(closes[i])
     m5 = _last_valid(ma5, i)
-    vma = _last_valid(vol_ma, i)
     bias = _bias_pct(c, m5)
-    body_r, upper_r, _yang = _candle_metrics(o, h, l, c)
-    look = int(HIGH_LOOKBACK)
-    prior = closes[max(0, i - look) : i]
-    is_new_high = bool(prior) and c >= float(np.max(prior))
-    detail = {"bias5": bias, "vol_ma": vma, "new_high": is_new_high}
-
+    detail = {"bias5": bias}
     if bias is not None and bias >= float(BIAS5_SELL):
         reasons.append("bias5")
-
-    spike = vma is not None and vma > 0 and vol >= vma * float(VOL_SPIKE_RATIO)
-    stagnate = (upper_r >= float(UPPER_SHADOW_RATIO)) or (body_r <= float(DOJI_BODY_RATIO))
-    if is_new_high and spike and stagnate:
-        reasons.append("vol_stagnate")
-
-    dif, dea, hist = macd
-    d0 = _last_valid(dif, i)
-    e0 = _last_valid(dea, i)
-    d1 = _last_valid(dif, i - 1)
-    e1 = _last_valid(dea, i - 1)
-    h0 = _last_valid(hist, i)
-    h1 = _last_valid(hist, i - 1)
-    if _cross_down(d1, e1, d0, e0) and d0 is not None and d0 > 0:
-        reasons.append("macd_death")
-    elif (
-        is_new_high
-        and h0 is not None
-        and h1 is not None
-        and h0 > 0
-        and h0 < h1
-    ):
-        reasons.append("macd_div")
-
     return bool(reasons), reasons, detail
+
+
+def _weekly_bias_guard(w_detail):
+    """周线 (MA5-MA30)/MA30 >= W_BIAS_HARD → 禁开。"""
+    m5 = w_detail.get("ma5")
+    m30 = w_detail.get("ma30")
+    if m5 is None or m30 is None or m30 <= 0:
+        return False, None
+    bias = (float(m5) - float(m30)) / float(m30)
+    return bias >= float(W_BIAS_HARD), bias
+
+
+def _update_hold_peak(high_px, cost):
+    """持仓期跟踪最高价（移动止盈用）。"""
+    hi = float(high_px)
+    peak = getattr(A, "hold_peak", None)
+    if peak is None:
+        base = float(cost) if cost and cost > 0 else hi
+        A.hold_peak = max(base, hi)
+        return True
+    if hi > float(peak):
+        A.hold_peak = hi
+        return True
+    return False
+
+
+def _trail_stop_hit(price, cost):
+    """曾浮盈 >= TRAIL_ACTIVATE 且自峰值回撤 > TRAIL_GIVEBACK。"""
+    if cost is None or cost <= 0:
+        return False
+    peak = getattr(A, "hold_peak", None)
+    if peak is None or peak <= 0:
+        return False
+    max_profit = (float(peak) - float(cost)) / float(cost)
+    giveback = (float(peak) - float(price)) / float(peak)
+    return (max_profit >= float(TRAIL_ACTIVATE)) and (giveback > float(TRAIL_GIVEBACK))
+
+
+def _time_flat_hit(ret_pct, hold_bars):
+    """持仓 >= TIME_FLAT_BARS 且盈亏落在 ±TIME_FLAT_BAND 内。"""
+    if hold_bars is None or int(hold_bars) < int(TIME_FLAT_BARS):
+        return False
+    if ret_pct is None:
+        return False
+    return abs(float(ret_pct)) <= float(TIME_FLAT_BAND)
+
+
+def _bump_hold_bars(day):
+    """每个交易日持仓计 1 根。"""
+    if getattr(A, "_hold_count_day", "") == day:
+        return
+    A.hold_bars = int(getattr(A, "hold_bars", 0) or 0) + 1
+    A._hold_count_day = day
 
 
 def _pending_ready(pend, day, bar_tag, mode):
@@ -1624,20 +1668,19 @@ def _pending_ready(pend, day, bar_tag, mode):
     return False
 
 
-# 卖出/买入原因码 -> 可读说明（对齐 model.md）
 _SELL_LABELS = {
     "bias5": "卖点1-5日乖离过大",
-    "vol_stagnate": "卖点2-放量滞涨",
-    "macd_death": "卖点3-MACD死叉",
-    "macd_div": "卖点3-MACD红柱背离",
+    "trail_stop": "卖点2-移动止盈回撤",
+    "time_flat": "卖点3-时间成本止损",
     "weekly_bear": "周线转空强制清仓",
     "stop_loss": "硬止损",
 }
 _BUY_LABELS = {
-    "pullback_vol": "买点1-缩量回踩",
-    "macd_2nd_gc": "买点2-零轴上二次金叉",
-    "kdj_os": "买点3-KDJ超卖拐头",
+    "pullback_vol": "买点1-缩量回踩强支撑",
+    "kdj_os": "买点2-MA20上KDJ超卖",
     "chase_skip": "追高过滤跳过",
+    "w_bias_skip": "周线高位乖离禁开",
+    "vol_dry_skip": "无量阴跌禁开",
 }
 
 
@@ -1704,31 +1747,66 @@ def _handle(C):
 
     price = float(closes_d[-1])
     open_px = float(opens_d[-1])
+    high_px = float(highs_d[-1])
     if bt:
         _bt_recover_position(now=now, last=price)
 
     weekly_bull, weekly_bear, w_detail = _eval_weekly(closes_w)
+    w_bias_block, w_bias = _weekly_bias_guard(w_detail)
     buy_ok, buy_reasons, b_detail = _eval_daily_buy(
         opens_d, highs_d, lows_d, closes_d, vols_d
     )
+    if w_bias_block:
+        buy_ok = False
+        buy_reasons = ["w_bias_skip"] + [
+            r for r in buy_reasons if r not in ("w_bias_skip",)
+        ]
     sell_ok, sell_reasons, s_detail = _eval_daily_sell(
         opens_d, highs_d, lows_d, closes_d, vols_d
     )
 
     holding = _has_position() or (bt and _bt_held_vol() >= 100)
     cost = _pos_cost_price()
+    if not holding:
+        if getattr(A, "hold_peak", None) is not None or int(getattr(A, "hold_bars", 0) or 0):
+            A.hold_peak = None
+            A.hold_bars = 0
+            A._hold_count_day = ""
+    else:
+        _bump_hold_bars(day)
+        if _update_hold_peak(high_px, cost):
+            _save_state()
+
     stop_hit = False
     if holding and cost > 0 and price <= cost * (1.0 - float(STOP_LOSS)):
         stop_hit = True
         sell_reasons = list(sell_reasons) + ["stop_loss"]
         sell_ok = True
 
+    trail_hit = False
+    if holding and (not stop_hit) and _trail_stop_hit(price, cost):
+        trail_hit = True
+        sell_reasons = list(sell_reasons) + ["trail_stop"]
+        sell_ok = True
+
     ret_pct = None
     if holding and cost > 0:
         ret_pct = (price - cost) / cost
 
-    buy_sig = bool(weekly_bull and buy_ok and buy_reasons and "chase_skip" not in buy_reasons)
+    time_flat_hit = False
+    if holding and (not stop_hit) and (not trail_hit) and _time_flat_hit(
+        ret_pct, getattr(A, "hold_bars", 0)
+    ):
+        time_flat_hit = True
+        sell_reasons = list(sell_reasons) + ["time_flat"]
+        sell_ok = True
+
+    skip_codes = ("chase_skip", "w_bias_skip", "vol_dry_skip")
+    real_buys = [r for r in buy_reasons if r not in skip_codes]
+    # v1.5：周线仅用乖离门控，不再要求旧版 weekly_bull
+    buy_sig = bool((not w_bias_block) and buy_ok and real_buys)
     force_empty = bool(weekly_bear)
+    vol_dry_block = "vol_dry_skip" in buy_reasons
 
     interesting = (
         buy_sig
@@ -1790,6 +1868,9 @@ def _handle(C):
             # 成交或提交后清掉信号挂起，避免 pe/px 粘滞
             A.pending_exit = None
             A.pending_entry = None
+            A.hold_peak = None
+            A.hold_bars = 0
+            A._hold_count_day = ""
             _save_state()
             if not ok:
                 print("%s pending_exit cleared after sell fail/skip" % STRATEGY_NAME)
@@ -1802,11 +1883,17 @@ def _handle(C):
         and ("BUY" not in getattr(A, "acted", set()))
         and _pending_ready(pe_entry, day, tag, "day")
     ):
-        # 周线已转空则取消待买
-        if weekly_bear:
+        # 执行日再校验：周线空头 / 高位乖离 / 无量阴跌
+        if weekly_bear or w_bias_block or vol_dry_block:
             A.pending_entry = None
             _save_state()
-            print("%s pending_entry cancel weekly_bear" % STRATEGY_NAME)
+            if weekly_bear:
+                why = "weekly_bear"
+            elif w_bias_block:
+                why = "w_bias_skip"
+            else:
+                why = "vol_dry_skip"
+            print("%s pending_entry cancel %s" % (STRATEGY_NAME, why))
             return
         reasons = pe_entry.get("reasons") or []
         primary = reasons[0] if reasons else "entry"
@@ -1823,9 +1910,12 @@ def _handle(C):
         )
         budget = _buy_budget(cash)
         ok = _order_buy(C, open_px, now, budget)
-        # 成功或手数不足等都清 pending_entry，避免长期 pe=True
         A.pending_entry = None
         A.pending_exit = None
+        if ok:
+            A.hold_peak = float(open_px)
+            A.hold_bars = 0
+            A._hold_count_day = day
         _save_state()
         if not ok:
             print("%s pending_entry cleared after buy fail/skip" % STRATEGY_NAME)
@@ -1834,12 +1924,19 @@ def _handle(C):
     # ---- 评估新信号（收盘确认 → 次日开盘）----
     if holding:
         cur_ex = getattr(A, "pending_exit", None)
-        if force_empty or sell_ok or stop_hit:
+        if force_empty or sell_ok or stop_hit or trail_hit or time_flat_hit:
             if isinstance(cur_ex, dict):
                 return
-            reason = "weekly_bear" if force_empty else (
-                sell_reasons[0] if sell_reasons else "SELL"
-            )
+            if force_empty:
+                reason = "weekly_bear"
+            elif stop_hit:
+                reason = "stop_loss"
+            elif trail_hit:
+                reason = "trail_stop"
+            elif time_flat_hit:
+                reason = "time_flat"
+            else:
+                reason = sell_reasons[0] if sell_reasons else "SELL"
             reasons = (["weekly_bear"] if force_empty else []) + list(sell_reasons)
             # 去重保序
             seen = set()
@@ -1878,18 +1975,18 @@ def _handle(C):
             "signal_day": day,
             "signal_tag": tag,
             "close": price,
-            "reasons": list(buy_reasons),
+            "reasons": list(real_buys),
         }
         A.pending_exit = None
         _save_state()
-        primary = buy_reasons[0] if buy_reasons else "entry"
+        primary = real_buys[0] if real_buys else "entry"
         print(
             "%s pending_entry set signal=%s label=%s all=%s day=%s close=%.4f"
             % (
                 STRATEGY_NAME,
                 primary,
                 _reason_label(primary, "buy"),
-                _format_reasons(buy_reasons, "buy"),
+                _format_reasons(real_buys, "buy"),
                 day,
                 price,
             )
@@ -1960,6 +2057,9 @@ def _init_impl(C):
             A.pending = None
             A.pending_entry = None
             A.pending_exit = None
+            A.hold_peak = None
+            A.hold_bars = 0
+            A._hold_count_day = ""
             A.bt_held = 0
             A.bt_locked = 0
             A.bt_lock_day = ""
@@ -1978,6 +2078,12 @@ def _init_impl(C):
                 A.pending_entry = None
             if not hasattr(A, "pending_exit"):
                 A.pending_exit = None
+            if not hasattr(A, "hold_peak"):
+                A.hold_peak = None
+            if not hasattr(A, "hold_bars"):
+                A.hold_bars = 0
+            if not hasattr(A, "_hold_count_day"):
+                A._hold_count_day = ""
             _bt_recover_position()
             print(
                 "%s backtest re-init preserve barpos=" % STRATEGY_NAME,
@@ -1996,6 +2102,12 @@ def _init_impl(C):
             A.pending_entry = None
         if not hasattr(A, "pending_exit"):
             A.pending_exit = None
+        if not hasattr(A, "hold_peak"):
+            A.hold_peak = None
+        if not hasattr(A, "hold_bars"):
+            A.hold_bars = 0
+        if not hasattr(A, "_hold_count_day"):
+            A._hold_count_day = ""
 
     try:
         C.set_universe([A.stock])

@@ -63,6 +63,9 @@ def _init_impl(C):
             A.pending = None
             A.pending_entry = None
             A.pending_exit = None
+            A.hold_peak = None
+            A.hold_bars = 0
+            A._hold_count_day = ""
             A.bt_held = 0
             A.bt_locked = 0
             A.bt_lock_day = ""
@@ -81,6 +84,12 @@ def _init_impl(C):
                 A.pending_entry = None
             if not hasattr(A, "pending_exit"):
                 A.pending_exit = None
+            if not hasattr(A, "hold_peak"):
+                A.hold_peak = None
+            if not hasattr(A, "hold_bars"):
+                A.hold_bars = 0
+            if not hasattr(A, "_hold_count_day"):
+                A._hold_count_day = ""
             _bt_recover_position()
             print(
                 "%s backtest re-init preserve barpos=" % STRATEGY_NAME,
@@ -99,6 +108,12 @@ def _init_impl(C):
             A.pending_entry = None
         if not hasattr(A, "pending_exit"):
             A.pending_exit = None
+        if not hasattr(A, "hold_peak"):
+            A.hold_peak = None
+        if not hasattr(A, "hold_bars"):
+            A.hold_bars = 0
+        if not hasattr(A, "_hold_count_day"):
+            A._hold_count_day = ""
 
     try:
         C.set_universe([A.stock])
