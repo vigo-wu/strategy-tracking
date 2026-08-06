@@ -224,13 +224,42 @@ def _trail_stop_hit(price, cost):
     return (max_profit >= float(TRAIL_ACTIVATE)) and (giveback > float(TRAIL_GIVEBACK))
 
 
-def _time_force_hit(ret_pct, hold_bars):
-    """持仓 > TIME_FORCE_BARS 且当前浮盈 < TIME_FORCE_RET_CAP → 无条件时间平仓。"""
+def _time_force_hit(price, closes, hold_bars):
+    """智能时间成本：持仓 > TIME_FORCE_BARS 后，破日线 MA60 强制平仓；
+    仍站上 MA60 则豁免一次并再观察 TIME_FORCE_GRACE_BARS 日，期满强制平仓。"""
     if hold_bars is None or int(hold_bars) <= int(TIME_FORCE_BARS):
         return False
-    if ret_pct is None:
+    ma60_arr = _sma(closes, D_MA_SLOW)
+    if ma60_arr is None:
         return False
-    return float(ret_pct) < float(TIME_FORCE_RET_CAP)
+    i = len(closes) - 1
+    ma60 = _last_valid(ma60_arr, i)
+    if ma60 is None or price is None:
+        return False
+    px = float(price)
+    m60 = float(ma60)
+
+    if px < m60:
+        return True
+
+    # 站上 MA60：豁免一次，多观察 GRACE 日；期满仍强制平仓
+    grace_until = getattr(A, "time_force_grace_until", None)
+    if grace_until is None:
+        until = int(hold_bars) + int(TIME_FORCE_GRACE_BARS)
+        A.time_force_grace_until = until
+        print(
+            "%s time_force grace ma60=%.4f hold=%s until_bars=%s"
+            % (STRATEGY_NAME, m60, hold_bars, until)
+        )
+        return False
+    return int(hold_bars) > int(grace_until)
+
+
+def _clear_hold_meta():
+    A.hold_peak = None
+    A.hold_bars = 0
+    A._hold_count_day = ""
+    A.time_force_grace_until = None
 
 
 def _bump_hold_bars(day):
@@ -258,7 +287,7 @@ def _pending_ready(pend, day, bar_tag, mode):
 _SELL_LABELS = {
     "bias5": "卖点1-5日乖离过大",
     "trail_stop": "卖点2-移动止盈回撤",
-    "time_force": "卖点3-时间成本无条件平仓",
+    "time_force": "卖点3-时间成本智能平仓",
     "weekly_bear": "周线转空强制清仓",
     "stop_loss": "硬止损",
 }
@@ -362,10 +391,12 @@ def _handle(C):
     holding = _has_position() or (bt and _bt_held_vol() >= 100)
     cost = _pos_cost_price()
     if not holding:
-        if getattr(A, "hold_peak", None) is not None or int(getattr(A, "hold_bars", 0) or 0):
-            A.hold_peak = None
-            A.hold_bars = 0
-            A._hold_count_day = ""
+        if (
+            getattr(A, "hold_peak", None) is not None
+            or int(getattr(A, "hold_bars", 0) or 0)
+            or getattr(A, "time_force_grace_until", None) is not None
+        ):
+            _clear_hold_meta()
     else:
         _bump_hold_bars(day)
         if _update_hold_peak(high_px, cost):
@@ -388,12 +419,19 @@ def _handle(C):
         ret_pct = (price - cost) / cost
 
     time_force_hit = False
+    grace_before = getattr(A, "time_force_grace_until", None)
     if holding and (not stop_hit) and (not trail_hit) and _time_force_hit(
-        ret_pct, getattr(A, "hold_bars", 0)
+        price, closes_d, getattr(A, "hold_bars", 0)
     ):
         time_force_hit = True
         sell_reasons = list(sell_reasons) + ["time_force"]
         sell_ok = True
+    elif (
+        holding
+        and grace_before is None
+        and getattr(A, "time_force_grace_until", None) is not None
+    ):
+        _save_state()
 
     skip_codes = ("chase_skip", "w_bias_skip", "w_slope_skip", "vol_dry_skip")
     real_buys = [r for r in buy_reasons if r not in skip_codes]
@@ -464,9 +502,7 @@ def _handle(C):
             # 成交或提交后清掉信号挂起，避免 pe/px 粘滞
             A.pending_exit = None
             A.pending_entry = None
-            A.hold_peak = None
-            A.hold_bars = 0
-            A._hold_count_day = ""
+            _clear_hold_meta()
             _save_state()
             if not ok:
                 print("%s pending_exit cleared after sell fail/skip" % STRATEGY_NAME)
@@ -514,6 +550,7 @@ def _handle(C):
             A.hold_peak = float(open_px)
             A.hold_bars = 0
             A._hold_count_day = day
+            A.time_force_grace_until = None
         _save_state()
         if not ok:
             print("%s pending_entry cleared after buy fail/skip" % STRATEGY_NAME)

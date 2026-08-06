@@ -38,13 +38,14 @@ VOL_PULLBACK_RATIO = 0.9
 VOL_DRY_N = 20
 VOL_DRY_RATIO = 0.70
 
-# 卖① BIAS5(%)；卖② 移动止盈；卖③ 时间成本无条件平仓
+# 卖① BIAS5(%)；卖② 移动止盈；卖③ 智能时间成本（MA60 缓冲）
 BIAS5_SELL = 6.0
 TRAIL_ACTIVATE = 0.03
 TRAIL_GIVEBACK = 0.015
-# 持仓交易日 > TIME_FORCE_BARS 且当前浮盈 < TIME_FORCE_RET_CAP → 无条件平仓
-TIME_FORCE_BARS = 20
-TIME_FORCE_RET_CAP = 0.025
+# 持仓 > TIME_FORCE_BARS：破日线 MA60 → 强制平仓；
+# 仍站上 MA60 → 豁免一次并再观察 TIME_FORCE_GRACE_BARS 日，期满强制平仓
+TIME_FORCE_BARS = 30
+TIME_FORCE_GRACE_BARS = 5
 
 # 兜底：追高过滤、硬止损、周线空头强平
 CHASE_MAX_PCT = 0.05
@@ -71,7 +72,7 @@ PENDING_ORPHAN_SEC = 60
 STATE_FILE = r"D:\service\GJQMT\python\hlband_qmt_state.json"
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.6"
+STRATEGY_VER = "v1.7"
 # =======================================================
 
 _ORDER_FILLED = (56, 8)

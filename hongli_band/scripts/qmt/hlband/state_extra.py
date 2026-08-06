@@ -14,6 +14,11 @@ def _state_extra_load(raw):
     except Exception:
         A.hold_bars = 0
     A._hold_count_day = str(raw.get("hold_count_day", "") or "")
+    gu = raw.get("time_force_grace_until")
+    try:
+        A.time_force_grace_until = None if gu is None else int(gu)
+    except Exception:
+        A.time_force_grace_until = None
 
 
 def _state_extra_save(data):
@@ -23,3 +28,5 @@ def _state_extra_save(data):
     data["hold_peak"] = None if peak is None else float(peak)
     data["hold_bars"] = int(getattr(A, "hold_bars", 0) or 0)
     data["hold_count_day"] = str(getattr(A, "_hold_count_day", "") or "")
+    gu = getattr(A, "time_force_grace_until", None)
+    data["time_force_grace_until"] = None if gu is None else int(gu)
