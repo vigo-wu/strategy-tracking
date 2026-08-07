@@ -9,7 +9,7 @@ description: >-
 
 # QMT 回测报告自动化
 
-将主题目录下的 `log.txt`（国金终端回测输出）一键变成：成交表、权益曲线、持仓着色 K 线、Markdown 报告。  
+将主题目录下的 `log.txt` +（优先）`report/QMT终端操作明细.csv` 一键变成：成交表、权益曲线、持仓着色 K 线、Markdown 报告。  
 **产物一律写到 `<主题>/report/`**（日志仍读 `<主题>/log.txt`）。
 
 ## 何时使用
@@ -28,6 +28,8 @@ description: >-
 python .cursor/skills/qmt-backtest-report/scripts/generate_report.py --theme hongli_band
 ```
 
+先将国金终端导出的 **`QMT终端操作明细.csv`** 放到 `<主题>/report/`（盈亏真源）；无此文件则回退 log 自记账价并告警。
+
 常用参数：
 
 | 参数 | 含义 |
@@ -35,6 +37,8 @@ python .cursor/skills/qmt-backtest-report/scripts/generate_report.py --theme hon
 | `--theme <dir>` | 主题目录；读 `<dir>/log.txt`，写出到 **`<dir>/report/`** |
 | `--log <path>` | 显式指定日志 |
 | `--out-dir <path>` | 覆盖输出目录（默认 `<主题>/report`） |
+| `--terminal-csv <path>` | 显式指定终端操作明细；默认在 `report/` 自动查找 |
+| `--no-terminal` | 强制仅用 log 自记账价 |
 | `--tag HlBand` | 日志前缀（默认取末次 `xxx vN.N init`） |
 | `--ver v1.2` | 锁定版本会话 |
 | `--no-kline` | 跳过行情拉取（仅成交表+权益+MD） |

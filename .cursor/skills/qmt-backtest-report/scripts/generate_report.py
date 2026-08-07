@@ -4,6 +4,9 @@
 用法:
   python generate_report.py --theme hongli_band
   python generate_report.py --log path/to/log.txt --out-dir path/to/dir --tag HlBand
+
+盈亏真源优先：<主题>/report/QMT终端操作明细.csv（引擎成交价/盈亏）；
+log 仅提供买卖信号标签与配对骨架。无终端明细时回退 log 自记账价。
 """
 from __future__ import annotations
 
@@ -32,15 +35,31 @@ COLOR_SELL_MARK = "#1b5e20"
 
 REPO_ROOT = Path(__file__).resolve().parents[4]  # scripts → skill → skills → .cursor → repo
 
+# 终端导出常见文件名（GBK）
+TERMINAL_CSV_NAMES = (
+    "QMT终端操作明细.csv",
+    "QWT终端操作明细.csv",
+    "终端操作明细.csv",
+)
+
 
 def _ymd(s: str) -> str:
+    s = str(s).replace("-", "")[:8]
     return f"{s[:4]}-{s[4:6]}-{s[6:8]}"
 
 
-def _ts(s: str | None) -> pd.Timestamp | None:
+def _ymd_compact(s: str | None) -> str | None:
     if not s:
         return None
-    return pd.Timestamp(str(s)[:8])
+    digits = re.sub(r"\D", "", str(s))
+    return digits[:8] if len(digits) >= 8 else None
+
+
+def _ts(s: str | None) -> pd.Timestamp | None:
+    d = _ymd_compact(s)
+    if not d:
+        return None
+    return pd.Timestamp(d)
 
 
 def slice_session(text: str, tag: str, ver: str | None) -> tuple[str, str]:
@@ -234,6 +253,242 @@ def parse_trades(seg: str, tag: str, stock: str) -> list[dict]:
     return trades
 
 
+def _read_csv_auto(path: Path) -> pd.DataFrame:
+    last_err: Exception | None = None
+    for enc in ("gbk", "gb18030", "utf-8-sig", "utf-8"):
+        try:
+            return pd.read_csv(path, encoding=enc)
+        except Exception as e:
+            last_err = e
+    raise RuntimeError(f"cannot read {path}: {last_err}")
+
+
+def _col_by_aliases(df: pd.DataFrame, *aliases: str) -> str | None:
+    cols = {str(c).strip(): c for c in df.columns}
+    for a in aliases:
+        if a in cols:
+            return cols[a]
+    # 容错：列名乱码时按位置（国金导出固定顺序）
+    return None
+
+
+def parse_terminal_rounds(path: Path) -> list[dict]:
+    """解析 QMT「操作明细」CSV → 买卖轮次（FIFO）。盈亏取卖出行「盈利」。"""
+    df = _read_csv_auto(path)
+    if df.empty:
+        return []
+
+    c_time = _col_by_aliases(df, "操作时间", "成交时间", "时间")
+    c_side = _col_by_aliases(df, "操作类型", "买卖方向", "方向")
+    c_price = _col_by_aliases(df, "操作价格", "成交价格", "成交价", "价格")
+    c_pnl = _col_by_aliases(df, "盈利", "盈亏", "实现盈亏")
+    c_shares = _col_by_aliases(df, "数量", "成交数量", "股数")
+    # 固定列序回退：代码,名称,...,操作时间(5),操作类型(6),操作价格(7),...,盈利(9),...,数量(12)
+    if c_time is None and df.shape[1] >= 13:
+        cols = list(df.columns)
+        c_time, c_side, c_price, c_pnl, c_shares = cols[5], cols[6], cols[7], cols[9], cols[12]
+
+    if not all([c_time, c_side, c_price, c_shares]):
+        raise RuntimeError(f"terminal csv missing columns: {list(df.columns)}")
+
+    rows = []
+    for _, r in df.iterrows():
+        day = _ymd_compact(r[c_time])
+        if not day:
+            continue
+        side_raw = str(r[c_side]).strip()
+        if "买" in side_raw:
+            side = "buy"
+        elif "卖" in side_raw:
+            side = "sell"
+        else:
+            continue
+        try:
+            price = float(r[c_price])
+            shares = int(float(r[c_shares]))
+        except Exception:
+            continue
+        pnl = None
+        if c_pnl is not None and pd.notna(r[c_pnl]):
+            try:
+                pnl = float(r[c_pnl])
+            except Exception:
+                pnl = None
+        rows.append({"day": day, "side": side, "price": price, "shares": shares, "pnl": pnl})
+
+    rounds: list[dict] = []
+    pending_buys: list[dict] = []
+    for r in rows:
+        if r["side"] == "buy":
+            pending_buys.append(r)
+            continue
+        if not pending_buys:
+            print(f"warn: orphan sell {r['day']} in terminal csv", file=sys.stderr)
+            continue
+        b = pending_buys.pop(0)
+        if b["shares"] != r["shares"]:
+            print(
+                f"warn: shares mismatch buy {b['day']}x{b['shares']} vs sell {r['day']}x{r['shares']}",
+                file=sys.stderr,
+            )
+        buy_p, sell_p = float(b["price"]), float(r["price"])
+        sh = int(r["shares"] or b["shares"])
+        pnl = r["pnl"]
+        if pnl is None:
+            pnl = (sell_p - buy_p) * sh
+        ret = (sell_p - buy_p) / buy_p * 100.0 if buy_p else 0.0
+        rounds.append(
+            {
+                "buy_open_day": b["day"],
+                "sell_exec_day": r["day"],
+                "buy_price": buy_p,
+                "sell_price": sell_p,
+                "shares": sh,
+                "cost": round(buy_p * sh, 2),
+                "pnl": float(pnl),
+                "ret_pct": ret,
+            }
+        )
+    if pending_buys:
+        print(f"warn: {len(pending_buys)} open buy(s) left in terminal csv", file=sys.stderr)
+    return rounds
+
+
+def find_terminal_csv(out_dir: Path, theme_dir: Path | None, explicit: str | None) -> Path | None:
+    if explicit:
+        p = Path(explicit)
+        if not p.is_file():
+            raise SystemExit(f"terminal csv not found: {p}")
+        return p.resolve()
+    search = []
+    if out_dir:
+        search.append(out_dir)
+    if theme_dir:
+        search.append(theme_dir)
+        search.append(theme_dir / "report")
+    seen: set[Path] = set()
+    for d in search:
+        d = d.resolve()
+        if d in seen or not d.is_dir():
+            continue
+        seen.add(d)
+        for name in TERMINAL_CSV_NAMES:
+            cand = d / name
+            if cand.is_file():
+                return cand
+        # 模糊：*操作明细*.csv / *terminal*trades*
+        for cand in sorted(d.glob("*操作明细*.csv")) + sorted(d.glob("*terminal*.csv")):
+            if cand.is_file():
+                return cand
+    return None
+
+
+def apply_terminal_pnl(log_trades: list[dict], rounds: list[dict]) -> tuple[list[dict], dict]:
+    """用终端轮次覆盖价格/盈亏；保留 log 的信号标签。按日期+股数对齐，失败则按序对齐。"""
+    if not rounds:
+        return log_trades, {"source": "log", "matched": 0, "n_terminal": 0}
+
+    used = [False] * len(rounds)
+    merged: list[dict] = []
+    matched = 0
+    seq_fallback = 0
+
+    def _pick(t: dict) -> int | None:
+        bday = _ymd_compact(t.get("buy_open_day"))
+        sday = _ymd_compact(t.get("sell_exec_day"))
+        sh = int(t.get("shares") or 0)
+        # 严格：买日+卖日+股数
+        for i, r in enumerate(rounds):
+            if used[i]:
+                continue
+            if r["buy_open_day"] == bday and r["sell_exec_day"] == sday and r["shares"] == sh:
+                return i
+        # 次严：买日+股数
+        for i, r in enumerate(rounds):
+            if used[i]:
+                continue
+            if r["buy_open_day"] == bday and r["shares"] == sh:
+                return i
+        return None
+
+    for t in log_trades:
+        idx = _pick(t)
+        if idx is None:
+            # 顺序回退：第 i 笔
+            i_ord = len(merged)
+            if i_ord < len(rounds) and not used[i_ord]:
+                idx = i_ord
+                seq_fallback += 1
+            else:
+                # 找不到终端轮次：保留 log 价并标记
+                nt = dict(t)
+                nt["price_source"] = "log"
+                merged.append(nt)
+                continue
+        used[idx] = True
+        r = rounds[idx]
+        nt = dict(t)
+        nt["buy_open_day"] = r["buy_open_day"]
+        nt["sell_exec_day"] = r["sell_exec_day"]
+        nt["buy_price"] = r["buy_price"]
+        nt["sell_price"] = r["sell_price"]
+        nt["shares"] = r["shares"]
+        nt["cost"] = r["cost"]
+        nt["pnl"] = r["pnl"]
+        nt["ret_pct"] = r["ret_pct"]
+        try:
+            nt["hold_calendar_days"] = (
+                datetime.strptime(r["sell_exec_day"], "%Y%m%d")
+                - datetime.strptime(r["buy_open_day"], "%Y%m%d")
+            ).days
+        except Exception:
+            pass
+        nt["price_source"] = "terminal"
+        nt["i"] = len(merged) + 1
+        merged.append(nt)
+        matched += 1
+
+    # 终端多出的轮次（log 未覆盖）——仍入库，信号标为未知
+    for i, r in enumerate(rounds):
+        if used[i]:
+            continue
+        merged.append(
+            {
+                "i": len(merged) + 1,
+                "buy_signal": "-",
+                "buy_label": "-",
+                "buy_signal_day": r["buy_open_day"],
+                "buy_open_day": r["buy_open_day"],
+                "buy_price": r["buy_price"],
+                "shares": r["shares"],
+                "cost": r["cost"],
+                "sell_signal": "-",
+                "sell_label": "-",
+                "sell_signal_day": r["sell_exec_day"],
+                "sell_exec_day": r["sell_exec_day"],
+                "sell_price": r["sell_price"],
+                "hold_calendar_days": None,
+                "ret_pct": r["ret_pct"],
+                "pnl": r["pnl"],
+                "price_source": "terminal_only",
+            }
+        )
+
+    for i, t in enumerate(merged, 1):
+        t["i"] = i
+
+    info = {
+        "source": "terminal",
+        "matched": matched,
+        "n_terminal": len(rounds),
+        "n_log": len(log_trades),
+        "seq_fallback": seq_fallback,
+        "unmatched_log": sum(1 for t in merged if t.get("price_source") == "log"),
+        "terminal_only": sum(1 for t in merged if t.get("price_source") == "terminal_only"),
+    }
+    return merged, info
+
+
 def parse_diag(seg: str, tag: str) -> dict:
     dates = re.findall(rf"{re.escape(tag)}\s+(20\d{{6}})\s+", seg)
     last = re.findall(
@@ -252,16 +507,19 @@ def parse_diag(seg: str, tag: str) -> dict:
     }
 
 
-def compute_stats(meta: dict, trades: list[dict], diag: dict) -> dict:
+def compute_stats(
+    meta: dict, trades: list[dict], diag: dict, price_info: dict | None = None
+) -> dict:
     rets = [t["ret_pct"] for t in trades]
     pnls = [t["pnl"] for t in trades]
-    wins = [t for t in trades if t["ret_pct"] > 0]
-    losses = [t for t in trades if t["ret_pct"] <= 0]
+    wins = [t for t in trades if t["pnl"] > 0]
+    losses = [t for t in trades if t["pnl"] <= 0]
     buy_c = Counter(t["buy_signal"] for t in trades)
     sell_c = Counter(t["sell_signal"] for t in trades)
     return {
         "meta": meta,
         "diag": diag,
+        "price_info": price_info or {"source": "log"},
         "n_buy": len(trades),
         "n_sell": len(trades),
         "sum_pnl": round(sum(pnls), 2) if pnls else 0.0,
@@ -526,9 +784,23 @@ def write_trades_csv(trades: list[dict], out: Path):
 def render_markdown(stats: dict, paths: dict, title: str) -> str:
     m = stats["meta"]
     d = stats["diag"]
+    pi = stats.get("price_info") or {}
     trades = stats["trades"]
     today = date.today().isoformat()
     wr = stats["win_rate"]
+    price_src = pi.get("source") or "log"
+    if price_src == "terminal":
+        pnl_note = (
+            "盈亏/成交价以 **QMT 终端操作明细** 为真源（引擎 `passorder` 结算）；"
+            "买卖信号标签来自 log。终端「盈利」字段优先，否则用（卖价−买价）×股数。"
+        )
+        src_row = f"| 盈亏真源 | **终端操作明细** `{paths.get('terminal_name', '')}` |"
+    else:
+        pnl_note = (
+            "未找到终端操作明细，盈亏回退为 log 自记账价（多为前复权开盘），"
+            "**可能与终端结算不一致**。建议导出 `QMT终端操作明细.csv` 至 `report/` 后重跑。"
+        )
+        src_row = "| 盈亏真源 | log 自记账（回退） |"
     lines = [
         f"# {title}",
         "",
@@ -540,7 +812,8 @@ def render_markdown(stats: dict, paths: dict, title: str) -> str:
         f"| 回测区间（日志 bar） | **{_ymd(d['first_bar']) if d.get('first_bar') else '?'} ~ {_ymd(d['last_bar']) if d.get('last_bar') else '?'}** |",
         f"| 单笔预算 | {m.get('budget'):,.0f} 元 |",
         f"| DRY_RUN | {m.get('dry_run')} |",
-        f"| 日志来源 | `{paths.get('log_name', 'log.txt')}` |",
+        f"| 日志来源 | `{paths.get('log_name', 'log.txt')}`（信号标签） |",
+        src_row,
         f"| 报告日期 | {today} |",
         f"| 生成方式 | `qmt-backtest-report` 自动生成 |",
         "",
@@ -548,7 +821,7 @@ def render_markdown(stats: dict, paths: dict, title: str) -> str:
         "",
         "## 1. 结论摘要",
         "",
-        f"本轮回测 **{stats['n_buy']} 买 {stats['n_sell']} 卖**，粗算合计盈亏约 "
+        f"本轮回测 **{stats['n_buy']} 买 {stats['n_sell']} 卖**，合计盈亏约 "
         f"**{stats['sum_pnl']:+,.2f} 元**"
         f"（相对预算 {m.get('budget'):,.0f} 约 **{stats['sum_pnl']/m['budget']*100 if m.get('budget') else 0:+.1f}%** 累计交易毛利）。"
         f"胜率 **{stats['win_n']}/{stats['n_buy']}（{wr}%）**，"
@@ -571,7 +844,7 @@ def render_markdown(stats: dict, paths: dict, title: str) -> str:
         "",
         "## 3. 成交明细",
         "",
-        "盈亏按「卖出价 − 买入价」× 股数粗算，**未单独拆佣金印花税**。",
+        pnl_note,
         "",
         "| # | 开仓日 | 买点 | 买入价 | 股数 | 平仓日 | 卖点 | 卖出价 | 持仓(日) | 收益% | 盈亏(元) |",
         "| :---: | :--- | :--- | ---: | ---: | :--- | :--- | ---: | ---: | ---: | ---: |",
@@ -585,7 +858,7 @@ def render_markdown(stats: dict, paths: dict, title: str) -> str:
         )
     lines += [
         "",
-        f"**合计粗算盈亏：{stats['sum_pnl']:+,.2f} 元**",
+        f"**合计盈亏：{stats['sum_pnl']:+,.2f} 元**",
         "",
         "---",
         "",
@@ -636,6 +909,12 @@ def render_markdown(stats: dict, paths: dict, title: str) -> str:
         "## 6. 附录",
         "",
         f"- 原始日志：[`../{paths.get('log_name', 'log.txt')}`](../{paths.get('log_name', 'log.txt')})",
+    ]
+    if paths.get("terminal_name"):
+        lines.append(
+            f"- 终端操作明细：[`{paths['terminal_name']}`](./{paths['terminal_name']})"
+        )
+    lines += [
         f"- 统计 JSON：[`{paths['json'].name}`](./{paths['json'].name})",
         f"- 深度解读（可选）：同目录下人工笔记如 `r1.md`",
         "",
@@ -660,12 +939,23 @@ def main(argv: list[str] | None = None):
     ap.add_argument("--theme", help="主题目录名或路径，如 hongli_band")
     ap.add_argument("--log", help="log.txt 路径")
     ap.add_argument("--out-dir", help="输出目录；默认 <主题>/report/")
+    ap.add_argument(
+        "--terminal-csv",
+        default=None,
+        help="QMT 终端操作明细.csv；默认在 report/ 下自动查找",
+    )
+    ap.add_argument(
+        "--no-terminal",
+        action="store_true",
+        help="强制不用终端明细，仅用 log 自记账价",
+    )
     ap.add_argument("--tag", default=None, help="日志前缀，如 HlBand；默认从 init 行推断")
     ap.add_argument("--ver", default=None, help="如 v1.2；默认取末次 init")
     ap.add_argument("--title", default=None, help="报告标题")
     ap.add_argument("--no-kline", action="store_true", help="跳过行情拉取与 K 线")
     args = ap.parse_args(argv)
 
+    theme_dir: Path | None = None
     if args.theme:
         theme_dir = resolve_theme(args.theme)
         log_path = Path(args.log).resolve() if args.log else theme_dir / "log.txt"
@@ -673,6 +963,7 @@ def main(argv: list[str] | None = None):
     elif args.log:
         log_path = Path(args.log).resolve()
         out_dir = Path(args.out_dir).resolve() if args.out_dir else log_path.parent / "report"
+        theme_dir = log_path.parent
     else:
         raise SystemExit("需要 --theme 或 --log")
 
@@ -696,11 +987,29 @@ def main(argv: list[str] | None = None):
     if args.ver:
         meta["ver"] = args.ver
     stock = meta.get("stock") or "561580.SH"
-    trades = parse_trades(seg, tag, stock)
+    log_trades = parse_trades(seg, tag, stock)
     diag = parse_diag(seg, tag)
     # interrupt 噪声常在会话前
     diag["interrupt_noise"] = "KeyboardInterrupt" in text[:3000]
-    stats = compute_stats(meta, trades, diag)
+
+    price_info: dict = {"source": "log"}
+    trades = log_trades
+    terminal_path: Path | None = None
+    if not args.no_terminal:
+        terminal_path = find_terminal_csv(out_dir, theme_dir, args.terminal_csv)
+        if terminal_path is not None:
+            rounds = parse_terminal_rounds(terminal_path)
+            trades, price_info = apply_terminal_pnl(log_trades, rounds)
+            price_info["terminal_csv"] = str(terminal_path)
+            print(
+                f"price source=terminal file={terminal_path.name} "
+                f"matched={price_info.get('matched')}/{price_info.get('n_terminal')} "
+                f"log={price_info.get('n_log')}"
+            )
+        else:
+            print("price source=log (no QMT终端操作明细.csv found under report/)", file=sys.stderr)
+
+    stats = compute_stats(meta, trades, diag, price_info)
 
     prefix = tag.lower()
     paths = {
@@ -710,6 +1019,7 @@ def main(argv: list[str] | None = None):
         "json": out_dir / f"{prefix}_report_stats.json",
         "md": out_dir / "回测分析报告.md",
         "log_name": log_path.name,
+        "terminal_name": terminal_path.name if terminal_path else "",
     }
 
     eq = equity_curve(trades, float(meta.get("budget") or 50000))
@@ -744,7 +1054,8 @@ def main(argv: list[str] | None = None):
     paths["md"].write_text(md, encoding="utf-8")
     print("wrote", paths["md"])
     print(
-        f"done: trades={len(trades)} sum_pnl={stats['sum_pnl']:+.2f} win_rate={stats['win_rate']}%"
+        f"done: trades={len(trades)} sum_pnl={stats['sum_pnl']:+.2f} "
+        f"win_rate={stats['win_rate']}% price_source={price_info.get('source')}"
     )
 
 
