@@ -49,11 +49,19 @@ VOL_PULLBACK_RATIO = 0.9      # 量 < 均量*0.9 视为缩量
 VOL_DRY_N = 20
 VOL_DRY_RATIO = 0.70          # 0.70 = 量不足 20 日均量的 70%
 
-# 卖① trail_stop：移动止盈
-#   持仓最高浮盈曾 >= ACTIVATE 后，自峰值回撤 > GIVEBACK → 平仓
-#   例：浮盈曾到 3%，再从峰值回落超过 1.5% 触发
-TRAIL_ACTIVATE = 0.03
-TRAIL_GIVEBACK = 0.015
+# 卖① trail_stop：阶梯式移动止盈
+#   按历史最高浮盈 (peak-cost)/cost 选档；触发条件：
+#     自峰值回撤 > giveback，或（若设了 profit_floor）当前浮盈 < 底线
+#   元组：(peak_lo, peak_hi, giveback, profit_floor)
+#     peak_hi=None 无上限；profit_floor=None 不设硬底线
+#   档1 起步保护 [3%,6%)：回撤>1.5%（同旧版，防破本）
+#   档2 落袋为安 [6%,10%)：回撤>3% 或 利润跌破 3%
+#   档3 放鹰吃肉 >=10%：回撤>5%（利润垫扛日线洗盘）
+TRAIL_TIERS = (
+    (0.03, 0.06, 0.015, None),
+    (0.06, 0.10, 0.03, 0.03),
+    (0.10, None, 0.05, None),
+)
 # 卖② time_force：智能时间成本（防长期磨人）
 #   持仓 bar 数 > BARS 后：收盘破日线 MA60 → 立即强制平仓；
 #   仍站上 MA60 → 豁免一次，再观察 GRACE_BARS 日，期满仍强制平仓
@@ -102,7 +110,7 @@ PENDING_ORPHAN_SEC = 60
 STATE_FILE = r"D:\service\GJQMT\python\hlband_qmt_state.json"
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.11"
+STRATEGY_VER = "v1.12"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
