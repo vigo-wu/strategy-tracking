@@ -88,6 +88,7 @@
 | `TIME_FORCE_GRACE_BARS` | `5` | 站上 MA60 时豁免观察日 |
 | `STOP_LOSS` | `0.08` | 硬止损（相对成本） |
 | `CHASE_MAX_PCT` | `0.05` | 追高禁开 |
-| `STATE_FILE` | `...\hlband_{stock}.json` | 实盘状态；按主图标的分文件（如 `hlband_513530_SH.json`） |
+| `STATE_FILE` | `D:\tradingStrategy\hlband_{stock}.json` | 实盘状态；按主图标的分文件 |
+| `LOG_DIR` | `D:\tradingStrategy\logs` | 实盘结构化日志根目录 |
 
 日志确认 `HlBand v1.12 init`（`dMA=20/60`）后再改 `DRY_RUN=False`。

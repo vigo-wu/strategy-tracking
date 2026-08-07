@@ -41,7 +41,7 @@
 | `_heartbeat_extra()` | 可选 | 心跳附加信息 |
 | `_state_extra_load` / `_state_extra_save` | 可选（均线双周期） | 扩展状态字段 |
 
-实盘日志：`config` 设 `LOG_DIR`（绝对路径）并拼接 `common:live_log.py`。目录：
+实盘日志：`config` 设 `LOG_DIR`（绝对路径，范例 `D:\tradingStrategy\logs`）并拼接 `common:live_log.py`。目录：
 
 ```
 LOG_DIR/<stock_tag>/
@@ -51,6 +51,7 @@ LOG_DIR/<stock_tag>/
   state_snapshots/YYYYMMDD_HHMM.json
 ```
 
+状态文件范例：`STATE_FILE = r"D:\tradingStrategy\<策略简名>_{stock}.json"`。
 `LOG_DIR=""` 关闭落盘；`LOG_IN_BACKTEST=False`（默认）时回测不写盘。
 
 ---
