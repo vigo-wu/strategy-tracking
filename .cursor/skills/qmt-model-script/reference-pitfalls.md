@@ -43,7 +43,7 @@ SyntaxError: (unicode error) 'utf-8' codec can't decode byte 0xb9 in position N
 **正确**：状态文件用**绝对路径**常量，例如：
 
 ```python
-STATE_FILE = r"D:\service\GJQMT\python\hlband_{stock}.json"
+STATE_FILE = r"D:\tradingStrategy\hlband_{stock}.json"
 # 或不写占位：...\hlband_qmt_state.json → 运行时自动变成 ...\hlband_qmt_state_513530_SH.json
 ```
 
@@ -67,7 +67,7 @@ STATE_FILE = r"D:\service\GJQMT\python\hlband_{stock}.json"
 
 1. `STATE_FILE` 用绝对路径基名；**推荐**显式 `{stock}`：
    ```python
-   STATE_FILE = r"D:\service\GJQMT\python\hlband_{stock}.json"
+   STATE_FILE = r"D:\tradingStrategy\hlband_{stock}.json"
    # → hlband_513530_SH.json / hlband_159934_SZ.json …
    ```
 2. 或不写占位：基名 `...\foo_qmt_state.json` 时自动后缀 `_513530_SH`。

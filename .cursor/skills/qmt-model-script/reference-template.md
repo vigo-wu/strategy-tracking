@@ -36,7 +36,7 @@ DRY_RUN = True
 AUTO_BUY_BASE = False
 # 状态落盘（终端模型无 __file__，必须用绝对路径）
 # 多模型实例挂不同主图：必须按标的分文件（{stock} 或 single/state_io 自动后缀），见 pitfalls §2.1
-STATE_FILE = r"D:\service\GJQMT\python\hongli_t_{stock}.json"
+STATE_FILE = r"D:\tradingStrategy\hongli_t_{stock}.json"
 # 外部 xtquant 版才可用 Path(__file__)...
 ```
 
