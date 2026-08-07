@@ -20,6 +20,7 @@ def _state_extra_load(raw):
     except Exception:
         A.time_force_grace_until = None
     A._confirmed_eval_day = str(raw.get("confirmed_eval_day", "") or "")
+    A._fallback_done_day = str(raw.get("fallback_done_day", "") or "")
 
 
 def _state_extra_save(data):
@@ -32,3 +33,4 @@ def _state_extra_save(data):
     gu = getattr(A, "time_force_grace_until", None)
     data["time_force_grace_until"] = None if gu is None else int(gu)
     data["confirmed_eval_day"] = str(getattr(A, "_confirmed_eval_day", "") or "")
+    data["fallback_done_day"] = str(getattr(A, "_fallback_done_day", "") or "")

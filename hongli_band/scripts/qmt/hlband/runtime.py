@@ -68,6 +68,7 @@ def _init_impl(C):
             A._hold_count_day = ""
             A.time_force_grace_until = None
             A._confirmed_eval_day = ""
+            A._fallback_done_day = ""
             A.bt_held = 0
             A.bt_locked = 0
             A.bt_lock_day = ""
@@ -96,6 +97,8 @@ def _init_impl(C):
                 A.time_force_grace_until = None
             if not hasattr(A, "_confirmed_eval_day"):
                 A._confirmed_eval_day = ""
+            if not hasattr(A, "_fallback_done_day"):
+                A._fallback_done_day = ""
             _bt_recover_position()
             print(
                 "%s backtest re-init preserve barpos=" % STRATEGY_NAME,
@@ -124,6 +127,8 @@ def _init_impl(C):
             A.time_force_grace_until = None
         if not hasattr(A, "_confirmed_eval_day"):
             A._confirmed_eval_day = ""
+        if not hasattr(A, "_fallback_done_day"):
+            A._fallback_done_day = ""
 
     try:
         C.set_universe([A.stock])

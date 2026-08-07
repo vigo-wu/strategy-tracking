@@ -255,8 +255,22 @@ def _live_signal_day(today):
 
 
 def _mark_confirmed_eval(day):
+    """收盘确认完成（当日完整 K）。"""
     A._confirmed_eval_day = str(day)
     _save_state()
+
+
+def _mark_fallback_done(day):
+    """开盘兜底评估完成；不写 confirmed，以免挡住今日收盘确认。"""
+    A._fallback_done_day = str(day)
+    _save_state()
+
+
+def _mark_signal_eval_done(day, is_confirm):
+    if is_confirm:
+        _mark_confirmed_eval(day)
+    else:
+        _mark_fallback_done(day)
 
 
 def _pending_ready(pend, day, bar_tag, mode):
@@ -365,11 +379,24 @@ def _handle(C):
     _ow, _hw, _lw, closes_w, _vw = ohlcv_w
 
     open_px = float(opens_d[-1])
-    # 开盘兜底：仅当完全没有确认记录且无挂起（收盘窗口未跑到）
+    # v1.10 误把开盘兜底写成 confirmed=今日，会挡收盘确认；盘中执行时段自动清掉
+    if (
+        live_cc
+        and phase == "exec"
+        and str(getattr(A, "_confirmed_eval_day", "") or "") == day
+    ):
+        print(
+            "%s clear mis-marked confirmed_eval_day=%s (was open fallback)"
+            % (STRATEGY_NAME, day)
+        )
+        A._confirmed_eval_day = ""
+        _save_state()
+    # 开盘兜底：无收盘确认记录、今日尚未兜底、无挂起
     need_fallback = (
         live_cc
         and phase == "exec"
         and (not str(getattr(A, "_confirmed_eval_day", "") or ""))
+        and str(getattr(A, "_fallback_done_day", "") or "") != day
         and (not isinstance(getattr(A, "pending_entry", None), dict))
         and (not isinstance(getattr(A, "pending_exit", None), dict))
     )
@@ -585,8 +612,9 @@ def _handle(C):
 
     # ---- 新信号：回测当根；实盘仅收盘确认或开盘兜底 ----
     allow_new = True
+    is_confirm = live_cc and phase == "confirm"
     if live_cc:
-        if phase == "confirm":
+        if is_confirm:
             if getattr(A, "_confirmed_eval_day", "") == day:
                 allow_new = False
         elif need_fallback:
@@ -601,7 +629,7 @@ def _handle(C):
         if force_empty or sell_ok or stop_hit or trail_hit or time_force_hit:
             if isinstance(cur_ex, dict):
                 if live_cc:
-                    _mark_confirmed_eval(day)
+                    _mark_signal_eval_done(day, is_confirm)
                 return
             if force_empty:
                 reason = "weekly_bear"
@@ -630,8 +658,9 @@ def _handle(C):
             }
             A.pending_entry = None
             if live_cc:
-                A._confirmed_eval_day = day
-            _save_state()
+                _mark_signal_eval_done(day, is_confirm)
+            else:
+                _save_state()
             print(
                 "%s pending_exit set signal=%s label=%s all=%s day=%s close=%.4f phase=%s"
                 % (
@@ -645,13 +674,13 @@ def _handle(C):
                 )
             )
         elif live_cc:
-            _mark_confirmed_eval(day)
+            _mark_signal_eval_done(day, is_confirm)
         return
 
     if buy_sig and ("BUY" not in getattr(A, "acted", set())):
         if isinstance(getattr(A, "pending_entry", None), dict):
             if live_cc:
-                _mark_confirmed_eval(day)
+                _mark_signal_eval_done(day, is_confirm)
             return
         A.pending_entry = {
             "signal_day": sig_day,
@@ -661,8 +690,9 @@ def _handle(C):
         }
         A.pending_exit = None
         if live_cc:
-            A._confirmed_eval_day = day
-        _save_state()
+            _mark_signal_eval_done(day, is_confirm)
+        else:
+            _save_state()
         primary = real_buys[0] if real_buys else "entry"
         print(
             "%s pending_entry set signal=%s label=%s all=%s day=%s close=%.4f phase=%s"
@@ -677,4 +707,4 @@ def _handle(C):
             )
         )
     elif live_cc:
-        _mark_confirmed_eval(day)
+        _mark_signal_eval_done(day, is_confirm)
