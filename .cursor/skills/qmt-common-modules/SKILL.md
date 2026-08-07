@@ -24,11 +24,12 @@ description: >-
 1. **禁止**跨片段 `import`；只靠 `_deploy_qmt_gbk.py` 的 `MODULE_ORDER` 拼接。
 2. **禁止**手改 `qmt_terminal_*.py` 与 QMT `python\` 下 GBK 产物；只改片段后 re-deploy。
 3. **禁止**在策略里复制 `_process_pending` / `_bt_roll_t1` / `_series_from_ex` / `_refresh_mode` / `_broker_position` 等已进 common 的逻辑。
-4. **禁止** `__file__` 定 STATE 路径；用绝对路径 `STATE_FILE`。
-5. 片段内**不要**再写 `import datetime/json/os/numpy`（preamble 已有，deploy 会剥）。
-6. 源码 UTF-8；部署 GBK；字符须可 GBK 编码。
-7. 改完必须跑该主题 `python .../_deploy_qmt_gbk.py` 且 `compile` 成功。
-8. 默认 `DRY_RUN=True`；日志用 `STRATEGY_NAME` / `_strategy_tag()`，勿写死策略名。
+4. **禁止** `__file__` 定 STATE 路径；用绝对路径 `STATE_FILE`（基路径或含 `{stock}`）。
+5. **多模型实例挂不同主图**：单仓必须按标的分状态文件。`common:single/state_io` 会把 `A.stock` 写入路径（`{stock}` 占位或自动后缀 `_513530_SH`）。**禁止**假定「同一策略脚本 + 同一 `STATE_FILE` 字符串」可安全并行多标的；否则后写覆盖、加载 `state stock mismatch`。双浮仓自研 `state_io` 同样须按标的隔离。详见 [reference-pitfalls §2.1](../qmt-model-script/reference-pitfalls.md)。
+6. 片段内**不要**再写 `import datetime/json/os/numpy`（preamble 已有，deploy 会剥）。
+7. 源码 UTF-8；部署 GBK；字符须可 GBK 编码。
+8. 改完必须跑该主题 `python .../_deploy_qmt_gbk.py` 且 `compile` 成功。
+9. 默认 `DRY_RUN=True`；日志用 `STRATEGY_NAME` / `_strategy_tag()`，勿写死策略名。
 
 ---
 

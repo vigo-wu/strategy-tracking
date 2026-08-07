@@ -2,8 +2,46 @@
 # 作用: 单仓 JSON 状态读写（回测不落盘）
 # 主要符号: _load_state, _save_state
 # 前置: STATE_FILE, STRATEGY_VER；可选扩展字段由 _state_extra_load/_state_extra_save
+# STATE_FILE 为基路径；有 A.stock 时按标的分文件，多模型实例互不覆盖
+#   例 ...\hlband_qmt_state.json + 513530.SH → ...\hlband_qmt_state_513530_SH.json
+#   或 STATE_FILE 含 {stock} 占位符时直接替换
+def _state_stock_tag():
+    stock = str(getattr(A, "stock", "") or "").strip()
+    if not stock:
+        return ""
+    return (
+        stock.replace(".", "_")
+        .replace("/", "_")
+        .replace("\\", "_")
+        .replace(":", "_")
+        .replace(" ", "")
+    )
+
+
 def _state_path():
-    return STATE_FILE
+    base = str(STATE_FILE or "").strip()
+    if not base:
+        return base
+    tag = _state_stock_tag()
+    if not tag:
+        return base
+    if "{stock}" in base:
+        return base.replace("{stock}", tag)
+    root, ext = os.path.splitext(base)
+    if not ext:
+        ext = ".json"
+    return root + "_" + tag + ext
+
+
+def _state_load_path():
+    """优先分标的文件；缺失时回退旧版共用 STATE_FILE（由 _load_state 再校验 stock）。"""
+    path = _state_path()
+    if path and os.path.isfile(path):
+        return path
+    legacy = str(STATE_FILE or "").strip()
+    if legacy and legacy != path and os.path.isfile(legacy):
+        return legacy
+    return path
 
 
 def _load_state():
@@ -11,9 +49,9 @@ def _load_state():
     A.acted_day = ""
     A.acted = set()
     A.pending = None
-    path = _state_path()
+    path = _state_load_path()
     if not path or not os.path.isfile(path):
-        print(_strategy_tag(), "state: empty (no file)")
+        print(_strategy_tag(), "state: empty (no file)", path or STATE_FILE)
         return
     try:
         with open(path, "r") as f:
@@ -44,7 +82,7 @@ def _load_state():
             extra(raw)
         except Exception as e:
             print(_strategy_tag(), "state extra load fail", e)
-    print(_strategy_tag(), "state loaded", A.position, "pending=", bool(A.pending))
+    print(_strategy_tag(), "state loaded", "path=", path, A.position, "pending=", bool(A.pending))
 
 
 def _save_state():
@@ -75,4 +113,4 @@ def _save_state():
         with open(path, "w") as f:
             json.dump(data, f, ensure_ascii=True, indent=2)
     except Exception as e:
-        print(_strategy_tag(), "state save fail", e)
+        print(_strategy_tag(), "state save fail", path, e)

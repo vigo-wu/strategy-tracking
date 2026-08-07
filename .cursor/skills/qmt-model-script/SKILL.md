@@ -48,7 +48,7 @@ description: >-
 转写进度:
 - [ ] 1. 读 model.md；判定单仓 vs 双浮仓 → 打开 qmt-common-modules
 - [ ] 2. 建 <主题>/scripts/qmt/<简名>/ 策略片段 + _deploy_qmt_gbk.py（MODULE_ORDER 含 common:）
-- [ ] 3. ACCOUNT_ID 兜底；STATE 绝对路径（禁 __file__）；DRY_RUN=True
+- [ ] 3. ACCOUNT_ID 兜底；STATE 绝对路径 + `{stock}`/按标的分文件（禁 __file__、禁多实例共写一文件）；DRY_RUN=True
 - [ ] 4. 行情：download_history_data + get_market_data_ex（走 common market_util）；禁 get_history_data
 - [ ] 5. handlebar 用 _refresh_mode；回测 K 线时间 / 实盘决策窗
 - [ ] 6. T+1：common backtest + broker；skip 不清仓；pending 成交后才改状态
@@ -95,6 +95,7 @@ xtquant 骨架见 [reference-template.md](reference-template.md)。
 | :--- | :--- |
 | `codec can't decode byte 0xb9` | §1 编码 |
 | `__file__ is not defined` | §2 |
+| `state stock mismatch` / 多实例 pending 丢失 | §2.1 多实例 STATE |
 | `account is not defined` | §3 |
 | 只有 init / warmup，无 close= | §4 |
 | `get_history_data` 过时或上下轨=收盘价 | §5 |

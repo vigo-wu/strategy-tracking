@@ -43,10 +43,39 @@ SyntaxError: (unicode error) 'utf-8' codec can't decode byte 0xb9 in position N
 **正确**：状态文件用**绝对路径**常量，例如：
 
 ```python
-STATE_FILE = r"D:\office\国金证券QMT交易端\python\hongli_t_qmt_state.json"
+STATE_FILE = r"D:\service\GJQMT\python\hlband_{stock}.json"
+# 或不写占位：...\hlband_qmt_state.json → 运行时自动变成 ...\hlband_qmt_state_513530_SH.json
 ```
 
 禁止 `os.path.dirname(__file__)`。
+
+---
+
+## 2.1 多模型实例共用一个 STATE 文件 → 状态串标的 / pending 丢失
+
+**现象**
+
+- 同一策略（如 `HLBAND_PROD`）在模型交易里开多个实例，主图分别挂 513530 / 159934 / 513300。
+- 日志：`state stock mismatch, ignore 513530.SH 159934.SZ`
+- pending / position / acted 被后启动或后保存的实例覆盖；重启后只剩某一个标的的状态。
+
+**原因**
+
+单仓 `STATE_FILE` 若指向**同一个物理 JSON**，且文件内只有一个 `stock` 字段：后写覆盖先写；加载时 stock 与当前主图不一致则整份忽略。
+
+**正确（单仓走 `common:single/state_io`）**
+
+1. `STATE_FILE` 用绝对路径基名；**推荐**显式 `{stock}`：
+   ```python
+   STATE_FILE = r"D:\service\GJQMT\python\hlband_{stock}.json"
+   # → hlband_513530_SH.json / hlband_159934_SZ.json …
+   ```
+2. 或不写占位：基名 `...\foo_qmt_state.json` 时自动后缀 `_513530_SH`。
+3. 加载优先分标的文件；缺失时才回退旧共用文件（仅 stock 匹配时生效），随后保存只写分文件。
+4. 账号、预算可相同；**状态路径必须按标的隔离**。改 `state_io` 后全策略 re-deploy，并重启各模型实例。
+5. 双浮仓等自研 `state_io`：**禁止**多实例共用单一 JSON；同样按 `A.stock` 分文件或分目录。
+
+**排查**：实盘 init 日志应出现 `state loaded path=..._513530_SH.json`（或 `{stock}` 展开后的路径），每个实例路径不同。
 
 ---
 
@@ -128,6 +157,7 @@ HongliT diag: ok source= get_market_data_ex n= 120 end= 20240930 last= 1.08 std2
 ## 6. 状态与仓位语义
 
 - 浮仓成本/股数写入 JSON；**回测只用内存状态，禁止读写实盘 STATE_FILE**。
+- **一策略多主图实例**：状态必须按标的分文件（见 §2.1）；勿让多个实盘实例写同一 JSON。
 - 回测 `init`：仅在新会话（`barpos<=0` / 首次）清空；**中途再 init 必须保留** `float` / `bt_held`（否则孤儿双开）。
 - 有底仓 + Float A/B 时：高抛 **只卖浮仓股数**，禁止按「全部持仓」清仓；`BASE_SHARES` 永不 adopt/卖出。
 - `sell=True` 且 `A=False B=False`：信号成立但无浮仓 → **不落单**，属正常。

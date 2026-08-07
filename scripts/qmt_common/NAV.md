@@ -20,7 +20,7 @@
 | `broker_base.py` | P0 | 查资金 / 持仓 / `can_use` |
 | `orders_pending.py` | P0 | pending、成交查询、撤单；钩子 `_pending_on_*` |
 | `market_util.py` | P1 | `_series_from_ex`、补历史、诊断、心跳 |
-| `single/state_io.py` | 单仓 | JSON 仓位读写 |
+| `single/state_io.py` | 单仓 | JSON 仓位读写（按 `A.stock` 分文件） |
 | `single/state_pos.py` | 单仓 | `A.position` 辅助 |
 | `single/bt_recover.py` | 单仓 | 回测仓恢复 |
 | `single/broker.py` | 单仓 | `_max_sell_vol` |

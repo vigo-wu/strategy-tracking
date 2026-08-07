@@ -144,7 +144,8 @@ ACCOUNT_TYPE = "STOCK"
 TRADE_BUDGET = 50000.0          # 单仓；双浮仓用 FLOAT_*_BUDGET
 PERIOD = "15m"                  # 或 "follow"
 OHLC_COUNT = 480
-STATE_FILE = r"D:\service\GJQMT\python\foo_qmt_state.json"
+# 绝对路径；多实例不同主图时用 {stock}（或基名由 single/state_io 自动加 _代码_市场 后缀）
+STATE_FILE = r"D:\service\GJQMT\python\foo_{stock}.json"
 PENDING_TIMEOUT_SEC = 180
 PENDING_ORPHAN_SEC = 60
 LIVE_HEARTBEAT_SEC = 60

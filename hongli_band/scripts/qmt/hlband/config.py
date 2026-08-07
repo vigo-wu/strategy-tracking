@@ -106,8 +106,9 @@ DOWNLOAD_HIST_BACKTEST = True
 PENDING_TIMEOUT_SEC = 180
 PENDING_ORPHAN_SEC = 60
 
-# QMT 模型无 __file__；状态绝对路径
-STATE_FILE = r"D:\service\GJQMT\python\hlband_qmt_state.json"
+# QMT 模型无 __file__；状态绝对路径（含 {stock}，多实例不同主图互不覆盖）
+#   513530.SH → ...\hlband_513530_SH.json
+STATE_FILE = r"D:\service\GJQMT\python\hlband_{stock}.json"
 
 STRATEGY_NAME = "HlBand"
 STRATEGY_VER = "v1.12"
