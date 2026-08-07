@@ -65,3 +65,34 @@ def _near_ma(price, ma, tol=None):
     if price is None or ma is None or ma <= 0:
         return False
     return abs(float(price) - float(ma)) / float(ma) <= tol
+
+
+def _true_range(highs, lows, closes):
+    """TR[i] = max(H-L, |H-C_prev|, |L-C_prev|)；首根用 H-L。"""
+    h = np.asarray(highs, dtype=float)
+    l = np.asarray(lows, dtype=float)
+    c = np.asarray(closes, dtype=float)
+    n = len(c)
+    if n == 0 or len(h) != n or len(l) != n:
+        return None
+    tr = np.empty(n, dtype=float)
+    tr[0] = h[0] - l[0]
+    for i in range(1, n):
+        hl = h[i] - l[i]
+        hc = abs(h[i] - c[i - 1])
+        lc = abs(l[i] - c[i - 1])
+        tr[i] = hl if hl >= hc and hl >= lc else (hc if hc >= lc else lc)
+    return tr
+
+
+def _atr(highs, lows, closes, n=None):
+    """Wilder ATR；返回与 closes 等长数组，不足暖机为 nan。"""
+    n = int(n if n is not None else TRAIL_ATR_PERIOD)
+    tr = _true_range(highs, lows, closes)
+    if tr is None or n <= 0 or len(tr) < n:
+        return None
+    out = np.full(len(tr), np.nan, dtype=float)
+    out[n - 1] = float(np.mean(tr[:n]))
+    for i in range(n, len(tr)):
+        out[i] = (out[i - 1] * (n - 1) + tr[i]) / float(n)
+    return out

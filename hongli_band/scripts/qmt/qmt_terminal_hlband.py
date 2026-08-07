@@ -59,11 +59,24 @@ VOL_PULLBACK_RATIO = 0.9      # 量 < 均量*0.9 视为缩量
 VOL_DRY_N = 20
 VOL_DRY_RATIO = 0.70          # 0.70 = 量不足 20 日均量的 70%
 
-# 卖① trail_stop：移动止盈
-#   持仓最高浮盈曾 >= ACTIVATE 后，自峰值回撤 > GIVEBACK → 平仓
-#   例：浮盈曾到 3%，再从峰值回落超过 1.5% 触发
+# 卖① trail_stop：ATR 自适应动态阶梯止盈（v1.13 融合）
+#   曾浮盈过门槛后，按最高浮盈分阶段：倍数×ATR% 再夹逼 → 自峰值回撤超阈值则平仓
+#   <3% 不激活；3%~6% 起步保护；6%~12% 防洗盘放宽；>=12% 高位锁利
 TRAIL_ACTIVATE = 0.03
-TRAIL_GIVEBACK = 0.015
+TRAIL_STAGE_MID = 0.06
+TRAIL_STAGE_HIGH = 0.12
+TRAIL_ATR_PERIOD = 14
+# 各阶段：ATR 倍数 + giveback 夹逼 [min, max]
+TRAIL_S1_MULT = 1.0
+TRAIL_S1_MIN = 0.010
+TRAIL_S1_MAX = 0.015
+TRAIL_S2_MULT = 1.5
+TRAIL_S2_MIN = 0.020
+TRAIL_S2_MAX = 0.035
+TRAIL_S3_MULT = 2.0
+TRAIL_S3_MIN = 0.020
+TRAIL_S3_MAX = 0.030
+TRAIL_ATR_PCT_FALLBACK = 0.015  # ATR 暖机不足时用的 atr/close 替代
 # 卖② time_force：智能时间成本（防长期磨人）
 #   持仓 bar 数 > BARS 后：收盘破日线 MA60 → 立即强制平仓；
 #   仍站上 MA60 → 豁免一次，再观察 GRACE_BARS 日，期满仍强制平仓
@@ -112,7 +125,7 @@ PENDING_ORPHAN_SEC = 60
 STATE_FILE = r"D:\service\GJQMT\python\hlband_qmt_state.json"
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.11"
+STRATEGY_VER = "v1.13"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
@@ -569,6 +582,37 @@ def _near_ma(price, ma, tol=None):
     if price is None or ma is None or ma <= 0:
         return False
     return abs(float(price) - float(ma)) / float(ma) <= tol
+
+
+def _true_range(highs, lows, closes):
+    """TR[i] = max(H-L, |H-C_prev|, |L-C_prev|)；首根用 H-L。"""
+    h = np.asarray(highs, dtype=float)
+    l = np.asarray(lows, dtype=float)
+    c = np.asarray(closes, dtype=float)
+    n = len(c)
+    if n == 0 or len(h) != n or len(l) != n:
+        return None
+    tr = np.empty(n, dtype=float)
+    tr[0] = h[0] - l[0]
+    for i in range(1, n):
+        hl = h[i] - l[i]
+        hc = abs(h[i] - c[i - 1])
+        lc = abs(l[i] - c[i - 1])
+        tr[i] = hl if hl >= hc and hl >= lc else (hc if hc >= lc else lc)
+    return tr
+
+
+def _atr(highs, lows, closes, n=None):
+    """Wilder ATR；返回与 closes 等长数组，不足暖机为 nan。"""
+    n = int(n if n is not None else TRAIL_ATR_PERIOD)
+    tr = _true_range(highs, lows, closes)
+    if tr is None or n <= 0 or len(tr) < n:
+        return None
+    out = np.full(len(tr), np.nan, dtype=float)
+    out[n - 1] = float(np.mean(tr[:n]))
+    for i in range(n, len(tr)):
+        out[i] = (out[i - 1] * (n - 1) + tr[i]) / float(n)
+    return out
 
 # === qmt_common/market_util.py ===
 # 作用: 行情辅助：诊断、序列解析、补历史、心跳
@@ -1596,8 +1640,54 @@ def _update_hold_peak(high_px, cost):
     return False
 
 
-def _trail_stop_hit(price, cost):
-    """曾浮盈 >= TRAIL_ACTIVATE 且自峰值回撤 > TRAIL_GIVEBACK。"""
+def _clip(val, lo, hi):
+    return max(min(float(val), float(hi)), float(lo))
+
+
+def _atr_pct(highs, lows, closes):
+    """ATR(14)/Close；失败则 FALLBACK。"""
+    atr_arr = _atr(highs, lows, closes, TRAIL_ATR_PERIOD)
+    if atr_arr is None:
+        return float(TRAIL_ATR_PCT_FALLBACK)
+    i = len(closes) - 1
+    atr = _last_valid(atr_arr, i)
+    px = float(closes[i]) if closes[i] is not None else 0.0
+    if atr is None or atr <= 0 or px <= 0:
+        return float(TRAIL_ATR_PCT_FALLBACK)
+    return float(atr) / px
+
+
+def _trail_giveback_fusion(max_profit, atr_pct):
+    """按最高浮盈阶梯推演 giveback；未激活返回 None。"""
+    if max_profit is None or max_profit < float(TRAIL_ACTIVATE):
+        return None
+    ap = float(atr_pct) if atr_pct is not None else float(TRAIL_ATR_PCT_FALLBACK)
+    if ap <= 0:
+        ap = float(TRAIL_ATR_PCT_FALLBACK)
+    mp = float(max_profit)
+    if mp < float(TRAIL_STAGE_MID):
+        # 起步保护：1.0×ATR%，夹逼 [1.0%, 1.5%]
+        return _clip(float(TRAIL_S1_MULT) * ap, TRAIL_S1_MIN, TRAIL_S1_MAX)
+    if mp < float(TRAIL_STAGE_HIGH):
+        # 发展期：1.5×ATR%，夹逼 [2.0%, 3.5%]
+        return _clip(float(TRAIL_S2_MULT) * ap, TRAIL_S2_MIN, TRAIL_S2_MAX)
+    # 高位锁利：2.0×ATR%，夹逼 [2.0%, 3.0%]
+    return _clip(float(TRAIL_S3_MULT) * ap, TRAIL_S3_MIN, TRAIL_S3_MAX)
+
+
+def _hold_max_profit(cost):
+    if cost is None or cost <= 0:
+        return None
+    peak = getattr(A, "hold_peak", None)
+    if peak is None or peak <= 0:
+        return None
+    return (float(peak) - float(cost)) / float(cost)
+
+
+def _trail_stop_hit(price, cost, giveback_pct):
+    """曾浮盈达激活线且自峰值回撤 > 融合 giveback。"""
+    if giveback_pct is None:
+        return False
     if cost is None or cost <= 0:
         return False
     peak = getattr(A, "hold_peak", None)
@@ -1605,7 +1695,9 @@ def _trail_stop_hit(price, cost):
         return False
     max_profit = (float(peak) - float(cost)) / float(cost)
     giveback = (float(peak) - float(price)) / float(peak)
-    return (max_profit >= float(TRAIL_ACTIVATE)) and (giveback > float(TRAIL_GIVEBACK))
+    return (max_profit >= float(TRAIL_ACTIVATE)) and (
+        giveback > float(giveback_pct)
+    )
 
 
 def _time_force_hit(price, closes, hold_bars):
@@ -1714,7 +1806,7 @@ def _pending_ready(pend, day, bar_tag, mode):
 
 
 _SELL_LABELS = {
-    "trail_stop": "卖点1-移动止盈回撤",
+    "trail_stop": "卖点1-ATR阶梯融合止盈",
     "time_force": "卖点2-时间成本智能平仓",
     "weekly_bear": "周线转空强制清仓",
     "stop_loss": "硬止损",
@@ -1827,12 +1919,13 @@ def _handle(C):
         and (not isinstance(getattr(A, "pending_exit", None), dict))
     )
     if live_cc and phase == "confirm":
-        highs_s, closes_s, vols_s = highs_d, closes_d, vols_d
+        highs_s, lows_s, closes_s, vols_s = highs_d, lows_d, closes_d, vols_d
         closes_ws = closes_w
         sig_day = day
     elif need_fallback:
         use_prev_bar = True
         highs_s = _drop_forming_bar(highs_d)
+        lows_s = _drop_forming_bar(lows_d)
         closes_s = _drop_forming_bar(closes_d)
         vols_s = _drop_forming_bar(vols_d)
         closes_ws = _drop_forming_bar(closes_w)
@@ -1842,7 +1935,7 @@ def _handle(C):
         sig_day = _live_signal_day(day)
     else:
         # 回测 / 盘中执行：信号评估用完整序列（盘中不新挂，仅供撤单校验与日志）
-        highs_s, closes_s, vols_s = highs_d, closes_d, vols_d
+        highs_s, lows_s, closes_s, vols_s = highs_d, lows_d, closes_d, vols_d
         closes_ws = closes_w
         sig_day = day
 
@@ -1882,6 +1975,14 @@ def _handle(C):
         if _update_hold_peak(high_px, cost):
             _save_state()
 
+    trail_gb = 0.0
+    max_profit = _hold_max_profit(cost) if holding else None
+    if holding:
+        atr_pct = _atr_pct(highs_s, lows_s, closes_s)
+        gb = _trail_giveback_fusion(max_profit, atr_pct)
+        if gb is not None:
+            trail_gb = float(gb)
+
     stop_hit = False
     if holding and cost > 0 and price <= cost * (1.0 - float(STOP_LOSS)):
         stop_hit = True
@@ -1889,11 +1990,20 @@ def _handle(C):
         sell_ok = True
 
     trail_hit = False
-    if holding and (not stop_hit) and _trail_stop_hit(price, cost):
+    if holding and (not stop_hit) and _trail_stop_hit(price, cost, trail_gb if trail_gb > 0 else None):
         trail_hit = True
         sell_reasons = list(sell_reasons) + ["trail_stop"]
         sell_ok = True
-
+        print(
+            "%s trail_fusion max_profit=%s giveback_tol=%.2f%% peak=%s close=%.4f"
+            % (
+                STRATEGY_NAME,
+                None if max_profit is None else ("%.2f%%" % (max_profit * 100.0)),
+                trail_gb * 100.0,
+                getattr(A, "hold_peak", None),
+                price,
+            )
+        )
     ret_pct = None
     if holding and cost > 0:
         ret_pct = (price - cost) / cost
@@ -1937,7 +2047,7 @@ def _handle(C):
             "n1d=%d n1w=%d close=%.4f sig_day=%s phase=%s prev=%s "
             "w_bull=%s w_bear=%s w_ma5=%s w_ma30=%s w_hist=%s "
             "buy=%s buyR=%s sell=%s sellR=%s "
-            "hold=%s ret=%s pe=%s px=%s bt_held=%s avail=%s"
+            "hold=%s ret=%s trail_gb=%.2f%% pe=%s px=%s bt_held=%s avail=%s"
             % (
                 len(closes_s),
                 len(closes_ws),
@@ -1956,6 +2066,7 @@ def _handle(C):
                 ",".join((["weekly_bear"] if force_empty else []) + sell_reasons) or "-",
                 holding,
                 None if ret_pct is None else ("%.2f%%" % (ret_pct * 100.0)),
+                trail_gb * 100.0,
                 bool(getattr(A, "pending_entry", None)),
                 bool(getattr(A, "pending_exit", None)),
                 _bt_held_vol() if bt else "-",
@@ -2289,6 +2400,8 @@ def _init_impl(C):
         "%d/%d/%d" % (W_MA_FAST, W_MA_MID, W_MA_LIFE),
         "dMA=",
         "%d/%d" % (D_MA_MID, D_MA_SLOW),
+        "trail=",
+        "fusion/ATR%d" % TRAIL_ATR_PERIOD,
         "stop=",
         STOP_LOSS,
         "chase<",

@@ -170,8 +170,54 @@ def _update_hold_peak(high_px, cost):
     return False
 
 
-def _trail_stop_hit(price, cost):
-    """曾浮盈 >= TRAIL_ACTIVATE 且自峰值回撤 > TRAIL_GIVEBACK。"""
+def _clip(val, lo, hi):
+    return max(min(float(val), float(hi)), float(lo))
+
+
+def _atr_pct(highs, lows, closes):
+    """ATR(14)/Close；失败则 FALLBACK。"""
+    atr_arr = _atr(highs, lows, closes, TRAIL_ATR_PERIOD)
+    if atr_arr is None:
+        return float(TRAIL_ATR_PCT_FALLBACK)
+    i = len(closes) - 1
+    atr = _last_valid(atr_arr, i)
+    px = float(closes[i]) if closes[i] is not None else 0.0
+    if atr is None or atr <= 0 or px <= 0:
+        return float(TRAIL_ATR_PCT_FALLBACK)
+    return float(atr) / px
+
+
+def _trail_giveback_fusion(max_profit, atr_pct):
+    """按最高浮盈阶梯推演 giveback；未激活返回 None。"""
+    if max_profit is None or max_profit < float(TRAIL_ACTIVATE):
+        return None
+    ap = float(atr_pct) if atr_pct is not None else float(TRAIL_ATR_PCT_FALLBACK)
+    if ap <= 0:
+        ap = float(TRAIL_ATR_PCT_FALLBACK)
+    mp = float(max_profit)
+    if mp < float(TRAIL_STAGE_MID):
+        # 起步保护：1.0×ATR%，夹逼 [1.0%, 1.5%]
+        return _clip(float(TRAIL_S1_MULT) * ap, TRAIL_S1_MIN, TRAIL_S1_MAX)
+    if mp < float(TRAIL_STAGE_HIGH):
+        # 发展期：1.5×ATR%，夹逼 [2.0%, 3.5%]
+        return _clip(float(TRAIL_S2_MULT) * ap, TRAIL_S2_MIN, TRAIL_S2_MAX)
+    # 高位锁利：2.0×ATR%，夹逼 [2.0%, 3.0%]
+    return _clip(float(TRAIL_S3_MULT) * ap, TRAIL_S3_MIN, TRAIL_S3_MAX)
+
+
+def _hold_max_profit(cost):
+    if cost is None or cost <= 0:
+        return None
+    peak = getattr(A, "hold_peak", None)
+    if peak is None or peak <= 0:
+        return None
+    return (float(peak) - float(cost)) / float(cost)
+
+
+def _trail_stop_hit(price, cost, giveback_pct):
+    """曾浮盈达激活线且自峰值回撤 > 融合 giveback。"""
+    if giveback_pct is None:
+        return False
     if cost is None or cost <= 0:
         return False
     peak = getattr(A, "hold_peak", None)
@@ -179,7 +225,9 @@ def _trail_stop_hit(price, cost):
         return False
     max_profit = (float(peak) - float(cost)) / float(cost)
     giveback = (float(peak) - float(price)) / float(peak)
-    return (max_profit >= float(TRAIL_ACTIVATE)) and (giveback > float(TRAIL_GIVEBACK))
+    return (max_profit >= float(TRAIL_ACTIVATE)) and (
+        giveback > float(giveback_pct)
+    )
 
 
 def _time_force_hit(price, closes, hold_bars):
@@ -288,7 +336,7 @@ def _pending_ready(pend, day, bar_tag, mode):
 
 
 _SELL_LABELS = {
-    "trail_stop": "卖点1-移动止盈回撤",
+    "trail_stop": "卖点1-ATR阶梯融合止盈",
     "time_force": "卖点2-时间成本智能平仓",
     "weekly_bear": "周线转空强制清仓",
     "stop_loss": "硬止损",
@@ -401,12 +449,13 @@ def _handle(C):
         and (not isinstance(getattr(A, "pending_exit", None), dict))
     )
     if live_cc and phase == "confirm":
-        highs_s, closes_s, vols_s = highs_d, closes_d, vols_d
+        highs_s, lows_s, closes_s, vols_s = highs_d, lows_d, closes_d, vols_d
         closes_ws = closes_w
         sig_day = day
     elif need_fallback:
         use_prev_bar = True
         highs_s = _drop_forming_bar(highs_d)
+        lows_s = _drop_forming_bar(lows_d)
         closes_s = _drop_forming_bar(closes_d)
         vols_s = _drop_forming_bar(vols_d)
         closes_ws = _drop_forming_bar(closes_w)
@@ -416,7 +465,7 @@ def _handle(C):
         sig_day = _live_signal_day(day)
     else:
         # 回测 / 盘中执行：信号评估用完整序列（盘中不新挂，仅供撤单校验与日志）
-        highs_s, closes_s, vols_s = highs_d, closes_d, vols_d
+        highs_s, lows_s, closes_s, vols_s = highs_d, lows_d, closes_d, vols_d
         closes_ws = closes_w
         sig_day = day
 
@@ -456,6 +505,14 @@ def _handle(C):
         if _update_hold_peak(high_px, cost):
             _save_state()
 
+    trail_gb = 0.0
+    max_profit = _hold_max_profit(cost) if holding else None
+    if holding:
+        atr_pct = _atr_pct(highs_s, lows_s, closes_s)
+        gb = _trail_giveback_fusion(max_profit, atr_pct)
+        if gb is not None:
+            trail_gb = float(gb)
+
     stop_hit = False
     if holding and cost > 0 and price <= cost * (1.0 - float(STOP_LOSS)):
         stop_hit = True
@@ -463,11 +520,20 @@ def _handle(C):
         sell_ok = True
 
     trail_hit = False
-    if holding and (not stop_hit) and _trail_stop_hit(price, cost):
+    if holding and (not stop_hit) and _trail_stop_hit(price, cost, trail_gb if trail_gb > 0 else None):
         trail_hit = True
         sell_reasons = list(sell_reasons) + ["trail_stop"]
         sell_ok = True
-
+        print(
+            "%s trail_fusion max_profit=%s giveback_tol=%.2f%% peak=%s close=%.4f"
+            % (
+                STRATEGY_NAME,
+                None if max_profit is None else ("%.2f%%" % (max_profit * 100.0)),
+                trail_gb * 100.0,
+                getattr(A, "hold_peak", None),
+                price,
+            )
+        )
     ret_pct = None
     if holding and cost > 0:
         ret_pct = (price - cost) / cost
@@ -511,7 +577,7 @@ def _handle(C):
             "n1d=%d n1w=%d close=%.4f sig_day=%s phase=%s prev=%s "
             "w_bull=%s w_bear=%s w_ma5=%s w_ma30=%s w_hist=%s "
             "buy=%s buyR=%s sell=%s sellR=%s "
-            "hold=%s ret=%s pe=%s px=%s bt_held=%s avail=%s"
+            "hold=%s ret=%s trail_gb=%.2f%% pe=%s px=%s bt_held=%s avail=%s"
             % (
                 len(closes_s),
                 len(closes_ws),
@@ -530,6 +596,7 @@ def _handle(C):
                 ",".join((["weekly_bear"] if force_empty else []) + sell_reasons) or "-",
                 holding,
                 None if ret_pct is None else ("%.2f%%" % (ret_pct * 100.0)),
+                trail_gb * 100.0,
                 bool(getattr(A, "pending_entry", None)),
                 bool(getattr(A, "pending_exit", None)),
                 _bt_held_vol() if bt else "-",

@@ -49,11 +49,24 @@ VOL_PULLBACK_RATIO = 0.9      # 量 < 均量*0.9 视为缩量
 VOL_DRY_N = 20
 VOL_DRY_RATIO = 0.70          # 0.70 = 量不足 20 日均量的 70%
 
-# 卖① trail_stop：移动止盈
-#   持仓最高浮盈曾 >= ACTIVATE 后，自峰值回撤 > GIVEBACK → 平仓
-#   例：浮盈曾到 3%，再从峰值回落超过 1.5% 触发
+# 卖① trail_stop：ATR 自适应动态阶梯止盈（v1.13 融合）
+#   曾浮盈过门槛后，按最高浮盈分阶段：倍数×ATR% 再夹逼 → 自峰值回撤超阈值则平仓
+#   <3% 不激活；3%~6% 起步保护；6%~12% 防洗盘放宽；>=12% 高位锁利
 TRAIL_ACTIVATE = 0.03
-TRAIL_GIVEBACK = 0.015
+TRAIL_STAGE_MID = 0.06
+TRAIL_STAGE_HIGH = 0.12
+TRAIL_ATR_PERIOD = 14
+# 各阶段：ATR 倍数 + giveback 夹逼 [min, max]
+TRAIL_S1_MULT = 1.0
+TRAIL_S1_MIN = 0.010
+TRAIL_S1_MAX = 0.015
+TRAIL_S2_MULT = 1.5
+TRAIL_S2_MIN = 0.020
+TRAIL_S2_MAX = 0.035
+TRAIL_S3_MULT = 2.0
+TRAIL_S3_MIN = 0.020
+TRAIL_S3_MAX = 0.030
+TRAIL_ATR_PCT_FALLBACK = 0.015  # ATR 暖机不足时用的 atr/close 替代
 # 卖② time_force：智能时间成本（防长期磨人）
 #   持仓 bar 数 > BARS 后：收盘破日线 MA60 → 立即强制平仓；
 #   仍站上 MA60 → 豁免一次，再观察 GRACE_BARS 日，期满仍强制平仓
@@ -102,7 +115,7 @@ PENDING_ORPHAN_SEC = 60
 STATE_FILE = r"D:\service\GJQMT\python\hlband_qmt_state.json"
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.11"
+STRATEGY_VER = "v1.13"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）

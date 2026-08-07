@@ -152,6 +152,8 @@ def _init_impl(C):
         "%d/%d/%d" % (W_MA_FAST, W_MA_MID, W_MA_LIFE),
         "dMA=",
         "%d/%d" % (D_MA_MID, D_MA_SLOW),
+        "trail=",
+        "fusion/ATR%d" % TRAIL_ATR_PERIOD,
         "stop=",
         STOP_LOSS,
         "chase<",
