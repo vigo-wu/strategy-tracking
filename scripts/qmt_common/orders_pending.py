@@ -12,6 +12,7 @@ def _deal_fill(remark, stock):
         deals = get_trade_detail_data(A.acct, A.acct_type, "deal")
     except Exception as e:
         print(_strategy_tag(), "deal query fail", e)
+        _event_log("deal_query_fail", error=str(e))
         return 0, 0.0
     if not deals:
         return 0, 0.0
@@ -35,6 +36,7 @@ def _find_order(remark, stock):
         orders = get_trade_detail_data(A.acct, A.acct_type, "order")
     except Exception as e:
         print(_strategy_tag(), "order query fail", e)
+        _event_log("order_query_fail", error=str(e))
         return None
     if not orders:
         return None
@@ -78,6 +80,7 @@ def _try_cancel_order(od, C):
     oid = _order_sys_id(od)
     if oid is None:
         print(_strategy_tag(), "cancel skip: no order id")
+        _event_log("cancel_skip", reason="no_order_id")
         return False
     for fn_name in ("cancel", "cancel_order", "cancelorder"):
         fn = globals().get(fn_name)
@@ -86,23 +89,37 @@ def _try_cancel_order(od, C):
         try:
             fn(oid, A.acct, A.acct_type, C)
             print(_strategy_tag(), "cancel via", fn_name, oid)
+            _event_log("cancel", via=fn_name, oid=str(oid))
             return True
         except TypeError:
             try:
                 fn(oid, A.acct, A.acct_type)
                 print(_strategy_tag(), "cancel via", fn_name, "(3arg)", oid)
+                _event_log("cancel", via=fn_name, oid=str(oid), argc=3)
                 return True
             except Exception as e:
                 print(_strategy_tag(), fn_name, "fail", e)
+                _event_log("cancel_fail", via=fn_name, error=str(e), oid=str(oid))
         except Exception as e:
             print(_strategy_tag(), fn_name, "fail", e)
+            _event_log("cancel_fail", via=fn_name, error=str(e), oid=str(oid))
     print(_strategy_tag(), "cancel unavailable; keep waiting, oid=", oid)
+    _event_log("cancel_unavailable", oid=str(oid))
     return False
 
 
 def _clear_pending(reason=""):
-    if getattr(A, "pending", None):
-        print(_strategy_tag(), "pending clear", reason, A.pending.get("remark"))
+    pend = getattr(A, "pending", None)
+    if pend:
+        print(_strategy_tag(), "pending clear", reason, pend.get("remark"))
+        _event_log(
+            "pending_clear",
+            reason=reason,
+            remark=pend.get("remark"),
+            side=pend.get("side"),
+            intent=pend.get("intent"),
+            vol=pend.get("vol"),
+        )
     A.pending = None
     _save_state()
 
@@ -152,6 +169,18 @@ def _process_pending(C, now):
         "cancel_req=",
         cancel_req,
     )
+    _event_log(
+        "pending_check",
+        intent=intent,
+        side=side,
+        deal=deal_vol,
+        traded=traded,
+        status=status,
+        age_sec=int(age),
+        cancel_req=cancel_req,
+        target=target,
+        remark=remark,
+    )
 
     filled = globals().get("_ORDER_FILLED") or (56, 8)
     dead = globals().get("_ORDER_DEAD") or (54, 57, 53, 5, 6, 9)
@@ -187,6 +216,7 @@ def _process_pending(C, now):
                 _try_cancel_order(od, C)
             else:
                 print(_strategy_tag(), "pending timeout, order not visible yet")
+                _event_log("pending_timeout", remark=remark, intent=intent, age_sec=int(age))
             pend["cancel_requested"] = True
             pend["cancel_at"] = (now or datetime.datetime.now()).strftime("%Y%m%d%H%M%S")
             A.pending = pend
@@ -198,6 +228,12 @@ def _process_pending(C, now):
             cancel_age = (now - cancel_at).total_seconds()
         if od is None and cancel_age >= orphan:
             print(_strategy_tag(), "pending orphan clear (no order after cancel wait)")
+            _event_log(
+                "pending_orphan",
+                remark=remark,
+                intent=intent,
+                cancel_age_sec=int(cancel_age),
+            )
             _clear_pending("orphan")
             return False
         return True

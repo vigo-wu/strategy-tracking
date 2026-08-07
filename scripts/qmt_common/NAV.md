@@ -12,7 +12,8 @@
 
 | 文件 | 层级 | 作用 |
 | :--- | :--- | :--- |
-| `ctx.py` | 核心 | 全局 `A`、`_lot`、`_strategy_tag` |
+| `ctx.py` | 核心 | 全局 `A`、`_lot`、`_strategy_tag`；落盘钩子空实现 |
+| `live_log.py` | P0 | 实盘落盘：`_event_log` / `_bar_log` / `_heartbeat_persist` / `_live_state_snapshot` |
 | `time_util.py` | 核心 | `_parse_opened_at`、日历日差 |
 | `period.py` | 核心 | 周期解析、OHLC 根数、`end_time` |
 | `backtest.py` | P0 | 回测影子仓 T+1（`bt_held` / `bt_locked`） |
@@ -40,12 +41,24 @@
 | `_heartbeat_extra()` | 可选 | 心跳附加信息 |
 | `_state_extra_load` / `_state_extra_save` | 可选（均线双周期） | 扩展状态字段 |
 
+实盘日志：`config` 设 `LOG_DIR`（绝对路径）并拼接 `common:live_log.py`。目录：
+
+```
+LOG_DIR/<stock_tag>/
+  {STRATEGY_NAME}_events.jsonl
+  {STRATEGY_NAME}_bars.jsonl
+  {STRATEGY_NAME}_heartbeat.log
+  state_snapshots/YYYYMMDD_HHMM.json
+```
+
+`LOG_DIR=""` 关闭落盘；`LOG_IN_BACKTEST=False`（默认）时回测不写盘。
+
 ---
 
 ## 典型拼接顺序（单仓）
 
 ```
-config → ctx → time_util → period → state_io → backtest → state_pos → bt_recover
+config → ctx → live_log → time_util → period → state_io → backtest → state_pos → bt_recover
 → indicators → market_util → market → mode → broker_base → single/broker
 → orders_pending → single/orders → strategy → runtime
 ```

@@ -41,6 +41,7 @@ def _apply_buy_fill(vol, price, opened_at, **extra):
     _bt_held_add(vol, buy_day=buy_day)
     _save_state()
     print(_strategy_tag(), "BUY filled", A.position)
+    _event_log("buy_filled", position=A.position, vol=vol, price=price, opened_at=ot)
 
 
 def _apply_sell_fill(now, reason, last_hint, filled_vol, mark_half=False):
@@ -59,6 +60,13 @@ def _apply_sell_fill(now, reason, last_hint, filled_vol, mark_half=False):
         return
     remain = max(0, want - filled_vol)
     print(_strategy_tag(), "partial sell fill", filled_vol, "remain~", remain)
+    _event_log(
+        "partial_sell_fill",
+        reason=reason,
+        filled_vol=filled_vol,
+        remain=remain,
+        last=last_hint,
+    )
     if A.position:
         A.position["shares"] = remain
     _bt_held_set(remain)
@@ -88,9 +96,11 @@ def _order_buy(C, price, now, budget=None, **extra_pos):
     """提交买入. DRY 即时; 回测 passorder+即时; 实盘 pending 至成交."""
     if getattr(A, "pending", None):
         print(_strategy_tag(), "buy skip: pending active")
+        _event_log("buy_skip", reason="pending_active")
         return False
     if _has_position() or (getattr(A, "is_backtest", False) and _bt_held_vol() >= 100):
         print(_strategy_tag(), "buy skip: already holding")
+        _event_log("buy_skip", reason="already_holding")
         return False
     if "BUY" in getattr(A, "acted", set()):
         return False
@@ -101,12 +111,14 @@ def _order_buy(C, price, now, budget=None, **extra_pos):
     vol = _lot(price, budget)
     if vol < 100:
         print(_strategy_tag(), "buy skip lot", "price=", price, "budget=", budget)
+        _event_log("buy_skip", reason="lot", price=price, budget=budget)
         return False
     cash = _available_cash()
     if cash is not None and cash < price * vol:
         vol = _lot(price, cash)
         if vol < 100:
             print(_strategy_tag(), "buy skip cash", cash)
+            _event_log("buy_skip", reason="cash", cash=cash, price=price)
             return False
 
     ot = (now or datetime.datetime.now()).strftime("%Y%m%d%H%M%S")
@@ -119,6 +131,7 @@ def _order_buy(C, price, now, budget=None, **extra_pos):
         passorder(A.buy_code, 1101, A.acct, A.stock, 14, -1, vol, _strategy_tag(), 1, msg, C)
     except Exception as e:
         print(_strategy_tag(), "passorder BUY fail", e)
+        _event_log("passorder_fail", side="buy", error=str(e), vol=vol, price=price)
         return False
     if getattr(A, "is_backtest", False):
         _apply_buy_fill(vol, price, ot, **extra_pos)
@@ -137,6 +150,7 @@ def _order_buy(C, price, now, budget=None, **extra_pos):
     }
     _save_state()
     print(_strategy_tag(), "BUY submitted", vol, msg)
+    _event_log("buy_submitted", vol=vol, price=price, remark=msg, dry_run=False)
     return True
 
 
@@ -144,6 +158,7 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False):
     """提交卖出. T+1: 下单量不超过可卖; skip 绝不清仓."""
     if getattr(A, "pending", None):
         print(_strategy_tag(), "sell skip: pending active")
+        _event_log("sell_skip", reason="pending_active", sell_reason=reason)
         return False
     if not _has_position() and not (getattr(A, "is_backtest", False) and _bt_held_vol() >= 100):
         return False
@@ -173,6 +188,15 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False):
                 "want=",
                 want,
             )
+            _event_log(
+                "sell_skip",
+                reason="t1_bt",
+                sell_reason=reason,
+                avail=avail,
+                held=_bt_held_vol(),
+                locked=_bt_locked_vol(),
+                want=want,
+            )
         elif DRY_RUN:
             print(
                 _strategy_tag(),
@@ -182,6 +206,13 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False):
                 want,
                 "sellable=",
                 avail,
+            )
+            _event_log(
+                "sell_skip",
+                reason="t1_dry",
+                sell_reason=reason,
+                want=want,
+                sellable=avail,
             )
         else:
             broker_vol, can, _cost = _broker_position(A.stock)
@@ -196,6 +227,14 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False):
                 "want=",
                 want,
             )
+            _event_log(
+                "sell_skip",
+                reason="t1_live",
+                sell_reason=reason,
+                can_use=can,
+                broker=broker_vol,
+                want=want,
+            )
         return False
 
     msg = _new_remark(reason or "SELL", "SELL", vol)
@@ -207,6 +246,14 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False):
         passorder(A.sell_code, 1101, A.acct, A.stock, 14, -1, vol, _strategy_tag(), 1, msg, C)
     except Exception as e:
         print(_strategy_tag(), "passorder SELL fail", e)
+        _event_log(
+            "passorder_fail",
+            side="sell",
+            error=str(e),
+            vol=vol,
+            price=price,
+            sell_reason=reason,
+        )
         return False
     if getattr(A, "is_backtest", False):
         _apply_sell_fill(now, reason, price, vol, mark_half=mark_half)
@@ -225,4 +272,12 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False):
     }
     _save_state()
     print(_strategy_tag(), "SELL submitted", vol, reason, msg)
+    _event_log(
+        "sell_submitted",
+        vol=vol,
+        price=price,
+        sell_reason=reason,
+        remark=msg,
+        dry_run=False,
+    )
     return True

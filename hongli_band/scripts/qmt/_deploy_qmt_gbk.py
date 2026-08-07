@@ -22,6 +22,7 @@ TARGETS = [
 MODULE_ORDER = [
     "config.py",
     "common:ctx.py",
+    "common:live_log.py",
     "common:time_util.py",
     "common:period.py",
     "state_extra.py",

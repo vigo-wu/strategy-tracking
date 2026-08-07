@@ -231,6 +231,12 @@ def _time_force_hit(price, closes, hold_bars):
             "%s time_force grace ma60=%.4f hold=%s until_bars=%s"
             % (STRATEGY_NAME, m60, hold_bars, until)
         )
+        _event_log(
+            "time_force_grace",
+            ma60=m60,
+            hold_bars=hold_bars,
+            until_bars=until,
+        )
         return False
     return int(hold_bars) > int(grace_until)
 
@@ -411,6 +417,7 @@ def _handle(C):
             "%s clear mis-marked confirmed_eval_day=%s (was open fallback)"
             % (STRATEGY_NAME, day)
         )
+        _event_log("clear_mis_confirmed_eval_day", day=day)
         A._confirmed_eval_day = ""
         _save_state()
     # 开盘兜底：无收盘确认记录、今日尚未兜底、无挂起
@@ -558,6 +565,29 @@ def _handle(C):
                 _bt_available_vol() if bt else "-",
             ),
         )
+        _bar_log(
+            day=day,
+            hhmm=hhmm,
+            n1d=len(closes_s),
+            n1w=len(closes_ws),
+            close=round(price, 6),
+            sig_day=sig_day,
+            phase=phase,
+            prev=use_prev_bar,
+            w_bull=weekly_bull,
+            w_bear=weekly_bear,
+            w_ma5=None if w_detail.get("ma5") is None else round(w_detail["ma5"], 4),
+            w_ma30=None if w_detail.get("ma30") is None else round(w_detail["ma30"], 4),
+            w_hist=None if w_detail.get("hist") is None else round(w_detail["hist"], 4),
+            buy=buy_sig,
+            buyR=",".join(buy_reasons) if buy_reasons else "-",
+            sell=bool(sell_ok or force_empty),
+            sellR=",".join((["weekly_bear"] if force_empty else []) + sell_reasons) or "-",
+            hold=holding,
+            ret=None if ret_pct is None else round(ret_pct * 100.0, 4),
+            pe=bool(getattr(A, "pending_entry", None)),
+            px=bool(getattr(A, "pending_exit", None)),
+        )
 
     # ---- 先执行挂起的卖/买（开盘时段）----
     pe_exit = getattr(A, "pending_exit", None)
@@ -576,6 +606,14 @@ def _handle(C):
                     open_px,
                 )
             )
+            _event_log(
+                "sell_by_signal",
+                signal=reason,
+                label=_reason_label(reason, "sell"),
+                all_reasons=_format_reasons(reasons, "sell"),
+                signal_day=pe_exit.get("signal_day"),
+                open=open_px,
+            )
             ok = _order_sell(C, reason, open_px, now)
             A.pending_exit = None
             A.pending_entry = None
@@ -583,6 +621,7 @@ def _handle(C):
             _save_state()
             if not ok:
                 print("%s pending_exit cleared after sell fail/skip" % STRATEGY_NAME)
+                _event_log("pending_exit_cleared_after_fail", sell_reason=reason)
             return
 
     pe_entry = getattr(A, "pending_entry", None)
@@ -604,6 +643,7 @@ def _handle(C):
             else:
                 why = "vol_dry_skip"
             print("%s pending_entry cancel %s" % (STRATEGY_NAME, why))
+            _event_log("pending_entry_cancel", reason=why, signal_day=pe_entry.get("signal_day"))
             return
         reasons = pe_entry.get("reasons") or []
         primary = reasons[0] if reasons else "entry"
@@ -618,6 +658,14 @@ def _handle(C):
                 open_px,
             )
         )
+        _event_log(
+            "buy_by_signal",
+            signal=primary,
+            label=_reason_label(primary, "buy"),
+            all_reasons=_format_reasons(reasons, "buy"),
+            signal_day=pe_entry.get("signal_day"),
+            open=open_px,
+        )
         budget = _buy_budget(cash)
         ok = _order_buy(C, open_px, now, budget)
         A.pending_entry = None
@@ -630,6 +678,7 @@ def _handle(C):
         _save_state()
         if not ok:
             print("%s pending_entry cleared after buy fail/skip" % STRATEGY_NAME)
+            _event_log("pending_entry_cleared_after_fail", signal=primary)
         return
 
     # ---- 新信号：回测当根；实盘仅收盘确认或开盘兜底 ----
@@ -695,6 +744,15 @@ def _handle(C):
                     phase,
                 )
             )
+            _event_log(
+                "pending_exit_set",
+                signal=reason,
+                label=_reason_label(reason, "sell"),
+                all_reasons=_format_reasons(uniq, "sell"),
+                signal_day=sig_day,
+                close=price,
+                phase=phase,
+            )
         elif live_cc:
             _mark_signal_eval_done(day, is_confirm)
         return
@@ -727,6 +785,15 @@ def _handle(C):
                 price,
                 phase,
             )
+        )
+        _event_log(
+            "pending_entry_set",
+            signal=primary,
+            label=_reason_label(primary, "buy"),
+            all_reasons=_format_reasons(real_buys, "buy"),
+            signal_day=sig_day,
+            close=price,
+            phase=phase,
         )
     elif live_cc:
         _mark_signal_eval_done(day, is_confirm)

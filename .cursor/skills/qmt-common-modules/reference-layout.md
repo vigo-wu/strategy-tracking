@@ -37,6 +37,7 @@ scripts/qmt_common/             # 共用片段
 MODULE_ORDER = [
     "config.py",
     "common:ctx.py",
+    "common:live_log.py",  # 可选；需 config.LOG_DIR
     "common:time_util.py",
     "common:period.py",
     # 可选: "state_extra.py",   # 须在 state_io 之前定义钩子亦可；运行时查找
@@ -146,6 +147,9 @@ PERIOD = "15m"                  # 或 "follow"
 OHLC_COUNT = 480
 # 绝对路径；多实例不同主图时用 {stock}（或基名由 single/state_io 自动加 _代码_市场 后缀）
 STATE_FILE = r"D:\service\GJQMT\python\foo_{stock}.json"
+# 实盘结构化日志根目录；空字符串关闭。落盘: LOG_DIR/<stock>/{tag}_*.jsonl
+LOG_DIR = r"D:\service\GJQMT\python\logs"
+LOG_IN_BACKTEST = False
 PENDING_TIMEOUT_SEC = 180
 PENDING_ORPHAN_SEC = 60
 LIVE_HEARTBEAT_SEC = 60

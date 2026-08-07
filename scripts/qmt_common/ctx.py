@@ -17,3 +17,20 @@ def _lot(price, budget):
 
 def _strategy_tag():
     return str(globals().get("STRATEGY_NAME") or "QMT")
+
+
+# 实盘落盘钩子空实现；引入 common:live_log.py 后覆盖
+def _event_log(event, **fields):
+    pass
+
+
+def _bar_log(**fields):
+    pass
+
+
+def _heartbeat_persist(text):
+    pass
+
+
+def _live_state_snapshot(data):
+    pass

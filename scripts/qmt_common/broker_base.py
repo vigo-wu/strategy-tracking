@@ -12,6 +12,7 @@ def _available_cash():
         return None
     if not accs:
         print(_strategy_tag(), "account not login", A.acct)
+        _event_log("account_not_login", acct=A.acct)
         return None
     return float(accs[0].m_dAvailable)
 
@@ -30,6 +31,7 @@ def _broker_position(stock):
         positions = get_trade_detail_data(A.acct, A.acct_type, "position")
     except Exception as e:
         print(_strategy_tag(), "position query fail", e)
+        _event_log("position_query_fail", error=str(e), query_stock=stock)
         return 0, 0, 0.0
     if not positions:
         return 0, 0, 0.0

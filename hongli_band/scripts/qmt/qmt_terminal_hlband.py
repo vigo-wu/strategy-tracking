@@ -119,6 +119,11 @@ PENDING_ORPHAN_SEC = 60
 # QMT 模型无 __file__；状态绝对路径（含 {stock}，多实例不同主图互不覆盖）
 #   513530.SH → ...\hlband_513530_SH.json
 STATE_FILE = r"D:\service\GJQMT\python\hlband_{stock}.json"
+# 实盘结构化日志根目录；落盘为 LOG_DIR/<stock_tag>/{tag}_events.jsonl 等
+# 空字符串关闭落盘（仍保留终端 print）
+LOG_DIR = r"D:\service\GJQMT\python\logs"
+# True=回测也写日志（默认关，避免回测刷爆磁盘）
+LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
 STRATEGY_VER = "v1.12"
@@ -151,6 +156,193 @@ def _lot(price, budget):
 
 def _strategy_tag():
     return str(globals().get("STRATEGY_NAME") or "QMT")
+
+
+# 实盘落盘钩子空实现；引入 common:live_log.py 后覆盖
+def _event_log(event, **fields):
+    pass
+
+
+def _bar_log(**fields):
+    pass
+
+
+def _heartbeat_persist(text):
+    pass
+
+
+def _live_state_snapshot(data):
+    pass
+
+# === qmt_common/live_log.py ===
+# 作用: 实盘结构化日志落盘（events / bars / heartbeat / state 快照）
+# 主要符号: _event_log, _bar_log, _heartbeat_persist, _live_state_snapshot
+# 前置: LOG_DIR（绝对路径）；可选 LOG_IN_BACKTEST
+# 目录: LOG_DIR/<stock_tag>/{tag}_events.jsonl | {tag}_bars.jsonl |
+#       {tag}_heartbeat.log | state_snapshots/YYYYMMDD_HHMM.json
+# 覆盖 ctx 中的同名空实现
+def _live_log_stock_tag():
+    stock = str(getattr(A, "stock", "") or "").strip()
+    if not stock:
+        return ""
+    return (
+        stock.replace(".", "_")
+        .replace("/", "_")
+        .replace("\\", "_")
+        .replace(":", "_")
+        .replace(" ", "")
+    )
+
+
+def _live_log_enabled():
+    base = str(globals().get("LOG_DIR") or "").strip()
+    if not base:
+        return False
+    if getattr(A, "is_backtest", False) and (not bool(globals().get("LOG_IN_BACKTEST"))):
+        return False
+    return True
+
+
+def _live_log_root():
+    base = str(globals().get("LOG_DIR") or "").strip()
+    tag = _live_log_stock_tag() or "_unknown"
+    return os.path.join(base, tag)
+
+
+def _live_log_file_tag():
+    raw = _strategy_tag()
+    return (
+        str(raw or "QMT")
+        .replace(".", "_")
+        .replace("/", "_")
+        .replace("\\", "_")
+        .replace(":", "_")
+        .replace(" ", "_")
+    )
+
+
+def _live_log_paths():
+    root = _live_log_root()
+    ft = _live_log_file_tag()
+    return {
+        "root": root,
+        "events": os.path.join(root, "%s_events.jsonl" % ft),
+        "bars": os.path.join(root, "%s_bars.jsonl" % ft),
+        "heartbeat": os.path.join(root, "%s_heartbeat.log" % ft),
+        "snap_dir": os.path.join(root, "state_snapshots"),
+    }
+
+
+def _live_log_mkdir(path):
+    d = os.path.dirname(path)
+    if d and (not os.path.isdir(d)):
+        os.makedirs(d)
+
+
+def _live_json_safe(obj):
+    if obj is None or isinstance(obj, (bool, int, float, str)):
+        return obj
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            out[str(k)] = _live_json_safe(v)
+        return out
+    if isinstance(obj, (list, tuple)):
+        return [_live_json_safe(x) for x in obj]
+    if isinstance(obj, set):
+        return sorted([_live_json_safe(x) for x in obj])
+    try:
+        if isinstance(obj, datetime.datetime):
+            return obj.strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        pass
+    return str(obj)
+
+
+def _live_append_line(path, line):
+    _live_log_mkdir(path)
+    with open(path, "a") as f:
+        f.write(line)
+        if not line.endswith("\n"):
+            f.write("\n")
+
+
+def _live_append_jsonl(path, row):
+    line = json.dumps(_live_json_safe(row), ensure_ascii=True)
+    _live_append_line(path, line)
+
+
+def _event_log(event, **fields):
+    """一行一事写入 {tag}_events.jsonl；失败静默，不影响交易。"""
+    if not _live_log_enabled():
+        return
+    try:
+        now = datetime.datetime.now()
+        row = {
+            "ts": now.strftime("%Y-%m-%d %H:%M:%S"),
+            "tag": _strategy_tag(),
+            "ver": str(globals().get("STRATEGY_VER") or ""),
+            "stock": getattr(A, "stock", ""),
+            "event": str(event or ""),
+        }
+        for k, v in fields.items():
+            if k in row:
+                continue
+            row[k] = v
+        _live_append_jsonl(_live_log_paths()["events"], row)
+    except Exception:
+        pass
+
+
+def _bar_log(**fields):
+    """决策行抽样写入 {tag}_bars.jsonl。"""
+    if not _live_log_enabled():
+        return
+    try:
+        now = datetime.datetime.now()
+        row = {
+            "ts": now.strftime("%Y-%m-%d %H:%M:%S"),
+            "tag": _strategy_tag(),
+            "ver": str(globals().get("STRATEGY_VER") or ""),
+            "stock": getattr(A, "stock", ""),
+        }
+        for k, v in fields.items():
+            if k in row:
+                continue
+            row[k] = v
+        _live_append_jsonl(_live_log_paths()["bars"], row)
+    except Exception:
+        pass
+
+
+def _heartbeat_persist(text):
+    """心跳写入 {tag}_heartbeat.log（纯文本）。"""
+    if not _live_log_enabled():
+        return
+    try:
+        line = str(text or "").rstrip()
+        if not line:
+            return
+        _live_append_line(_live_log_paths()["heartbeat"], line)
+    except Exception:
+        pass
+
+
+def _live_state_snapshot(data):
+    """状态快照: state_snapshots/YYYYMMDD_HHMM.json（同分钟覆盖）。"""
+    if not _live_log_enabled():
+        return
+    if not isinstance(data, dict):
+        return
+    try:
+        now = datetime.datetime.now()
+        name = now.strftime("%Y%m%d_%H%M") + ".json"
+        path = os.path.join(_live_log_paths()["snap_dir"], name)
+        _live_log_mkdir(path)
+        with open(path, "w") as f:
+            json.dump(_live_json_safe(data), f, ensure_ascii=True, indent=2)
+    except Exception:
+        pass
 
 # === qmt_common/time_util.py ===
 # 作用: 时间解析与日历日差
@@ -371,17 +563,25 @@ def _load_state():
     path = _state_load_path()
     if not path or not os.path.isfile(path):
         print(_strategy_tag(), "state: empty (no file)", path or STATE_FILE)
+        _event_log("state_empty", path=path or STATE_FILE)
         return
     try:
         with open(path, "r") as f:
             raw = json.load(f)
     except Exception as e:
         print(_strategy_tag(), "state load fail", e)
+        _event_log("state_load_fail", error=str(e), path=path)
         return
     if not isinstance(raw, dict):
         return
     if str(raw.get("stock", "")) and str(raw.get("stock")) != str(getattr(A, "stock", "")):
         print(_strategy_tag(), "state stock mismatch, ignore", raw.get("stock"), getattr(A, "stock", None))
+        _event_log(
+            "state_stock_mismatch",
+            file_stock=raw.get("stock"),
+            runtime_stock=getattr(A, "stock", None),
+            path=path,
+        )
         return
     pos = raw.get("position")
     if isinstance(pos, dict) and int(pos.get("shares", 0) or 0) >= 100:
@@ -401,7 +601,15 @@ def _load_state():
             extra(raw)
         except Exception as e:
             print(_strategy_tag(), "state extra load fail", e)
+            _event_log("state_extra_load_fail", error=str(e))
     print(_strategy_tag(), "state loaded", "path=", path, A.position, "pending=", bool(A.pending))
+    _event_log(
+        "state_loaded",
+        path=path,
+        position=A.position,
+        pending=bool(A.pending),
+        pending_order=bool(getattr(A, "pending", None)),
+    )
 
 
 def _save_state():
@@ -425,14 +633,17 @@ def _save_state():
             extra(data)
         except Exception as e:
             print(_strategy_tag(), "state extra save fail", e)
+            _event_log("state_extra_save_fail", error=str(e))
     try:
         d = os.path.dirname(path)
         if d and not os.path.isdir(d):
             os.makedirs(d)
         with open(path, "w") as f:
             json.dump(data, f, ensure_ascii=True, indent=2)
+        _live_state_snapshot(data)
     except Exception as e:
         print(_strategy_tag(), "state save fail", path, e)
+        _event_log("state_save_fail", error=str(e), path=path)
 
 # === qmt_common/backtest.py ===
 # 作用: 回测影子持仓与 T+1 锁定
@@ -517,7 +728,9 @@ def _pos_cost_price():
 
 
 def _clear_after_sell(now, reason, last=None):
-    print(_strategy_tag(), "SELL done", reason, "last=", last, "cleared", A.position)
+    cleared = getattr(A, "position", None)
+    print(_strategy_tag(), "SELL done", reason, "last=", last, "cleared", cleared)
+    _event_log("sell_done", sell_reason=reason, last=last, cleared=cleared)
     A.position = None
     A.acted.add("SELL")
     if getattr(A, "is_backtest", False):
@@ -633,6 +846,7 @@ def _diag_once(key, *msg):
         return
     A._diag.add(key)
     print(_strategy_tag(), "diag:", key, " ".join([str(x) for x in msg]))
+    _event_log("diag", key=str(key), msg=" ".join([str(x) for x in msg]))
 
 
 def _series_from_ex(md, stock, field):
@@ -730,6 +944,17 @@ def _live_heartbeat(reason=""):
         getattr(A, "stock", "?"),
         extra,
         ("reason=" + str(reason)) if reason else "",
+    )
+    _heartbeat_persist(
+        "%s live heartbeat %s PERIOD= %s stock= %s %s %s"
+        % (
+            _strategy_tag(),
+            now.strftime("%Y-%m-%d %H:%M:%S"),
+            getattr(A, "period", "?"),
+            getattr(A, "stock", "?"),
+            extra,
+            ("reason=" + str(reason)) if reason else "",
+        )
     )
 
 # === hlband/market.py ===
@@ -872,12 +1097,19 @@ def _on_mode_switch_to_live(C):
         "barpos=",
         getattr(C, "barpos", None),
     )
+    _event_log(
+        "mode_switch",
+        direction="backtest_to_live",
+        raw_do_back_test=getattr(A, "do_back_test_raw", None),
+        barpos=getattr(C, "barpos", None),
+    )
     A.ready_logged = False
     A._hb_at = None
     try:
         _load_state()
     except Exception as e:
         print(_strategy_tag(), "live switch load_state fail", e)
+        _event_log("live_switch_load_state_fail", error=str(e))
     if not hasattr(A, "pending"):
         A.pending = None
     recon = globals().get("_reconcile_with_broker")
@@ -886,6 +1118,7 @@ def _on_mode_switch_to_live(C):
             recon()
         except Exception as e:
             print(_strategy_tag(), "live switch reconcile fail", e)
+            _event_log("live_switch_reconcile_fail", error=str(e))
 
 
 def _refresh_mode(C):
@@ -925,6 +1158,7 @@ def _refresh_mode(C):
         _on_mode_switch_to_live(C)
     elif prev is False and use_bt:
         print(_strategy_tag(), "mode switch live -> backtest raw=", raw)
+        _event_log("mode_switch", direction="live_to_backtest", raw=raw)
     return use_bt
 
 
@@ -959,6 +1193,7 @@ def _available_cash():
         return None
     if not accs:
         print(_strategy_tag(), "account not login", A.acct)
+        _event_log("account_not_login", acct=A.acct)
         return None
     return float(accs[0].m_dAvailable)
 
@@ -977,6 +1212,7 @@ def _broker_position(stock):
         positions = get_trade_detail_data(A.acct, A.acct_type, "position")
     except Exception as e:
         print(_strategy_tag(), "position query fail", e)
+        _event_log("position_query_fail", error=str(e), query_stock=stock)
         return 0, 0, 0.0
     if not positions:
         return 0, 0, 0.0
@@ -1050,6 +1286,7 @@ def _deal_fill(remark, stock):
         deals = get_trade_detail_data(A.acct, A.acct_type, "deal")
     except Exception as e:
         print(_strategy_tag(), "deal query fail", e)
+        _event_log("deal_query_fail", error=str(e))
         return 0, 0.0
     if not deals:
         return 0, 0.0
@@ -1073,6 +1310,7 @@ def _find_order(remark, stock):
         orders = get_trade_detail_data(A.acct, A.acct_type, "order")
     except Exception as e:
         print(_strategy_tag(), "order query fail", e)
+        _event_log("order_query_fail", error=str(e))
         return None
     if not orders:
         return None
@@ -1116,6 +1354,7 @@ def _try_cancel_order(od, C):
     oid = _order_sys_id(od)
     if oid is None:
         print(_strategy_tag(), "cancel skip: no order id")
+        _event_log("cancel_skip", reason="no_order_id")
         return False
     for fn_name in ("cancel", "cancel_order", "cancelorder"):
         fn = globals().get(fn_name)
@@ -1124,23 +1363,37 @@ def _try_cancel_order(od, C):
         try:
             fn(oid, A.acct, A.acct_type, C)
             print(_strategy_tag(), "cancel via", fn_name, oid)
+            _event_log("cancel", via=fn_name, oid=str(oid))
             return True
         except TypeError:
             try:
                 fn(oid, A.acct, A.acct_type)
                 print(_strategy_tag(), "cancel via", fn_name, "(3arg)", oid)
+                _event_log("cancel", via=fn_name, oid=str(oid), argc=3)
                 return True
             except Exception as e:
                 print(_strategy_tag(), fn_name, "fail", e)
+                _event_log("cancel_fail", via=fn_name, error=str(e), oid=str(oid))
         except Exception as e:
             print(_strategy_tag(), fn_name, "fail", e)
+            _event_log("cancel_fail", via=fn_name, error=str(e), oid=str(oid))
     print(_strategy_tag(), "cancel unavailable; keep waiting, oid=", oid)
+    _event_log("cancel_unavailable", oid=str(oid))
     return False
 
 
 def _clear_pending(reason=""):
-    if getattr(A, "pending", None):
-        print(_strategy_tag(), "pending clear", reason, A.pending.get("remark"))
+    pend = getattr(A, "pending", None)
+    if pend:
+        print(_strategy_tag(), "pending clear", reason, pend.get("remark"))
+        _event_log(
+            "pending_clear",
+            reason=reason,
+            remark=pend.get("remark"),
+            side=pend.get("side"),
+            intent=pend.get("intent"),
+            vol=pend.get("vol"),
+        )
     A.pending = None
     _save_state()
 
@@ -1190,6 +1443,18 @@ def _process_pending(C, now):
         "cancel_req=",
         cancel_req,
     )
+    _event_log(
+        "pending_check",
+        intent=intent,
+        side=side,
+        deal=deal_vol,
+        traded=traded,
+        status=status,
+        age_sec=int(age),
+        cancel_req=cancel_req,
+        target=target,
+        remark=remark,
+    )
 
     filled = globals().get("_ORDER_FILLED") or (56, 8)
     dead = globals().get("_ORDER_DEAD") or (54, 57, 53, 5, 6, 9)
@@ -1225,6 +1490,7 @@ def _process_pending(C, now):
                 _try_cancel_order(od, C)
             else:
                 print(_strategy_tag(), "pending timeout, order not visible yet")
+                _event_log("pending_timeout", remark=remark, intent=intent, age_sec=int(age))
             pend["cancel_requested"] = True
             pend["cancel_at"] = (now or datetime.datetime.now()).strftime("%Y%m%d%H%M%S")
             A.pending = pend
@@ -1236,6 +1502,12 @@ def _process_pending(C, now):
             cancel_age = (now - cancel_at).total_seconds()
         if od is None and cancel_age >= orphan:
             print(_strategy_tag(), "pending orphan clear (no order after cancel wait)")
+            _event_log(
+                "pending_orphan",
+                remark=remark,
+                intent=intent,
+                cancel_age_sec=int(cancel_age),
+            )
             _clear_pending("orphan")
             return False
         return True
@@ -1285,6 +1557,7 @@ def _apply_buy_fill(vol, price, opened_at, **extra):
     _bt_held_add(vol, buy_day=buy_day)
     _save_state()
     print(_strategy_tag(), "BUY filled", A.position)
+    _event_log("buy_filled", position=A.position, vol=vol, price=price, opened_at=ot)
 
 
 def _apply_sell_fill(now, reason, last_hint, filled_vol, mark_half=False):
@@ -1303,6 +1576,13 @@ def _apply_sell_fill(now, reason, last_hint, filled_vol, mark_half=False):
         return
     remain = max(0, want - filled_vol)
     print(_strategy_tag(), "partial sell fill", filled_vol, "remain~", remain)
+    _event_log(
+        "partial_sell_fill",
+        reason=reason,
+        filled_vol=filled_vol,
+        remain=remain,
+        last=last_hint,
+    )
     if A.position:
         A.position["shares"] = remain
     _bt_held_set(remain)
@@ -1332,9 +1612,11 @@ def _order_buy(C, price, now, budget=None, **extra_pos):
     """提交买入. DRY 即时; 回测 passorder+即时; 实盘 pending 至成交."""
     if getattr(A, "pending", None):
         print(_strategy_tag(), "buy skip: pending active")
+        _event_log("buy_skip", reason="pending_active")
         return False
     if _has_position() or (getattr(A, "is_backtest", False) and _bt_held_vol() >= 100):
         print(_strategy_tag(), "buy skip: already holding")
+        _event_log("buy_skip", reason="already_holding")
         return False
     if "BUY" in getattr(A, "acted", set()):
         return False
@@ -1345,12 +1627,14 @@ def _order_buy(C, price, now, budget=None, **extra_pos):
     vol = _lot(price, budget)
     if vol < 100:
         print(_strategy_tag(), "buy skip lot", "price=", price, "budget=", budget)
+        _event_log("buy_skip", reason="lot", price=price, budget=budget)
         return False
     cash = _available_cash()
     if cash is not None and cash < price * vol:
         vol = _lot(price, cash)
         if vol < 100:
             print(_strategy_tag(), "buy skip cash", cash)
+            _event_log("buy_skip", reason="cash", cash=cash, price=price)
             return False
 
     ot = (now or datetime.datetime.now()).strftime("%Y%m%d%H%M%S")
@@ -1363,6 +1647,7 @@ def _order_buy(C, price, now, budget=None, **extra_pos):
         passorder(A.buy_code, 1101, A.acct, A.stock, 14, -1, vol, _strategy_tag(), 1, msg, C)
     except Exception as e:
         print(_strategy_tag(), "passorder BUY fail", e)
+        _event_log("passorder_fail", side="buy", error=str(e), vol=vol, price=price)
         return False
     if getattr(A, "is_backtest", False):
         _apply_buy_fill(vol, price, ot, **extra_pos)
@@ -1381,6 +1666,7 @@ def _order_buy(C, price, now, budget=None, **extra_pos):
     }
     _save_state()
     print(_strategy_tag(), "BUY submitted", vol, msg)
+    _event_log("buy_submitted", vol=vol, price=price, remark=msg, dry_run=False)
     return True
 
 
@@ -1388,6 +1674,7 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False):
     """提交卖出. T+1: 下单量不超过可卖; skip 绝不清仓."""
     if getattr(A, "pending", None):
         print(_strategy_tag(), "sell skip: pending active")
+        _event_log("sell_skip", reason="pending_active", sell_reason=reason)
         return False
     if not _has_position() and not (getattr(A, "is_backtest", False) and _bt_held_vol() >= 100):
         return False
@@ -1417,6 +1704,15 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False):
                 "want=",
                 want,
             )
+            _event_log(
+                "sell_skip",
+                reason="t1_bt",
+                sell_reason=reason,
+                avail=avail,
+                held=_bt_held_vol(),
+                locked=_bt_locked_vol(),
+                want=want,
+            )
         elif DRY_RUN:
             print(
                 _strategy_tag(),
@@ -1426,6 +1722,13 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False):
                 want,
                 "sellable=",
                 avail,
+            )
+            _event_log(
+                "sell_skip",
+                reason="t1_dry",
+                sell_reason=reason,
+                want=want,
+                sellable=avail,
             )
         else:
             broker_vol, can, _cost = _broker_position(A.stock)
@@ -1440,6 +1743,14 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False):
                 "want=",
                 want,
             )
+            _event_log(
+                "sell_skip",
+                reason="t1_live",
+                sell_reason=reason,
+                can_use=can,
+                broker=broker_vol,
+                want=want,
+            )
         return False
 
     msg = _new_remark(reason or "SELL", "SELL", vol)
@@ -1451,6 +1762,14 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False):
         passorder(A.sell_code, 1101, A.acct, A.stock, 14, -1, vol, _strategy_tag(), 1, msg, C)
     except Exception as e:
         print(_strategy_tag(), "passorder SELL fail", e)
+        _event_log(
+            "passorder_fail",
+            side="sell",
+            error=str(e),
+            vol=vol,
+            price=price,
+            sell_reason=reason,
+        )
         return False
     if getattr(A, "is_backtest", False):
         _apply_sell_fill(now, reason, price, vol, mark_half=mark_half)
@@ -1469,6 +1788,14 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False):
     }
     _save_state()
     print(_strategy_tag(), "SELL submitted", vol, reason, msg)
+    _event_log(
+        "sell_submitted",
+        vol=vol,
+        price=price,
+        sell_reason=reason,
+        remark=msg,
+        dry_run=False,
+    )
     return True
 
 # === hlband/strategy.py ===
@@ -1704,6 +2031,12 @@ def _time_force_hit(price, closes, hold_bars):
             "%s time_force grace ma60=%.4f hold=%s until_bars=%s"
             % (STRATEGY_NAME, m60, hold_bars, until)
         )
+        _event_log(
+            "time_force_grace",
+            ma60=m60,
+            hold_bars=hold_bars,
+            until_bars=until,
+        )
         return False
     return int(hold_bars) > int(grace_until)
 
@@ -1884,6 +2217,7 @@ def _handle(C):
             "%s clear mis-marked confirmed_eval_day=%s (was open fallback)"
             % (STRATEGY_NAME, day)
         )
+        _event_log("clear_mis_confirmed_eval_day", day=day)
         A._confirmed_eval_day = ""
         _save_state()
     # 开盘兜底：无收盘确认记录、今日尚未兜底、无挂起
@@ -2031,6 +2365,29 @@ def _handle(C):
                 _bt_available_vol() if bt else "-",
             ),
         )
+        _bar_log(
+            day=day,
+            hhmm=hhmm,
+            n1d=len(closes_s),
+            n1w=len(closes_ws),
+            close=round(price, 6),
+            sig_day=sig_day,
+            phase=phase,
+            prev=use_prev_bar,
+            w_bull=weekly_bull,
+            w_bear=weekly_bear,
+            w_ma5=None if w_detail.get("ma5") is None else round(w_detail["ma5"], 4),
+            w_ma30=None if w_detail.get("ma30") is None else round(w_detail["ma30"], 4),
+            w_hist=None if w_detail.get("hist") is None else round(w_detail["hist"], 4),
+            buy=buy_sig,
+            buyR=",".join(buy_reasons) if buy_reasons else "-",
+            sell=bool(sell_ok or force_empty),
+            sellR=",".join((["weekly_bear"] if force_empty else []) + sell_reasons) or "-",
+            hold=holding,
+            ret=None if ret_pct is None else round(ret_pct * 100.0, 4),
+            pe=bool(getattr(A, "pending_entry", None)),
+            px=bool(getattr(A, "pending_exit", None)),
+        )
 
     # ---- 先执行挂起的卖/买（开盘时段）----
     pe_exit = getattr(A, "pending_exit", None)
@@ -2049,6 +2406,14 @@ def _handle(C):
                     open_px,
                 )
             )
+            _event_log(
+                "sell_by_signal",
+                signal=reason,
+                label=_reason_label(reason, "sell"),
+                all_reasons=_format_reasons(reasons, "sell"),
+                signal_day=pe_exit.get("signal_day"),
+                open=open_px,
+            )
             ok = _order_sell(C, reason, open_px, now)
             A.pending_exit = None
             A.pending_entry = None
@@ -2056,6 +2421,7 @@ def _handle(C):
             _save_state()
             if not ok:
                 print("%s pending_exit cleared after sell fail/skip" % STRATEGY_NAME)
+                _event_log("pending_exit_cleared_after_fail", sell_reason=reason)
             return
 
     pe_entry = getattr(A, "pending_entry", None)
@@ -2077,6 +2443,7 @@ def _handle(C):
             else:
                 why = "vol_dry_skip"
             print("%s pending_entry cancel %s" % (STRATEGY_NAME, why))
+            _event_log("pending_entry_cancel", reason=why, signal_day=pe_entry.get("signal_day"))
             return
         reasons = pe_entry.get("reasons") or []
         primary = reasons[0] if reasons else "entry"
@@ -2091,6 +2458,14 @@ def _handle(C):
                 open_px,
             )
         )
+        _event_log(
+            "buy_by_signal",
+            signal=primary,
+            label=_reason_label(primary, "buy"),
+            all_reasons=_format_reasons(reasons, "buy"),
+            signal_day=pe_entry.get("signal_day"),
+            open=open_px,
+        )
         budget = _buy_budget(cash)
         ok = _order_buy(C, open_px, now, budget)
         A.pending_entry = None
@@ -2103,6 +2478,7 @@ def _handle(C):
         _save_state()
         if not ok:
             print("%s pending_entry cleared after buy fail/skip" % STRATEGY_NAME)
+            _event_log("pending_entry_cleared_after_fail", signal=primary)
         return
 
     # ---- 新信号：回测当根；实盘仅收盘确认或开盘兜底 ----
@@ -2168,6 +2544,15 @@ def _handle(C):
                     phase,
                 )
             )
+            _event_log(
+                "pending_exit_set",
+                signal=reason,
+                label=_reason_label(reason, "sell"),
+                all_reasons=_format_reasons(uniq, "sell"),
+                signal_day=sig_day,
+                close=price,
+                phase=phase,
+            )
         elif live_cc:
             _mark_signal_eval_done(day, is_confirm)
         return
@@ -2201,6 +2586,15 @@ def _handle(C):
                 phase,
             )
         )
+        _event_log(
+            "pending_entry_set",
+            signal=primary,
+            label=_reason_label(primary, "buy"),
+            all_reasons=_format_reasons(real_buys, "buy"),
+            signal_day=sig_day,
+            close=price,
+            phase=phase,
+        )
     elif live_cc:
         _mark_signal_eval_done(day, is_confirm)
 
@@ -2212,6 +2606,7 @@ def init(C):
         _init_impl(C)
     except Exception as e:
         print("%s init error" % STRATEGY_NAME, e)
+        _event_log("init_error", error=str(e))
         try:
             traceback.print_exc()
         except Exception:
@@ -2363,6 +2758,16 @@ def _init_impl(C):
         "chase<",
         CHASE_MAX_PCT,
     )
+    _event_log(
+        "init",
+        acct=A.acct,
+        acct_type=A.acct_type,
+        period=A.period,
+        backtest=A.is_backtest,
+        dry_run=DRY_RUN,
+        budget=TRADE_BUDGET,
+        log_dir=str(globals().get("LOG_DIR") or ""),
+    )
 
 
 def handlebar(C):
@@ -2374,6 +2779,7 @@ def handlebar(C):
         _handle(C)
     except Exception as e:
         print("%s handlebar error" % STRATEGY_NAME, e)
+        _event_log("handlebar_error", error=str(e))
         try:
             traceback.print_exc()
         except Exception:

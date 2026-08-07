@@ -16,12 +16,19 @@ def _on_mode_switch_to_live(C):
         "barpos=",
         getattr(C, "barpos", None),
     )
+    _event_log(
+        "mode_switch",
+        direction="backtest_to_live",
+        raw_do_back_test=getattr(A, "do_back_test_raw", None),
+        barpos=getattr(C, "barpos", None),
+    )
     A.ready_logged = False
     A._hb_at = None
     try:
         _load_state()
     except Exception as e:
         print(_strategy_tag(), "live switch load_state fail", e)
+        _event_log("live_switch_load_state_fail", error=str(e))
     if not hasattr(A, "pending"):
         A.pending = None
     recon = globals().get("_reconcile_with_broker")
@@ -30,6 +37,7 @@ def _on_mode_switch_to_live(C):
             recon()
         except Exception as e:
             print(_strategy_tag(), "live switch reconcile fail", e)
+            _event_log("live_switch_reconcile_fail", error=str(e))
 
 
 def _refresh_mode(C):
@@ -69,6 +77,7 @@ def _refresh_mode(C):
         _on_mode_switch_to_live(C)
     elif prev is False and use_bt:
         print(_strategy_tag(), "mode switch live -> backtest raw=", raw)
+        _event_log("mode_switch", direction="live_to_backtest", raw=raw)
     return use_bt
 
 

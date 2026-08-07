@@ -6,6 +6,7 @@ def init(C):
         _init_impl(C)
     except Exception as e:
         print("%s init error" % STRATEGY_NAME, e)
+        _event_log("init_error", error=str(e))
         try:
             traceback.print_exc()
         except Exception:
@@ -157,6 +158,16 @@ def _init_impl(C):
         "chase<",
         CHASE_MAX_PCT,
     )
+    _event_log(
+        "init",
+        acct=A.acct,
+        acct_type=A.acct_type,
+        period=A.period,
+        backtest=A.is_backtest,
+        dry_run=DRY_RUN,
+        budget=TRADE_BUDGET,
+        log_dir=str(globals().get("LOG_DIR") or ""),
+    )
 
 
 def handlebar(C):
@@ -168,6 +179,7 @@ def handlebar(C):
         _handle(C)
     except Exception as e:
         print("%s handlebar error" % STRATEGY_NAME, e)
+        _event_log("handlebar_error", error=str(e))
         try:
             traceback.print_exc()
         except Exception:

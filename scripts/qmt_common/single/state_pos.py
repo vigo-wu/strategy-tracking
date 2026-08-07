@@ -29,7 +29,9 @@ def _pos_cost_price():
 
 
 def _clear_after_sell(now, reason, last=None):
-    print(_strategy_tag(), "SELL done", reason, "last=", last, "cleared", A.position)
+    cleared = getattr(A, "position", None)
+    print(_strategy_tag(), "SELL done", reason, "last=", last, "cleared", cleared)
+    _event_log("sell_done", sell_reason=reason, last=last, cleared=cleared)
     A.position = None
     A.acted.add("SELL")
     if getattr(A, "is_backtest", False):

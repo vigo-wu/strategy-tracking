@@ -14,6 +14,7 @@ def _diag_once(key, *msg):
         return
     A._diag.add(key)
     print(_strategy_tag(), "diag:", key, " ".join([str(x) for x in msg]))
+    _event_log("diag", key=str(key), msg=" ".join([str(x) for x in msg]))
 
 
 def _series_from_ex(md, stock, field):
@@ -111,4 +112,15 @@ def _live_heartbeat(reason=""):
         getattr(A, "stock", "?"),
         extra,
         ("reason=" + str(reason)) if reason else "",
+    )
+    _heartbeat_persist(
+        "%s live heartbeat %s PERIOD= %s stock= %s %s %s"
+        % (
+            _strategy_tag(),
+            now.strftime("%Y-%m-%d %H:%M:%S"),
+            getattr(A, "period", "?"),
+            getattr(A, "stock", "?"),
+            extra,
+            ("reason=" + str(reason)) if reason else "",
+        )
     )

@@ -52,17 +52,25 @@ def _load_state():
     path = _state_load_path()
     if not path or not os.path.isfile(path):
         print(_strategy_tag(), "state: empty (no file)", path or STATE_FILE)
+        _event_log("state_empty", path=path or STATE_FILE)
         return
     try:
         with open(path, "r") as f:
             raw = json.load(f)
     except Exception as e:
         print(_strategy_tag(), "state load fail", e)
+        _event_log("state_load_fail", error=str(e), path=path)
         return
     if not isinstance(raw, dict):
         return
     if str(raw.get("stock", "")) and str(raw.get("stock")) != str(getattr(A, "stock", "")):
         print(_strategy_tag(), "state stock mismatch, ignore", raw.get("stock"), getattr(A, "stock", None))
+        _event_log(
+            "state_stock_mismatch",
+            file_stock=raw.get("stock"),
+            runtime_stock=getattr(A, "stock", None),
+            path=path,
+        )
         return
     pos = raw.get("position")
     if isinstance(pos, dict) and int(pos.get("shares", 0) or 0) >= 100:
@@ -82,7 +90,15 @@ def _load_state():
             extra(raw)
         except Exception as e:
             print(_strategy_tag(), "state extra load fail", e)
+            _event_log("state_extra_load_fail", error=str(e))
     print(_strategy_tag(), "state loaded", "path=", path, A.position, "pending=", bool(A.pending))
+    _event_log(
+        "state_loaded",
+        path=path,
+        position=A.position,
+        pending=bool(A.pending),
+        pending_order=bool(getattr(A, "pending", None)),
+    )
 
 
 def _save_state():
@@ -106,11 +122,14 @@ def _save_state():
             extra(data)
         except Exception as e:
             print(_strategy_tag(), "state extra save fail", e)
+            _event_log("state_extra_save_fail", error=str(e))
     try:
         d = os.path.dirname(path)
         if d and not os.path.isdir(d):
             os.makedirs(d)
         with open(path, "w") as f:
             json.dump(data, f, ensure_ascii=True, indent=2)
+        _live_state_snapshot(data)
     except Exception as e:
         print(_strategy_tag(), "state save fail", path, e)
+        _event_log("state_save_fail", error=str(e), path=path)

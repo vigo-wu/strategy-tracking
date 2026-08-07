@@ -109,6 +109,11 @@ PENDING_ORPHAN_SEC = 60
 # QMT 模型无 __file__；状态绝对路径（含 {stock}，多实例不同主图互不覆盖）
 #   513530.SH → ...\hlband_513530_SH.json
 STATE_FILE = r"D:\service\GJQMT\python\hlband_{stock}.json"
+# 实盘结构化日志根目录；落盘为 LOG_DIR/<stock_tag>/{tag}_events.jsonl 等
+# 空字符串关闭落盘（仍保留终端 print）
+LOG_DIR = r"D:\service\GJQMT\python\logs"
+# True=回测也写日志（默认关，避免回测刷爆磁盘）
+LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
 STRATEGY_VER = "v1.12"
