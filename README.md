@@ -5,6 +5,7 @@
 | 主题 | 手册 | QMT 脚本 |
 | :--- | :--- | :--- |
 | 红利波段 · 周线过滤 + 日线缩量低吸（v1.8） | [`hongli_band/model.md`](./hongli_band/model.md) | [`hongli_band/scripts/qmt/`](./hongli_band/scripts/qmt/) |
+| 转债首日竞价 · 9:15@130 买 / 收盘手动卖 | [`cb_auction/model.md`](./cb_auction/model.md) | [`cb_auction/scripts/qmt/`](./cb_auction/scripts/qmt/) |
 
 **共用基础设施**（P0/P1）：[`scripts/qmt_common/`](./scripts/qmt_common/)（下单 pending、经纪查询、T+1、模式切换、行情工具等）。导航见 [`scripts/qmt_common/NAV.md`](./scripts/qmt_common/NAV.md)。
 
@@ -23,9 +24,10 @@
 ```bash
 # 拼接 qmt_common + 策略片段 → GBK 写入终端 python\
 python hongli_band/scripts/qmt/_deploy_qmt_gbk.py
+python cb_auction/scripts/qmt/_deploy_qmt_gbk.py
 ```
 
-操作步骤见 [`hongli_band/model.md`](./hongli_band/model.md) §5。
+操作步骤见各主题 `model.md`（红利波段 §5；转债竞价 §4）。
 
 默认 `DRY_RUN=True`；回测见 `diag: ok` 后再改 `False` 实盘。
 
