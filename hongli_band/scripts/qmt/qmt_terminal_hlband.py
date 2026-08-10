@@ -33,9 +33,9 @@ CASH_RATIO = 0.8
 #   MA30 → 生命线（收盘跌破即周线空，强制清仓）；乖离/斜率过滤也用它
 #   MA60 → 数据暖机长度参考（market 取数 need）
 W_MA_FAST = 5
-W_MA_MID = 10
-W_MA_LIFE = 30
-W_MA_SLOW = 60
+W_MA_MID = 13
+W_MA_LIFE = 34
+W_MA_SLOW = 55
 # 周线 MACD 参数（DIF/DEA/柱）；多头要求 DIF>0 且柱>0；死叉且双线在零轴下 → 空
 MACD_FAST = 12
 MACD_SLOW = 26
@@ -92,7 +92,7 @@ STOP_LOSS = 0.08
 # weekly_bear 强制清仓：连续 N 个信号日（日 K）仍为空头才挂 pending_exit
 #   N<=0 或 1：当天空头即挂（与改前一致）；N=2：连续两日仍空才挂
 #   禁开 / 撤买入 pending 仍按「当日」空头即时生效，不要求满 N 日
-W_BEAR_CONFIRM_DAYS = 3
+W_BEAR_CONFIRM_DAYS = 2
 
 # （另有 weekly_bear：周线空头判定见 _eval_weekly；清仓见上）
 
@@ -108,6 +108,7 @@ LIVE_ONLY_LAST_BAR = True
 # 实盘：盘中(DECISION_*)只执行 pending；收盘后(SIGNAL_CONFIRM_*)用当日完整日/周 K 确认信号并挂起 → 次日开盘成交
 # 若收盘窗口未跑到，次日开盘对「上一根已收盘日」兜底评估并挂起（同日可成交）
 # 判定：confirmed_eval_day < 上一完整交易日 且今日尚未 fallback
+# 周线：bt/confirm/开盘 exec·兜底一律含本周未收盘根；日线开盘仍去未收盘日 K
 LIVE_CLOSE_CONFIRM = True
 # 实盘决策时窗（HHmmss）：盘中处理券商 pending / 心跳；信号成交见 PENDING_EXEC_*
 DECISION_START = "093000"
@@ -142,7 +143,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.20"
+STRATEGY_VER = "v1.23"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
@@ -2543,8 +2544,9 @@ def _handle(C):
     conf_end = str(globals().get("SIGNAL_CONFIRM_END", "160000") or "160000")
     in_exec = (not bt) and (DECISION_START <= now_s < conf_start)
     in_confirm = (not bt) and (conf_start <= now_s <= conf_end)
-    # 收盘确认：用当日完整 K；开盘兜底：用昨收（去未收盘根）
-    use_prev_bar = False
+    # 收盘确认：用当日完整 K；开盘：日 K 去未收盘根，周 K 含未收盘根
+    prev_d = False
+    prev_w = False
     phase = "bt" if bt else "live"
 
     if not bt:
@@ -2620,24 +2622,29 @@ def _handle(C):
     if live_cc and phase == "confirm":
         highs_s, closes_s, vols_s = highs_d, closes_d, vols_d
         closes_ws = closes_w
-        sig_day = day
+        sig_day_daily = day
+        sig_day_weekly = day
     elif need_fallback or (live_cc and phase == "exec"):
-        # 开盘兜底 / 盘中撤单校验：一律去掉未收盘根，避免今日未完成 K
-        # 误触 vol_dry_skip 等把刚挂的 pending_entry 立刻撤掉
-        use_prev_bar = True
+        # 开盘兜底 / 盘中执行：日 K 去掉未收盘根，避免未完成日线误触 vol_dry 等；
+        # 周 K 含本周未收盘根，与 confirm/回测一致（新周首日即可 weekly_bear 撤买入 pending）
+        # 日信号日=上一完整交易日；周线 streak/清仓信号日=今日（与含未收盘周根对齐）
+        prev_d = True
+        prev_w = False
         highs_s = _drop_forming_bar(highs_d)
         closes_s = _drop_forming_bar(closes_d)
         vols_s = _drop_forming_bar(vols_d)
-        closes_ws = _drop_forming_bar(closes_w)
+        closes_ws = closes_w
         if closes_s is None or len(closes_s) < 3 or closes_ws is None or len(closes_ws) < 3:
             _live_heartbeat("ohlcv_confirm_short")
             return
-        sig_day = prev_closed_day
+        sig_day_daily = prev_closed_day
+        sig_day_weekly = day
     else:
         # 回测：信号评估用完整序列
         highs_s, closes_s, vols_s = highs_d, closes_d, vols_d
         closes_ws = closes_w
-        sig_day = day
+        sig_day_daily = day
+        sig_day_weekly = day
 
     price = float(closes_s[-1])
     high_px = float(highs_s[-1])
@@ -2648,7 +2655,7 @@ def _handle(C):
     # 清仓二次确认只在 bt / confirm / 开盘兜底累计；盘中 exec 不改 streak
     track_bear = (not live_cc) or (phase == "confirm") or bool(need_fallback)
     force_empty, w_bear_n = _update_w_bear_streak(
-        weekly_bear, sig_day, track=track_bear
+        weekly_bear, sig_day_weekly, track=track_bear
     )
     w_bias_block, w_bias = _weekly_bias_guard(w_detail)
     w_slope_block, _w_bias_low = _weekly_low_slope_guard(w_detail)
@@ -2746,7 +2753,7 @@ def _handle(C):
             "%s" % STRATEGY_NAME,
             day,
             hhmm,
-            "n1d=%d n1w=%d close=%.4f sig_day=%s phase=%s prev=%s "
+            "n1d=%d n1w=%d close=%.4f sig_d=%s sig_w=%s phase=%s prev_d=%s prev_w=%s "
             "w_bull=%s w_bear=%s w_bn=%s/%s w_ma5=%s w_ma30=%s w_hist=%s "
             "buy=%s buyR=%s sell=%s sellR=%s "
             "hold=%s ret=%s pe=%s px=%s bt_held=%s avail=%s"
@@ -2754,9 +2761,11 @@ def _handle(C):
                 len(closes_s),
                 len(closes_ws),
                 price,
-                sig_day,
+                sig_day_daily,
+                sig_day_weekly,
                 phase,
-                use_prev_bar,
+                prev_d,
+                prev_w,
                 weekly_bull,
                 weekly_bear,
                 w_bear_n,
@@ -2782,9 +2791,11 @@ def _handle(C):
             n1d=len(closes_s),
             n1w=len(closes_ws),
             close=round(price, 6),
-            sig_day=sig_day,
+            sig_d=sig_day_daily,
+            sig_w=sig_day_weekly,
             phase=phase,
-            prev=use_prev_bar,
+            prev_d=prev_d,
+            prev_w=prev_w,
             w_bull=weekly_bull,
             w_bear=weekly_bear,
             w_bn=w_bear_n,
@@ -2855,6 +2866,7 @@ def _handle(C):
         and ("BUY" not in getattr(A, "acted", set()))
         and _pending_ready(pe_entry, day, tag, "day")
     ):
+        # 撤单校验用当 bar 周线（含未收盘周根）与日线过滤；与 confirm/bt 一致
         if weekly_bear or w_bias_block or w_slope_block or vol_dry_block:
             A.pending_entry = None
             _save_state()
@@ -2953,10 +2965,16 @@ def _handle(C):
                 if r not in seen:
                     seen.add(r)
                     uniq.append(r)
+            # 周线清仓用 sig_w；日线卖点用 sig_d
+            exit_sig_day = (
+                sig_day_weekly
+                if (force_empty or reason == "weekly_bear")
+                else sig_day_daily
+            )
             A.pending_exit = {
                 "mode": "day",
                 "reason": reason,
-                "signal_day": sig_day,
+                "signal_day": exit_sig_day,
                 "signal_tag": tag,
                 "close": price,
                 "reasons": uniq,
@@ -2973,7 +2991,7 @@ def _handle(C):
                     reason,
                     _reason_label(reason, "sell"),
                     _format_reasons(uniq, "sell"),
-                    sig_day,
+                    exit_sig_day,
                     price,
                     phase,
                 )
@@ -2983,7 +3001,7 @@ def _handle(C):
                 signal=reason,
                 label=_reason_label(reason, "sell"),
                 all_reasons=_format_reasons(uniq, "sell"),
-                signal_day=sig_day,
+                signal_day=exit_sig_day,
                 close=price,
                 phase=phase,
             )
@@ -2997,7 +3015,7 @@ def _handle(C):
                 _mark_signal_eval_done(day, is_confirm)
             return
         A.pending_entry = {
-            "signal_day": sig_day,
+            "signal_day": sig_day_daily,
             "signal_tag": tag,
             "close": price,
             "reasons": list(real_buys),
@@ -3015,7 +3033,7 @@ def _handle(C):
                 primary,
                 _reason_label(primary, "buy"),
                 _format_reasons(real_buys, "buy"),
-                sig_day,
+                sig_day_daily,
                 price,
                 phase,
             )
@@ -3025,7 +3043,7 @@ def _handle(C):
             signal=primary,
             label=_reason_label(primary, "buy"),
             all_reasons=_format_reasons(real_buys, "buy"),
-            signal_day=sig_day,
+            signal_day=sig_day_daily,
             close=price,
             phase=phase,
         )
