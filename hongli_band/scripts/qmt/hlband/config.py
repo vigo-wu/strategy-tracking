@@ -105,7 +105,7 @@ PENDING_EXEC_END = "094500"
 # 日线盘后常无新 tick，故从 14:55 起用当日 K 确认；16:00 前仍可确认
 SIGNAL_CONFIRM_START = "145500"
 SIGNAL_CONFIRM_END = "160000"
-# 实盘心跳日志间隔（秒）
+# 实盘心跳日志间隔（秒）；持仓无事件时的状态行也按此节流
 LIVE_HEARTBEAT_SEC = 60
 
 # download_history_data 最长回溯（自然日）；回测暖机用
@@ -127,7 +127,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.17"
+STRATEGY_VER = "v1.18"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）

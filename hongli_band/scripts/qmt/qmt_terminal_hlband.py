@@ -115,7 +115,7 @@ PENDING_EXEC_END = "094500"
 # 日线盘后常无新 tick，故从 14:55 起用当日 K 确认；16:00 前仍可确认
 SIGNAL_CONFIRM_START = "145500"
 SIGNAL_CONFIRM_END = "160000"
-# 实盘心跳日志间隔（秒）
+# 实盘心跳日志间隔（秒）；持仓无事件时的状态行也按此节流
 LIVE_HEARTBEAT_SEC = 60
 
 # download_history_data 最长回溯（自然日）；回测暖机用
@@ -137,7 +137,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.17"
+STRATEGY_VER = "v1.18"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
@@ -2291,6 +2291,41 @@ def _log_pending_defer_once(kind, day, now_s, signal_day):
     )
 
 
+def _should_emit_bar_status(C, now, force, status_idle):
+    """
+    状态行是否输出。
+    force（买卖/强平信号）立刻打；回测逐 bar 不节流；
+    实盘仅持仓或仅挂起 pending、无事件时按 LIVE_HEARTBEAT_SEC 节流。
+    """
+    if not getattr(A, "ready_logged", False):
+        return True
+    if force:
+        return True
+    if getattr(A, "is_backtest", False):
+        if status_idle:
+            return True
+        try:
+            return int(getattr(C, "barpos", 0) or 0) % 20 == 0
+        except Exception:
+            return False
+    if status_idle:
+        sec = int(globals().get("LIVE_HEARTBEAT_SEC") or 60)
+        if sec <= 0:
+            return True
+        last = getattr(A, "_bar_status_at", None)
+        if last is not None and now is not None:
+            try:
+                if (now - last).total_seconds() < float(sec):
+                    return False
+            except Exception:
+                pass
+        return True
+    try:
+        return int(getattr(C, "barpos", 0) or 0) % 20 == 0
+    except Exception:
+        return False
+
+
 def _after_signal_buy_filled(px, day):
     """买入成交后初始化持仓元数据并清信号 pending。"""
     A.pending_entry = None
@@ -2587,15 +2622,16 @@ def _handle(C):
     force_empty = bool(weekly_bear)
     vol_dry_block = "vol_dry_skip" in buy_reasons
 
-    interesting = (
-        buy_sig
-        or sell_ok
-        or force_empty
-        or holding
-        or bool(getattr(A, "pending_entry", None) or getattr(A, "pending_exit", None))
-    )
-    if (not getattr(A, "ready_logged", False)) or interesting or (C.barpos % 20 == 0):
+    pe_now = bool(getattr(A, "pending_entry", None))
+    px_now = bool(getattr(A, "pending_exit", None))
+    # 买卖/强平信号强制打；仅持仓或仅挂起 pending 时实盘按心跳节流
+    # （pending 整天挂起时若也强制打，窗外仍会刷屏）
+    force_bar_log = bool(buy_sig or sell_ok or force_empty)
+    status_idle = (bool(holding) or pe_now or px_now) and (not force_bar_log)
+    if _should_emit_bar_status(C, now, force_bar_log, status_idle):
         A.ready_logged = True
+        if not getattr(A, "is_backtest", False):
+            A._bar_status_at = now
         print(
             "%s" % STRATEGY_NAME,
             day,
@@ -2622,8 +2658,8 @@ def _handle(C):
                 ",".join((["weekly_bear"] if force_empty else []) + sell_reasons) or "-",
                 holding,
                 None if ret_pct is None else ("%.2f%%" % (ret_pct * 100.0)),
-                bool(getattr(A, "pending_entry", None)),
-                bool(getattr(A, "pending_exit", None)),
+                pe_now,
+                px_now,
                 _bt_held_vol() if bt else "-",
                 _bt_available_vol() if bt else "-",
             ),
@@ -2648,8 +2684,8 @@ def _handle(C):
             sellR=",".join((["weekly_bear"] if force_empty else []) + sell_reasons) or "-",
             hold=holding,
             ret=None if ret_pct is None else round(ret_pct * 100.0, 4),
-            pe=bool(getattr(A, "pending_entry", None)),
-            px=bool(getattr(A, "pending_exit", None)),
+            pe=pe_now,
+            px=px_now,
         )
 
     # ---- 先执行挂起的卖/买（仅开盘窗；收盘确认不按开盘价成交）----
