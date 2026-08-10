@@ -2,9 +2,21 @@
 # 作用: 单仓买卖委托与成交落地
 # 主要符号: _order_buy, _order_sell, _apply_buy_fill, _apply_sell_fill
 # 钩子实现: _pending_on_buy_fill / _pending_on_sell_fill
-# 预算: TRADE_BUDGET；可选 CASH_RATIO（实盘 min(budget, cash*ratio)）
+# 预算: TRADE_BUDGET；可选 TRADE_BUDGET_BY_STOCK[A.stock]；可选 CASH_RATIO
+def _trade_budget_cap():
+    """单笔预算上限：优先 TRADE_BUDGET_BY_STOCK[A.stock]，否则 TRADE_BUDGET。"""
+    stock = str(getattr(A, "stock", "") or "").strip()
+    by_stock = globals().get("TRADE_BUDGET_BY_STOCK") or {}
+    if stock and isinstance(by_stock, dict) and stock in by_stock:
+        try:
+            return float(by_stock[stock] or 0)
+        except Exception:
+            pass
+    return float(globals().get("TRADE_BUDGET") or 0)
+
+
 def _buy_budget(cash):
-    budget = float(globals().get("TRADE_BUDGET") or 0)
+    budget = _trade_budget_cap()
     if getattr(A, "is_backtest", False) or DRY_RUN:
         return budget if budget > 0 else 0.0
     ratio = float(globals().get("CASH_RATIO") or 0)

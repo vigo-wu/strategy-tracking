@@ -17,7 +17,13 @@ ACCOUNT_ID = "39953913"
 ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 
 # 单笔下单资金上限（元）；实际股数 = floor(预算/开盘价/100)*100
+# 未在 TRADE_BUDGET_BY_STOCK 中单独配置的标的用此默认值
 TRADE_BUDGET = 25000.0
+# 按标的覆盖预算（key 须与 A.stock 一致，如 513530.SH）
+TRADE_BUDGET_BY_STOCK = {
+    "513530.SH": 20000.0,
+    "601398.SH": 30000.0,
+}
 # 可用现金占用比例（预留下单缓冲，避免满仓打满失败）
 CASH_RATIO = 0.8
 
@@ -126,7 +132,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.13"
+STRATEGY_VER = "v1.14"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
@@ -1518,9 +1524,21 @@ def _process_pending(C, now):
 # 作用: 单仓买卖委托与成交落地
 # 主要符号: _order_buy, _order_sell, _apply_buy_fill, _apply_sell_fill
 # 钩子实现: _pending_on_buy_fill / _pending_on_sell_fill
-# 预算: TRADE_BUDGET；可选 CASH_RATIO（实盘 min(budget, cash*ratio)）
+# 预算: TRADE_BUDGET；可选 TRADE_BUDGET_BY_STOCK[A.stock]；可选 CASH_RATIO
+def _trade_budget_cap():
+    """单笔预算上限：优先 TRADE_BUDGET_BY_STOCK[A.stock]，否则 TRADE_BUDGET。"""
+    stock = str(getattr(A, "stock", "") or "").strip()
+    by_stock = globals().get("TRADE_BUDGET_BY_STOCK") or {}
+    if stock and isinstance(by_stock, dict) and stock in by_stock:
+        try:
+            return float(by_stock[stock] or 0)
+        except Exception:
+            pass
+    return float(globals().get("TRADE_BUDGET") or 0)
+
+
 def _buy_budget(cash):
-    budget = float(globals().get("TRADE_BUDGET") or 0)
+    budget = _trade_budget_cap()
     if getattr(A, "is_backtest", False) or DRY_RUN:
         return budget if budget > 0 else 0.0
     ratio = float(globals().get("CASH_RATIO") or 0)
@@ -2750,7 +2768,7 @@ def _init_impl(C):
         "DRY_RUN=",
         DRY_RUN,
         "budget=",
-        TRADE_BUDGET,
+        _trade_budget_cap(),
         "wMA=",
         "%d/%d/%d" % (W_MA_FAST, W_MA_MID, W_MA_LIFE),
         "dMA=",
@@ -2767,7 +2785,7 @@ def _init_impl(C):
         period=A.period,
         backtest=A.is_backtest,
         dry_run=DRY_RUN,
-        budget=TRADE_BUDGET,
+        budget=_trade_budget_cap(),
         log_dir=str(globals().get("LOG_DIR") or ""),
     )
 
