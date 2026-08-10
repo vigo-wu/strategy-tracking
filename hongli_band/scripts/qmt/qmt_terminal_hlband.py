@@ -17,7 +17,13 @@ ACCOUNT_ID = "39953913"
 ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 
 # 单笔下单资金上限（元）；实际股数 = floor(预算/开盘价/100)*100
-TRADE_BUDGET = 50000.0
+# 未在 TRADE_BUDGET_BY_STOCK 中单独配置的标的用此默认值
+TRADE_BUDGET = 25000.0
+# 按标的覆盖预算（key 须与 A.stock 一致，如 513530.SH）
+TRADE_BUDGET_BY_STOCK = {
+    "513530.SH": 20000.0,
+    "601398.SH": 30000.0,
+}
 # 可用现金占用比例（预留下单缓冲，避免满仓打满失败）
 CASH_RATIO = 0.8
 
@@ -57,7 +63,7 @@ VOL_PULLBACK_RATIO = 0.9      # 量 < 均量*0.9 视为缩量
 # 全局禁开 vol_dry_skip（无量阴跌不言底）：
 #   收盘跌破 MA20 且量 < N 日均量 * 比例 → 当天任何买点失效
 VOL_DRY_N = 20
-VOL_DRY_RATIO = 0.70          # 0.70 = 量不足 20 日均量的 70%
+VOL_DRY_RATIO = 0.60          # 量 < 20 日均量的 60% 视为无量阴跌
 
 # 卖① trail_stop：阶梯式移动止盈
 #   按历史最高浮盈 (peak-cost)/cost 选档；触发条件：
@@ -66,11 +72,11 @@ VOL_DRY_RATIO = 0.70          # 0.70 = 量不足 20 日均量的 70%
 #     peak_hi=None 无上限；profit_floor=None 不设硬底线
 #   档1 起步保护 [3%,6%)：回撤>1.5%（同旧版，防破本）
 #   档2 落袋为安 [6%,10%)：回撤>3% 或 利润跌破 3%
-#   档3 放鹰吃肉 >=10%：回撤>5%（利润垫扛日线洗盘）
+#   档3 放鹰吃肉 >=10%：回撤>4%（利润垫扛日线洗盘）
 TRAIL_TIERS = (
     (0.03, 0.06, 0.015, None),
     (0.06, 0.10, 0.03, 0.03),
-    (0.10, None, 0.05, None),
+    (0.10, None, 0.04, None),
 )
 # 卖② time_force：智能时间成本（防长期磨人）
 #   持仓 bar 数 > BARS 后：收盘破日线 MA60 → 立即强制平仓；
@@ -95,16 +101,21 @@ WEEKLY_OHLC_COUNT = 120
 # 实盘只在最新一根 bar 决策；回测逐 bar 扫
 LIVE_ONLY_LAST_BAR = True
 # 实盘：盘中(DECISION_*)只执行 pending；收盘后(SIGNAL_CONFIRM_*)用当日完整日/周 K 确认信号并挂起 → 次日开盘成交
-# 若收盘窗口未跑到，次日开盘用已确认昨 K 兜底挂起（同日可成交）
+# 若收盘窗口未跑到，次日开盘对「上一根已收盘日」兜底评估并挂起（同日可成交）
+# 判定：confirmed_eval_day < 上一完整交易日 且今日尚未 fallback
 LIVE_CLOSE_CONFIRM = True
-# 实盘决策时窗（HHmmss）：执行挂起买卖
+# 实盘决策时窗（HHmmss）：盘中处理券商 pending / 心跳；信号成交见 PENDING_EXEC_*
 DECISION_START = "093000"
 DECISION_END = "150000"
+# 信号 pending（pending_entry/exit）仅在开盘附近成交；错过则保留到下一交易日开盘窗
+# 须覆盖「开盘兜底挂起 → 同窗内下一根成交」；收盘确认窗绝不按开盘价成交
+PENDING_EXEC_START = "093000"
+PENDING_EXEC_END = "094500"
 # 收盘确认信号时窗（须与 DECISION 衔接；含尾盘近似收盘 + 盘后）
 # 日线盘后常无新 tick，故从 14:55 起用当日 K 确认；16:00 前仍可确认
 SIGNAL_CONFIRM_START = "145500"
 SIGNAL_CONFIRM_END = "160000"
-# 实盘心跳日志间隔（秒）
+# 实盘心跳日志间隔（秒）；持仓无事件时的状态行也按此节流
 LIVE_HEARTBEAT_SEC = 60
 
 # download_history_data 最长回溯（自然日）；回测暖机用
@@ -126,7 +137,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.12"
+STRATEGY_VER = "v1.19"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
@@ -958,6 +969,102 @@ def _live_heartbeat(reason=""):
     )
 
 # === hlband/market.py ===
+def _norm_bar_day(x):
+    """行情时间戳/索引 → yyyymmdd。"""
+    if x is None:
+        return ""
+    try:
+        if hasattr(x, "strftime"):
+            return x.strftime("%Y%m%d")
+    except Exception:
+        pass
+    s = str(x).strip()
+    digits = []
+    for ch in s:
+        if ch.isdigit():
+            digits.append(ch)
+        elif digits:
+            break
+    if len(digits) >= 8:
+        return "".join(digits[:8])
+    return ""
+
+
+def _days_from_ex(md, stock):
+    """从 get_market_data_ex 结果解析交易日列表（与 close 序列对齐时优先 index/time）。"""
+    if md is None:
+        return None
+    df = None
+    if isinstance(md, dict) and stock in md:
+        df = md[stock]
+    elif isinstance(md, dict):
+        for v in md.values():
+            df = v
+            break
+    if df is None:
+        return None
+    raw = None
+    if hasattr(df, "index"):
+        try:
+            raw = list(df.index)
+        except Exception:
+            raw = None
+    if (not raw) and hasattr(df, "columns"):
+        for col in ("time", "date", "datetime", "stime"):
+            try:
+                cols = getattr(df, "columns", [])
+                if col in cols:
+                    raw = list(df[col])
+                    break
+            except Exception:
+                continue
+    if not raw:
+        return None
+    out = []
+    for x in raw:
+        d = _norm_bar_day(x)
+        if d:
+            out.append(d)
+    return out if out else None
+
+
+def _get_daily_bar_days(C, stock, count=8):
+    """最近若干根日线交易日（yyyymmdd），失败返回 None。"""
+    end = _bar_end_str(C)
+    if len(end) >= 8:
+        end = end[:8]
+    fields = ["close"]
+    md = None
+    try:
+        md = C.get_market_data_ex(
+            fields=fields,
+            stock_code=[stock],
+            period=getattr(A, "period", "1d"),
+            end_time=end,
+            count=int(count),
+            dividend_type="front_ratio",
+            fill_data=True,
+            subscribe=False,
+        )
+    except TypeError:
+        try:
+            md = C.get_market_data_ex(
+                fields,
+                [stock],
+                period=getattr(A, "period", "1d"),
+                start_time="",
+                end_time=end,
+                count=int(count),
+                dividend_type="front_ratio",
+            )
+        except Exception:
+            md = None
+    except Exception:
+        md = None
+    days = _days_from_ex(md, stock) if md is not None else None
+    return days
+
+
 def _get_ohlcv_period(C, stock, period, count, need, diag_key):
     end = _bar_end_str(C)
     if period in ("1d", "1w", "1mon", "1q", "1hy", "1y"):
@@ -1518,9 +1625,21 @@ def _process_pending(C, now):
 # 作用: 单仓买卖委托与成交落地
 # 主要符号: _order_buy, _order_sell, _apply_buy_fill, _apply_sell_fill
 # 钩子实现: _pending_on_buy_fill / _pending_on_sell_fill
-# 预算: TRADE_BUDGET；可选 CASH_RATIO（实盘 min(budget, cash*ratio)）
+# 预算: TRADE_BUDGET；可选 TRADE_BUDGET_BY_STOCK[A.stock]；可选 CASH_RATIO
+def _trade_budget_cap():
+    """单笔预算上限：优先 TRADE_BUDGET_BY_STOCK[A.stock]，否则 TRADE_BUDGET。"""
+    stock = str(getattr(A, "stock", "") or "").strip()
+    by_stock = globals().get("TRADE_BUDGET_BY_STOCK") or {}
+    if stock and isinstance(by_stock, dict) and stock in by_stock:
+        try:
+            return float(by_stock[stock] or 0)
+        except Exception:
+            pass
+    return float(globals().get("TRADE_BUDGET") or 0)
+
+
 def _buy_budget(cash):
-    budget = float(globals().get("TRADE_BUDGET") or 0)
+    budget = _trade_budget_cap()
     if getattr(A, "is_backtest", False) or DRY_RUN:
         return budget if budget > 0 else 0.0
     ratio = float(globals().get("CASH_RATIO") or 0)
@@ -1855,11 +1974,16 @@ def _eval_weekly(closes_w):
     h1 = _last_valid(hist, i - 1)
     d1 = _last_valid(dif, i - 1)
     e1 = _last_valid(dea, i - 1)
-    m30_prev2 = _last_valid(ma30, i - 2) if i >= 2 else None
+    slope_weeks = int(globals().get("W_MA30_SLOPE_WEEKS", 2) or 2)
     slope_up_n = False
-    if m30 is not None and m30_prev is not None and m30_prev2 is not None:
-        # 连续 2 周向上：ma30[t]>ma30[t-1] 且 ma30[t-1]>ma30[t-2]
-        slope_up_n = (m30 > m30_prev) and (m30_prev > m30_prev2)
+    if slope_weeks > 0 and i >= slope_weeks:
+        slope_up_n = True
+        for k in range(slope_weeks):
+            a = _last_valid(ma30, i - k)
+            b = _last_valid(ma30, i - k - 1)
+            if a is None or b is None or not (a > b):
+                slope_up_n = False
+                break
     detail.update(
         {
             "ma5": m5,
@@ -1913,7 +2037,7 @@ def _eval_daily_buy(closes, volumes):
     if prev > 0 and (price - prev) / prev >= float(CHASE_MAX_PCT):
         return False, ["chase_skip"], detail
 
-    # 无量阴跌不言底：跌破 MA20 且量 < 20 日均量 * 0.7 → 全局禁开
+    # 无量阴跌不言底：跌破 MA20 且量 < 20 日均量 * VOL_DRY_RATIO → 全局禁开
     dry_below = (
         m20 is not None
         and price < m20
@@ -2071,15 +2195,38 @@ def _live_close_confirm_on():
     )
 
 
-def _live_signal_day(today):
-    """开盘兜底挂起用的信号日：墙钟昨日历日，保证 signal_day < 今日可成交。"""
+def _calendar_prev_weekday(yyyymmdd):
+    """自然日回退到上一工作日（跳过周末；节假日以行情轴为准）。"""
     try:
-        d = datetime.datetime.strptime(str(today), "%Y%m%d") - datetime.timedelta(
-            days=1
-        )
-        return d.strftime("%Y%m%d")
+        d = datetime.datetime.strptime(str(yyyymmdd), "%Y%m%d")
     except Exception:
-        return str(today)
+        return str(yyyymmdd)
+    d -= datetime.timedelta(days=1)
+    while int(d.weekday()) >= 5:
+        d -= datetime.timedelta(days=1)
+    return d.strftime("%Y%m%d")
+
+
+def _last_closed_bar_day(C, today):
+    """上一根已收盘日线交易日；优先行情时间轴，否则跳过周末的自然日。"""
+    today = str(today)
+    days = None
+    try:
+        days = _get_daily_bar_days(C, A.stock, count=8)
+    except Exception:
+        days = None
+    if days:
+        last = str(days[-1])
+        if last >= today and len(days) >= 2:
+            return str(days[-2])
+        if last and last < today:
+            return last
+    return _calendar_prev_weekday(today)
+
+
+def _live_signal_day(C, today):
+    """开盘兜底/盘中校验用的信号日：上一根已收盘交易日（保证 signal_day < 今日可成交）。"""
+    return _last_closed_bar_day(C, today)
 
 
 def _mark_confirmed_eval(day):
@@ -2115,6 +2262,154 @@ def _pending_ready(pend, day, bar_tag, mode):
     return False
 
 
+def _in_pending_exec_window(now_s):
+    """回测不限时；实盘仅开盘附近允许按开盘价成交信号 pending。"""
+    if getattr(A, "is_backtest", False):
+        return True
+    start = str(globals().get("PENDING_EXEC_START", "093000") or "093000")
+    end = str(globals().get("PENDING_EXEC_END", "094500") or "094500")
+    return start <= str(now_s) < end
+
+
+def _log_pending_defer_once(kind, day, now_s, signal_day):
+    """开盘窗外 defer 每个交易日每种 pending 只打一次日志，避免盘中刷屏。"""
+    kind = str(kind or "")
+    day = str(day or "")
+    attr = "_defer_log_%s_day" % kind
+    if str(getattr(A, attr, "") or "") == day:
+        return
+    setattr(A, attr, day)
+    print(
+        "%s pending_%s defer outside open window now=%s signal_day=%s"
+        % (STRATEGY_NAME, kind, now_s, signal_day)
+    )
+    _event_log(
+        "pending_%s_defer" % kind,
+        now=now_s,
+        signal_day=signal_day,
+        exec_end=str(globals().get("PENDING_EXEC_END", "094500") or "094500"),
+    )
+
+
+def _should_emit_bar_status(C, now, force, status_idle):
+    """
+    状态行是否输出。
+    force（信号上升沿）立刻打；回测逐 bar 对 idle 不节流；
+    实盘仅持仓/挂起、无新沿时按 LIVE_HEARTBEAT_SEC 节流。
+    """
+    if not getattr(A, "ready_logged", False):
+        return True
+    if force:
+        return True
+    if getattr(A, "is_backtest", False):
+        if status_idle:
+            return True
+        try:
+            return int(getattr(C, "barpos", 0) or 0) % 20 == 0
+        except Exception:
+            return False
+    if status_idle:
+        sec = int(globals().get("LIVE_HEARTBEAT_SEC") or 60)
+        if sec <= 0:
+            return True
+        last = getattr(A, "_bar_status_at", None)
+        if last is not None and now is not None:
+            try:
+                if (now - last).total_seconds() < float(sec):
+                    return False
+            except Exception:
+                pass
+        return True
+    try:
+        return int(getattr(C, "barpos", 0) or 0) % 20 == 0
+    except Exception:
+        return False
+
+
+def _bar_signal_rising_edge(buy_sig, sell_ok, force_empty):
+    """
+    相对上一 tick 的买卖/强平上升沿。
+    电平一直为真时不再强制打状态行（避免收盘确认窗刷屏）。
+    """
+    cur = (bool(buy_sig), bool(sell_ok), bool(force_empty))
+    prev = getattr(A, "_bar_sig_prev", None)
+    A._bar_sig_prev = cur
+    if prev is None:
+        return bool(cur[0] or cur[1] or cur[2])
+    return (
+        (cur[0] and not prev[0])
+        or (cur[1] and not prev[1])
+        or (cur[2] and not prev[2])
+    )
+
+
+def _after_signal_buy_filled(px, day):
+    """买入成交后初始化持仓元数据并清信号 pending。"""
+    A.pending_entry = None
+    A.pending_exit = None
+    try:
+        A.hold_peak = float(px) if px else None
+    except Exception:
+        A.hold_peak = None
+    A.hold_bars = 0
+    A._hold_count_day = str(day or "")
+    A.time_force_grace_until = None
+    _save_state()
+
+
+def _after_signal_sell_filled():
+    """卖出成交（或已空仓）后清信号 pending 与持仓元数据。"""
+    A.pending_exit = None
+    A.pending_entry = None
+    _clear_hold_meta()
+    _save_state()
+
+
+def _pending_on_buy_fill(pend, vol, px):
+    """覆盖 common：成交后再清 pending_entry / 写 hold_meta（废单则保留信号 pending）。"""
+    extra = pend.get("extra_pos") if isinstance(pend.get("extra_pos"), dict) else {}
+    _apply_buy_fill(vol, px, pend.get("opened_at") or pend.get("submitted_at"), **extra)
+    ot = str(pend.get("opened_at") or pend.get("submitted_at") or "")
+    day = ot[:8] if len(ot) >= 8 else datetime.datetime.now().strftime("%Y%m%d")
+    _after_signal_buy_filled(px, day)
+
+
+def _pending_on_sell_fill(pend, now, vol, px):
+    """覆盖 common：成交后再清 pending_exit；部分成交仍持仓则保留 hold_meta。"""
+    intent = str(pend.get("intent", "") or "")
+    last_hint = pend.get("last_hint")
+    if last_hint is None:
+        last_hint = px
+    mark_half = bool(pend.get("mark_half"))
+    _apply_sell_fill(now, intent, last_hint, vol, mark_half=mark_half)
+    if not _has_position() and not (
+        getattr(A, "is_backtest", False) and _bt_held_vol() >= 100
+    ):
+        _after_signal_sell_filled()
+    else:
+        A.pending_exit = None
+        _save_state()
+
+
+def _on_signal_order_ok(side, px=None, day=None):
+    """下单返回 True：实盘等成交回调；回测/DRY 立即清信号 pending 并写 hold_meta。"""
+    live_waiting = (not getattr(A, "is_backtest", False)) and (
+        not DRY_RUN
+    ) and isinstance(getattr(A, "pending", None), dict)
+    if live_waiting:
+        print(
+            "%s %s submitted keep signal pending until fill"
+            % (STRATEGY_NAME, side)
+        )
+        _event_log("signal_pending_keep_until_fill", side=side)
+        _save_state()
+        return
+    if side == "buy":
+        _after_signal_buy_filled(px, day)
+    else:
+        _after_signal_sell_filled()
+
+
 _SELL_LABELS = {
     "trail_stop": "卖点1-移动止盈回撤",
     "time_force": "卖点2-时间成本智能平仓",
@@ -2127,6 +2422,7 @@ _BUY_LABELS = {
     "w_bias_skip": "周线高位乖离禁开",
     "w_slope_skip": "低位周线MA30未连升禁开",
     "vol_dry_skip": "无量阴跌禁开",
+    "weekly_bear": "周线空头禁开",
 }
 
 
@@ -2220,11 +2516,13 @@ def _handle(C):
         _event_log("clear_mis_confirmed_eval_day", day=day)
         A._confirmed_eval_day = ""
         _save_state()
-    # 开盘兜底：无收盘确认记录、今日尚未兜底、无挂起
+    # 开盘兜底：上一根已收盘日尚未确认、今日尚未兜底、无挂起
+    prev_closed_day = _last_closed_bar_day(C, day) if live_cc else day
+    confirmed_day = str(getattr(A, "_confirmed_eval_day", "") or "")
     need_fallback = (
         live_cc
         and phase == "exec"
-        and (not str(getattr(A, "_confirmed_eval_day", "") or ""))
+        and confirmed_day < str(prev_closed_day)
         and str(getattr(A, "_fallback_done_day", "") or "") != day
         and (not isinstance(getattr(A, "pending_entry", None), dict))
         and (not isinstance(getattr(A, "pending_exit", None), dict))
@@ -2233,7 +2531,9 @@ def _handle(C):
         highs_s, closes_s, vols_s = highs_d, closes_d, vols_d
         closes_ws = closes_w
         sig_day = day
-    elif need_fallback:
+    elif need_fallback or (live_cc and phase == "exec"):
+        # 开盘兜底 / 盘中撤单校验：一律去掉未收盘根，避免今日未完成 K
+        # 误触 vol_dry_skip 等把刚挂的 pending_entry 立刻撤掉
         use_prev_bar = True
         highs_s = _drop_forming_bar(highs_d)
         closes_s = _drop_forming_bar(closes_d)
@@ -2242,9 +2542,9 @@ def _handle(C):
         if closes_s is None or len(closes_s) < 3 or closes_ws is None or len(closes_ws) < 3:
             _live_heartbeat("ohlcv_confirm_short")
             return
-        sig_day = _live_signal_day(day)
+        sig_day = prev_closed_day
     else:
-        # 回测 / 盘中执行：信号评估用完整序列（盘中不新挂，仅供撤单校验与日志）
+        # 回测：信号评估用完整序列
         highs_s, closes_s, vols_s = highs_d, closes_d, vols_d
         closes_ws = closes_w
         sig_day = day
@@ -2258,7 +2558,12 @@ def _handle(C):
     w_bias_block, w_bias = _weekly_bias_guard(w_detail)
     w_slope_block, _w_bias_low = _weekly_low_slope_guard(w_detail)
     buy_ok, buy_reasons, b_detail = _eval_daily_buy(closes_s, vols_s)
-    if w_bias_block:
+    if weekly_bear:
+        buy_ok = False
+        buy_reasons = ["weekly_bear"] + [
+            r for r in buy_reasons if r not in ("weekly_bear",)
+        ]
+    elif w_bias_block:
         buy_ok = False
         buy_reasons = ["w_bias_skip"] + [
             r for r in buy_reasons if r not in ("w_bias_skip",)
@@ -2316,23 +2621,33 @@ def _handle(C):
     ):
         _save_state()
 
-    skip_codes = ("chase_skip", "w_bias_skip", "w_slope_skip", "vol_dry_skip")
+    skip_codes = (
+        "chase_skip",
+        "w_bias_skip",
+        "w_slope_skip",
+        "vol_dry_skip",
+        "weekly_bear",
+    )
     real_buys = [r for r in buy_reasons if r not in skip_codes]
     buy_sig = bool(
-        (not w_bias_block) and (not w_slope_block) and buy_ok and real_buys
+        (not weekly_bear)
+        and (not w_bias_block)
+        and (not w_slope_block)
+        and buy_ok
+        and real_buys
     )
     force_empty = bool(weekly_bear)
     vol_dry_block = "vol_dry_skip" in buy_reasons
 
-    interesting = (
-        buy_sig
-        or sell_ok
-        or force_empty
-        or holding
-        or bool(getattr(A, "pending_entry", None) or getattr(A, "pending_exit", None))
-    )
-    if (not getattr(A, "ready_logged", False)) or interesting or (C.barpos % 20 == 0):
+    pe_now = bool(getattr(A, "pending_entry", None))
+    px_now = bool(getattr(A, "pending_exit", None))
+    # 信号上升沿强制打；电平持续为真时走 idle 节流（避免 confirm 窗刷屏）
+    force_bar_log = _bar_signal_rising_edge(buy_sig, sell_ok, force_empty)
+    status_idle = (bool(holding) or pe_now or px_now) and (not force_bar_log)
+    if _should_emit_bar_status(C, now, force_bar_log, status_idle):
         A.ready_logged = True
+        if not getattr(A, "is_backtest", False):
+            A._bar_status_at = now
         print(
             "%s" % STRATEGY_NAME,
             day,
@@ -2359,8 +2674,8 @@ def _handle(C):
                 ",".join((["weekly_bear"] if force_empty else []) + sell_reasons) or "-",
                 holding,
                 None if ret_pct is None else ("%.2f%%" % (ret_pct * 100.0)),
-                bool(getattr(A, "pending_entry", None)),
-                bool(getattr(A, "pending_exit", None)),
+                pe_now,
+                px_now,
                 _bt_held_vol() if bt else "-",
                 _bt_available_vol() if bt else "-",
             ),
@@ -2385,44 +2700,55 @@ def _handle(C):
             sellR=",".join((["weekly_bear"] if force_empty else []) + sell_reasons) or "-",
             hold=holding,
             ret=None if ret_pct is None else round(ret_pct * 100.0, 4),
-            pe=bool(getattr(A, "pending_entry", None)),
-            px=bool(getattr(A, "pending_exit", None)),
+            pe=pe_now,
+            px=px_now,
         )
 
-    # ---- 先执行挂起的卖/买（开盘时段）----
+    # ---- 先执行挂起的卖/买（仅开盘窗；收盘确认不按开盘价成交）----
+    can_exec_pending = (not live_cc) or _in_pending_exec_window(now_s)
     pe_exit = getattr(A, "pending_exit", None)
     if holding and isinstance(pe_exit, dict):
         if _pending_ready(pe_exit, day, tag, "day"):
-            reason = str(pe_exit.get("reason", "SELL") or "SELL")
-            reasons = pe_exit.get("reasons") or [reason]
-            print(
-                "%s SELL by signal=%s label=%s all=%s signal_day=%s @open=%.4f"
-                % (
-                    STRATEGY_NAME,
-                    reason,
-                    _reason_label(reason, "sell"),
-                    _format_reasons(reasons, "sell"),
-                    pe_exit.get("signal_day"),
-                    open_px,
+            if not can_exec_pending:
+                _log_pending_defer_once(
+                    "exit", day, now_s, pe_exit.get("signal_day")
                 )
-            )
-            _event_log(
-                "sell_by_signal",
-                signal=reason,
-                label=_reason_label(reason, "sell"),
-                all_reasons=_format_reasons(reasons, "sell"),
-                signal_day=pe_exit.get("signal_day"),
-                open=open_px,
-            )
-            ok = _order_sell(C, reason, open_px, now)
-            A.pending_exit = None
-            A.pending_entry = None
-            _clear_hold_meta()
-            _save_state()
-            if not ok:
-                print("%s pending_exit cleared after sell fail/skip" % STRATEGY_NAME)
-                _event_log("pending_exit_cleared_after_fail", sell_reason=reason)
-            return
+            else:
+                reason = str(pe_exit.get("reason", "SELL") or "SELL")
+                reasons = pe_exit.get("reasons") or [reason]
+                print(
+                    "%s SELL by signal=%s label=%s all=%s signal_day=%s @open=%.4f"
+                    % (
+                        STRATEGY_NAME,
+                        reason,
+                        _reason_label(reason, "sell"),
+                        _format_reasons(reasons, "sell"),
+                        pe_exit.get("signal_day"),
+                        open_px,
+                    )
+                )
+                _event_log(
+                    "sell_by_signal",
+                    signal=reason,
+                    label=_reason_label(reason, "sell"),
+                    all_reasons=_format_reasons(reasons, "sell"),
+                    signal_day=pe_exit.get("signal_day"),
+                    open=open_px,
+                )
+                ok = _order_sell(C, reason, open_px, now)
+                if ok:
+                    _on_signal_order_ok("sell")
+                else:
+                    print(
+                        "%s pending_exit keep after sell fail/skip signal=%s"
+                        % (STRATEGY_NAME, reason)
+                    )
+                    _event_log(
+                        "pending_exit_keep_after_fail",
+                        sell_reason=reason,
+                        signal_day=pe_exit.get("signal_day"),
+                    )
+                return
 
     pe_entry = getattr(A, "pending_entry", None)
     if (
@@ -2443,43 +2769,53 @@ def _handle(C):
             else:
                 why = "vol_dry_skip"
             print("%s pending_entry cancel %s" % (STRATEGY_NAME, why))
-            _event_log("pending_entry_cancel", reason=why, signal_day=pe_entry.get("signal_day"))
-            return
-        reasons = pe_entry.get("reasons") or []
-        primary = reasons[0] if reasons else "entry"
-        print(
-            "%s BUY by signal=%s label=%s all=%s signal_day=%s @open=%.4f"
-            % (
-                STRATEGY_NAME,
-                primary,
-                _reason_label(primary, "buy"),
-                _format_reasons(reasons, "buy"),
-                pe_entry.get("signal_day"),
-                open_px,
+            _event_log(
+                "pending_entry_cancel",
+                reason=why,
+                signal_day=pe_entry.get("signal_day"),
             )
-        )
-        _event_log(
-            "buy_by_signal",
-            signal=primary,
-            label=_reason_label(primary, "buy"),
-            all_reasons=_format_reasons(reasons, "buy"),
-            signal_day=pe_entry.get("signal_day"),
-            open=open_px,
-        )
-        budget = _buy_budget(cash)
-        ok = _order_buy(C, open_px, now, budget)
-        A.pending_entry = None
-        A.pending_exit = None
-        if ok:
-            A.hold_peak = float(open_px)
-            A.hold_bars = 0
-            A._hold_count_day = day
-            A.time_force_grace_until = None
-        _save_state()
-        if not ok:
-            print("%s pending_entry cleared after buy fail/skip" % STRATEGY_NAME)
-            _event_log("pending_entry_cleared_after_fail", signal=primary)
-        return
+            return
+        if not can_exec_pending:
+            _log_pending_defer_once(
+                "entry", day, now_s, pe_entry.get("signal_day")
+            )
+        else:
+            reasons = pe_entry.get("reasons") or []
+            primary = reasons[0] if reasons else "entry"
+            print(
+                "%s BUY by signal=%s label=%s all=%s signal_day=%s @open=%.4f"
+                % (
+                    STRATEGY_NAME,
+                    primary,
+                    _reason_label(primary, "buy"),
+                    _format_reasons(reasons, "buy"),
+                    pe_entry.get("signal_day"),
+                    open_px,
+                )
+            )
+            _event_log(
+                "buy_by_signal",
+                signal=primary,
+                label=_reason_label(primary, "buy"),
+                all_reasons=_format_reasons(reasons, "buy"),
+                signal_day=pe_entry.get("signal_day"),
+                open=open_px,
+            )
+            budget = _buy_budget(cash)
+            ok = _order_buy(C, open_px, now, budget)
+            if ok:
+                _on_signal_order_ok("buy", px=open_px, day=day)
+            else:
+                print(
+                    "%s pending_entry keep after buy fail/skip signal=%s"
+                    % (STRATEGY_NAME, primary)
+                )
+                _event_log(
+                    "pending_entry_keep_after_fail",
+                    signal=primary,
+                    signal_day=pe_entry.get("signal_day"),
+                )
+            return
 
     # ---- 新信号：回测当根；实盘仅收盘确认或开盘兜底 ----
     allow_new = True
@@ -2748,7 +3084,7 @@ def _init_impl(C):
         "DRY_RUN=",
         DRY_RUN,
         "budget=",
-        TRADE_BUDGET,
+        _trade_budget_cap(),
         "wMA=",
         "%d/%d/%d" % (W_MA_FAST, W_MA_MID, W_MA_LIFE),
         "dMA=",
@@ -2765,7 +3101,7 @@ def _init_impl(C):
         period=A.period,
         backtest=A.is_backtest,
         dry_run=DRY_RUN,
-        budget=TRADE_BUDGET,
+        budget=_trade_budget_cap(),
         log_dir=str(globals().get("LOG_DIR") or ""),
     )
 

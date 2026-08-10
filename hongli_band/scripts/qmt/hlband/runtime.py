@@ -148,7 +148,7 @@ def _init_impl(C):
         "DRY_RUN=",
         DRY_RUN,
         "budget=",
-        TRADE_BUDGET,
+        _trade_budget_cap(),
         "wMA=",
         "%d/%d/%d" % (W_MA_FAST, W_MA_MID, W_MA_LIFE),
         "dMA=",
@@ -165,7 +165,7 @@ def _init_impl(C):
         period=A.period,
         backtest=A.is_backtest,
         dry_run=DRY_RUN,
-        budget=TRADE_BUDGET,
+        budget=_trade_budget_cap(),
         log_dir=str(globals().get("LOG_DIR") or ""),
     )
 

@@ -49,7 +49,7 @@ def main() -> None:
     deploy_gbk(text, TARGETS, compile_name="qmt_terminal_hlband.py")
     print("OK: 打开国金 QMT -> 模型交易 -> 加载 HlBand / 红利波段")
     print("主图: 红利标的(如银行/煤炭/电力/红利ETF) | 周期=日线 | 前复权")
-    print("编辑 hlband/*.py 与 scripts/qmt_common/；默认 DRY_RUN=True")
+    print("编辑 hlband/*.py 与 scripts/qmt_common/；DRY_RUN 以 hlband/config.py 为准")
 
 
 if __name__ == "__main__":
