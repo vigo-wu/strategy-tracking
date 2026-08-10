@@ -54,7 +54,10 @@ PENDING_TIMEOUT_EXEMPT_LOG_SEC = 300
 # ---- 上市首日门闩 ----
 # True=仅上市首日跑买卖；非首日只心跳
 LISTING_DAY_ONLY = True
-# True=忽略首日检测强制运行（联调）
+# True=任意交易日都跑尾盘竞价逻辑（用于非首日回测/联调验证时窗与下单）
+# 注意：非首日无 130 临停/143→157.30 微观结构，只验流程；实盘务必 False
+VERIFY_AUCTION_ANY_DAY = False
+# 兼容旧名：等同 VERIFY_AUCTION_ANY_DAY（联调）
 FORCE_RUN = False
 # 日K推断失败时：False=禁止下单(fail-closed)；True=放行(fail-open)
 LISTING_DAY_FAIL_OPEN = False
@@ -127,7 +130,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "CbAuct"
-STRATEGY_VER = "v2.8"
+STRATEGY_VER = "v2.9"
 
 # DRY_RUN：False=虚拟挂单可测阶梯/升级；True=下单即成交（旧行为）
 DRY_RUN_FILL_IMMEDIATE = False

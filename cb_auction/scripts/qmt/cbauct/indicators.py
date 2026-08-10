@@ -266,7 +266,13 @@ def _listing_day_uncached(C, day):
 
 
 def _is_listing_day(C, day):
-    """上市首日门闩（按 day+stock 缓存）。FORCE_RUN 强制；失败看 LISTING_DAY_FAIL_OPEN。"""
+    """上市首日门闩（按 day+stock 缓存）。
+
+    VERIFY_AUCTION_ANY_DAY / FORCE_RUN / LISTING_DAY_ONLY=False 均可放行任意交易日。
+    推断失败看 LISTING_DAY_FAIL_OPEN。
+    """
+    if bool(globals().get("VERIFY_AUCTION_ANY_DAY", False)):
+        return True
     if bool(globals().get("FORCE_RUN", False)):
         return True
     if not bool(globals().get("LISTING_DAY_ONLY", True)):

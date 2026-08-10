@@ -64,7 +64,10 @@ PENDING_TIMEOUT_EXEMPT_LOG_SEC = 300
 # ---- 上市首日门闩 ----
 # True=仅上市首日跑买卖；非首日只心跳
 LISTING_DAY_ONLY = True
-# True=忽略首日检测强制运行（联调）
+# True=任意交易日都跑尾盘竞价逻辑（用于非首日回测/联调验证时窗与下单）
+# 注意：非首日无 130 临停/143→157.30 微观结构，只验流程；实盘务必 False
+VERIFY_AUCTION_ANY_DAY = False
+# 兼容旧名：等同 VERIFY_AUCTION_ANY_DAY（联调）
 FORCE_RUN = False
 # 日K推断失败时：False=禁止下单(fail-closed)；True=放行(fail-open)
 LISTING_DAY_FAIL_OPEN = False
@@ -137,7 +140,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "CbAuct"
-STRATEGY_VER = "v2.8"
+STRATEGY_VER = "v2.9"
 
 # DRY_RUN：False=虚拟挂单可测阶梯/升级；True=下单即成交（旧行为）
 DRY_RUN_FILL_IMMEDIATE = False
@@ -1049,7 +1052,13 @@ def _listing_day_uncached(C, day):
 
 
 def _is_listing_day(C, day):
-    """上市首日门闩（按 day+stock 缓存）。FORCE_RUN 强制；失败看 LISTING_DAY_FAIL_OPEN。"""
+    """上市首日门闩（按 day+stock 缓存）。
+
+    VERIFY_AUCTION_ANY_DAY / FORCE_RUN / LISTING_DAY_ONLY=False 均可放行任意交易日。
+    推断失败看 LISTING_DAY_FAIL_OPEN。
+    """
+    if bool(globals().get("VERIFY_AUCTION_ANY_DAY", False)):
+        return True
     if bool(globals().get("FORCE_RUN", False)):
         return True
     if not bool(globals().get("LISTING_DAY_ONLY", True)):
@@ -3018,6 +3027,10 @@ def _init_impl(C):
         SH_CHASE_INTERVAL_MS,
         "chase_mode=",
         SH_CHASE_MODE,
+        "any_day=",
+        bool(globals().get("VERIFY_AUCTION_ANY_DAY", False))
+        or bool(globals().get("FORCE_RUN", False))
+        or (not bool(globals().get("LISTING_DAY_ONLY", True))),
     )
     _event_log(
         "init",
@@ -3031,6 +3044,9 @@ def _init_impl(C):
         size_yi=size_yi,
         reopen_cap=_reopen_cap(),
         limit_up=_limit_up(),
+        verify_any_day=bool(globals().get("VERIFY_AUCTION_ANY_DAY", False)),
+        force_run=bool(globals().get("FORCE_RUN", False)),
+        listing_day_only=bool(globals().get("LISTING_DAY_ONLY", True)),
         log_dir=str(globals().get("LOG_DIR") or ""),
     )
 

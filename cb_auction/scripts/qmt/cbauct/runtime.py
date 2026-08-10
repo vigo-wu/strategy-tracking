@@ -164,6 +164,10 @@ def _init_impl(C):
         SH_CHASE_INTERVAL_MS,
         "chase_mode=",
         SH_CHASE_MODE,
+        "any_day=",
+        bool(globals().get("VERIFY_AUCTION_ANY_DAY", False))
+        or bool(globals().get("FORCE_RUN", False))
+        or (not bool(globals().get("LISTING_DAY_ONLY", True))),
     )
     _event_log(
         "init",
@@ -177,6 +181,9 @@ def _init_impl(C):
         size_yi=size_yi,
         reopen_cap=_reopen_cap(),
         limit_up=_limit_up(),
+        verify_any_day=bool(globals().get("VERIFY_AUCTION_ANY_DAY", False)),
+        force_run=bool(globals().get("FORCE_RUN", False)),
+        listing_day_only=bool(globals().get("LISTING_DAY_ONLY", True)),
         log_dir=str(globals().get("LOG_DIR") or ""),
     )
 

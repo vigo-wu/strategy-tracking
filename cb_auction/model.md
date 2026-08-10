@@ -108,5 +108,6 @@
 *   `SZ_PREPLACE` / `SH_OPEN` / `SH_CHASE` 在超时豁免列表内，禁止按短超时撤掉排队单
 *   启动/暖机切活：`_reconcile_with_broker`；`vol>0` 即同步；清影子仓时丢掉 `acted.BUY`
 *   默认 `LISTING_DAY_ONLY=True`（仅日K空洞+当日1m且日期校验才兜底；`query_fail` 不兜底）
+*   非首日验竞价：`VERIFY_AUCTION_ANY_DAY=True`（或旧名 `FORCE_RUN`）；只验时窗/下单流程，实盘务必关
 *   `DRY_RUN`：虚拟挂单可测撤补；默认**不写 STATE**；未登录用虚拟资金；挂到涨停才模拟成交
 *   本策略只做尾盘买入卡位，**不自动卖出**；成交后隔夜风险自负（见避坑清单）
