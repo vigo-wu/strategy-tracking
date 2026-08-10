@@ -375,8 +375,8 @@ def _log_pending_defer_once(kind, day, now_s, signal_day):
 def _should_emit_bar_status(C, now, force, status_idle):
     """
     状态行是否输出。
-    force（买卖/强平信号）立刻打；回测逐 bar 不节流；
-    实盘仅持仓或仅挂起 pending、无事件时按 LIVE_HEARTBEAT_SEC 节流。
+    force（信号上升沿）立刻打；回测逐 bar 对 idle 不节流；
+    实盘仅持仓/挂起、无新沿时按 LIVE_HEARTBEAT_SEC 节流。
     """
     if not getattr(A, "ready_logged", False):
         return True
@@ -405,6 +405,23 @@ def _should_emit_bar_status(C, now, force, status_idle):
         return int(getattr(C, "barpos", 0) or 0) % 20 == 0
     except Exception:
         return False
+
+
+def _bar_signal_rising_edge(buy_sig, sell_ok, force_empty):
+    """
+    相对上一 tick 的买卖/强平上升沿。
+    电平一直为真时不再强制打状态行（避免收盘确认窗刷屏）。
+    """
+    cur = (bool(buy_sig), bool(sell_ok), bool(force_empty))
+    prev = getattr(A, "_bar_sig_prev", None)
+    A._bar_sig_prev = cur
+    if prev is None:
+        return bool(cur[0] or cur[1] or cur[2])
+    return (
+        (cur[0] and not prev[0])
+        or (cur[1] and not prev[1])
+        or (cur[2] and not prev[2])
+    )
 
 
 def _after_signal_buy_filled(px, day):
@@ -705,9 +722,8 @@ def _handle(C):
 
     pe_now = bool(getattr(A, "pending_entry", None))
     px_now = bool(getattr(A, "pending_exit", None))
-    # 买卖/强平信号强制打；仅持仓或仅挂起 pending 时实盘按心跳节流
-    # （pending 整天挂起时若也强制打，窗外仍会刷屏）
-    force_bar_log = bool(buy_sig or sell_ok or force_empty)
+    # 信号上升沿强制打；电平持续为真时走 idle 节流（避免 confirm 窗刷屏）
+    force_bar_log = _bar_signal_rising_edge(buy_sig, sell_ok, force_empty)
     status_idle = (bool(holding) or pe_now or px_now) and (not force_bar_log)
     if _should_emit_bar_status(C, now, force_bar_log, status_idle):
         A.ready_logged = True

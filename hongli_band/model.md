@@ -1,6 +1,6 @@
 # 红利板块波段策略：周线定方向，日线找买卖点
 
-**主题目录**：`hongli_band/`｜**版本**：v1.18｜**运行**：国金 QMT 终端模型（见 §5）  
+**主题目录**：`hongli_band/`｜**版本**：v1.19｜**运行**：国金 QMT 终端模型（见 §5）  
 **参数真源**：`hongli_band/scripts/qmt/hlband/config.py`（本文数值与之对齐；改参只改 config 后 re-deploy）
 
 ---
@@ -103,4 +103,4 @@
 | `STATE_FILE` | `D:\tradingStrategy\hlband_{stock}.json` | 实盘状态；按主图标的分文件 |
 | `LOG_DIR` | `D:\tradingStrategy\logs` | 实盘结构化日志根目录 |
 
-日志确认 `HlBand v1.18 init`（`dMA=20/60`，`DRY_RUN=` 与 config 一致）后再挂实盘。
+日志确认 `HlBand v1.19 init`（`dMA=20/60`，`DRY_RUN=` 与 config 一致）后再挂实盘。
