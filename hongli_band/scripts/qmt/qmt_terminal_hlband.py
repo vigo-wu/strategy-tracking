@@ -137,7 +137,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.16"
+STRATEGY_VER = "v1.17"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
@@ -2271,6 +2271,26 @@ def _in_pending_exec_window(now_s):
     return start <= str(now_s) < end
 
 
+def _log_pending_defer_once(kind, day, now_s, signal_day):
+    """开盘窗外 defer 每个交易日每种 pending 只打一次日志，避免盘中刷屏。"""
+    kind = str(kind or "")
+    day = str(day or "")
+    attr = "_defer_log_%s_day" % kind
+    if str(getattr(A, attr, "") or "") == day:
+        return
+    setattr(A, attr, day)
+    print(
+        "%s pending_%s defer outside open window now=%s signal_day=%s"
+        % (STRATEGY_NAME, kind, now_s, signal_day)
+    )
+    _event_log(
+        "pending_%s_defer" % kind,
+        now=now_s,
+        signal_day=signal_day,
+        exec_end=str(globals().get("PENDING_EXEC_END", "094500") or "094500"),
+    )
+
+
 def _after_signal_buy_filled(px, day):
     """买入成交后初始化持仓元数据并清信号 pending。"""
     A.pending_entry = None
@@ -2638,15 +2658,8 @@ def _handle(C):
     if holding and isinstance(pe_exit, dict):
         if _pending_ready(pe_exit, day, tag, "day"):
             if not can_exec_pending:
-                print(
-                    "%s pending_exit defer outside open window now=%s signal_day=%s"
-                    % (STRATEGY_NAME, now_s, pe_exit.get("signal_day"))
-                )
-                _event_log(
-                    "pending_exit_defer",
-                    now=now_s,
-                    signal_day=pe_exit.get("signal_day"),
-                    exec_end=str(globals().get("PENDING_EXEC_END", "094500") or "094500"),
+                _log_pending_defer_once(
+                    "exit", day, now_s, pe_exit.get("signal_day")
                 )
             else:
                 reason = str(pe_exit.get("reason", "SELL") or "SELL")
@@ -2711,15 +2724,8 @@ def _handle(C):
             )
             return
         if not can_exec_pending:
-            print(
-                "%s pending_entry defer outside open window now=%s signal_day=%s"
-                % (STRATEGY_NAME, now_s, pe_entry.get("signal_day"))
-            )
-            _event_log(
-                "pending_entry_defer",
-                now=now_s,
-                signal_day=pe_entry.get("signal_day"),
-                exec_end=str(globals().get("PENDING_EXEC_END", "094500") or "094500"),
+            _log_pending_defer_once(
+                "entry", day, now_s, pe_entry.get("signal_day")
             )
         else:
             reasons = pe_entry.get("reasons") or []
