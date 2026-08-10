@@ -11,8 +11,8 @@ ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 TRADE_BUDGET = 25000.0
 # 按标的覆盖预算（key 须与 A.stock 一致，如 513530.SH）
 TRADE_BUDGET_BY_STOCK = {
-    "513530.SH": 20000.0,
-    "601398.SH": 30000.0,
+    "513530.SH": 50000.0,
+    "601398.SH": 50000.0,
 }
 # 可用现金占用比例（预留下单缓冲，避免满仓打满失败）
 CASH_RATIO = 0.8
@@ -23,9 +23,9 @@ CASH_RATIO = 0.8
 #   MA30 → 生命线（收盘跌破即周线空，强制清仓）；乖离/斜率过滤也用它
 #   MA60 → 数据暖机长度参考（market 取数 need）
 W_MA_FAST = 5
-W_MA_MID = 10
-W_MA_LIFE = 30
-W_MA_SLOW = 60
+W_MA_MID = 13
+W_MA_LIFE = 34
+W_MA_SLOW = 55
 # 周线 MACD 参数（DIF/DEA/柱）；多头要求 DIF>0 且柱>0；死叉且双线在零轴下 → 空
 MACD_FAST = 12
 MACD_SLOW = 26
@@ -79,7 +79,12 @@ TIME_FORCE_GRACE_BARS = 5
 CHASE_MAX_PCT = 0.05
 # stop_loss：收盘价 <= 成本 * (1 - 此值) → 硬止损清仓
 STOP_LOSS = 0.08
-# （另有 weekly_bear：周线空头时强制清仓，无独立阈值，见周线 bull/bear 判定）
+# weekly_bear 强制清仓：连续 N 个信号日（日 K）仍为空头才挂 pending_exit
+#   N<=0 或 1：当天空头即挂（与改前一致）；N=2：连续两日仍空才挂
+#   禁开 / 撤买入 pending 仍按「当日」空头即时生效，不要求满 N 日
+W_BEAR_CONFIRM_DAYS = 2
+
+# （另有 weekly_bear：周线空头判定见 _eval_weekly；清仓见上）
 
 # ---- 行情与运行 ----
 # 主图周期；周线另拉 1w 跨周期
@@ -93,6 +98,7 @@ LIVE_ONLY_LAST_BAR = True
 # 实盘：盘中(DECISION_*)只执行 pending；收盘后(SIGNAL_CONFIRM_*)用当日完整日/周 K 确认信号并挂起 → 次日开盘成交
 # 若收盘窗口未跑到，次日开盘对「上一根已收盘日」兜底评估并挂起（同日可成交）
 # 判定：confirmed_eval_day < 上一完整交易日 且今日尚未 fallback
+# 周线：bt/confirm/开盘 exec·兜底一律含本周未收盘根；日线开盘仍去未收盘日 K
 LIVE_CLOSE_CONFIRM = True
 # 实盘决策时窗（HHmmss）：盘中处理券商 pending / 心跳；信号成交见 PENDING_EXEC_*
 DECISION_START = "093000"
@@ -127,7 +133,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.19"
+STRATEGY_VER = "v1.23"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）

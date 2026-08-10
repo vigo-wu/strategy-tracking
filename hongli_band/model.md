@@ -1,6 +1,6 @@
 # 红利板块波段策略：周线定方向，日线找买卖点
 
-**主题目录**：`hongli_band/`｜**版本**：v1.19｜**运行**：国金 QMT 终端模型（见 §5）  
+**主题目录**：`hongli_band/`｜**版本**：v1.20｜**运行**：国金 QMT 终端模型（见 §5）  
 **参数真源**：`hongli_band/scripts/qmt/hlband/config.py`（本文数值与之对齐；改参只改 config 后 re-deploy）
 
 ---
@@ -17,7 +17,7 @@
 
 1. `(MA5_W - MA30_W) / MA30_W >= W_BIAS_HARD`（当前 `0.08`）→ 禁开（`w_bias_skip`）。
 2. **低位斜率**：当周线乖离 `< W_BIAS_LOW`（当前 `0.02`）时，要求 **MA30 连续 `W_MA30_SLOPE_WEEKS` 周向上**（当前 `2`），否则禁开（`w_slope_skip`）；执行日也会取消 pending。
-3. 周线空头（收盘破 30 周，或 DIF/DEA 零轴下死叉）→ 持仓强制清仓（`weekly_bear`）；**同时禁止挂买**；执行日若仍空头则取消买入 pending。
+3. 周线空头（收盘破 30 周，或 DIF/DEA 零轴下死叉）：**当日即禁开**（`weekly_bear`）；持仓强制清仓须 **连续 `W_BEAR_CONFIRM_DAYS` 根日 K（信号日）仍空**（当前 `3`）才挂 `pending_exit`；执行日若仍空头则取消买入 pending。
 
 说明：开仓不强制要求 `weekly_bull`；多头条件仅用于日志，禁开靠乖离/斜率/空头。
 
@@ -47,7 +47,7 @@
 | :--- | :--- | :--- |
 | ① 阶梯移动止盈 | 按峰值浮盈选档（见下表）；回撤超容忍或跌破利润底线 | `trail_stop` |
 | ② 智能时间 | 持仓 **> `TIME_FORCE_BARS`**（当前 30）日：破日线 MA60 → 强制平仓；仍站上 MA60 → **豁免一次**并再观察 **`TIME_FORCE_GRACE_BARS`**（当前 5）日，期满强制平仓 | `time_force` |
-| 兜底 | 收盘 ≤ 成本 × (1 − `STOP_LOSS`)（当前 `0.08`）/ 周线转空 | `stop_loss` / `weekly_bear` |
+| 兜底 | 收盘 ≤ 成本 × (1 − `STOP_LOSS`)（当前 `0.08`）/ 周线转空且连续 `W_BEAR_CONFIRM_DAYS` 日 | `stop_loss` / `weekly_bear` |
 
 阶梯档位 `TRAIL_TIERS`（峰值浮盈 = `(hold_peak − cost) / cost`）：
 
@@ -90,6 +90,7 @@
 | `W_BIAS_HARD` | `0.08` | 周线高位乖离禁开 |
 | `W_BIAS_LOW` | `0.02` | 低位区阈值（配合斜率） |
 | `W_MA30_SLOPE_WEEKS` | `2` | 低位区 MA30 连续向上周数 |
+| `W_BEAR_CONFIRM_DAYS` | `3` | 周线空头清仓须连续信号日数 |
 | `MA_TOUCH_TOL` | `0.025` | 回踩均线容差 |
 | `VOL_PULLBACK_N/RATIO` | `10` / `0.9` | 买点量能 |
 | `VOL_DRY_N/RATIO` | `20` / `0.60` | 无量阴跌禁开 |
