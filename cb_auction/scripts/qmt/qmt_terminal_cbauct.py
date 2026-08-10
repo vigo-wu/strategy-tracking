@@ -187,7 +187,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "CbAuct"
-STRATEGY_VER = "v3.1"
+STRATEGY_VER = "v3.2"
 
 # DRY_RUN：False=虚拟挂单可测阶梯/升级；True=下单即成交（旧行为）
 DRY_RUN_FILL_IMMEDIATE = False
@@ -962,7 +962,14 @@ def _cage_cap(last_px):
 
 
 def _tick_last(C, fallback=None):
-    """优先全推 tick 最新价；失败回退 K 线收盘。"""
+    """实盘优先全推 tick 最新价；回测禁用 tick（避免串入实盘脏价），回退 K 线。"""
+    if getattr(A, "is_backtest", False):
+        try:
+            if fallback is not None and float(fallback) > 0:
+                return _px_round(fallback)
+        except Exception:
+            pass
+        return 0.0
     stock = str(getattr(A, "stock", "") or "")
     try:
         fn = getattr(C, "get_full_tick", None)
@@ -987,6 +994,30 @@ def _tick_last(C, fallback=None):
             return _px_round(fallback)
     except Exception:
         pass
+    return 0.0
+
+
+def _prev_close_px(C, day):
+    """日K昨收；回测/次日缺口判断用。"""
+    stock = str(getattr(A, "stock", "") or "")
+    try:
+        md = C.get_market_data_ex(
+            fields=["close"],
+            stock_code=[stock],
+            period="1d",
+            end_time=str(day),
+            count=3,
+            dividend_type="none",
+            fill_data=False,
+            subscribe=False,
+        )
+        closes = _series_from_ex(md, stock, "close")
+        if closes is not None and len(closes) >= 2:
+            return _px_round(closes[-2])
+        if closes is not None and len(closes) == 1:
+            return _px_round(closes[-1])
+    except Exception as e:
+        _diag_once("prev_close_fail", e)
     return 0.0
 
 
@@ -3410,7 +3441,7 @@ def _handle_sh_mode_b(C, now, now_s, day, last_px):
 
 
 def _underlying_open_gap(C, day, cb_open, cost):
-    """正股开盘涨跌幅；无映射则用转债相对成本。"""
+    """开盘缺口：优先正股；否则转债开盘相对昨收（勿用成本价，否则 ModeB 顶格买次日几乎必触发止损）。"""
     stock = str(getattr(A, "stock", "") or "")
     mp = globals().get("UNDERLYING_MAP") or {}
     und = str(mp.get(stock) or "").strip()
@@ -3435,6 +3466,9 @@ def _underlying_open_gap(C, day, cb_open, cost):
                     return (o / prev) - 1.0, "underlying"
         except Exception as e:
             _diag_once("underlying_gap_fail", e)
+    prev = _prev_close_px(C, day)
+    if prev > 0 and cb_open and cb_open > 0:
+        return (float(cb_open) / float(prev)) - 1.0, "cb_vs_prev"
     if cost and cost > 0 and cb_open and cb_open > 0:
         return (float(cb_open) / float(cost)) - 1.0, "cb_vs_cost"
     return None, "none"
@@ -3461,21 +3495,42 @@ def _handle_day2_exit(C, now, now_s, day, last_px, open_px):
         _save_state()
     d2_open = float(getattr(A, "d2_open_px", 0) or 0) or float(open_px or 0)
 
-    # 1) 集合竞价高开锁利
+    # 1) 集合竞价高开锁利（回测常无 09:15–09:25 K，09:30 首根用开盘价补一次）
     auc_s = str(globals().get("D2_AUCTION_START") or "091500")
     auc_e = str(globals().get("D2_AUCTION_END") or "092459")
+    trail_s = str(globals().get("D2_TRAIL_START") or "093000")
+    trail_e = str(globals().get("D2_TRAIL_END") or "093500")
     gap_up = float(globals().get("D2_GAP_UP_MIN") or 0.05)
-    if (
-        _in_window(now_s, auc_s, auc_e)
+    in_auc = _in_window(now_s, auc_s, auc_e)
+    auc_catchup = (
+        (not in_auc)
+        and str(now_s) >= trail_s
+        and str(now_s) <= trail_e
         and str(getattr(A, "d2_auction_day", "") or "") != day
-    ):
+        and float(getattr(A, "d2_open_px", 0) or 0) > 0
+        and not bool(getattr(A, "d2_auc_checked", False))
+    )
+    if (in_auc or auc_catchup) and str(getattr(A, "d2_auction_day", "") or "") != day:
+        A.d2_auc_checked = True
         ref = d2_open if d2_open > 0 else last_px
         if cost > 0 and ref > 0 and (ref / cost - 1.0) >= gap_up:
             print(
-                "%s D2_AUCTION sell gap=%.2f%% ref=%.3f cost=%.3f"
-                % (STRATEGY_NAME, (ref / cost - 1.0) * 100.0, ref, cost)
+                "%s D2_AUCTION sell gap=%.2f%% ref=%.3f cost=%.3f catchup=%s"
+                % (
+                    STRATEGY_NAME,
+                    (ref / cost - 1.0) * 100.0,
+                    ref,
+                    cost,
+                    auc_catchup,
+                )
             )
-            _event_log("d2_auction_sell", ref=ref, cost=cost, gap=ref / cost - 1.0)
+            _event_log(
+                "d2_auction_sell",
+                ref=ref,
+                cost=cost,
+                gap=ref / cost - 1.0,
+                catchup=auc_catchup,
+            )
             if _order_sell_limit(C, "D2_AUCTION", _px_round(ref), now) or _order_sell_mkt(
                 C, "D2_AUCTION", now
             ):
@@ -3483,13 +3538,12 @@ def _handle_day2_exit(C, now, now_s, day, last_px, open_px):
                 _save_state()
             return
 
-    # 2) 09:30 低开止损（正股或转债自身）
-    trail_s = str(globals().get("D2_TRAIL_START") or "093000")
+    # 2) 09:30 低开止损（正股或转债相对昨收）
     gap_dn = float(globals().get("D2_GAP_DOWN_STOP") or -0.02)
     if (
         str(now_s) >= trail_s
         and str(getattr(A, "d2_stop_day", "") or "") != day
-        and str(now_s) <= str(globals().get("D2_TRAIL_END") or "093500")
+        and str(now_s) <= trail_e
     ):
         gap, src = _underlying_open_gap(C, day, d2_open or open_px, cost)
         if gap is not None and gap <= gap_dn:
@@ -3504,7 +3558,6 @@ def _handle_day2_exit(C, now, now_s, day, last_px, open_px):
             return
 
     # 3) 开盘后移动止盈：自最高点回撤
-    trail_e = str(globals().get("D2_TRAIL_END") or "093500")
     dd = float(globals().get("D2_TRAIL_DRAWDOWN") or 0.015)
     if _in_window(now_s, trail_s, trail_e):
         hi = float(getattr(A, "d2_day_high", 0) or 0)
@@ -3567,9 +3620,17 @@ def _handle(C):
     opens, highs, lows, closes, vols = ohlcv
     bar_last = float(closes[-1])
     open_px = float(opens[-1])
+    try:
+        bar_high = float(highs[-1])
+    except Exception:
+        bar_high = bar_last
     last_px = _tick_last(C, fallback=bar_last)
     if last_px <= 0:
         last_px = _px_round(bar_last)
+    # 沪市阶梯追单：回测用当根 high 近似 last 抬升（避免只用收盘漏追）
+    chase_px = last_px
+    if bt and bar_high > chase_px:
+        chase_px = _px_round(bar_high)
 
     if bt:
         _bt_recover_position(now=now, last=last_px)
@@ -3627,7 +3688,7 @@ def _handle(C):
             if mkt == "SZ":
                 _handle_sz_sell(C, now, now_s, day, last_px)
             elif mkt == "SH":
-                _handle_sh_sell_chase(C, now, now_s, day, last_px)
+                _handle_sh_sell_chase(C, now, now_s, day, chase_px)
         return
 
     if ("BUY" in getattr(A, "acted", set())) and (not getattr(A, "pending", None)):
@@ -3656,7 +3717,7 @@ def _handle(C):
     if mkt == "SZ":
         _handle_sz_mode_b(C, now, now_s, day, last_px)
     elif mkt == "SH":
-        _handle_sh_mode_b(C, now, now_s, day, last_px)
+        _handle_sh_mode_b(C, now, now_s, day, chase_px)
     else:
         if C.barpos % 60 == 0:
             print("%s unknown market stock=%s" % (STRATEGY_NAME, A.stock))
@@ -3710,6 +3771,8 @@ def _ensure_day_flags():
         A.d2_day_high = 0.0
     if not hasattr(A, "d2_open_px"):
         A.d2_open_px = 0.0
+    if not hasattr(A, "d2_auc_checked"):
+        A.d2_auc_checked = False
     if not hasattr(A, "entry_mode"):
         A.entry_mode = ""
 
@@ -3778,6 +3841,7 @@ def _init_impl(C):
             A.d2_trail_day = ""
             A.d2_day_high = 0.0
             A.d2_open_px = 0.0
+            A.d2_auc_checked = False
             A.entry_mode = ""
             A.bt_held = 0
             A.bt_locked = 0

@@ -46,6 +46,8 @@ def _ensure_day_flags():
         A.d2_day_high = 0.0
     if not hasattr(A, "d2_open_px"):
         A.d2_open_px = 0.0
+    if not hasattr(A, "d2_auc_checked"):
+        A.d2_auc_checked = False
     if not hasattr(A, "entry_mode"):
         A.entry_mode = ""
 
@@ -114,6 +116,7 @@ def _init_impl(C):
             A.d2_trail_day = ""
             A.d2_day_high = 0.0
             A.d2_open_px = 0.0
+            A.d2_auc_checked = False
             A.entry_mode = ""
             A.bt_held = 0
             A.bt_locked = 0

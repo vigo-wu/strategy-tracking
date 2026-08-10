@@ -111,7 +111,14 @@ def _cage_cap(last_px):
 
 
 def _tick_last(C, fallback=None):
-    """优先全推 tick 最新价；失败回退 K 线收盘。"""
+    """实盘优先全推 tick 最新价；回测禁用 tick（避免串入实盘脏价），回退 K 线。"""
+    if getattr(A, "is_backtest", False):
+        try:
+            if fallback is not None and float(fallback) > 0:
+                return _px_round(fallback)
+        except Exception:
+            pass
+        return 0.0
     stock = str(getattr(A, "stock", "") or "")
     try:
         fn = getattr(C, "get_full_tick", None)
@@ -136,6 +143,30 @@ def _tick_last(C, fallback=None):
             return _px_round(fallback)
     except Exception:
         pass
+    return 0.0
+
+
+def _prev_close_px(C, day):
+    """日K昨收；回测/次日缺口判断用。"""
+    stock = str(getattr(A, "stock", "") or "")
+    try:
+        md = C.get_market_data_ex(
+            fields=["close"],
+            stock_code=[stock],
+            period="1d",
+            end_time=str(day),
+            count=3,
+            dividend_type="none",
+            fill_data=False,
+            subscribe=False,
+        )
+        closes = _series_from_ex(md, stock, "close")
+        if closes is not None and len(closes) >= 2:
+            return _px_round(closes[-2])
+        if closes is not None and len(closes) == 1:
+            return _px_round(closes[-1])
+    except Exception as e:
+        _diag_once("prev_close_fail", e)
     return 0.0
 
 

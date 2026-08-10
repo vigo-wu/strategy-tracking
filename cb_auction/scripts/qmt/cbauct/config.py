@@ -177,7 +177,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "CbAuct"
-STRATEGY_VER = "v3.1"
+STRATEGY_VER = "v3.2"
 
 # DRY_RUN：False=虚拟挂单可测阶梯/升级；True=下单即成交（旧行为）
 DRY_RUN_FILL_IMMEDIATE = False
