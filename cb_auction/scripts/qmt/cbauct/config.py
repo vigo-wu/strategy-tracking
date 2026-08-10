@@ -12,50 +12,96 @@ CASH_RATIO = 0.8
 # 可转债最小交易单位（张）
 LOT_SIZE = 10
 
-# ---- 上市首日价格锚点（model.md 终审）----
-# 临停基准价（触及 30% 停牌）
+# ---- 上市首日价格锚点（model.md）----
+# 临停基准价 / 模式A 早盘顶格买价（触及 30% 停牌）
 HALT_BASE_PRICE = 130.0
+MORNING_BUY_PRICE = 130.0
 # 价格笼子比例（有效申报上限 = 基准/最新价 * CAGE_RATIO）
 CAGE_RATIO = 1.1
 # 复牌首段顶格 = 130 * 1.1（严禁深市临停期硬编码 157.30）
 REOPEN_CAP_PRICE = 143.0
-# 全天最高限价
+# 全天最高限价 / 模式A 复牌卖出价
 LIMIT_UP_PRICE = 157.30
 # 可转债价格小数位
 PRICE_DECIMALS = 3
 # 沪市追单：新上限至少高出旧挂单价这么多才撤补
 CHASE_MIN_STEP = 0.01
 
+# ---- 模式开关（model.md：A 日内动量 / B 尾盘隔夜 / 次日出局）----
+ENABLE_MODE_A = True   # 09:25 前 130 抢筹 → 14:57 后封板卖 157.30
+ENABLE_MODE_B = True   # 早盘失败则尾盘 143→157.30 备用买入
+ENABLE_DAY2_EXIT = True
+
 # ---- 时窗（HHmmss；实盘墙钟，回测用 K 线时间）----
-# 深市：临停期内均可埋 143（须在 14:55 前完成）；窗开太晚易漏单
+# 模式A 深市：隔夜委托优先；上市日前夜清算后 + 首日 09:25 前均可挂 130
+SZ_AM_EVE_START = "203000"
+SZ_AM_EVE_END = "223000"
+SZ_AM_BUY_START = "000000"
+SZ_AM_BUY_END = "092459"
+# 模式A 沪市：临停托管不接受申报，卡点 09:24:59.850–09:24:59.950（毫秒）
+SH_AM_BUY_MS_START = 850
+SH_AM_BUY_MS_END = 950
+# 回测 1m 分辨率：用秒级窗近似卡点（实盘仍走毫秒窗）
+SH_AM_BUY_START = "092459"
+SH_AM_BUY_END = "092459"
+# VERIFY_AUCTION_ANY_DAY：开盘竞价放宽窗（1m/联调够得着；首日实盘仍用上方卡点）
+SH_AM_BUY_START_VERIFY = "091500"
+SH_AM_BUY_END_VERIFY = "092459"
+# 未成交早盘单：过此时点后撤掉，腾出 Mode B
+AM_CANCEL_AFTER = "092500"
+
+# 模式A 复牌卖出（两市 14:57 起；深市不可撤时段慎挂）
+SELL_START = "145700"
+SELL_END = "145955"
+
+# 模式B 深市：临停期内均可埋 143（须在 14:55 前完成）
 SZ_PREPLACE_START = "130000"
 SZ_PREPLACE_END = "145459"
-# 深市：复牌瞬间即可升级（撤143→挂157.30）；勿晚于 14:57:01
+# 模式B 深市：封板后撤 143→挂 157.30
 SZ_CLOSE_BUY_START = "145700"
 SZ_CLOSE_BUY_END = "145950"
-# 深市升级撤单告警阈值（秒）：撤不掉则持续告警
 SZ_ESCALATE_ALERT_SEC = 2.0
-# 沪市：14:57 起连续竞价阶梯追单（可撤可补）
+# 模式B 沪市：14:57 起连续竞价阶梯追单
 SH_CHASE_START = "145700"
 SH_CHASE_END = "145955"
-# 沪市追单节流（毫秒）。仅抑制重复撤单评估；撤成后允许立刻重挂
-SH_CHASE_INTERVAL_MS = 200
-# cancel_replace=撤旧挂新（model 定稿）
+# 沪市追单节流（毫秒）；model 建议 50–100ms
+SH_CHASE_INTERVAL_MS = 50
 SH_CHASE_MODE = "cancel_replace"
-# 撤单重试间隔（秒）；common orders_pending 读取
+
+# 次日（模式B 隔夜仓）出局
+D2_AUCTION_START = "091500"
+D2_AUCTION_END = "092459"
+# 集合竞价高开达到该比例则锁利卖出（相对成本价）
+D2_GAP_UP_MIN = 0.05
+D2_TRAIL_START = "093000"
+D2_TRAIL_END = "093500"
+# 自次日开盘后最高点回撤超过该比例 → 市价清仓
+D2_TRAIL_DRAWDOWN = 0.015
+# 次日开盘相对成本低开超过该比例 → 09:30 止损（无正股映射时用转债自身）
+D2_GAP_DOWN_STOP = -0.02
+# 可选正股映射：{"123276.SZ": "000001.SZ"}；有则优先看正股开盘
+UNDERLYING_MAP = {}
+
 CANCEL_RETRY_SEC = 1.0
-# 撤单后「见过委托且已从列表消失」才清 pending 的等待秒数
 PENDING_ORPHAN_SEC = 15
-# 深市临停埋单 + 沪市追单窗内挂单：禁止按短超时自动撤（否则丢排队）
-PENDING_TIMEOUT_EXEMPT_INTENTS = ("SZ_PREPLACE", "SH_OPEN", "SH_CHASE")
-# 豁免超时日志最短间隔（秒）
+# 排队/追单意图禁止按短超时自动撤
+PENDING_TIMEOUT_EXEMPT_INTENTS = (
+    "SZ_AM",
+    "SH_AM",
+    "SZ_PREPLACE",
+    "SH_OPEN",
+    "SH_CHASE",
+    "SZ_SELL",
+    "SH_SELL",
+    "SH_SELL_CHASE",
+)
 PENDING_TIMEOUT_EXEMPT_LOG_SEC = 300
 
 # ---- 上市首日门闩 ----
 # True=仅上市首日跑买卖；非首日只心跳
 LISTING_DAY_ONLY = True
-# True=任意交易日都跑尾盘竞价逻辑（用于非首日回测/联调验证时窗与下单）
-# 注意：非首日无 130 临停/143→157.30 微观结构，只验流程；实盘务必 False
+# True=任意交易日验竞价流程（开盘 ModeA + 尾盘 ModeB）；非首日无真实微观结构，只验时窗/下单
+# DRY 下开盘 130 会模拟成交以便串起 ModeA 卖出；实盘务必 False
 VERIFY_AUCTION_ANY_DAY = False
 # 兼容旧名：等同 VERIFY_AUCTION_ANY_DAY（联调）
 FORCE_RUN = False
@@ -64,6 +110,7 @@ LISTING_DAY_FAIL_OPEN = False
 # 可选显式上市日 YYYYMMDD；有则优先于日K推断
 LISTING_DATE_MAP = {
     # "123276.SZ": "20260810",
+    "118073.SH": "20260812",
 }
 
 # 发行规模仅作日志参考（本策略买入不依赖规模）
@@ -130,7 +177,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "CbAuct"
-STRATEGY_VER = "v2.9"
+STRATEGY_VER = "v3.1"
 
 # DRY_RUN：False=虚拟挂单可测阶梯/升级；True=下单即成交（旧行为）
 DRY_RUN_FILL_IMMEDIATE = False

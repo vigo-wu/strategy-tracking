@@ -265,17 +265,24 @@ def _listing_day_uncached(C, day):
     return ok, reason
 
 
+def _verify_any_day():
+    """联调：跳过上市首日门闩，开盘+尾盘竞价流程均可在任意交易日验证。"""
+    if bool(globals().get("VERIFY_AUCTION_ANY_DAY", False)):
+        return True
+    if bool(globals().get("FORCE_RUN", False)):
+        return True
+    if not bool(globals().get("LISTING_DAY_ONLY", True)):
+        return True
+    return False
+
+
 def _is_listing_day(C, day):
     """上市首日门闩（按 day+stock 缓存）。
 
     VERIFY_AUCTION_ANY_DAY / FORCE_RUN / LISTING_DAY_ONLY=False 均可放行任意交易日。
     推断失败看 LISTING_DAY_FAIL_OPEN。
     """
-    if bool(globals().get("VERIFY_AUCTION_ANY_DAY", False)):
-        return True
-    if bool(globals().get("FORCE_RUN", False)):
-        return True
-    if not bool(globals().get("LISTING_DAY_ONLY", True)):
+    if _verify_any_day():
         return True
     stock = str(getattr(A, "stock", "") or "")
     cache_key = "%s|%s" % (stock, day)

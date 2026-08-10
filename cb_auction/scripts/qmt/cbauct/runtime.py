@@ -16,6 +16,8 @@ def init(C):
 def _ensure_day_flags():
     if not hasattr(A, "buy_done_day"):
         A.buy_done_day = ""
+    if not hasattr(A, "am_buy_day"):
+        A.am_buy_day = ""
     if not hasattr(A, "sz_preplace_day"):
         A.sz_preplace_day = ""
     if not hasattr(A, "sz_close_buy_day"):
@@ -24,12 +26,28 @@ def _ensure_day_flags():
         A.sz_escalate_day = ""
     if not hasattr(A, "sz_escalate_alert_ms"):
         A.sz_escalate_alert_ms = 0.0
+    if not hasattr(A, "sz_sell_day"):
+        A.sz_sell_day = ""
     if not hasattr(A, "sh_chase_day"):
         A.sh_chase_day = ""
     if not hasattr(A, "sh_last_order_px"):
         A.sh_last_order_px = 0.0
     if not hasattr(A, "sh_chase_at_ms"):
         A.sh_chase_at_ms = 0.0
+    if not hasattr(A, "sh_sell_day"):
+        A.sh_sell_day = ""
+    if not hasattr(A, "d2_auction_day"):
+        A.d2_auction_day = ""
+    if not hasattr(A, "d2_stop_day"):
+        A.d2_stop_day = ""
+    if not hasattr(A, "d2_trail_day"):
+        A.d2_trail_day = ""
+    if not hasattr(A, "d2_day_high"):
+        A.d2_day_high = 0.0
+    if not hasattr(A, "d2_open_px"):
+        A.d2_open_px = 0.0
+    if not hasattr(A, "entry_mode"):
+        A.entry_mode = ""
 
 
 def _init_impl(C):
@@ -81,13 +99,22 @@ def _init_impl(C):
             A.acted = set()
             A.pending = None
             A.buy_done_day = ""
+            A.am_buy_day = ""
             A.sz_preplace_day = ""
             A.sz_close_buy_day = ""
             A.sz_escalate_day = ""
             A.sz_escalate_alert_ms = 0.0
+            A.sz_sell_day = ""
             A.sh_chase_day = ""
             A.sh_last_order_px = 0.0
             A.sh_chase_at_ms = 0.0
+            A.sh_sell_day = ""
+            A.d2_auction_day = ""
+            A.d2_stop_day = ""
+            A.d2_trail_day = ""
+            A.d2_day_high = 0.0
+            A.d2_open_px = 0.0
+            A.entry_mode = ""
             A.bt_held = 0
             A.bt_locked = 0
             A.bt_lock_day = ""
@@ -148,6 +175,14 @@ def _init_impl(C):
         TRADE_BUDGET,
         "lot=",
         LOT_SIZE,
+        "modeA=",
+        bool(globals().get("ENABLE_MODE_A", True)),
+        "modeB=",
+        bool(globals().get("ENABLE_MODE_B", True)),
+        "day2=",
+        bool(globals().get("ENABLE_DAY2_EXIT", True)),
+        "am_px=",
+        _morning_buy_price(),
         "reopen_cap=",
         _reopen_cap(),
         "limit_up=",
@@ -162,8 +197,6 @@ def _init_impl(C):
         "%s-%s" % (SH_CHASE_START, SH_CHASE_END),
         "chase_ms=",
         SH_CHASE_INTERVAL_MS,
-        "chase_mode=",
-        SH_CHASE_MODE,
         "any_day=",
         bool(globals().get("VERIFY_AUCTION_ANY_DAY", False))
         or bool(globals().get("FORCE_RUN", False))
@@ -179,6 +212,9 @@ def _init_impl(C):
         budget=TRADE_BUDGET,
         mkt=mkt,
         size_yi=size_yi,
+        mode_a=bool(globals().get("ENABLE_MODE_A", True)),
+        mode_b=bool(globals().get("ENABLE_MODE_B", True)),
+        day2=bool(globals().get("ENABLE_DAY2_EXIT", True)),
         reopen_cap=_reopen_cap(),
         limit_up=_limit_up(),
         verify_any_day=bool(globals().get("VERIFY_AUCTION_ANY_DAY", False)),

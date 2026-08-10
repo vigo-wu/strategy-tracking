@@ -49,8 +49,8 @@ def main() -> None:
     deploy_gbk(text, TARGETS, compile_name="qmt_terminal_cbauct.py")
     print("OK: 打开国金 QMT -> 模型交易 -> 加载 CbAuct / 转债首日竞价")
     print("主图: 上市首日可转债 | 周期=1分钟 | 不复权")
-    print("深市: 13:00-14:54埋143 -> 封板撤未成再挂157.30; 沪市: 14:57起143阶梯追至157.30")
-    print("编辑 cbauct/*.py 与 scripts/qmt_common/；默认 DRY_RUN=True")
+    print("ModeA: 早盘130抢筹 -> 14:57封板卖157.30 | ModeB: 深市143->157 / 沪市阶梯追")
+    print("Day2: 高开锁利 / 1.5%回撤止盈 / 低开止损；默认 DRY_RUN=True")
 
 
 if __name__ == "__main__":
