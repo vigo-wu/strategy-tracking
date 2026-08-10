@@ -13,6 +13,25 @@ def init(C):
             pass
 
 
+def _ensure_day_flags():
+    if not hasattr(A, "buy_done_day"):
+        A.buy_done_day = ""
+    if not hasattr(A, "sz_preplace_day"):
+        A.sz_preplace_day = ""
+    if not hasattr(A, "sz_close_buy_day"):
+        A.sz_close_buy_day = ""
+    if not hasattr(A, "sz_escalate_day"):
+        A.sz_escalate_day = ""
+    if not hasattr(A, "sz_escalate_alert_ms"):
+        A.sz_escalate_alert_ms = 0.0
+    if not hasattr(A, "sh_chase_day"):
+        A.sh_chase_day = ""
+    if not hasattr(A, "sh_last_order_px"):
+        A.sh_last_order_px = 0.0
+    if not hasattr(A, "sh_chase_at_ms"):
+        A.sh_chase_at_ms = 0.0
+
+
 def _init_impl(C):
     A.stock = C.stockcode + "." + C.market
     A.period = _resolve_period(C, default="1m")
@@ -62,8 +81,13 @@ def _init_impl(C):
             A.acted = set()
             A.pending = None
             A.buy_done_day = ""
-            A.sell_hint_day = ""
-            A.sim_sell_day = ""
+            A.sz_preplace_day = ""
+            A.sz_close_buy_day = ""
+            A.sz_escalate_day = ""
+            A.sz_escalate_alert_ms = 0.0
+            A.sh_chase_day = ""
+            A.sh_last_order_px = 0.0
+            A.sh_chase_at_ms = 0.0
             A.bt_held = 0
             A.bt_locked = 0
             A.bt_lock_day = ""
@@ -78,12 +102,7 @@ def _init_impl(C):
                 A.acted = set()
             if not hasattr(A, "pending"):
                 A.pending = None
-            if not hasattr(A, "buy_done_day"):
-                A.buy_done_day = ""
-            if not hasattr(A, "sell_hint_day"):
-                A.sell_hint_day = ""
-            if not hasattr(A, "sim_sell_day"):
-                A.sim_sell_day = ""
+            _ensure_day_flags()
             _bt_recover_position()
             print(
                 "%s backtest re-init preserve barpos=" % STRATEGY_NAME,
@@ -98,12 +117,12 @@ def _init_impl(C):
         A.ready_logged = False
         if not hasattr(A, "pending"):
             A.pending = None
-        if not hasattr(A, "buy_done_day"):
-            A.buy_done_day = ""
-        if not hasattr(A, "sell_hint_day"):
-            A.sell_hint_day = ""
-        if not hasattr(A, "sim_sell_day"):
-            A.sim_sell_day = ""
+        _ensure_day_flags()
+        try:
+            _reconcile_with_broker()
+        except Exception as e:
+            print("%s reconcile fail" % STRATEGY_NAME, e)
+            _event_log("reconcile_fail", error=str(e))
 
     try:
         C.set_universe([A.stock])
@@ -111,9 +130,12 @@ def _init_impl(C):
         print("%s set_universe fail" % STRATEGY_NAME, e)
 
     size_yi = _issue_size_yi()
+    mkt = _market_tag()
     print(
         "%s %s init" % (STRATEGY_NAME, STRATEGY_VER),
         A.stock,
+        "mkt=",
+        mkt,
         A.acct,
         A.acct_type,
         "PERIOD=",
@@ -126,15 +148,22 @@ def _init_impl(C):
         TRADE_BUDGET,
         "lot=",
         LOT_SIZE,
-        "open_buy=",
-        OPEN_BUY_PRICE,
+        "reopen_cap=",
+        _reopen_cap(),
+        "limit_up=",
+        _limit_up(),
         "size_yi=",
         size_yi,
-        "small=",
-        _is_small_issue(),
-        "buy_window=",
-        "%s-%s" % (BUY_START, BUY_END),
-        "sell=MANUAL",
+        "sz_pre=",
+        "%s-%s" % (SZ_PREPLACE_START, SZ_PREPLACE_END),
+        "sz_close=",
+        "%s-%s" % (SZ_CLOSE_BUY_START, SZ_CLOSE_BUY_END),
+        "sh_chase=",
+        "%s-%s" % (SH_CHASE_START, SH_CHASE_END),
+        "chase_ms=",
+        SH_CHASE_INTERVAL_MS,
+        "chase_mode=",
+        SH_CHASE_MODE,
     )
     _event_log(
         "init",
@@ -144,8 +173,10 @@ def _init_impl(C):
         backtest=A.is_backtest,
         dry_run=DRY_RUN,
         budget=TRADE_BUDGET,
+        mkt=mkt,
         size_yi=size_yi,
-        small=_is_small_issue(),
+        reopen_cap=_reopen_cap(),
+        limit_up=_limit_up(),
         log_dir=str(globals().get("LOG_DIR") or ""),
     )
 

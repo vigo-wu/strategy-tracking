@@ -73,7 +73,10 @@ def _load_state():
         )
         return
     pos = raw.get("position")
-    if isinstance(pos, dict) and int(pos.get("shares", 0) or 0) >= 100:
+    lot = int(globals().get("LOT_SIZE") or 100)
+    if lot <= 0:
+        lot = 100
+    if isinstance(pos, dict) and int(pos.get("shares", 0) or 0) >= lot:
         A.position = dict(pos)
         A.position["shares"] = int(pos["shares"])
         A.position["price"] = float(pos.get("price", 0) or 0)
@@ -84,6 +87,11 @@ def _load_state():
     A.acted = set([str(x) for x in acted]) if isinstance(acted, list) else set()
     pend = raw.get("pending")
     A.pending = pend if isinstance(pend, dict) else None
+    # 历史 DRY 虚拟单不得带入实盘
+    if isinstance(A.pending, dict) and A.pending.get("dry_keep"):
+        print(_strategy_tag(), "state drop dry_keep pending")
+        _event_log("state_drop_dry_pending", remark=A.pending.get("remark"))
+        A.pending = None
     extra = globals().get("_state_extra_load")
     if callable(extra):
         try:
@@ -104,16 +112,22 @@ def _load_state():
 def _save_state():
     if getattr(A, "is_backtest", False):
         return
+    # DRY_RUN 且策略显式关闭落盘时跳过（cbauct: DRY_RUN_SAVE_STATE=False）
+    if DRY_RUN and (not bool(globals().get("DRY_RUN_SAVE_STATE", True))):
+        return
     path = _state_path()
     if not path:
         return
+    pend = getattr(A, "pending", None)
+    if isinstance(pend, dict) and pend.get("dry_keep"):
+        pend = None
     data = {
         "stock": getattr(A, "stock", ""),
         "version": str(globals().get("STRATEGY_VER") or ""),
         "position": getattr(A, "position", None),
         "acted_day": getattr(A, "acted_day", ""),
         "acted": sorted(list(getattr(A, "acted", set()) or [])),
-        "pending": getattr(A, "pending", None),
+        "pending": pend,
         "updated": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
     extra = globals().get("_state_extra_save")

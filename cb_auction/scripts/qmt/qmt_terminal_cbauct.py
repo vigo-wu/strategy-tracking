@@ -22,17 +22,60 @@ CASH_RATIO = 0.8
 # 可转债最小交易单位（张）
 LOT_SIZE = 10
 
-# ---- 竞价价格（上市首日规则）----
-# 开盘竞价买入顶格价
-OPEN_BUY_PRICE = 130.0
-# 首日涨停顶格价（≤5亿收盘挂卖参考）
+# ---- 上市首日价格锚点（model.md 终审）----
+# 临停基准价（触及 30% 停牌）
+HALT_BASE_PRICE = 130.0
+# 价格笼子比例（有效申报上限 = 基准/最新价 * CAGE_RATIO）
+CAGE_RATIO = 1.1
+# 复牌首段顶格 = 130 * 1.1（严禁深市临停期硬编码 157.30）
+REOPEN_CAP_PRICE = 143.0
+# 全天最高限价
 LIMIT_UP_PRICE = 157.30
-# 小盘分界：发行规模（亿元）<= 此值 → 收盘提示/回测模拟挂 157.30
-SMALL_SIZE_YI = 5.0
+# 可转债价格小数位
+PRICE_DECIMALS = 3
+# 沪市追单：新上限至少高出旧挂单价这么多才撤补
+CHASE_MIN_STEP = 0.01
 
-# 发行规模（亿元）：优先 ISSUE_SIZE_MAP[A.stock]，否则用默认
+# ---- 时窗（HHmmss；实盘墙钟，回测用 K 线时间）----
+# 深市：临停期内均可埋 143（须在 14:55 前完成）；窗开太晚易漏单
+SZ_PREPLACE_START = "130000"
+SZ_PREPLACE_END = "145459"
+# 深市：复牌瞬间即可升级（撤143→挂157.30）；勿晚于 14:57:01
+SZ_CLOSE_BUY_START = "145700"
+SZ_CLOSE_BUY_END = "145950"
+# 深市升级撤单告警阈值（秒）：撤不掉则持续告警
+SZ_ESCALATE_ALERT_SEC = 2.0
+# 沪市：14:57 起连续竞价阶梯追单（可撤可补）
+SH_CHASE_START = "145700"
+SH_CHASE_END = "145955"
+# 沪市追单节流（毫秒）。仅抑制重复撤单评估；撤成后允许立刻重挂
+SH_CHASE_INTERVAL_MS = 200
+# cancel_replace=撤旧挂新（model 定稿）
+SH_CHASE_MODE = "cancel_replace"
+# 撤单重试间隔（秒）；common orders_pending 读取
+CANCEL_RETRY_SEC = 1.0
+# 撤单后「见过委托且已从列表消失」才清 pending 的等待秒数
+PENDING_ORPHAN_SEC = 15
+# 深市临停埋单 + 沪市追单窗内挂单：禁止按短超时自动撤（否则丢排队）
+PENDING_TIMEOUT_EXEMPT_INTENTS = ("SZ_PREPLACE", "SH_OPEN", "SH_CHASE")
+# 豁免超时日志最短间隔（秒）
+PENDING_TIMEOUT_EXEMPT_LOG_SEC = 300
+
+# ---- 上市首日门闩 ----
+# True=仅上市首日跑买卖；非首日只心跳
+LISTING_DAY_ONLY = True
+# True=忽略首日检测强制运行（联调）
+FORCE_RUN = False
+# 日K推断失败时：False=禁止下单(fail-closed)；True=放行(fail-open)
+LISTING_DAY_FAIL_OPEN = False
+# 可选显式上市日 YYYYMMDD；有则优先于日K推断
+LISTING_DATE_MAP = {
+    # "123276.SZ": "20260810",
+}
+
+# 发行规模仅作日志参考（本策略买入不依赖规模）
 ISSUE_SIZE_YI = 0.0
-# 2026 样本规模（可继续追加）；键=代码.市场
+SMALL_SIZE_YI = 5.0
 ISSUE_SIZE_MAP = {
     "118063.SH": 16.72,
     "111024.SH": 5.80,
@@ -76,18 +119,6 @@ ISSUE_SIZE_MAP = {
     "113708.SH": 80.00,
 }
 
-# ---- 时窗（HHmmss，实盘用墙钟；回测用 K 线时间）----
-# 开盘竞价：9:15 起挂 130；默认挂到 9:24:59
-BUY_START = "091500"
-BUY_END = "092500"
-# 收盘竞价提示窗（仅日志 / 回测模拟卖，实盘不自动卖）
-SELL_HINT_START = "145700"
-SELL_HINT_END = "150000"
-
-# 实盘：卖出一律手动；本策略只打印建议挂单价
-# 回测：True=在提示窗按定稿价模拟卖出（可转债 T+0）；实盘忽略此开关
-BACKTEST_SIM_SELL = True
-
 # ---- 行情与运行 ----
 PERIOD = "1m"
 OHLC_COUNT = 120
@@ -98,15 +129,25 @@ HIST_MAX_LOOKBACK_DAYS = 30
 DOWNLOAD_HIST_LIVE = False
 DOWNLOAD_HIST_BACKTEST = True
 
-PENDING_TIMEOUT_SEC = 300
-PENDING_ORPHAN_SEC = 60
+# 尾盘窗口短：超时缩短；orphan 仅在「见过委托后消失」时生效（见上方 PENDING_ORPHAN_SEC）
+PENDING_TIMEOUT_SEC = 90
 
 STATE_FILE = r"D:\tradingStrategy\cbauct_{stock}.json"
 LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "CbAuct"
-STRATEGY_VER = "v1.0"
+STRATEGY_VER = "v2.8"
+
+# DRY_RUN：False=虚拟挂单可测阶梯/升级；True=下单即成交（旧行为）
+DRY_RUN_FILL_IMMEDIATE = False
+# DRY_RUN 且非立即成交时：挂到涨停价则模拟成交
+DRY_RUN_FILL_ON_LIMIT = True
+# DRY_RUN 未登录时使用虚拟资金（便于无柜台联调）
+DRY_RUN_VIRTUAL_CASH = True
+DRY_RUN_VIRTUAL_CASH_AMT = 100000.0
+# DRY_RUN 默认不写 STATE，避免污染实盘
+DRY_RUN_SAVE_STATE = False
 # =======================================================
 
 _ORDER_FILLED = (56, 8)
@@ -454,14 +495,24 @@ def _bar_end_str(C):
 # === cbauct/state_extra.py ===
 def _state_extra_load(raw):
     A.buy_done_day = str(raw.get("buy_done_day", "") or "")
-    A.sell_hint_day = str(raw.get("sell_hint_day", "") or "")
-    A.sim_sell_day = str(raw.get("sim_sell_day", "") or "")
+    A.sz_preplace_day = str(raw.get("sz_preplace_day", "") or "")
+    A.sz_close_buy_day = str(raw.get("sz_close_buy_day", "") or "")
+    A.sz_escalate_day = str(raw.get("sz_escalate_day", "") or "")
+    A.sz_escalate_alert_ms = float(raw.get("sz_escalate_alert_ms", 0) or 0)
+    A.sh_chase_day = str(raw.get("sh_chase_day", "") or "")
+    A.sh_last_order_px = float(raw.get("sh_last_order_px", 0) or 0)
+    A.sh_chase_at_ms = float(raw.get("sh_chase_at_ms", 0) or 0)
 
 
 def _state_extra_save(data):
     data["buy_done_day"] = str(getattr(A, "buy_done_day", "") or "")
-    data["sell_hint_day"] = str(getattr(A, "sell_hint_day", "") or "")
-    data["sim_sell_day"] = str(getattr(A, "sim_sell_day", "") or "")
+    data["sz_preplace_day"] = str(getattr(A, "sz_preplace_day", "") or "")
+    data["sz_close_buy_day"] = str(getattr(A, "sz_close_buy_day", "") or "")
+    data["sz_escalate_day"] = str(getattr(A, "sz_escalate_day", "") or "")
+    data["sz_escalate_alert_ms"] = float(getattr(A, "sz_escalate_alert_ms", 0) or 0)
+    data["sh_chase_day"] = str(getattr(A, "sh_chase_day", "") or "")
+    data["sh_last_order_px"] = float(getattr(A, "sh_last_order_px", 0) or 0)
+    data["sh_chase_at_ms"] = float(getattr(A, "sh_chase_at_ms", 0) or 0)
 
 # === qmt_common/single/state_io.py ===
 # 作用: 单仓 JSON 状态读写（回测不落盘）
@@ -538,7 +589,10 @@ def _load_state():
         )
         return
     pos = raw.get("position")
-    if isinstance(pos, dict) and int(pos.get("shares", 0) or 0) >= 100:
+    lot = int(globals().get("LOT_SIZE") or 100)
+    if lot <= 0:
+        lot = 100
+    if isinstance(pos, dict) and int(pos.get("shares", 0) or 0) >= lot:
         A.position = dict(pos)
         A.position["shares"] = int(pos["shares"])
         A.position["price"] = float(pos.get("price", 0) or 0)
@@ -549,6 +603,11 @@ def _load_state():
     A.acted = set([str(x) for x in acted]) if isinstance(acted, list) else set()
     pend = raw.get("pending")
     A.pending = pend if isinstance(pend, dict) else None
+    # 历史 DRY 虚拟单不得带入实盘
+    if isinstance(A.pending, dict) and A.pending.get("dry_keep"):
+        print(_strategy_tag(), "state drop dry_keep pending")
+        _event_log("state_drop_dry_pending", remark=A.pending.get("remark"))
+        A.pending = None
     extra = globals().get("_state_extra_load")
     if callable(extra):
         try:
@@ -569,16 +628,22 @@ def _load_state():
 def _save_state():
     if getattr(A, "is_backtest", False):
         return
+    # DRY_RUN 且策略显式关闭落盘时跳过（cbauct: DRY_RUN_SAVE_STATE=False）
+    if DRY_RUN and (not bool(globals().get("DRY_RUN_SAVE_STATE", True))):
+        return
     path = _state_path()
     if not path:
         return
+    pend = getattr(A, "pending", None)
+    if isinstance(pend, dict) and pend.get("dry_keep"):
+        pend = None
     data = {
         "stock": getattr(A, "stock", ""),
         "version": str(globals().get("STRATEGY_VER") or ""),
         "position": getattr(A, "position", None),
         "acted_day": getattr(A, "acted_day", ""),
         "acted": sorted(list(getattr(A, "acted", set()) or [])),
-        "pending": getattr(A, "pending", None),
+        "pending": pend,
         "updated": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
     extra = globals().get("_state_extra_save")
@@ -730,7 +795,7 @@ def _bar_tag(dt):
 
 
 def _issue_size_yi():
-    """发行规模（亿元）；未知返回 None。"""
+    """发行规模（亿元）；未知返回 None。仅日志参考。"""
     stock = str(getattr(A, "stock", "") or "")
     mp = globals().get("ISSUE_SIZE_MAP") or {}
     if stock in mp:
@@ -754,17 +819,272 @@ def _is_small_issue():
     return sz <= float(globals().get("SMALL_SIZE_YI") or 5.0)
 
 
-def _sell_hint_price(last_px):
-    """定稿卖价：≤5亿→157.30；否则→可确认收盘价（用最新价近似）。"""
-    if _is_small_issue():
-        return float(globals().get("LIMIT_UP_PRICE") or 157.30)
+def _cb_code_num():
+    stock = str(getattr(A, "stock", "") or "")
+    code = stock.split(".")[0] if stock else ""
     try:
-        px = float(last_px)
+        return int(code)
     except Exception:
-        px = 0.0
-    if px > 0:
-        return round(px, 3)
-    return None
+        return 0
+
+
+def _is_sz_cb():
+    """深市新债：12 / 123 开头（含 127/128 等 12x）。"""
+    stock = str(getattr(A, "stock", "") or "").upper()
+    if stock.endswith(".SZ"):
+        return True
+    n = _cb_code_num()
+    return 120000 <= n <= 129999
+
+
+def _is_sh_cb():
+    """沪市新债：11 开头。"""
+    stock = str(getattr(A, "stock", "") or "").upper()
+    if stock.endswith(".SH"):
+        return True
+    n = _cb_code_num()
+    return 110000 <= n <= 119999
+
+
+def _market_tag():
+    if _is_sz_cb():
+        return "SZ"
+    if _is_sh_cb():
+        return "SH"
+    return "UNK"
+
+
+def _px_round(price):
+    dec = int(globals().get("PRICE_DECIMALS") or 3)
+    try:
+        return round(float(price), dec)
+    except Exception:
+        return 0.0
+
+
+def _reopen_cap():
+    """临停基准 * 笼子；默认 143.00。"""
+    cfg = globals().get("REOPEN_CAP_PRICE")
+    if cfg is not None:
+        try:
+            v = float(cfg)
+            if v > 0:
+                return _px_round(v)
+        except Exception:
+            pass
+    base = float(globals().get("HALT_BASE_PRICE") or 130.0)
+    ratio = float(globals().get("CAGE_RATIO") or 1.1)
+    return _px_round(base * ratio)
+
+
+def _limit_up():
+    return _px_round(globals().get("LIMIT_UP_PRICE") or 157.30)
+
+
+def _cage_cap(last_px):
+    """有效申报上限 = min(last * CAGE_RATIO, 全天涨停)。"""
+    try:
+        last = float(last_px)
+    except Exception:
+        last = 0.0
+    if last <= 0:
+        return _reopen_cap()
+    ratio = float(globals().get("CAGE_RATIO") or 1.1)
+    return _px_round(min(last * ratio, _limit_up()))
+
+
+def _tick_last(C, fallback=None):
+    """优先全推 tick 最新价；失败回退 K 线收盘。"""
+    stock = str(getattr(A, "stock", "") or "")
+    try:
+        fn = getattr(C, "get_full_tick", None)
+        if callable(fn):
+            ticks = fn([stock])
+            if isinstance(ticks, dict) and stock in ticks:
+                t = ticks[stock]
+                # 勿用 lastClose（昨收/面值），会算错笼子
+                for k in ("lastPrice", "price", "last", "match"):
+                    if isinstance(t, dict) and t.get(k) is not None:
+                        px = float(t[k])
+                        if px > 0:
+                            return _px_round(px)
+                    if hasattr(t, k):
+                        px = float(getattr(t, k))
+                        if px > 0:
+                            return _px_round(px)
+    except Exception as e:
+        _diag_once("tick_fail", e)
+    try:
+        if fallback is not None and float(fallback) > 0:
+            return _px_round(fallback)
+    except Exception:
+        pass
+    return 0.0
+
+
+def _listing_day_uncached(C, day):
+    """无缓存推断是否上市首日。空日K时若今日分钟线有行情则放行。"""
+    stock = str(getattr(A, "stock", "") or "")
+    mp = globals().get("LISTING_DATE_MAP") or {}
+    if stock in mp:
+        return str(mp.get(stock) or "") == str(day), "map"
+
+    def _from_close(close):
+        if close is None:
+            return None, "daily_none"
+        try:
+            n = len(close)
+        except Exception:
+            return None, "daily_bad"
+        if n <= 0:
+            return None, "daily_empty"
+        if n >= 2:
+            return False, "daily_ge2"
+        return True, "daily_eq1"
+
+    def _index_yyyymmdd(ix):
+        s = str(ix).strip()
+        digits = "".join([c for c in s if c.isdigit()])
+        if len(digits) >= 8:
+            return digits[:8]
+        try:
+            if hasattr(ix, "strftime"):
+                return ix.strftime("%Y%m%d")
+        except Exception:
+            pass
+        return ""
+
+    def _minute_has_today():
+        """日K空洞时：仅当 1m 有数据且时间戳均属 day 才放行。"""
+        day8 = str(day)[:8]
+        start = day8 + "091500"
+        end = day8 + "150000"
+        md = None
+        try:
+            md = C.get_market_data_ex(
+                fields=["close"],
+                stock_code=[stock],
+                period="1m",
+                start_time=start,
+                end_time=end,
+                count=300,
+                dividend_type="none",
+                fill_data=False,
+                subscribe=False,
+            )
+        except TypeError:
+            try:
+                md = C.get_market_data_ex(
+                    ["close"],
+                    [stock],
+                    period="1m",
+                    start_time=start,
+                    end_time=end,
+                    count=300,
+                    dividend_type="none",
+                )
+            except Exception as e:
+                _diag_once("listing_minute_fail", e)
+                return False
+        except Exception as e:
+            _diag_once("listing_minute_fail", e)
+            return False
+        close = _series_from_ex(md, stock, "close")
+        if close is None or len(close) <= 0:
+            return False
+        # 尽量校验 index 日期；拿不到 index 则依赖 start/end 窗口
+        try:
+            df = None
+            if isinstance(md, dict) and stock in md:
+                df = md[stock]
+            if df is not None and hasattr(df, "index"):
+                days = set()
+                for ix in list(df.index)[:300]:
+                    d8 = _index_yyyymmdd(ix)
+                    if d8:
+                        days.add(d8)
+                if days and (day8 not in days or any(d != day8 for d in days)):
+                    return False
+        except Exception as e:
+            _diag_once("listing_minute_index", e)
+        return True
+
+    # 日K >=2 根 => 已非首日；fill_data=False 避免空洞填充假K
+    try:
+        md = C.get_market_data_ex(
+            fields=["close"],
+            stock_code=[stock],
+            period="1d",
+            end_time=str(day),
+            count=5,
+            dividend_type="none",
+            fill_data=False,
+            subscribe=False,
+        )
+        ok, reason = _from_close(_series_from_ex(md, stock, "close"))
+    except TypeError:
+        try:
+            md = C.get_market_data_ex(
+                ["close"],
+                [stock],
+                period="1d",
+                start_time="",
+                end_time=str(day),
+                count=5,
+                dividend_type="none",
+            )
+            ok, reason = _from_close(_series_from_ex(md, stock, "close"))
+        except Exception as e:
+            _diag_once("listing_day_fail", e)
+            ok, reason = None, "query_fail"
+    except Exception as e:
+        _diag_once("listing_day_fail", e)
+        ok, reason = None, "query_fail"
+
+    # 仅日K空洞兜底；query_fail/daily_bad 不兜底，避免老债误放行
+    if ok is None and reason in ("daily_none", "daily_empty"):
+        if _minute_has_today():
+            return True, "minute_today_fallback"
+    return ok, reason
+
+
+def _is_listing_day(C, day):
+    """上市首日门闩（按 day+stock 缓存）。FORCE_RUN 强制；失败看 LISTING_DAY_FAIL_OPEN。"""
+    if bool(globals().get("FORCE_RUN", False)):
+        return True
+    if not bool(globals().get("LISTING_DAY_ONLY", True)):
+        return True
+    stock = str(getattr(A, "stock", "") or "")
+    cache_key = "%s|%s" % (stock, day)
+    cache = getattr(A, "_listing_day_cache", None)
+    if not isinstance(cache, dict):
+        cache = {}
+        A._listing_day_cache = cache
+    if cache_key in cache:
+        return bool(cache[cache_key])
+
+    ok, reason = _listing_day_uncached(C, day)
+    if ok is None:
+        fail_open = bool(globals().get("LISTING_DAY_FAIL_OPEN", False))
+        ok = fail_open
+        print(
+            "%s listing_day unknown -> %s" % (STRATEGY_NAME, "ALLOW" if ok else "DENY"),
+            reason,
+            stock,
+            day,
+        )
+        _event_log(
+            "listing_day_unknown",
+            stock=stock,
+            day=day,
+            allow=ok,
+            reason=reason,
+        )
+    else:
+        _event_log("listing_day", stock=stock, day=day, ok=ok, reason=reason)
+    cache[cache_key] = bool(ok)
+    A._listing_day_cache = cache
+    return bool(ok)
 
 # === qmt_common/market_util.py ===
 # 作用: 行情辅助：诊断、序列解析、补历史、心跳
@@ -1112,10 +1432,25 @@ def _available_cash():
         accs = get_trade_detail_data(A.acct, A.acct_type, "account")
     except Exception as e:
         _diag_once("cash_fail", e)
+        if DRY_RUN and bool(globals().get("DRY_RUN_VIRTUAL_CASH", True)):
+            return float(
+                globals().get("DRY_RUN_VIRTUAL_CASH_AMT")
+                or globals().get("TRADE_BUDGET")
+                or 10**9
+            )
         return None
     if not accs:
         print(_strategy_tag(), "account not login", A.acct)
         _event_log("account_not_login", acct=A.acct)
+        if DRY_RUN and bool(globals().get("DRY_RUN_VIRTUAL_CASH", True)):
+            amt = float(
+                globals().get("DRY_RUN_VIRTUAL_CASH_AMT")
+                or globals().get("TRADE_BUDGET")
+                or 10**9
+            )
+            print(_strategy_tag(), "DRY virtual cash=", amt)
+            _event_log("dry_virtual_cash", amt=amt)
+            return amt
         return None
     return float(accs[0].m_dAvailable)
 
@@ -1227,15 +1562,20 @@ def _deal_fill(remark, stock):
     return vol, avg
 
 
-def _find_order(remark, stock):
+def _find_order_ex(remark, stock):
+    """查找委托 -> (order_or_None, query_ok)。
+
+    query_ok=False：接口失败，绝不能当成「已撤/不存在」去清 pending（防双挂）。
+    """
     try:
         orders = get_trade_detail_data(A.acct, A.acct_type, "order")
     except Exception as e:
         print(_strategy_tag(), "order query fail", e)
         _event_log("order_query_fail", error=str(e))
-        return None
-    if not orders:
-        return None
+        return None, False
+    if orders is None:
+        _event_log("order_query_fail", error="orders_none")
+        return None, False
     hit = None
     for od in orders:
         if str(getattr(od, "m_strRemark", "") or "") != remark:
@@ -1244,7 +1584,12 @@ def _find_order(remark, stock):
         if code != stock:
             continue
         hit = od
-    return hit
+    return hit, True
+
+
+def _find_order(remark, stock):
+    od, _ok = _find_order_ex(remark, stock)
+    return od
 
 
 def _order_traded_vol(od):
@@ -1330,7 +1675,16 @@ def _process_pending(C, now):
     pend = getattr(A, "pending", None)
     if not pend:
         return False
-    if getattr(A, "is_backtest", False) or DRY_RUN:
+    if getattr(A, "is_backtest", False):
+        A.pending = None
+        return False
+    if DRY_RUN:
+        # dry_keep：保留虚拟挂单，供策略测撤补/升级；否则沿用旧行为立刻清空
+        if bool(pend.get("dry_keep")):
+            if bool(pend.get("cancel_requested")):
+                _clear_pending("dry_cancel")
+                return False
+            return True
         A.pending = None
         return False
 
@@ -1345,11 +1699,18 @@ def _process_pending(C, now):
         age = (now - submitted).total_seconds()
 
     deal_vol, deal_avg = _deal_fill(remark, stock)
-    od = _find_order(remark, stock)
+    od, order_qok = _find_order_ex(remark, stock)
     status = int(getattr(od, "m_nOrderStatus", -1) or -1) if od is not None else -1
     traded = max(deal_vol, _order_traded_vol(od))
     px = deal_avg if deal_avg > 0 else float(pend.get("price_hint", 0) or 0)
     cancel_req = bool(pend.get("cancel_requested"))
+    if od is not None and not pend.get("order_seen"):
+        pend["order_seen"] = True
+        A.pending = pend
+        try:
+            _save_state()
+        except Exception:
+            pass
 
     print(
         _strategy_tag(),
@@ -1364,6 +1725,10 @@ def _process_pending(C, now):
         "age=%.0fs" % age,
         "cancel_req=",
         cancel_req,
+        "qok=",
+        order_qok,
+        "seen=",
+        bool(pend.get("order_seen")),
     )
     _event_log(
         "pending_check",
@@ -1376,16 +1741,22 @@ def _process_pending(C, now):
         cancel_req=cancel_req,
         target=target,
         remark=remark,
+        order_qok=order_qok,
+        order_seen=bool(pend.get("order_seen")),
     )
 
     filled = globals().get("_ORDER_FILLED") or (56, 8)
     dead = globals().get("_ORDER_DEAD") or (54, 57, 53, 5, 6, 9)
-    done_fill = traded >= target and target >= 100
+    # 股票默认 100；可转债等可在策略 config 设 LOT_SIZE=10
+    lot = int(globals().get("LOT_SIZE") or 100)
+    if lot <= 0:
+        lot = 100
+    done_fill = traded >= target and target >= lot
     status_filled = status in filled
     status_dead = status in dead
 
-    if done_fill or (status_filled and traded >= 100):
-        use_vol = traded if traded >= 100 else deal_vol
+    if done_fill or (status_filled and traded >= lot):
+        use_vol = traded if traded >= lot else deal_vol
         if side == "buy":
             _pending_on_buy_fill(pend, use_vol, px)
         else:
@@ -1394,7 +1765,7 @@ def _process_pending(C, now):
         return False
 
     if status_dead:
-        if traded >= 100:
+        if traded > 0:
             if side == "buy":
                 _pending_on_buy_fill(pend, traded, px)
             else:
@@ -1406,32 +1777,128 @@ def _process_pending(C, now):
 
     timeout = float(globals().get("PENDING_TIMEOUT_SEC") or 180)
     orphan = float(globals().get("PENDING_ORPHAN_SEC") or 60)
-    if age >= timeout:
-        if not cancel_req:
-            if od is not None:
-                _try_cancel_order(od, C)
-            else:
-                print(_strategy_tag(), "pending timeout, order not visible yet")
-                _event_log("pending_timeout", remark=remark, intent=intent, age_sec=int(age))
-            pend["cancel_requested"] = True
-            pend["cancel_at"] = (now or datetime.datetime.now()).strftime("%Y%m%d%H%M%S")
-            A.pending = pend
-            _save_state()
-            return True
+    retry_sec = float(globals().get("CANCEL_RETRY_SEC") or 1.0)
+
+    # 主动撤单中：周期重试；仅「曾经见过委托 + 查询成功 + 委托已消失」才可清 pending
+    if cancel_req:
         cancel_at = _parse_opened_at(pend.get("cancel_at"))
         cancel_age = 0.0
         if cancel_at is not None and now is not None:
             cancel_age = (now - cancel_at).total_seconds()
-        if od is None and cancel_age >= orphan:
-            print(_strategy_tag(), "pending orphan clear (no order after cancel wait)")
+        if not order_qok:
+            print(_strategy_tag(), "cancel wait: order query fail, keep pending")
             _event_log(
-                "pending_orphan",
+                "cancel_wait_query_fail",
                 remark=remark,
                 intent=intent,
                 cancel_age_sec=int(cancel_age),
             )
-            _clear_pending("orphan")
+            return True
+        if od is not None:
+            last_retry = _parse_opened_at(pend.get("cancel_retry_at"))
+            retry_age = 1e9
+            if last_retry is not None and now is not None:
+                retry_age = (now - last_retry).total_seconds()
+            if last_retry is None or retry_age >= retry_sec:
+                ok = _try_cancel_order(od, C)
+                pend["cancel_retry_at"] = (now or datetime.datetime.now()).strftime(
+                    "%Y%m%d%H%M%S"
+                )
+                A.pending = pend
+                _save_state()
+                if not ok:
+                    print(
+                        _strategy_tag(),
+                        "cancel retry fail; order still open age=%.0fs" % cancel_age,
+                    )
+                    _event_log(
+                        "cancel_retry_fail",
+                        remark=remark,
+                        intent=intent,
+                        cancel_age_sec=int(cancel_age),
+                    )
+            return True
+        # 查询成功且委托列表中已无此单
+        if pend.get("order_seen") and cancel_age >= orphan:
+            if traded > 0:
+                if side == "buy":
+                    _pending_on_buy_fill(pend, traded, px)
+                else:
+                    _pending_on_sell_fill(pend, now, traded, px)
+                _clear_pending("cancel_gone_partial")
+            else:
+                print(
+                    _strategy_tag(),
+                    "pending clear after cancel: order seen then gone",
+                )
+                _event_log(
+                    "pending_cancel_confirmed",
+                    remark=remark,
+                    intent=intent,
+                    cancel_age_sec=int(cancel_age),
+                )
+                _clear_pending("cancel_confirmed_gone")
             return False
+        if cancel_age >= orphan and (not pend.get("order_seen")):
+            # 从未见到委托：拒绝 orphan 清，避免旧单仍在时双挂
+            print(
+                _strategy_tag(),
+                "orphan blocked: order never seen, keep pending age=%.0fs"
+                % cancel_age,
+            )
+            _event_log(
+                "pending_orphan_blocked",
+                remark=remark,
+                intent=intent,
+                cancel_age_sec=int(cancel_age),
+                reason="order_never_seen",
+            )
+        return True
+
+    if age >= timeout:
+        exempt = globals().get("PENDING_TIMEOUT_EXEMPT_INTENTS") or ()
+        try:
+            exempt_set = set(str(x) for x in exempt)
+        except Exception:
+            exempt_set = set()
+        if intent in exempt_set or bool(pend.get("no_timeout")):
+            # 长生命周期挂单（如深市临停埋单/沪市首单）禁止超时撤
+            log_sec = float(globals().get("PENDING_TIMEOUT_EXEMPT_LOG_SEC") or 300)
+            last_log = _parse_opened_at(pend.get("timeout_exempt_log_at"))
+            need_log = last_log is None
+            if (not need_log) and now is not None and last_log is not None:
+                need_log = (now - last_log).total_seconds() >= log_sec
+            if need_log:
+                print(
+                    _strategy_tag(),
+                    "pending timeout exempt intent=",
+                    intent,
+                    "age=%.0fs" % age,
+                )
+                _event_log(
+                    "pending_timeout_exempt",
+                    remark=remark,
+                    intent=intent,
+                    age_sec=int(age),
+                )
+                pend["timeout_exempt_log_at"] = (
+                    now or datetime.datetime.now()
+                ).strftime("%Y%m%d%H%M%S")
+                A.pending = pend
+                try:
+                    _save_state()
+                except Exception:
+                    pass
+            return True
+        if od is not None:
+            _try_cancel_order(od, C)
+        else:
+            print(_strategy_tag(), "pending timeout, order not visible yet")
+            _event_log("pending_timeout", remark=remark, intent=intent, age_sec=int(age))
+        pend["cancel_requested"] = True
+        pend["cancel_at"] = (now or datetime.datetime.now()).strftime("%Y%m%d%H%M%S")
+        A.pending = pend
+        _save_state()
         return True
 
     return True
@@ -1440,9 +1907,21 @@ def _process_pending(C, now):
 # 作用: 单仓买卖委托与成交落地
 # 主要符号: _order_buy, _order_sell, _apply_buy_fill, _apply_sell_fill
 # 钩子实现: _pending_on_buy_fill / _pending_on_sell_fill
-# 预算: TRADE_BUDGET；可选 CASH_RATIO（实盘 min(budget, cash*ratio)）
+# 预算: TRADE_BUDGET；可选 TRADE_BUDGET_BY_STOCK[A.stock]；可选 CASH_RATIO
+def _trade_budget_cap():
+    """单笔预算上限：优先 TRADE_BUDGET_BY_STOCK[A.stock]，否则 TRADE_BUDGET。"""
+    stock = str(getattr(A, "stock", "") or "").strip()
+    by_stock = globals().get("TRADE_BUDGET_BY_STOCK") or {}
+    if stock and isinstance(by_stock, dict) and stock in by_stock:
+        try:
+            return float(by_stock[stock] or 0)
+        except Exception:
+            pass
+    return float(globals().get("TRADE_BUDGET") or 0)
+
+
 def _buy_budget(cash):
-    budget = float(globals().get("TRADE_BUDGET") or 0)
+    budget = _trade_budget_cap()
     if getattr(A, "is_backtest", False) or DRY_RUN:
         return budget if budget > 0 else 0.0
     ratio = float(globals().get("CASH_RATIO") or 0)
@@ -1721,16 +2200,15 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False):
     return True
 
 # === cbauct/strategy.py ===
-# 定稿:
-#   开盘竞价: 9:15 全标的 @130 限价买
-#   收盘竞价: ≤5亿提示 157.30；>5亿提示可确认收盘价；卖出手动（回测可模拟）
+# 定稿 model.md v2.8:
+#   深市: 临停埋 143（禁超时撤）→ 14:57 封板后撤未成单再挂顶格
+#   沪市: 14:57 起连续竞价，从 143 阶梯撤补追至 157.30
 
 
 def _has_position():
-    """可转债一手=10张；覆盖 common 的 >=100 判定。"""
+    """可转债：任意张数>0 即视为有仓（防部分成交影子丢失后重复满仓）。"""
     pos = getattr(A, "position", None)
-    lot = int(globals().get("LOT_SIZE") or 10)
-    return isinstance(pos, dict) and int(pos.get("shares", 0) or 0) >= lot
+    return isinstance(pos, dict) and int(pos.get("shares", 0) or 0) > 0
 
 
 def _cb_lot(price, budget):
@@ -1740,39 +2218,74 @@ def _cb_lot(price, budget):
     return int(float(budget) // (float(price) * lot)) * lot
 
 
+def _remaining_buy_budget(cash):
+    """预算扣减已持仓成本，防止部分成交后再按满额重挂。"""
+    cap = _buy_budget(cash)
+    try:
+        cap = float(cap or 0)
+    except Exception:
+        cap = 0.0
+    pos = getattr(A, "position", None)
+    if not isinstance(pos, dict):
+        return max(0.0, cap)
+    sh = int(pos.get("shares", 0) or 0)
+    if sh <= 0:
+        return max(0.0, cap)
+    spent = float(pos.get("cost", 0) or 0)
+    if spent <= 0:
+        spent = sh * float(pos.get("price", 0) or 0)
+    return max(0.0, cap - spent)
+
+
 def _apply_cb_buy_fill(vol, price, opened_at, **extra):
     lot = int(globals().get("LOT_SIZE") or 10)
     vol = int(vol)
     price = float(price) if price and price > 0 else 0.0
-    if vol < lot:
+    if vol <= 0:
         return
     ot = str(opened_at or "").strip()
     if not ot:
         ot = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+    prev = getattr(A, "position", None)
+    prev_sh = int(prev.get("shares", 0) or 0) if isinstance(prev, dict) else 0
+    prev_cost = float(prev.get("cost", 0) or 0) if isinstance(prev, dict) else 0.0
+    new_sh = prev_sh + vol
+    new_cost = prev_cost + round(vol * price, 2)
+    avg = (new_cost / float(new_sh)) if new_sh > 0 else price
     pos = {
-        "shares": vol,
-        "price": price,
-        "cost": round(vol * price, 2),
-        "opened_at": ot,
+        "shares": new_sh,
+        "price": avg,
+        "cost": round(new_cost, 2),
+        "opened_at": ot
+        if prev_sh <= 0
+        else str((prev or {}).get("opened_at") or ot),
     }
     for k, v in extra.items():
         if v is not None:
             pos[k] = v
     A.position = pos
+    if not hasattr(A, "acted") or A.acted is None:
+        A.acted = set()
     A.acted.add("BUY")
     if getattr(A, "is_backtest", False):
-        A.bt_opened_at = ot
-    buy_day = ot[:8] if len(ot) >= 8 else None
+        A.bt_opened_at = pos["opened_at"]
+    buy_day = str(pos["opened_at"])[:8] if len(str(pos["opened_at"])) >= 8 else None
     _bt_held_add(vol, buy_day=buy_day)
-    # 可转债 T+0：回测当日即可卖（仅影响 BACKTEST_SIM_SELL）
     if getattr(A, "is_backtest", False):
         A.bt_locked = 0
     day = buy_day or ""
     if day:
         A.buy_done_day = day
     _save_state()
-    print(_strategy_tag(), "BUY filled", A.position)
-    _event_log("buy_filled", position=A.position, vol=vol, price=price, opened_at=ot)
+    print(_strategy_tag(), "BUY filled", A.position, "add_vol=", vol, "lot=", lot)
+    _event_log(
+        "buy_filled",
+        position=A.position,
+        vol=vol,
+        price=price,
+        opened_at=ot,
+        add_vol=vol,
+    )
 
 
 def _pending_on_buy_fill(pend, vol, px):
@@ -1780,15 +2293,18 @@ def _pending_on_buy_fill(pend, vol, px):
     _apply_cb_buy_fill(vol, px, pend.get("opened_at") or pend.get("submitted_at"), **extra)
 
 
-def _order_buy_limit(C, price, now, budget=None):
-    """限价买入 prType=11；用于开盘竞价挂 130。"""
+def _order_buy_limit(C, price, now, budget=None, intent="BUY"):
+    """限价买入 prType=11。"""
     lot = int(globals().get("LOT_SIZE") or 10)
+    price = _px_round(price)
+    if price <= 0:
+        return False
     if getattr(A, "pending", None):
         print(_strategy_tag(), "buy skip: pending active")
         _event_log("buy_skip", reason="pending_active")
         return False
     if _has_position() or (
-        getattr(A, "is_backtest", False) and _bt_held_vol() >= lot
+        getattr(A, "is_backtest", False) and _bt_held_vol() > 0
     ):
         print(_strategy_tag(), "buy skip: already holding")
         _event_log("buy_skip", reason="already_holding")
@@ -1798,7 +2314,7 @@ def _order_buy_limit(C, price, now, budget=None):
 
     if budget is None:
         cash = _available_cash()
-        budget = _buy_budget(cash)
+        budget = _remaining_buy_budget(cash)
     vol = _cb_lot(price, budget)
     if vol < lot:
         print(_strategy_tag(), "buy skip lot", "price=", price, "budget=", budget)
@@ -1806,20 +2322,59 @@ def _order_buy_limit(C, price, now, budget=None):
         return False
     cash = _available_cash()
     if cash is not None and cash < price * vol:
-        vol = _cb_lot(price, cash)
+        vol = _cb_lot(price, min(budget, float(cash)))
         if vol < lot:
             print(_strategy_tag(), "buy skip cash", cash)
             _event_log("buy_skip", reason="cash", cash=cash, price=price)
             return False
 
     ot = (now or datetime.datetime.now()).strftime("%Y%m%d%H%M%S")
-    msg = _new_remark("BUY", "BUY", vol)
-    print(("[DRY] " if DRY_RUN else "") + msg, "@limit", price)
+    msg = _new_remark(intent, "BUY", vol)
+    print(("[DRY] " if DRY_RUN else "") + msg, "@limit", price, intent)
+    exempt = set(str(x) for x in (globals().get("PENDING_TIMEOUT_EXEMPT_INTENTS") or ()))
+    no_timeout = str(intent) in exempt
     if DRY_RUN:
-        _apply_cb_buy_fill(vol, price, ot)
+        if bool(globals().get("DRY_RUN_FILL_IMMEDIATE", False)):
+            _apply_cb_buy_fill(vol, price, ot, intent=intent)
+            return True
+        A.pending = {
+            "remark": msg,
+            "side": "buy",
+            "intent": intent,
+            "vol": int(vol),
+            "stock": A.stock,
+            "price_hint": float(price),
+            "opened_at": ot,
+            "submitted_at": ot,
+            "cancel_requested": False,
+            "no_timeout": no_timeout,
+            "dry_keep": True,
+            "extra_pos": {"intent": intent},
+        }
+        A.buy_done_day = ot[:8]
+        A.sh_last_order_px = float(price)
+        _save_state()
+        print(_strategy_tag(), "DRY pending", vol, "@", price, intent)
+        _event_log(
+            "buy_submitted",
+            vol=vol,
+            price=price,
+            remark=msg,
+            intent=intent,
+            dry_run=True,
+            dry_keep=True,
+        )
+        if (
+            bool(globals().get("DRY_RUN_FILL_ON_LIMIT", True))
+            and price + 1e-9 >= _limit_up()
+        ):
+            _apply_cb_buy_fill(vol, price, ot, intent=intent)
+            A.pending = None
+            _save_state()
+            print(_strategy_tag(), "DRY fill on limit", price)
         return True
     try:
-        # prType=11 指定价；quickTrade=1 即时报单（集合竞价可挂）
+        # prType=11 指定价；quickTrade=1 即时报单（集合竞价/连续均可挂）
         passorder(
             A.buy_code,
             1101,
@@ -1838,55 +2393,354 @@ def _order_buy_limit(C, price, now, budget=None):
         _event_log("passorder_fail", side="buy", error=str(e), vol=vol, price=price)
         return False
     if getattr(A, "is_backtest", False):
-        _apply_cb_buy_fill(vol, price, ot)
+        _apply_cb_buy_fill(vol, price, ot, intent=intent)
         return True
     A.pending = {
         "remark": msg,
         "side": "buy",
-        "intent": "BUY",
+        "intent": intent,
         "vol": int(vol),
         "stock": A.stock,
         "price_hint": float(price),
         "opened_at": ot,
         "submitted_at": ot,
         "cancel_requested": False,
-        "extra_pos": {},
+        "no_timeout": no_timeout,
+        "extra_pos": {"intent": intent},
     }
     A.buy_done_day = ot[:8]
+    A.sh_last_order_px = float(price)
     _save_state()
-    print(_strategy_tag(), "BUY submitted limit", vol, "@", price, msg)
-    _event_log("buy_submitted", vol=vol, price=price, remark=msg, dry_run=False)
-    return True
-
-
-def _cb_sim_sell(now, reason, price):
-    """仅回测：按提示价清空影子仓（T+0）。"""
-    if not getattr(A, "is_backtest", False):
-        return False
-    if not _has_position() and _bt_held_vol() < int(globals().get("LOT_SIZE") or 10):
-        return False
-    A.bt_locked = 0
-    vol = max(_pos_shares(), _bt_held_vol())
-    print(
-        "[BT-SIM] %s SELL" % _strategy_tag(),
-        reason,
-        "vol=",
-        vol,
-        "@",
-        price,
-    )
+    print(_strategy_tag(), "BUY submitted limit", vol, "@", price, msg, intent)
     _event_log(
-        "bt_sim_sell",
-        sell_reason=reason,
+        "buy_submitted",
         vol=vol,
         price=price,
+        remark=msg,
+        intent=intent,
+        dry_run=False,
     )
-    _clear_after_sell(now, reason, last=price)
     return True
+
+
+def _request_pending_cancel(C, now, reason):
+    """主动撤当前 pending；未见委托时不打 cancel_requested，避免永久卡住。"""
+    pend = getattr(A, "pending", None)
+    if not isinstance(pend, dict):
+        return False
+    if pend.get("cancel_requested"):
+        return True
+    # DRY 虚拟单：直接清掉，供同 bar 重挂
+    if DRY_RUN and bool(pend.get("dry_keep")):
+        print(_strategy_tag(), "DRY cancel", reason, "px=", pend.get("price_hint"))
+        _event_log(
+            "chase_cancel",
+            reason=reason,
+            price=pend.get("price_hint"),
+            remark=pend.get("remark"),
+            dry=True,
+        )
+        A.pending = None
+        _save_state()
+        return True
+    remark = str(pend.get("remark", "") or "")
+    stock = str(pend.get("stock", A.stock) or A.stock)
+    od, qok = _find_order_ex(remark, stock)
+    if not qok:
+        print(_strategy_tag(), "chase cancel defer: order query fail", reason)
+        _event_log("chase_cancel_defer", reason=reason, error="order_query_fail")
+        return False
+    if od is None:
+        # 委托尚未回写：不标记 cancel_requested，下根再试
+        print(_strategy_tag(), "chase cancel defer: order not visible yet", reason)
+        _event_log("chase_cancel_defer", reason=reason, error="order_not_visible")
+        return False
+    pend["order_seen"] = True
+    _try_cancel_order(od, C)
+    pend["cancel_requested"] = True
+    pend["cancel_at"] = (now or datetime.datetime.now()).strftime("%Y%m%d%H%M%S")
+    pend["cancel_reason"] = str(reason or "")
+    A.pending = pend
+    _save_state()
+    print(_strategy_tag(), "chase cancel requested", reason, "px=", pend.get("price_hint"))
+    _event_log(
+        "chase_cancel",
+        reason=reason,
+        price=pend.get("price_hint"),
+        remark=remark,
+        order_seen=True,
+    )
+    return True
+
+
+def _reconcile_with_broker():
+    """实盘启动/暖机切活：用券商持仓校正影子仓，防状态丢失后重复买。"""
+    if getattr(A, "is_backtest", False) or DRY_RUN:
+        return
+    if _available_cash() is None:
+        print(_strategy_tag(), "reconcile skip: not login")
+        _event_log("reconcile_skip", reason="not_login")
+        return
+    lot = int(globals().get("LOT_SIZE") or 10)
+    stock = str(getattr(A, "stock", "") or "")
+    try:
+        positions = get_trade_detail_data(A.acct, A.acct_type, "position")
+    except Exception as e:
+        print(_strategy_tag(), "reconcile position query fail", e)
+        _event_log("reconcile_fail", error=str(e))
+        return
+    if positions is None:
+        _event_log("reconcile_fail", error="positions_none")
+        return
+    vol = 0
+    cost = 0.0
+    found = False
+    for p in positions:
+        if _pos_code(p) != stock:
+            continue
+        found = True
+        vol = int(getattr(p, "m_nVolume", 0) or 0)
+        for attr in ("m_dOpenPrice", "m_dCostPrice", "m_dAvgPrice"):
+            v = getattr(p, attr, None)
+            if v is not None:
+                try:
+                    cost = float(v)
+                    if cost > 0:
+                        break
+                except Exception:
+                    pass
+        break
+    if found and vol > 0:
+        cur = int((getattr(A, "position", None) or {}).get("shares", 0) or 0)
+        if cur != vol or (not _has_position()):
+            ot = ""
+            if isinstance(getattr(A, "position", None), dict):
+                ot = str(A.position.get("opened_at", "") or "")
+            if not ot:
+                ot = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+            A.position = {
+                "shares": vol,
+                "price": float(cost) if cost > 0 else float(
+                    (getattr(A, "position", None) or {}).get("price", 0) or 0
+                ),
+                "cost": round(vol * float(cost), 2) if cost > 0 else 0.0,
+                "opened_at": ot,
+                "reconciled": True,
+            }
+            if not hasattr(A, "acted") or A.acted is None:
+                A.acted = set()
+            A.acted.add("BUY")
+            day = ot[:8] if len(ot) >= 8 else datetime.datetime.now().strftime("%Y%m%d")
+            A.buy_done_day = day
+            _save_state()
+            print(_strategy_tag(), "reconcile sync from broker vol=", vol, "cost=", cost)
+            _event_log("reconcile_sync", vol=vol, cost=cost)
+        return
+    # 已登录且持仓列表确认无此标的（或量为0）→ 清影子仓，避免假持仓挡买入
+    if (not found or vol <= 0) and _has_position():
+        print(
+            _strategy_tag(),
+            "reconcile clear shadow (broker flat) was=",
+            A.position,
+        )
+        _event_log("reconcile_clear", was=A.position, broker_vol=vol, found=found)
+        A.position = None
+        if hasattr(A, "acted") and isinstance(A.acted, set):
+            A.acted.discard("BUY")
+        A.buy_done_day = ""
+        _save_state()
 
 
 def _in_window(now_s, start, end):
     return str(start) <= str(now_s) <= str(end)
+
+
+def _now_ms(now):
+    if now is None:
+        now = datetime.datetime.now()
+    try:
+        return now.timestamp() * 1000.0
+    except Exception:
+        return 0.0
+
+
+def _handle_sz(C, now, now_s, day, last_px):
+    """深市两段：临停埋 143 → 封板后撤未成单再挂 157.30。"""
+    reopen = _reopen_cap()
+    limit_up = _limit_up()
+    pre_s = str(globals().get("SZ_PREPLACE_START") or "130000")
+    pre_e = str(globals().get("SZ_PREPLACE_END") or "145459")
+    close_s = str(globals().get("SZ_CLOSE_BUY_START") or "145700")
+    close_e = str(globals().get("SZ_CLOSE_BUY_END") or "145950")
+    alert_sec = float(globals().get("SZ_ESCALATE_ALERT_SEC") or 2.0)
+
+    # 阶段1：临停期埋首段顶格（禁 157.30）
+    if _in_window(now_s, pre_s, pre_e):
+        if str(getattr(A, "sz_preplace_day", "") or "") == day:
+            return
+        if _has_position() or getattr(A, "pending", None):
+            return
+        print(
+            "%s SZ_PREPLACE buy @%.3f window=%s-%s (禁挂涨停顶格)"
+            % (STRATEGY_NAME, reopen, pre_s, pre_e)
+        )
+        _event_log("sz_preplace", price=reopen, window="%s-%s" % (pre_s, pre_e))
+        if _order_buy_limit(C, reopen, now, intent="SZ_PREPLACE"):
+            A.sz_preplace_day = day
+            A.buy_done_day = day
+            _save_state()
+        return
+
+    # 阶段2：复牌后仅当最新价已封全天上限，才挂收盘顶格
+    if not _in_window(now_s, close_s, close_e):
+        return
+    if str(getattr(A, "sz_close_buy_day", "") or "") == day:
+        return
+    if _has_position():
+        return
+    if last_px + 1e-9 < limit_up:
+        if C.barpos % 5 == 0:
+            print(
+                "%s SZ_CLOSE wait limit_up last=%.3f need=%.3f"
+                % (STRATEGY_NAME, last_px, limit_up)
+            )
+        return
+
+    pend = getattr(A, "pending", None)
+    if isinstance(pend, dict):
+        # 143 未成且已封板：必须先撤，否则卡在不可撤的收盘竞价里踏空
+        intent = str(pend.get("intent", "") or "")
+        old_px = float(pend.get("price_hint") or 0)
+        if not pend.get("cancel_requested"):
+            A.sz_escalate_day = day
+            print(
+                "%s SZ_ESCALATE cancel old=%.3f intent=%s -> then @%.3f"
+                % (STRATEGY_NAME, old_px, intent, limit_up)
+            )
+            _event_log(
+                "sz_escalate_cancel",
+                old=old_px,
+                intent=intent,
+                target=limit_up,
+                last=last_px,
+            )
+            _request_pending_cancel(C, now, "sz_escalate_to_limit")
+            A.sz_escalate_alert_ms = _now_ms(now)
+            _save_state()
+            # DRY 即时清掉 pending 时可同 bar 继续挂顶格
+            if getattr(A, "pending", None):
+                return
+            pend = None
+        else:
+            # 撤单中仍未清：周期告警（可能已进入不可撤时段）
+            now_ms = _now_ms(now)
+            last_alert = float(getattr(A, "sz_escalate_alert_ms", 0) or 0)
+            if last_alert <= 0 or (now_ms - last_alert) >= alert_sec * 1000.0:
+                A.sz_escalate_alert_ms = now_ms
+                print(
+                    "%s SZ_ESCALATE ALERT: 143未撤掉无法挂157.30 pending=%s "
+                    "px=%.3f - 若已进收盘竞价请人工处理"
+                    % (STRATEGY_NAME, intent, old_px)
+                )
+                _event_log(
+                    "sz_escalate_alert",
+                    intent=intent,
+                    price=old_px,
+                    last=last_px,
+                    cancel_requested=True,
+                )
+                _save_state()
+            return
+
+    if isinstance(pend, dict):
+        return
+
+    # pending 已清（撤成/废单）：挂顶格
+    print(
+        "%s SZ_CLOSE buy @%.3f last=%.3f window=%s-%s"
+        % (STRATEGY_NAME, limit_up, last_px, close_s, close_e)
+    )
+    _event_log(
+        "sz_close_buy",
+        price=limit_up,
+        last=last_px,
+        window="%s-%s" % (close_s, close_e),
+        escalated=str(getattr(A, "sz_escalate_day", "") or "") == day,
+    )
+    if _order_buy_limit(C, limit_up, now, intent="SZ_CLOSE"):
+        A.sz_close_buy_day = day
+        A.buy_done_day = day
+        _save_state()
+
+
+def _handle_sh(C, now, now_s, day, last_px):
+    """沪市连续竞价：143 起阶梯追至 157.30。"""
+    start = str(globals().get("SH_CHASE_START") or "145700")
+    end = str(globals().get("SH_CHASE_END") or "145955")
+    if not _in_window(now_s, start, end):
+        return
+    if _has_position():
+        return
+
+    reopen = _reopen_cap()
+    limit_up = _limit_up()
+    target = _cage_cap(last_px if last_px > 0 else reopen)
+    if target < reopen:
+        target = reopen
+    interval = float(globals().get("SH_CHASE_INTERVAL_MS") or 200)
+    min_step = float(globals().get("CHASE_MIN_STEP") or 0.01)
+    now_ms = _now_ms(now)
+    pend = getattr(A, "pending", None)
+    # 节流只抑制「重复发起撤单」；pending 已空时允许立刻重挂
+    if isinstance(pend, dict):
+        last_ms = float(getattr(A, "sh_chase_at_ms", 0) or 0)
+        if last_ms > 0 and (now_ms - last_ms) < interval:
+            if pend.get("cancel_requested"):
+                pass  # 撤单等待中仍可走下面告警分支
+            else:
+                return
+
+    if isinstance(pend, dict):
+        old_px = float(pend.get("price_hint") or 0)
+        if old_px + 1e-9 >= limit_up:
+            return
+        if target > old_px + min_step:
+            if not pend.get("cancel_requested"):
+                A.sh_chase_at_ms = now_ms
+                print(
+                    "%s SH_CHASE cancel->%.3f old=%.3f last=%.3f"
+                    % (STRATEGY_NAME, target, old_px, last_px)
+                )
+                _event_log("sh_chase", target=target, old=old_px, last=last_px)
+                _request_pending_cancel(C, now, "cage_up")
+                # DRY 即时清 pending 后同 bar 重挂
+                if getattr(A, "pending", None):
+                    return
+            else:
+                if C.barpos % 3 == 0:
+                    print(
+                        "%s SH_CHASE wait cancel old=%.3f target=%.3f"
+                        % (STRATEGY_NAME, old_px, target)
+                    )
+                return
+            # fall through when dry cancel cleared pending
+        else:
+            return
+
+    if "BUY" in getattr(A, "acted", set()):
+        return
+    A.sh_chase_at_ms = now_ms
+    intent = "SH_OPEN" if str(getattr(A, "sh_chase_day", "") or "") != day else "SH_CHASE"
+    print(
+        "%s %s buy @%.3f last=%.3f cage=%.3f"
+        % (STRATEGY_NAME, intent, target, last_px, target)
+    )
+    _event_log("sh_buy", intent=intent, price=target, last=last_px)
+    if _order_buy_limit(C, target, now, intent=intent):
+        A.sh_chase_day = day
+        A.sh_last_order_px = float(target)
+        A.buy_done_day = day
+        _save_state()
 
 
 def _handle(C):
@@ -1900,8 +2754,11 @@ def _handle(C):
     if not bt:
         if getattr(A, "pending", None):
             if _process_pending(C, now):
-                _live_heartbeat("pending")
-                return
+                # pending 处理中仍允许沪市在同 bar 评估是否追单
+                pass
+            else:
+                # pending 已清空（成交/废单），继续本 bar 逻辑
+                pass
         if LIVE_ONLY_LAST_BAR:
             try:
                 if hasattr(C, "is_last_bar") and (not C.is_last_bar()):
@@ -1925,24 +2782,18 @@ def _handle(C):
         _live_heartbeat("ohlcv_none")
         return
     opens, highs, lows, closes, vols = ohlcv
-    last_px = float(closes[-1])
+    bar_last = float(closes[-1])
     open_px = float(opens[-1])
+    last_px = _tick_last(C, fallback=bar_last)
+    if last_px <= 0:
+        last_px = _px_round(bar_last)
 
     if bt:
         _bt_recover_position(now=now, last=last_px)
 
-    holding = _has_position() or (
-        bt and _bt_held_vol() >= int(globals().get("LOT_SIZE") or 10)
-    )
+    holding = _has_position() or (bt and _bt_held_vol() > 0)
+    mkt = _market_tag()
     size_yi = _issue_size_yi()
-    small = _is_small_issue()
-    hint_px = _sell_hint_price(last_px)
-
-    buy_start = str(globals().get("BUY_START") or "091500")
-    buy_end = str(globals().get("BUY_END") or "092500")
-    hint_start = str(globals().get("SELL_HINT_START") or "145700")
-    hint_end = str(globals().get("SELL_HINT_END") or "150000")
-    buy_px = float(globals().get("OPEN_BUY_PRICE") or 130.0)
 
     interesting = holding or getattr(A, "pending", None) or (
         str(getattr(A, "buy_done_day", "") or "") == day
@@ -1953,19 +2804,18 @@ def _handle(C):
             "%s" % STRATEGY_NAME,
             day,
             now_s,
-            "n=%d last=%.4f open=%.4f hold=%s size=%s small=%s hint=%s "
-            "buy_done=%s pending=%s bt_held=%s"
+            "mkt=%s n=%d last=%.3f open=%.3f hold=%s size=%s "
+            "buy_done=%s pending=%s cage=%.3f"
             % (
+                mkt,
                 len(closes),
                 last_px,
                 open_px,
                 holding,
                 size_yi,
-                small,
-                hint_px,
                 getattr(A, "buy_done_day", ""),
                 bool(getattr(A, "pending", None)),
-                _bt_held_vol() if bt else "-",
+                _cage_cap(last_px),
             ),
         )
         _bar_log(
@@ -1975,70 +2825,32 @@ def _handle(C):
             last=round(last_px, 6),
             open=round(open_px, 6),
             hold=holding,
+            mkt=mkt,
             size_yi=size_yi,
-            small=small,
-            hint=hint_px,
             buy_done=str(getattr(A, "buy_done_day", "") or ""),
             tag=tag,
         )
 
-    # ---- 开盘竞价限价买 ----
-    in_buy = _in_window(now_s, buy_start, buy_end)
-    already_bought = str(getattr(A, "buy_done_day", "") or "") == day
-    if (
-        in_buy
-        and (not holding)
-        and (not already_bought)
-        and ("BUY" not in getattr(A, "acted", set()))
-        and (not getattr(A, "pending", None))
-    ):
-        print(
-            "%s OPEN_AUCTION buy @%.2f window=%s-%s size=%s"
-            % (STRATEGY_NAME, buy_px, buy_start, buy_end, size_yi)
-        )
-        _event_log(
-            "open_auction_buy",
-            price=buy_px,
-            size_yi=size_yi,
-            window="%s-%s" % (buy_start, buy_end),
-        )
-        ok = _order_buy_limit(C, buy_px, now)
-        if ok:
-            A.buy_done_day = day
-            _save_state()
+    # 已成交则停；有 pending 时沪市仍可撤补追单
+    if holding:
+        return
+    if ("BUY" in getattr(A, "acted", set())) and (not getattr(A, "pending", None)):
         return
 
-    # ---- 收盘：手动卖出提示；回测可选模拟 ----
-    in_hint = _in_window(now_s, hint_start, hint_end)
-    if in_hint and holding:
-        if str(getattr(A, "sell_hint_day", "") or "") != day:
-            A.sell_hint_day = day
-            _save_state()
-            mode = "小盘顶格" if small else "可确认收盘价"
-            print(
-                "%s MANUAL_SELL hint mode=%s price=%s size=%s亿 last=%.4f "
-                "(实盘请手动挂卖，策略不下单)"
-                % (STRATEGY_NAME, mode, hint_px, size_yi, last_px)
-            )
-            _event_log(
-                "manual_sell_hint",
-                mode=mode,
-                price=hint_px,
-                size_yi=size_yi,
-                last=last_px,
-            )
+    if not _is_listing_day(C, day):
+        if C.barpos % 60 == 0:
+            print("%s skip: not listing day" % STRATEGY_NAME, day, A.stock)
+            _event_log("skip_not_listing_day", day=day, stock=A.stock)
+        return
 
-        if (
-            bt
-            and bool(globals().get("BACKTEST_SIM_SELL", True))
-            and str(getattr(A, "sim_sell_day", "") or "") != day
-            and hint_px is not None
-        ):
-            reason = "close_limit_up" if small else "close_confirm"
-            if _cb_sim_sell(now, reason, float(hint_px)):
-                A.sim_sell_day = day
-                _save_state()
-            return
+    if mkt == "SZ":
+        _handle_sz(C, now, now_s, day, last_px)
+    elif mkt == "SH":
+        _handle_sh(C, now, now_s, day, last_px)
+    else:
+        if C.barpos % 60 == 0:
+            print("%s unknown market stock=%s" % (STRATEGY_NAME, A.stock))
+            _event_log("unknown_market", stock=A.stock)
 
 # === cbauct/runtime.py ===
 def init(C):
@@ -2053,6 +2865,25 @@ def init(C):
             traceback.print_exc()
         except Exception:
             pass
+
+
+def _ensure_day_flags():
+    if not hasattr(A, "buy_done_day"):
+        A.buy_done_day = ""
+    if not hasattr(A, "sz_preplace_day"):
+        A.sz_preplace_day = ""
+    if not hasattr(A, "sz_close_buy_day"):
+        A.sz_close_buy_day = ""
+    if not hasattr(A, "sz_escalate_day"):
+        A.sz_escalate_day = ""
+    if not hasattr(A, "sz_escalate_alert_ms"):
+        A.sz_escalate_alert_ms = 0.0
+    if not hasattr(A, "sh_chase_day"):
+        A.sh_chase_day = ""
+    if not hasattr(A, "sh_last_order_px"):
+        A.sh_last_order_px = 0.0
+    if not hasattr(A, "sh_chase_at_ms"):
+        A.sh_chase_at_ms = 0.0
 
 
 def _init_impl(C):
@@ -2104,8 +2935,13 @@ def _init_impl(C):
             A.acted = set()
             A.pending = None
             A.buy_done_day = ""
-            A.sell_hint_day = ""
-            A.sim_sell_day = ""
+            A.sz_preplace_day = ""
+            A.sz_close_buy_day = ""
+            A.sz_escalate_day = ""
+            A.sz_escalate_alert_ms = 0.0
+            A.sh_chase_day = ""
+            A.sh_last_order_px = 0.0
+            A.sh_chase_at_ms = 0.0
             A.bt_held = 0
             A.bt_locked = 0
             A.bt_lock_day = ""
@@ -2120,12 +2956,7 @@ def _init_impl(C):
                 A.acted = set()
             if not hasattr(A, "pending"):
                 A.pending = None
-            if not hasattr(A, "buy_done_day"):
-                A.buy_done_day = ""
-            if not hasattr(A, "sell_hint_day"):
-                A.sell_hint_day = ""
-            if not hasattr(A, "sim_sell_day"):
-                A.sim_sell_day = ""
+            _ensure_day_flags()
             _bt_recover_position()
             print(
                 "%s backtest re-init preserve barpos=" % STRATEGY_NAME,
@@ -2140,12 +2971,12 @@ def _init_impl(C):
         A.ready_logged = False
         if not hasattr(A, "pending"):
             A.pending = None
-        if not hasattr(A, "buy_done_day"):
-            A.buy_done_day = ""
-        if not hasattr(A, "sell_hint_day"):
-            A.sell_hint_day = ""
-        if not hasattr(A, "sim_sell_day"):
-            A.sim_sell_day = ""
+        _ensure_day_flags()
+        try:
+            _reconcile_with_broker()
+        except Exception as e:
+            print("%s reconcile fail" % STRATEGY_NAME, e)
+            _event_log("reconcile_fail", error=str(e))
 
     try:
         C.set_universe([A.stock])
@@ -2153,9 +2984,12 @@ def _init_impl(C):
         print("%s set_universe fail" % STRATEGY_NAME, e)
 
     size_yi = _issue_size_yi()
+    mkt = _market_tag()
     print(
         "%s %s init" % (STRATEGY_NAME, STRATEGY_VER),
         A.stock,
+        "mkt=",
+        mkt,
         A.acct,
         A.acct_type,
         "PERIOD=",
@@ -2168,15 +3002,22 @@ def _init_impl(C):
         TRADE_BUDGET,
         "lot=",
         LOT_SIZE,
-        "open_buy=",
-        OPEN_BUY_PRICE,
+        "reopen_cap=",
+        _reopen_cap(),
+        "limit_up=",
+        _limit_up(),
         "size_yi=",
         size_yi,
-        "small=",
-        _is_small_issue(),
-        "buy_window=",
-        "%s-%s" % (BUY_START, BUY_END),
-        "sell=MANUAL",
+        "sz_pre=",
+        "%s-%s" % (SZ_PREPLACE_START, SZ_PREPLACE_END),
+        "sz_close=",
+        "%s-%s" % (SZ_CLOSE_BUY_START, SZ_CLOSE_BUY_END),
+        "sh_chase=",
+        "%s-%s" % (SH_CHASE_START, SH_CHASE_END),
+        "chase_ms=",
+        SH_CHASE_INTERVAL_MS,
+        "chase_mode=",
+        SH_CHASE_MODE,
     )
     _event_log(
         "init",
@@ -2186,8 +3027,10 @@ def _init_impl(C):
         backtest=A.is_backtest,
         dry_run=DRY_RUN,
         budget=TRADE_BUDGET,
+        mkt=mkt,
         size_yi=size_yi,
-        small=_is_small_issue(),
+        reopen_cap=_reopen_cap(),
+        limit_up=_limit_up(),
         log_dir=str(globals().get("LOG_DIR") or ""),
     )
 

@@ -608,7 +608,10 @@ def _load_state():
         )
         return
     pos = raw.get("position")
-    if isinstance(pos, dict) and int(pos.get("shares", 0) or 0) >= 100:
+    lot = int(globals().get("LOT_SIZE") or 100)
+    if lot <= 0:
+        lot = 100
+    if isinstance(pos, dict) and int(pos.get("shares", 0) or 0) >= lot:
         A.position = dict(pos)
         A.position["shares"] = int(pos["shares"])
         A.position["price"] = float(pos.get("price", 0) or 0)
@@ -619,6 +622,11 @@ def _load_state():
     A.acted = set([str(x) for x in acted]) if isinstance(acted, list) else set()
     pend = raw.get("pending")
     A.pending = pend if isinstance(pend, dict) else None
+    # 历史 DRY 虚拟单不得带入实盘
+    if isinstance(A.pending, dict) and A.pending.get("dry_keep"):
+        print(_strategy_tag(), "state drop dry_keep pending")
+        _event_log("state_drop_dry_pending", remark=A.pending.get("remark"))
+        A.pending = None
     extra = globals().get("_state_extra_load")
     if callable(extra):
         try:
@@ -639,16 +647,22 @@ def _load_state():
 def _save_state():
     if getattr(A, "is_backtest", False):
         return
+    # DRY_RUN 且策略显式关闭落盘时跳过（cbauct: DRY_RUN_SAVE_STATE=False）
+    if DRY_RUN and (not bool(globals().get("DRY_RUN_SAVE_STATE", True))):
+        return
     path = _state_path()
     if not path:
         return
+    pend = getattr(A, "pending", None)
+    if isinstance(pend, dict) and pend.get("dry_keep"):
+        pend = None
     data = {
         "stock": getattr(A, "stock", ""),
         "version": str(globals().get("STRATEGY_VER") or ""),
         "position": getattr(A, "position", None),
         "acted_day": getattr(A, "acted_day", ""),
         "acted": sorted(list(getattr(A, "acted", set()) or [])),
-        "pending": getattr(A, "pending", None),
+        "pending": pend,
         "updated": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
     extra = globals().get("_state_extra_save")
@@ -1310,10 +1324,25 @@ def _available_cash():
         accs = get_trade_detail_data(A.acct, A.acct_type, "account")
     except Exception as e:
         _diag_once("cash_fail", e)
+        if DRY_RUN and bool(globals().get("DRY_RUN_VIRTUAL_CASH", True)):
+            return float(
+                globals().get("DRY_RUN_VIRTUAL_CASH_AMT")
+                or globals().get("TRADE_BUDGET")
+                or 10**9
+            )
         return None
     if not accs:
         print(_strategy_tag(), "account not login", A.acct)
         _event_log("account_not_login", acct=A.acct)
+        if DRY_RUN and bool(globals().get("DRY_RUN_VIRTUAL_CASH", True)):
+            amt = float(
+                globals().get("DRY_RUN_VIRTUAL_CASH_AMT")
+                or globals().get("TRADE_BUDGET")
+                or 10**9
+            )
+            print(_strategy_tag(), "DRY virtual cash=", amt)
+            _event_log("dry_virtual_cash", amt=amt)
+            return amt
         return None
     return float(accs[0].m_dAvailable)
 
@@ -1425,15 +1454,20 @@ def _deal_fill(remark, stock):
     return vol, avg
 
 
-def _find_order(remark, stock):
+def _find_order_ex(remark, stock):
+    """查找委托 -> (order_or_None, query_ok)。
+
+    query_ok=False：接口失败，绝不能当成「已撤/不存在」去清 pending（防双挂）。
+    """
     try:
         orders = get_trade_detail_data(A.acct, A.acct_type, "order")
     except Exception as e:
         print(_strategy_tag(), "order query fail", e)
         _event_log("order_query_fail", error=str(e))
-        return None
-    if not orders:
-        return None
+        return None, False
+    if orders is None:
+        _event_log("order_query_fail", error="orders_none")
+        return None, False
     hit = None
     for od in orders:
         if str(getattr(od, "m_strRemark", "") or "") != remark:
@@ -1442,7 +1476,12 @@ def _find_order(remark, stock):
         if code != stock:
             continue
         hit = od
-    return hit
+    return hit, True
+
+
+def _find_order(remark, stock):
+    od, _ok = _find_order_ex(remark, stock)
+    return od
 
 
 def _order_traded_vol(od):
@@ -1528,7 +1567,16 @@ def _process_pending(C, now):
     pend = getattr(A, "pending", None)
     if not pend:
         return False
-    if getattr(A, "is_backtest", False) or DRY_RUN:
+    if getattr(A, "is_backtest", False):
+        A.pending = None
+        return False
+    if DRY_RUN:
+        # dry_keep：保留虚拟挂单，供策略测撤补/升级；否则沿用旧行为立刻清空
+        if bool(pend.get("dry_keep")):
+            if bool(pend.get("cancel_requested")):
+                _clear_pending("dry_cancel")
+                return False
+            return True
         A.pending = None
         return False
 
@@ -1543,11 +1591,18 @@ def _process_pending(C, now):
         age = (now - submitted).total_seconds()
 
     deal_vol, deal_avg = _deal_fill(remark, stock)
-    od = _find_order(remark, stock)
+    od, order_qok = _find_order_ex(remark, stock)
     status = int(getattr(od, "m_nOrderStatus", -1) or -1) if od is not None else -1
     traded = max(deal_vol, _order_traded_vol(od))
     px = deal_avg if deal_avg > 0 else float(pend.get("price_hint", 0) or 0)
     cancel_req = bool(pend.get("cancel_requested"))
+    if od is not None and not pend.get("order_seen"):
+        pend["order_seen"] = True
+        A.pending = pend
+        try:
+            _save_state()
+        except Exception:
+            pass
 
     print(
         _strategy_tag(),
@@ -1562,6 +1617,10 @@ def _process_pending(C, now):
         "age=%.0fs" % age,
         "cancel_req=",
         cancel_req,
+        "qok=",
+        order_qok,
+        "seen=",
+        bool(pend.get("order_seen")),
     )
     _event_log(
         "pending_check",
@@ -1574,16 +1633,22 @@ def _process_pending(C, now):
         cancel_req=cancel_req,
         target=target,
         remark=remark,
+        order_qok=order_qok,
+        order_seen=bool(pend.get("order_seen")),
     )
 
     filled = globals().get("_ORDER_FILLED") or (56, 8)
     dead = globals().get("_ORDER_DEAD") or (54, 57, 53, 5, 6, 9)
-    done_fill = traded >= target and target >= 100
+    # 股票默认 100；可转债等可在策略 config 设 LOT_SIZE=10
+    lot = int(globals().get("LOT_SIZE") or 100)
+    if lot <= 0:
+        lot = 100
+    done_fill = traded >= target and target >= lot
     status_filled = status in filled
     status_dead = status in dead
 
-    if done_fill or (status_filled and traded >= 100):
-        use_vol = traded if traded >= 100 else deal_vol
+    if done_fill or (status_filled and traded >= lot):
+        use_vol = traded if traded >= lot else deal_vol
         if side == "buy":
             _pending_on_buy_fill(pend, use_vol, px)
         else:
@@ -1592,7 +1657,7 @@ def _process_pending(C, now):
         return False
 
     if status_dead:
-        if traded >= 100:
+        if traded > 0:
             if side == "buy":
                 _pending_on_buy_fill(pend, traded, px)
             else:
@@ -1604,32 +1669,128 @@ def _process_pending(C, now):
 
     timeout = float(globals().get("PENDING_TIMEOUT_SEC") or 180)
     orphan = float(globals().get("PENDING_ORPHAN_SEC") or 60)
-    if age >= timeout:
-        if not cancel_req:
-            if od is not None:
-                _try_cancel_order(od, C)
-            else:
-                print(_strategy_tag(), "pending timeout, order not visible yet")
-                _event_log("pending_timeout", remark=remark, intent=intent, age_sec=int(age))
-            pend["cancel_requested"] = True
-            pend["cancel_at"] = (now or datetime.datetime.now()).strftime("%Y%m%d%H%M%S")
-            A.pending = pend
-            _save_state()
-            return True
+    retry_sec = float(globals().get("CANCEL_RETRY_SEC") or 1.0)
+
+    # 主动撤单中：周期重试；仅「曾经见过委托 + 查询成功 + 委托已消失」才可清 pending
+    if cancel_req:
         cancel_at = _parse_opened_at(pend.get("cancel_at"))
         cancel_age = 0.0
         if cancel_at is not None and now is not None:
             cancel_age = (now - cancel_at).total_seconds()
-        if od is None and cancel_age >= orphan:
-            print(_strategy_tag(), "pending orphan clear (no order after cancel wait)")
+        if not order_qok:
+            print(_strategy_tag(), "cancel wait: order query fail, keep pending")
             _event_log(
-                "pending_orphan",
+                "cancel_wait_query_fail",
                 remark=remark,
                 intent=intent,
                 cancel_age_sec=int(cancel_age),
             )
-            _clear_pending("orphan")
+            return True
+        if od is not None:
+            last_retry = _parse_opened_at(pend.get("cancel_retry_at"))
+            retry_age = 1e9
+            if last_retry is not None and now is not None:
+                retry_age = (now - last_retry).total_seconds()
+            if last_retry is None or retry_age >= retry_sec:
+                ok = _try_cancel_order(od, C)
+                pend["cancel_retry_at"] = (now or datetime.datetime.now()).strftime(
+                    "%Y%m%d%H%M%S"
+                )
+                A.pending = pend
+                _save_state()
+                if not ok:
+                    print(
+                        _strategy_tag(),
+                        "cancel retry fail; order still open age=%.0fs" % cancel_age,
+                    )
+                    _event_log(
+                        "cancel_retry_fail",
+                        remark=remark,
+                        intent=intent,
+                        cancel_age_sec=int(cancel_age),
+                    )
+            return True
+        # 查询成功且委托列表中已无此单
+        if pend.get("order_seen") and cancel_age >= orphan:
+            if traded > 0:
+                if side == "buy":
+                    _pending_on_buy_fill(pend, traded, px)
+                else:
+                    _pending_on_sell_fill(pend, now, traded, px)
+                _clear_pending("cancel_gone_partial")
+            else:
+                print(
+                    _strategy_tag(),
+                    "pending clear after cancel: order seen then gone",
+                )
+                _event_log(
+                    "pending_cancel_confirmed",
+                    remark=remark,
+                    intent=intent,
+                    cancel_age_sec=int(cancel_age),
+                )
+                _clear_pending("cancel_confirmed_gone")
             return False
+        if cancel_age >= orphan and (not pend.get("order_seen")):
+            # 从未见到委托：拒绝 orphan 清，避免旧单仍在时双挂
+            print(
+                _strategy_tag(),
+                "orphan blocked: order never seen, keep pending age=%.0fs"
+                % cancel_age,
+            )
+            _event_log(
+                "pending_orphan_blocked",
+                remark=remark,
+                intent=intent,
+                cancel_age_sec=int(cancel_age),
+                reason="order_never_seen",
+            )
+        return True
+
+    if age >= timeout:
+        exempt = globals().get("PENDING_TIMEOUT_EXEMPT_INTENTS") or ()
+        try:
+            exempt_set = set(str(x) for x in exempt)
+        except Exception:
+            exempt_set = set()
+        if intent in exempt_set or bool(pend.get("no_timeout")):
+            # 长生命周期挂单（如深市临停埋单/沪市首单）禁止超时撤
+            log_sec = float(globals().get("PENDING_TIMEOUT_EXEMPT_LOG_SEC") or 300)
+            last_log = _parse_opened_at(pend.get("timeout_exempt_log_at"))
+            need_log = last_log is None
+            if (not need_log) and now is not None and last_log is not None:
+                need_log = (now - last_log).total_seconds() >= log_sec
+            if need_log:
+                print(
+                    _strategy_tag(),
+                    "pending timeout exempt intent=",
+                    intent,
+                    "age=%.0fs" % age,
+                )
+                _event_log(
+                    "pending_timeout_exempt",
+                    remark=remark,
+                    intent=intent,
+                    age_sec=int(age),
+                )
+                pend["timeout_exempt_log_at"] = (
+                    now or datetime.datetime.now()
+                ).strftime("%Y%m%d%H%M%S")
+                A.pending = pend
+                try:
+                    _save_state()
+                except Exception:
+                    pass
+            return True
+        if od is not None:
+            _try_cancel_order(od, C)
+        else:
+            print(_strategy_tag(), "pending timeout, order not visible yet")
+            _event_log("pending_timeout", remark=remark, intent=intent, age_sec=int(age))
+        pend["cancel_requested"] = True
+        pend["cancel_at"] = (now or datetime.datetime.now()).strftime("%Y%m%d%H%M%S")
+        A.pending = pend
+        _save_state()
         return True
 
     return True

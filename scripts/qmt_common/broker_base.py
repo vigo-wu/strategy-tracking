@@ -9,10 +9,25 @@ def _available_cash():
         accs = get_trade_detail_data(A.acct, A.acct_type, "account")
     except Exception as e:
         _diag_once("cash_fail", e)
+        if DRY_RUN and bool(globals().get("DRY_RUN_VIRTUAL_CASH", True)):
+            return float(
+                globals().get("DRY_RUN_VIRTUAL_CASH_AMT")
+                or globals().get("TRADE_BUDGET")
+                or 10**9
+            )
         return None
     if not accs:
         print(_strategy_tag(), "account not login", A.acct)
         _event_log("account_not_login", acct=A.acct)
+        if DRY_RUN and bool(globals().get("DRY_RUN_VIRTUAL_CASH", True)):
+            amt = float(
+                globals().get("DRY_RUN_VIRTUAL_CASH_AMT")
+                or globals().get("TRADE_BUDGET")
+                or 10**9
+            )
+            print(_strategy_tag(), "DRY virtual cash=", amt)
+            _event_log("dry_virtual_cash", amt=amt)
+            return amt
         return None
     return float(accs[0].m_dAvailable)
 
