@@ -21,8 +21,8 @@ ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 TRADE_BUDGET = 25000.0
 # 按标的覆盖预算（key 须与 A.stock 一致，如 513530.SH）
 TRADE_BUDGET_BY_STOCK = {
-    "513530.SH": 20000.0,
-    "601398.SH": 30000.0,
+    "513530.SH": 50000.0,
+    "601398.SH": 50000.0,
 }
 # 可用现金占用比例（预留下单缓冲，避免满仓打满失败）
 CASH_RATIO = 0.8
@@ -89,7 +89,12 @@ TIME_FORCE_GRACE_BARS = 5
 CHASE_MAX_PCT = 0.05
 # stop_loss：收盘价 <= 成本 * (1 - 此值) → 硬止损清仓
 STOP_LOSS = 0.08
-# （另有 weekly_bear：周线空头时强制清仓，无独立阈值，见周线 bull/bear 判定）
+# weekly_bear 强制清仓：连续 N 个信号日（日 K）仍为空头才挂 pending_exit
+#   N<=0 或 1：当天空头即挂（与改前一致）；N=2：连续两日仍空才挂
+#   禁开 / 撤买入 pending 仍按「当日」空头即时生效，不要求满 N 日
+W_BEAR_CONFIRM_DAYS = 3
+
+# （另有 weekly_bear：周线空头判定见 _eval_weekly；清仓见上）
 
 # ---- 行情与运行 ----
 # 主图周期；周线另拉 1w 跨周期
@@ -137,7 +142,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.19"
+STRATEGY_VER = "v1.20"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
@@ -506,6 +511,11 @@ def _state_extra_load(raw):
         A.time_force_grace_until = None
     A._confirmed_eval_day = str(raw.get("confirmed_eval_day", "") or "")
     A._fallback_done_day = str(raw.get("fallback_done_day", "") or "")
+    try:
+        A._w_bear_streak = int(raw.get("w_bear_streak", 0) or 0)
+    except Exception:
+        A._w_bear_streak = 0
+    A._w_bear_last_day = str(raw.get("w_bear_last_day", "") or "")
 
 
 def _state_extra_save(data):
@@ -519,6 +529,8 @@ def _state_extra_save(data):
     data["time_force_grace_until"] = None if gu is None else int(gu)
     data["confirmed_eval_day"] = str(getattr(A, "_confirmed_eval_day", "") or "")
     data["fallback_done_day"] = str(getattr(A, "_fallback_done_day", "") or "")
+    data["w_bear_streak"] = int(getattr(A, "_w_bear_streak", 0) or 0)
+    data["w_bear_last_day"] = str(getattr(A, "_w_bear_last_day", "") or "")
 
 # === qmt_common/single/state_io.py ===
 # 作用: 单仓 JSON 状态读写（回测不落盘）
@@ -2008,6 +2020,84 @@ def _eval_weekly(closes_w):
     return bull, bear, detail
 
 
+def _w_bear_confirm_need():
+    """最少 1：当天空头即可挂清仓；勿用 `x or 2`（0 会被当成缺省翻成 2）。"""
+    raw = globals().get("W_BEAR_CONFIRM_DAYS", 2)
+    try:
+        n = int(2 if raw is None else raw)
+    except Exception:
+        n = 2
+    return max(1, n)
+
+
+def _update_w_bear_streak(weekly_bear, sig_day, track):
+    """
+    连续 N 个信号日仍周线空头才确认清仓。
+    track=False（实盘盘中 exec）不改计数，避免半成品 K 抖动。
+    返回 (force_empty, streak)。
+    """
+    need = _w_bear_confirm_need()
+    sig_day = str(sig_day or "")
+    streak = int(getattr(A, "_w_bear_streak", 0) or 0)
+    last = str(getattr(A, "_w_bear_last_day", "") or "")
+    if not track:
+        return bool(weekly_bear) and streak >= need, streak
+    if not sig_day:
+        return False, streak
+
+    prev_streak = streak
+    prev_last = last
+    changed = False
+
+    if sig_day == last:
+        # 同一信号日：confirm 窗内可能先空后翻多（或相反），须跟最终电平
+        if weekly_bear:
+            if streak <= 0:
+                streak = 1
+                changed = True
+        else:
+            if streak > 0:
+                streak = 0
+                changed = True
+    elif weekly_bear:
+        if streak > 0 and last and sig_day > last:
+            streak = streak + 1
+        else:
+            streak = 1
+        changed = True
+    else:
+        streak = 0
+        changed = True
+
+    A._w_bear_streak = int(streak)
+    A._w_bear_last_day = sig_day
+    if changed or (sig_day != prev_last):
+        if not getattr(A, "is_backtest", False):
+            _save_state()
+        if weekly_bear and (streak != prev_streak or sig_day != prev_last):
+            print(
+                "%s w_bear streak=%d/%d day=%s"
+                % (STRATEGY_NAME, streak, need, sig_day)
+            )
+            _event_log(
+                "w_bear_streak",
+                streak=streak,
+                need=need,
+                signal_day=sig_day,
+            )
+        elif (not weekly_bear) and prev_streak:
+            print(
+                "%s w_bear streak reset day=%s (was %d)"
+                % (STRATEGY_NAME, sig_day, prev_streak)
+            )
+            _event_log(
+                "w_bear_streak_reset",
+                signal_day=sig_day,
+                was=prev_streak,
+            )
+    return streak >= need, streak
+
+
 def _eval_daily_buy(closes, volumes):
     """买点：缩量回踩 MA20/MA60。"""
     reasons = []
@@ -2555,6 +2645,11 @@ def _handle(C):
         _bt_recover_position(now=now, last=float(closes_d[-1]))
 
     weekly_bull, weekly_bear, w_detail = _eval_weekly(closes_ws)
+    # 清仓二次确认只在 bt / confirm / 开盘兜底累计；盘中 exec 不改 streak
+    track_bear = (not live_cc) or (phase == "confirm") or bool(need_fallback)
+    force_empty, w_bear_n = _update_w_bear_streak(
+        weekly_bear, sig_day, track=track_bear
+    )
     w_bias_block, w_bias = _weekly_bias_guard(w_detail)
     w_slope_block, _w_bias_low = _weekly_low_slope_guard(w_detail)
     buy_ok, buy_reasons, b_detail = _eval_daily_buy(closes_s, vols_s)
@@ -2636,7 +2731,6 @@ def _handle(C):
         and buy_ok
         and real_buys
     )
-    force_empty = bool(weekly_bear)
     vol_dry_block = "vol_dry_skip" in buy_reasons
 
     pe_now = bool(getattr(A, "pending_entry", None))
@@ -2653,7 +2747,7 @@ def _handle(C):
             day,
             hhmm,
             "n1d=%d n1w=%d close=%.4f sig_day=%s phase=%s prev=%s "
-            "w_bull=%s w_bear=%s w_ma5=%s w_ma30=%s w_hist=%s "
+            "w_bull=%s w_bear=%s w_bn=%s/%s w_ma5=%s w_ma30=%s w_hist=%s "
             "buy=%s buyR=%s sell=%s sellR=%s "
             "hold=%s ret=%s pe=%s px=%s bt_held=%s avail=%s"
             % (
@@ -2665,6 +2759,8 @@ def _handle(C):
                 use_prev_bar,
                 weekly_bull,
                 weekly_bear,
+                w_bear_n,
+                _w_bear_confirm_need(),
                 None if w_detail.get("ma5") is None else round(w_detail["ma5"], 4),
                 None if w_detail.get("ma30") is None else round(w_detail["ma30"], 4),
                 None if w_detail.get("hist") is None else round(w_detail["hist"], 4),
@@ -2691,6 +2787,8 @@ def _handle(C):
             prev=use_prev_bar,
             w_bull=weekly_bull,
             w_bear=weekly_bear,
+            w_bn=w_bear_n,
+            w_bn_need=_w_bear_confirm_need(),
             w_ma5=None if w_detail.get("ma5") is None else round(w_detail["ma5"], 4),
             w_ma30=None if w_detail.get("ma30") is None else round(w_detail["ma30"], 4),
             w_hist=None if w_detail.get("hist") is None else round(w_detail["hist"], 4),
@@ -3006,6 +3104,8 @@ def _init_impl(C):
             A.time_force_grace_until = None
             A._confirmed_eval_day = ""
             A._fallback_done_day = ""
+            A._w_bear_streak = 0
+            A._w_bear_last_day = ""
             A.bt_held = 0
             A.bt_locked = 0
             A.bt_lock_day = ""
@@ -3036,6 +3136,10 @@ def _init_impl(C):
                 A._confirmed_eval_day = ""
             if not hasattr(A, "_fallback_done_day"):
                 A._fallback_done_day = ""
+            if not hasattr(A, "_w_bear_streak"):
+                A._w_bear_streak = 0
+            if not hasattr(A, "_w_bear_last_day"):
+                A._w_bear_last_day = ""
             _bt_recover_position()
             print(
                 "%s backtest re-init preserve barpos=" % STRATEGY_NAME,
@@ -3066,6 +3170,10 @@ def _init_impl(C):
             A._confirmed_eval_day = ""
         if not hasattr(A, "_fallback_done_day"):
             A._fallback_done_day = ""
+        if not hasattr(A, "_w_bear_streak"):
+            A._w_bear_streak = 0
+        if not hasattr(A, "_w_bear_last_day"):
+            A._w_bear_last_day = ""
 
     try:
         C.set_universe([A.stock])
