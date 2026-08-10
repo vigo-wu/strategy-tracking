@@ -55,11 +55,16 @@ def _eval_weekly(closes_w):
     h1 = _last_valid(hist, i - 1)
     d1 = _last_valid(dif, i - 1)
     e1 = _last_valid(dea, i - 1)
-    m30_prev2 = _last_valid(ma30, i - 2) if i >= 2 else None
+    slope_weeks = int(globals().get("W_MA30_SLOPE_WEEKS", 2) or 2)
     slope_up_n = False
-    if m30 is not None and m30_prev is not None and m30_prev2 is not None:
-        # 连续 2 周向上：ma30[t]>ma30[t-1] 且 ma30[t-1]>ma30[t-2]
-        slope_up_n = (m30 > m30_prev) and (m30_prev > m30_prev2)
+    if slope_weeks > 0 and i >= slope_weeks:
+        slope_up_n = True
+        for k in range(slope_weeks):
+            a = _last_valid(ma30, i - k)
+            b = _last_valid(ma30, i - k - 1)
+            if a is None or b is None or not (a > b):
+                slope_up_n = False
+                break
     detail.update(
         {
             "ma5": m5,
@@ -113,7 +118,7 @@ def _eval_daily_buy(closes, volumes):
     if prev > 0 and (price - prev) / prev >= float(CHASE_MAX_PCT):
         return False, ["chase_skip"], detail
 
-    # 无量阴跌不言底：跌破 MA20 且量 < 20 日均量 * 0.7 → 全局禁开
+    # 无量阴跌不言底：跌破 MA20 且量 < 20 日均量 * VOL_DRY_RATIO → 全局禁开
     dry_below = (
         m20 is not None
         and price < m20
@@ -271,15 +276,38 @@ def _live_close_confirm_on():
     )
 
 
-def _live_signal_day(today):
-    """开盘兜底挂起用的信号日：墙钟昨日历日，保证 signal_day < 今日可成交。"""
+def _calendar_prev_weekday(yyyymmdd):
+    """自然日回退到上一工作日（跳过周末；节假日以行情轴为准）。"""
     try:
-        d = datetime.datetime.strptime(str(today), "%Y%m%d") - datetime.timedelta(
-            days=1
-        )
-        return d.strftime("%Y%m%d")
+        d = datetime.datetime.strptime(str(yyyymmdd), "%Y%m%d")
     except Exception:
-        return str(today)
+        return str(yyyymmdd)
+    d -= datetime.timedelta(days=1)
+    while int(d.weekday()) >= 5:
+        d -= datetime.timedelta(days=1)
+    return d.strftime("%Y%m%d")
+
+
+def _last_closed_bar_day(C, today):
+    """上一根已收盘日线交易日；优先行情时间轴，否则跳过周末的自然日。"""
+    today = str(today)
+    days = None
+    try:
+        days = _get_daily_bar_days(C, A.stock, count=8)
+    except Exception:
+        days = None
+    if days:
+        last = str(days[-1])
+        if last >= today and len(days) >= 2:
+            return str(days[-2])
+        if last and last < today:
+            return last
+    return _calendar_prev_weekday(today)
+
+
+def _live_signal_day(C, today):
+    """开盘兜底/盘中校验用的信号日：上一根已收盘交易日（保证 signal_day < 今日可成交）。"""
+    return _last_closed_bar_day(C, today)
 
 
 def _mark_confirmed_eval(day):
@@ -327,6 +355,7 @@ _BUY_LABELS = {
     "w_bias_skip": "周线高位乖离禁开",
     "w_slope_skip": "低位周线MA30未连升禁开",
     "vol_dry_skip": "无量阴跌禁开",
+    "weekly_bear": "周线空头禁开",
 }
 
 
@@ -420,11 +449,13 @@ def _handle(C):
         _event_log("clear_mis_confirmed_eval_day", day=day)
         A._confirmed_eval_day = ""
         _save_state()
-    # 开盘兜底：无收盘确认记录、今日尚未兜底、无挂起
+    # 开盘兜底：上一根已收盘日尚未确认、今日尚未兜底、无挂起
+    prev_closed_day = _last_closed_bar_day(C, day) if live_cc else day
+    confirmed_day = str(getattr(A, "_confirmed_eval_day", "") or "")
     need_fallback = (
         live_cc
         and phase == "exec"
-        and (not str(getattr(A, "_confirmed_eval_day", "") or ""))
+        and confirmed_day < str(prev_closed_day)
         and str(getattr(A, "_fallback_done_day", "") or "") != day
         and (not isinstance(getattr(A, "pending_entry", None), dict))
         and (not isinstance(getattr(A, "pending_exit", None), dict))
@@ -444,7 +475,7 @@ def _handle(C):
         if closes_s is None or len(closes_s) < 3 or closes_ws is None or len(closes_ws) < 3:
             _live_heartbeat("ohlcv_confirm_short")
             return
-        sig_day = _live_signal_day(day)
+        sig_day = prev_closed_day
     else:
         # 回测：信号评估用完整序列
         highs_s, closes_s, vols_s = highs_d, closes_d, vols_d
@@ -460,7 +491,12 @@ def _handle(C):
     w_bias_block, w_bias = _weekly_bias_guard(w_detail)
     w_slope_block, _w_bias_low = _weekly_low_slope_guard(w_detail)
     buy_ok, buy_reasons, b_detail = _eval_daily_buy(closes_s, vols_s)
-    if w_bias_block:
+    if weekly_bear:
+        buy_ok = False
+        buy_reasons = ["weekly_bear"] + [
+            r for r in buy_reasons if r not in ("weekly_bear",)
+        ]
+    elif w_bias_block:
         buy_ok = False
         buy_reasons = ["w_bias_skip"] + [
             r for r in buy_reasons if r not in ("w_bias_skip",)
@@ -518,10 +554,20 @@ def _handle(C):
     ):
         _save_state()
 
-    skip_codes = ("chase_skip", "w_bias_skip", "w_slope_skip", "vol_dry_skip")
+    skip_codes = (
+        "chase_skip",
+        "w_bias_skip",
+        "w_slope_skip",
+        "vol_dry_skip",
+        "weekly_bear",
+    )
     real_buys = [r for r in buy_reasons if r not in skip_codes]
     buy_sig = bool(
-        (not w_bias_block) and (not w_slope_block) and buy_ok and real_buys
+        (not weekly_bear)
+        and (not w_bias_block)
+        and (not w_slope_block)
+        and buy_ok
+        and real_buys
     )
     force_empty = bool(weekly_bear)
     vol_dry_block = "vol_dry_skip" in buy_reasons
@@ -617,13 +663,21 @@ def _handle(C):
                 open=open_px,
             )
             ok = _order_sell(C, reason, open_px, now)
-            A.pending_exit = None
-            A.pending_entry = None
-            _clear_hold_meta()
-            _save_state()
-            if not ok:
-                print("%s pending_exit cleared after sell fail/skip" % STRATEGY_NAME)
-                _event_log("pending_exit_cleared_after_fail", sell_reason=reason)
+            if ok:
+                A.pending_exit = None
+                A.pending_entry = None
+                _clear_hold_meta()
+                _save_state()
+            else:
+                print(
+                    "%s pending_exit keep after sell fail/skip signal=%s"
+                    % (STRATEGY_NAME, reason)
+                )
+                _event_log(
+                    "pending_exit_keep_after_fail",
+                    sell_reason=reason,
+                    signal_day=pe_exit.get("signal_day"),
+                )
             return
 
     pe_entry = getattr(A, "pending_entry", None)
@@ -670,17 +724,24 @@ def _handle(C):
         )
         budget = _buy_budget(cash)
         ok = _order_buy(C, open_px, now, budget)
-        A.pending_entry = None
-        A.pending_exit = None
         if ok:
+            A.pending_entry = None
+            A.pending_exit = None
             A.hold_peak = float(open_px)
             A.hold_bars = 0
             A._hold_count_day = day
             A.time_force_grace_until = None
-        _save_state()
-        if not ok:
-            print("%s pending_entry cleared after buy fail/skip" % STRATEGY_NAME)
-            _event_log("pending_entry_cleared_after_fail", signal=primary)
+            _save_state()
+        else:
+            print(
+                "%s pending_entry keep after buy fail/skip signal=%s"
+                % (STRATEGY_NAME, primary)
+            )
+            _event_log(
+                "pending_entry_keep_after_fail",
+                signal=primary,
+                signal_day=pe_entry.get("signal_day"),
+            )
         return
 
     # ---- 新信号：回测当根；实盘仅收盘确认或开盘兜底 ----

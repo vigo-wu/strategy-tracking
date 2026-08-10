@@ -53,7 +53,7 @@ VOL_PULLBACK_RATIO = 0.9      # 量 < 均量*0.9 视为缩量
 # 全局禁开 vol_dry_skip（无量阴跌不言底）：
 #   收盘跌破 MA20 且量 < N 日均量 * 比例 → 当天任何买点失效
 VOL_DRY_N = 20
-VOL_DRY_RATIO = 0.60          # 0.70 = 量不足 20 日均量的 60%
+VOL_DRY_RATIO = 0.60          # 量 < 20 日均量的 60% 视为无量阴跌
 
 # 卖① trail_stop：阶梯式移动止盈
 #   按历史最高浮盈 (peak-cost)/cost 选档；触发条件：
@@ -91,7 +91,8 @@ WEEKLY_OHLC_COUNT = 120
 # 实盘只在最新一根 bar 决策；回测逐 bar 扫
 LIVE_ONLY_LAST_BAR = True
 # 实盘：盘中(DECISION_*)只执行 pending；收盘后(SIGNAL_CONFIRM_*)用当日完整日/周 K 确认信号并挂起 → 次日开盘成交
-# 若收盘窗口未跑到，次日开盘用已确认昨 K 兜底挂起（同日可成交）
+# 若收盘窗口未跑到，次日开盘对「上一根已收盘日」兜底评估并挂起（同日可成交）
+# 判定：confirmed_eval_day < 上一完整交易日 且今日尚未 fallback
 LIVE_CLOSE_CONFIRM = True
 # 实盘决策时窗（HHmmss）：执行挂起买卖
 DECISION_START = "093000"
@@ -122,7 +123,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.14"
+STRATEGY_VER = "v1.15"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）

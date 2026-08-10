@@ -1,4 +1,100 @@
 # === hlband/market.py ===
+def _norm_bar_day(x):
+    """行情时间戳/索引 → yyyymmdd。"""
+    if x is None:
+        return ""
+    try:
+        if hasattr(x, "strftime"):
+            return x.strftime("%Y%m%d")
+    except Exception:
+        pass
+    s = str(x).strip()
+    digits = []
+    for ch in s:
+        if ch.isdigit():
+            digits.append(ch)
+        elif digits:
+            break
+    if len(digits) >= 8:
+        return "".join(digits[:8])
+    return ""
+
+
+def _days_from_ex(md, stock):
+    """从 get_market_data_ex 结果解析交易日列表（与 close 序列对齐时优先 index/time）。"""
+    if md is None:
+        return None
+    df = None
+    if isinstance(md, dict) and stock in md:
+        df = md[stock]
+    elif isinstance(md, dict):
+        for v in md.values():
+            df = v
+            break
+    if df is None:
+        return None
+    raw = None
+    if hasattr(df, "index"):
+        try:
+            raw = list(df.index)
+        except Exception:
+            raw = None
+    if (not raw) and hasattr(df, "columns"):
+        for col in ("time", "date", "datetime", "stime"):
+            try:
+                cols = getattr(df, "columns", [])
+                if col in cols:
+                    raw = list(df[col])
+                    break
+            except Exception:
+                continue
+    if not raw:
+        return None
+    out = []
+    for x in raw:
+        d = _norm_bar_day(x)
+        if d:
+            out.append(d)
+    return out if out else None
+
+
+def _get_daily_bar_days(C, stock, count=8):
+    """最近若干根日线交易日（yyyymmdd），失败返回 None。"""
+    end = _bar_end_str(C)
+    if len(end) >= 8:
+        end = end[:8]
+    fields = ["close"]
+    md = None
+    try:
+        md = C.get_market_data_ex(
+            fields=fields,
+            stock_code=[stock],
+            period=getattr(A, "period", "1d"),
+            end_time=end,
+            count=int(count),
+            dividend_type="front_ratio",
+            fill_data=True,
+            subscribe=False,
+        )
+    except TypeError:
+        try:
+            md = C.get_market_data_ex(
+                fields,
+                [stock],
+                period=getattr(A, "period", "1d"),
+                start_time="",
+                end_time=end,
+                count=int(count),
+                dividend_type="front_ratio",
+            )
+        except Exception:
+            md = None
+    except Exception:
+        md = None
+    days = _days_from_ex(md, stock) if md is not None else None
+    return days
+
+
 def _get_ohlcv_period(C, stock, period, count, need, diag_key):
     end = _bar_end_str(C)
     if period in ("1d", "1w", "1mon", "1q", "1hy", "1y"):
