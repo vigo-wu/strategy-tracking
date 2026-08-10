@@ -343,6 +343,82 @@ def _pending_ready(pend, day, bar_tag, mode):
     return False
 
 
+def _in_pending_exec_window(now_s):
+    """回测不限时；实盘仅开盘附近允许按开盘价成交信号 pending。"""
+    if getattr(A, "is_backtest", False):
+        return True
+    start = str(globals().get("PENDING_EXEC_START", "093000") or "093000")
+    end = str(globals().get("PENDING_EXEC_END", "094500") or "094500")
+    return start <= str(now_s) < end
+
+
+def _after_signal_buy_filled(px, day):
+    """买入成交后初始化持仓元数据并清信号 pending。"""
+    A.pending_entry = None
+    A.pending_exit = None
+    try:
+        A.hold_peak = float(px) if px else None
+    except Exception:
+        A.hold_peak = None
+    A.hold_bars = 0
+    A._hold_count_day = str(day or "")
+    A.time_force_grace_until = None
+    _save_state()
+
+
+def _after_signal_sell_filled():
+    """卖出成交（或已空仓）后清信号 pending 与持仓元数据。"""
+    A.pending_exit = None
+    A.pending_entry = None
+    _clear_hold_meta()
+    _save_state()
+
+
+def _pending_on_buy_fill(pend, vol, px):
+    """覆盖 common：成交后再清 pending_entry / 写 hold_meta（废单则保留信号 pending）。"""
+    extra = pend.get("extra_pos") if isinstance(pend.get("extra_pos"), dict) else {}
+    _apply_buy_fill(vol, px, pend.get("opened_at") or pend.get("submitted_at"), **extra)
+    ot = str(pend.get("opened_at") or pend.get("submitted_at") or "")
+    day = ot[:8] if len(ot) >= 8 else datetime.datetime.now().strftime("%Y%m%d")
+    _after_signal_buy_filled(px, day)
+
+
+def _pending_on_sell_fill(pend, now, vol, px):
+    """覆盖 common：成交后再清 pending_exit；部分成交仍持仓则保留 hold_meta。"""
+    intent = str(pend.get("intent", "") or "")
+    last_hint = pend.get("last_hint")
+    if last_hint is None:
+        last_hint = px
+    mark_half = bool(pend.get("mark_half"))
+    _apply_sell_fill(now, intent, last_hint, vol, mark_half=mark_half)
+    if not _has_position() and not (
+        getattr(A, "is_backtest", False) and _bt_held_vol() >= 100
+    ):
+        _after_signal_sell_filled()
+    else:
+        A.pending_exit = None
+        _save_state()
+
+
+def _on_signal_order_ok(side, px=None, day=None):
+    """下单返回 True：实盘等成交回调；回测/DRY 立即清信号 pending 并写 hold_meta。"""
+    live_waiting = (not getattr(A, "is_backtest", False)) and (
+        not DRY_RUN
+    ) and isinstance(getattr(A, "pending", None), dict)
+    if live_waiting:
+        print(
+            "%s %s submitted keep signal pending until fill"
+            % (STRATEGY_NAME, side)
+        )
+        _event_log("signal_pending_keep_until_fill", side=side)
+        _save_state()
+        return
+    if side == "buy":
+        _after_signal_buy_filled(px, day)
+    else:
+        _after_signal_sell_filled()
+
+
 _SELL_LABELS = {
     "trail_stop": "卖点1-移动止盈回撤",
     "time_force": "卖点2-时间成本智能平仓",
@@ -637,48 +713,58 @@ def _handle(C):
             px=bool(getattr(A, "pending_exit", None)),
         )
 
-    # ---- 先执行挂起的卖/买（开盘时段）----
+    # ---- 先执行挂起的卖/买（仅开盘窗；收盘确认不按开盘价成交）----
+    can_exec_pending = (not live_cc) or _in_pending_exec_window(now_s)
     pe_exit = getattr(A, "pending_exit", None)
     if holding and isinstance(pe_exit, dict):
         if _pending_ready(pe_exit, day, tag, "day"):
-            reason = str(pe_exit.get("reason", "SELL") or "SELL")
-            reasons = pe_exit.get("reasons") or [reason]
-            print(
-                "%s SELL by signal=%s label=%s all=%s signal_day=%s @open=%.4f"
-                % (
-                    STRATEGY_NAME,
-                    reason,
-                    _reason_label(reason, "sell"),
-                    _format_reasons(reasons, "sell"),
-                    pe_exit.get("signal_day"),
-                    open_px,
-                )
-            )
-            _event_log(
-                "sell_by_signal",
-                signal=reason,
-                label=_reason_label(reason, "sell"),
-                all_reasons=_format_reasons(reasons, "sell"),
-                signal_day=pe_exit.get("signal_day"),
-                open=open_px,
-            )
-            ok = _order_sell(C, reason, open_px, now)
-            if ok:
-                A.pending_exit = None
-                A.pending_entry = None
-                _clear_hold_meta()
-                _save_state()
-            else:
+            if not can_exec_pending:
                 print(
-                    "%s pending_exit keep after sell fail/skip signal=%s"
-                    % (STRATEGY_NAME, reason)
+                    "%s pending_exit defer outside open window now=%s signal_day=%s"
+                    % (STRATEGY_NAME, now_s, pe_exit.get("signal_day"))
                 )
                 _event_log(
-                    "pending_exit_keep_after_fail",
-                    sell_reason=reason,
+                    "pending_exit_defer",
+                    now=now_s,
                     signal_day=pe_exit.get("signal_day"),
+                    exec_end=str(globals().get("PENDING_EXEC_END", "094500") or "094500"),
                 )
-            return
+            else:
+                reason = str(pe_exit.get("reason", "SELL") or "SELL")
+                reasons = pe_exit.get("reasons") or [reason]
+                print(
+                    "%s SELL by signal=%s label=%s all=%s signal_day=%s @open=%.4f"
+                    % (
+                        STRATEGY_NAME,
+                        reason,
+                        _reason_label(reason, "sell"),
+                        _format_reasons(reasons, "sell"),
+                        pe_exit.get("signal_day"),
+                        open_px,
+                    )
+                )
+                _event_log(
+                    "sell_by_signal",
+                    signal=reason,
+                    label=_reason_label(reason, "sell"),
+                    all_reasons=_format_reasons(reasons, "sell"),
+                    signal_day=pe_exit.get("signal_day"),
+                    open=open_px,
+                )
+                ok = _order_sell(C, reason, open_px, now)
+                if ok:
+                    _on_signal_order_ok("sell")
+                else:
+                    print(
+                        "%s pending_exit keep after sell fail/skip signal=%s"
+                        % (STRATEGY_NAME, reason)
+                    )
+                    _event_log(
+                        "pending_exit_keep_after_fail",
+                        sell_reason=reason,
+                        signal_day=pe_exit.get("signal_day"),
+                    )
+                return
 
     pe_entry = getattr(A, "pending_entry", None)
     if (
@@ -699,50 +785,60 @@ def _handle(C):
             else:
                 why = "vol_dry_skip"
             print("%s pending_entry cancel %s" % (STRATEGY_NAME, why))
-            _event_log("pending_entry_cancel", reason=why, signal_day=pe_entry.get("signal_day"))
-            return
-        reasons = pe_entry.get("reasons") or []
-        primary = reasons[0] if reasons else "entry"
-        print(
-            "%s BUY by signal=%s label=%s all=%s signal_day=%s @open=%.4f"
-            % (
-                STRATEGY_NAME,
-                primary,
-                _reason_label(primary, "buy"),
-                _format_reasons(reasons, "buy"),
-                pe_entry.get("signal_day"),
-                open_px,
-            )
-        )
-        _event_log(
-            "buy_by_signal",
-            signal=primary,
-            label=_reason_label(primary, "buy"),
-            all_reasons=_format_reasons(reasons, "buy"),
-            signal_day=pe_entry.get("signal_day"),
-            open=open_px,
-        )
-        budget = _buy_budget(cash)
-        ok = _order_buy(C, open_px, now, budget)
-        if ok:
-            A.pending_entry = None
-            A.pending_exit = None
-            A.hold_peak = float(open_px)
-            A.hold_bars = 0
-            A._hold_count_day = day
-            A.time_force_grace_until = None
-            _save_state()
-        else:
-            print(
-                "%s pending_entry keep after buy fail/skip signal=%s"
-                % (STRATEGY_NAME, primary)
-            )
             _event_log(
-                "pending_entry_keep_after_fail",
-                signal=primary,
+                "pending_entry_cancel",
+                reason=why,
                 signal_day=pe_entry.get("signal_day"),
             )
-        return
+            return
+        if not can_exec_pending:
+            print(
+                "%s pending_entry defer outside open window now=%s signal_day=%s"
+                % (STRATEGY_NAME, now_s, pe_entry.get("signal_day"))
+            )
+            _event_log(
+                "pending_entry_defer",
+                now=now_s,
+                signal_day=pe_entry.get("signal_day"),
+                exec_end=str(globals().get("PENDING_EXEC_END", "094500") or "094500"),
+            )
+        else:
+            reasons = pe_entry.get("reasons") or []
+            primary = reasons[0] if reasons else "entry"
+            print(
+                "%s BUY by signal=%s label=%s all=%s signal_day=%s @open=%.4f"
+                % (
+                    STRATEGY_NAME,
+                    primary,
+                    _reason_label(primary, "buy"),
+                    _format_reasons(reasons, "buy"),
+                    pe_entry.get("signal_day"),
+                    open_px,
+                )
+            )
+            _event_log(
+                "buy_by_signal",
+                signal=primary,
+                label=_reason_label(primary, "buy"),
+                all_reasons=_format_reasons(reasons, "buy"),
+                signal_day=pe_entry.get("signal_day"),
+                open=open_px,
+            )
+            budget = _buy_budget(cash)
+            ok = _order_buy(C, open_px, now, budget)
+            if ok:
+                _on_signal_order_ok("buy", px=open_px, day=day)
+            else:
+                print(
+                    "%s pending_entry keep after buy fail/skip signal=%s"
+                    % (STRATEGY_NAME, primary)
+                )
+                _event_log(
+                    "pending_entry_keep_after_fail",
+                    signal=primary,
+                    signal_day=pe_entry.get("signal_day"),
+                )
+            return
 
     # ---- 新信号：回测当根；实盘仅收盘确认或开盘兜底 ----
     allow_new = True

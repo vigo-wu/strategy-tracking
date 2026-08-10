@@ -1,6 +1,6 @@
 # 红利板块波段策略：周线定方向，日线找买卖点
 
-**主题目录**：`hongli_band/`｜**版本**：v1.15｜**运行**：国金 QMT 终端模型（见 §5）  
+**主题目录**：`hongli_band/`｜**版本**：v1.16｜**运行**：国金 QMT 终端模型（见 §5）  
 **参数真源**：`hongli_band/scripts/qmt/hlband/config.py`（本文数值与之对齐；改参只改 config 后 re-deploy）
 
 ---
@@ -8,7 +8,8 @@
 ## 核心逻辑
 
 红利资产慢牛爬坡、震荡抗跌。脚本做 **周线估值/斜率过滤 + 日线缩量低吸 + 动态锁利卖出**。  
-行情一律 **前复权**（`dividend_type=front_ratio`）。主图 **日线**；实盘信号在收盘确认窗评估 → **次日开盘**执行；若收盘窗未跑到，开盘对上一根已收盘日兜底评估（`confirmed_eval_day < 上一完整交易日`）。
+行情一律 **前复权**（`dividend_type=front_ratio`）。主图 **日线**；实盘信号在收盘确认窗评估 → **次日开盘窗**（`PENDING_EXEC_START`～`PENDING_EXEC_END`，默认 09:30–09:45）按开盘价成交；错过则保留到下一交易日开盘窗，**收盘确认窗不成交**。若收盘窗未跑到，开盘对上一根已收盘日兜底评估（`confirmed_eval_day < 上一完整交易日`）。  
+实盘报单成功后**保留**信号 pending / 止盈元数据，**仅成交回调**后清除；废单/撤单后下一开盘窗自动重试。
 
 ---
 
@@ -57,7 +58,7 @@
 | 放鹰吃肉 | ≥ 10% | 4% | — |
 
 优先级（挂 pending 主因）：`weekly_bear` > `stop_loss` > `trail_stop` > `time_force`。  
-买卖委托失败时**保留**对应 pending（及持仓元数据），下一根可重试。
+买卖委托失败/T+1 skip 时**保留**对应 pending（及持仓元数据）；实盘报单成功亦保留至成交，废单后开盘窗可重试。
 
 ---
 
@@ -98,7 +99,8 @@
 | `STOP_LOSS` | `0.08` | 硬止损（相对成本） |
 | `CHASE_MAX_PCT` | `0.05` | 追高禁开 |
 | `LIVE_CLOSE_CONFIRM` | `True` | 收盘确认 + 开盘兜底 |
+| `PENDING_EXEC_START/END` | `093000` / `094500` | 信号 pending 仅开盘窗按开盘价成交 |
 | `STATE_FILE` | `D:\tradingStrategy\hlband_{stock}.json` | 实盘状态；按主图标的分文件 |
 | `LOG_DIR` | `D:\tradingStrategy\logs` | 实盘结构化日志根目录 |
 
-日志确认 `HlBand v1.15 init`（`dMA=20/60`，`DRY_RUN=` 与 config 一致）后再挂实盘。
+日志确认 `HlBand v1.16 init`（`dMA=20/60`，`DRY_RUN=` 与 config 一致）后再挂实盘。

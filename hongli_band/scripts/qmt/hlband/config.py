@@ -94,9 +94,13 @@ LIVE_ONLY_LAST_BAR = True
 # 若收盘窗口未跑到，次日开盘对「上一根已收盘日」兜底评估并挂起（同日可成交）
 # 判定：confirmed_eval_day < 上一完整交易日 且今日尚未 fallback
 LIVE_CLOSE_CONFIRM = True
-# 实盘决策时窗（HHmmss）：执行挂起买卖
+# 实盘决策时窗（HHmmss）：盘中处理券商 pending / 心跳；信号成交见 PENDING_EXEC_*
 DECISION_START = "093000"
 DECISION_END = "150000"
+# 信号 pending（pending_entry/exit）仅在开盘附近成交；错过则保留到下一交易日开盘窗
+# 须覆盖「开盘兜底挂起 → 同窗内下一根成交」；收盘确认窗绝不按开盘价成交
+PENDING_EXEC_START = "093000"
+PENDING_EXEC_END = "094500"
 # 收盘确认信号时窗（须与 DECISION 衔接；含尾盘近似收盘 + 盘后）
 # 日线盘后常无新 tick，故从 14:55 起用当日 K 确认；16:00 前仍可确认
 SIGNAL_CONFIRM_START = "145500"
@@ -123,7 +127,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.15"
+STRATEGY_VER = "v1.16"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
