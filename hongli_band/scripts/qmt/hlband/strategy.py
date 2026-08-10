@@ -433,7 +433,9 @@ def _handle(C):
         highs_s, closes_s, vols_s = highs_d, closes_d, vols_d
         closes_ws = closes_w
         sig_day = day
-    elif need_fallback:
+    elif need_fallback or (live_cc and phase == "exec"):
+        # 开盘兜底 / 盘中撤单校验：一律去掉未收盘根，避免今日未完成 K
+        # 误触 vol_dry_skip 等把刚挂的 pending_entry 立刻撤掉
         use_prev_bar = True
         highs_s = _drop_forming_bar(highs_d)
         closes_s = _drop_forming_bar(closes_d)
@@ -444,7 +446,7 @@ def _handle(C):
             return
         sig_day = _live_signal_day(day)
     else:
-        # 回测 / 盘中执行：信号评估用完整序列（盘中不新挂，仅供撤单校验与日志）
+        # 回测：信号评估用完整序列
         highs_s, closes_s, vols_s = highs_d, closes_d, vols_d
         closes_ws = closes_w
         sig_day = day

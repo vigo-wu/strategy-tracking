@@ -7,7 +7,7 @@ ACCOUNT_ID = "39953913"
 ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 
 # 单笔下单资金上限（元）；实际股数 = floor(预算/开盘价/100)*100
-TRADE_BUDGET = 50000.0
+TRADE_BUDGET = 25000.0
 # 可用现金占用比例（预留下单缓冲，避免满仓打满失败）
 CASH_RATIO = 0.8
 
@@ -116,7 +116,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.12"
+STRATEGY_VER = "v1.13"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）

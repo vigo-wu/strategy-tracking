@@ -17,7 +17,7 @@ ACCOUNT_ID = "39953913"
 ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 
 # 单笔下单资金上限（元）；实际股数 = floor(预算/开盘价/100)*100
-TRADE_BUDGET = 50000.0
+TRADE_BUDGET = 25000.0
 # 可用现金占用比例（预留下单缓冲，避免满仓打满失败）
 CASH_RATIO = 0.8
 
@@ -57,7 +57,7 @@ VOL_PULLBACK_RATIO = 0.9      # 量 < 均量*0.9 视为缩量
 # 全局禁开 vol_dry_skip（无量阴跌不言底）：
 #   收盘跌破 MA20 且量 < N 日均量 * 比例 → 当天任何买点失效
 VOL_DRY_N = 20
-VOL_DRY_RATIO = 0.70          # 0.70 = 量不足 20 日均量的 70%
+VOL_DRY_RATIO = 0.60          # 0.70 = 量不足 20 日均量的 60%
 
 # 卖① trail_stop：阶梯式移动止盈
 #   按历史最高浮盈 (peak-cost)/cost 选档；触发条件：
@@ -66,11 +66,11 @@ VOL_DRY_RATIO = 0.70          # 0.70 = 量不足 20 日均量的 70%
 #     peak_hi=None 无上限；profit_floor=None 不设硬底线
 #   档1 起步保护 [3%,6%)：回撤>1.5%（同旧版，防破本）
 #   档2 落袋为安 [6%,10%)：回撤>3% 或 利润跌破 3%
-#   档3 放鹰吃肉 >=10%：回撤>5%（利润垫扛日线洗盘）
+#   档3 放鹰吃肉 >=10%：回撤>4%（利润垫扛日线洗盘）
 TRAIL_TIERS = (
     (0.03, 0.06, 0.015, None),
     (0.06, 0.10, 0.03, 0.03),
-    (0.10, None, 0.05, None),
+    (0.10, None, 0.04, None),
 )
 # 卖② time_force：智能时间成本（防长期磨人）
 #   持仓 bar 数 > BARS 后：收盘破日线 MA60 → 立即强制平仓；
@@ -126,7 +126,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.12"
+STRATEGY_VER = "v1.13"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
@@ -2233,7 +2233,9 @@ def _handle(C):
         highs_s, closes_s, vols_s = highs_d, closes_d, vols_d
         closes_ws = closes_w
         sig_day = day
-    elif need_fallback:
+    elif need_fallback or (live_cc and phase == "exec"):
+        # 开盘兜底 / 盘中撤单校验：一律去掉未收盘根，避免今日未完成 K
+        # 误触 vol_dry_skip 等把刚挂的 pending_entry 立刻撤掉
         use_prev_bar = True
         highs_s = _drop_forming_bar(highs_d)
         closes_s = _drop_forming_bar(closes_d)
@@ -2244,7 +2246,7 @@ def _handle(C):
             return
         sig_day = _live_signal_day(day)
     else:
-        # 回测 / 盘中执行：信号评估用完整序列（盘中不新挂，仅供撤单校验与日志）
+        # 回测：信号评估用完整序列
         highs_s, closes_s, vols_s = highs_d, closes_d, vols_d
         closes_ws = closes_w
         sig_day = day
