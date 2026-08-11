@@ -4,6 +4,7 @@
 # 前置: config 中 PERIOD / OHLC_COUNT / HIST_MAX_LOOKBACK_DAYS / _VALID_PERIODS
 #       可选 _PERIOD_COUNT / _PERIOD_HIST_START；_bar_datetime 由 mode 提供（运行时）
 _DEFAULT_PERIOD_COUNT = {
+    "tick": 500,
     "1m": 1200,
     "3m": 800,
     "5m": 600,
@@ -18,6 +19,7 @@ _DEFAULT_PERIOD_COUNT = {
     "1y": 30,
 }
 _DEFAULT_PERIOD_HIST_START = {
+    "tick": "20240101",
     "1m": "20240101",
     "3m": "20240101",
     "5m": "20230101",
@@ -50,6 +52,8 @@ def _norm_period(p):
         "60m": "1h",
         "min": "1m",
         "minute": "1m",
+        "fenbi": "tick",
+        "tickline": "tick",
     }
     s = aliases.get(s, s)
     valid = globals().get("_VALID_PERIODS") or tuple(_DEFAULT_PERIOD_COUNT.keys())
@@ -73,6 +77,8 @@ def _is_intraday(period):
     p = period or "1d"
     if p == "1mon":
         return False
+    if p == "tick":
+        return True
     return p.endswith("m") or p == "1h"
 
 
