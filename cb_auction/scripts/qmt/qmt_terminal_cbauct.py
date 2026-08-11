@@ -11,7 +11,7 @@ import numpy as np
 # === cbauct/config.py ===
 # ===================== 用户配置 =====================
 # True=只打日志不下单；实盘前确认账号与主图后再改 False
-DRY_RUN = True
+DRY_RUN = False
 
 ACCOUNT_ID = "39953913"
 ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
@@ -112,7 +112,7 @@ PENDING_TIMEOUT_EXEMPT_LOG_SEC = 300
 LISTING_DAY_ONLY = True
 # True=任意交易日验竞价流程（开盘 ModeA + 尾盘 ModeB）；非首日无真实微观结构，只验时窗/下单
 # DRY 下开盘 130 会模拟成交以便串起 ModeA 卖出；实盘务必 False
-VERIFY_AUCTION_ANY_DAY = False
+VERIFY_AUCTION_ANY_DAY = True
 # 兼容旧名：等同 VERIFY_AUCTION_ANY_DAY（联调）
 FORCE_RUN = False
 # 日K推断失败时：False=禁止下单(fail-closed)；True=放行(fail-open)
@@ -3484,6 +3484,12 @@ def _handle_day2_exit(C, now, now_s, day, last_px, open_px):
     opened = _pos_opened_day()
     if opened and opened >= day:
         return
+
+    if str(getattr(A, "d2_check_day", "") or "") != day:
+        A.d2_check_day = day
+        A.d2_auc_checked = False
+        A.d2_day_high = 0.0
+        A.d2_open_px = 0.0
 
     cost = float((getattr(A, "position", None) or {}).get("price", 0) or 0)
     if cost <= 0:

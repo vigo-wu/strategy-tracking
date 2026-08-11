@@ -1,0 +1,947 @@
+
+[2026-08-11 09:05:28][HLBAND_PROD][SH601398][日线] [trade]start trading mode
+[2026-08-11 09:05:28][HLBAND_PROD][SH601398][日线] HlBand skip download_history (live) 1d +1w
+HlBand state loaded path= D:\tradingStrategy\hlband_601398_SH.json {'shares': 3300, 'price': 7.52, 'cost': 24816.0, 'opened_at': '20260810093757'} pending= False
+HlBand v1.19 init 601398.SH 39953913 STOCK PERIOD= 1d BACKTEST= False DRY_RUN= False budget= 30000.0 wMA= 5/10/30 dMA= 20/60 stop= 0.08 chase< 0.05
+HlBand live heartbeat 2026-08-11 09:05:28 PERIOD= 1d stock= 601398.SH  reason=outside_session
+
+[2026-08-11 09:05:29][HLBAND_PROD][SH513530][日线] HlBand skip download_history (live) 1d +1w
+
+[2026-08-11 09:05:29][HLBAND_PROD][SH513530][日线] [trade]start trading mode
+[2026-08-11 09:05:29][HLBAND_PROD][SH513530][日线] HlBand state loaded path= D:\tradingStrategy\hlband_513530_SH.json {'shares': 3100, 'price': 1.58, 'cost': 4898.0, 'opened_at': '20260810101932'} pending= False
+HlBand v1.19 init 513530.SH 39953913 STOCK PERIOD= 1d BACKTEST= False DRY_RUN= False budget= 20000.0 wMA= 5/10/30 dMA= 20/60 stop= 0.08 chase< 0.05
+HlBand live heartbeat 2026-08-11 09:05:29 PERIOD= 1d stock= 513530.SH  reason=outside_session
+
+[2026-08-11 09:09:49][CBAUCT][SZ128134][1分钟] [trade]start simulation mode
+[2026-08-11 09:09:49][CBAUCT][SZ128134][1分钟] CbAuct skip download_history (live) 1m
+CbAuct state: empty (no file) D:\tradingStrategy\cbauct_128134_SZ.json
+CbAuct v3.2 init 128134.SZ mkt= SZ 39953913 STOCK PERIOD= 1m BACKTEST= False DRY_RUN= False budget= 50000.0 lot= 10 modeA= True modeB= True day2= True am_px= 130.0 reopen_cap= 143.0 limit_up= 157.3 size_yi= None sz_pre= 130000-145459 sz_close= 145700-145950 sh_chase= 145700-145955 chase_ms= 50 any_day= True
+
+[2026-08-11 09:09:53][CBAUCT][SZ128134][1分钟] CbAuct live heartbeat 2026-08-11 09:09:53 PERIOD= 1m stock= 128134.SZ  reason=live
+
+[2026-08-11 09:09:53][CBAUCT][SZ128134][1分钟] CbAuct diag: md_ok source= get_market_data_ex period= 1m n= 120 end= 20260810150000 last= 119.801
+CbAuct 20260811 090953 mkt=SZ n=120 last=119.801 open=119.801 hold=False mode= size=None buy_done= pending=False cage=131.781
+CbAuct SZ_AM buy @130.000 window listing/eve now=090953 verify=True
+CbAuct BUY SZ_AM 128134.SZ x380 20260811090953 @limit 130.0 SZ_AM
+CbAuct BUY submitted limit 380 @ 130.0 CbAuct BUY SZ_AM 128134.SZ x380 20260811090953 SZ_AM
+
+[2026-08-11 09:15:24][HLBAND_PROD][SH513530][日线] HlBand live heartbeat 2026-08-11 09:15:24 PERIOD= 1d stock= 513530.SH  reason=outside_session
+
+[2026-08-11 09:15:24][HLBAND_PROD][SH601398][日线] HlBand live heartbeat 2026-08-11 09:15:24 PERIOD= 1d stock= 601398.SH  reason=outside_session
+
+[2026-08-11 09:15:24][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=331s cancel_req= False qok= True seen= False
+CbAuct pending timeout exempt intent= SZ_AM age=331s
+CbAuct live heartbeat 2026-08-11 09:15:24 PERIOD= 1m stock= 128134.SZ  reason=live
+CbAuct 20260811 091524 mkt=SZ n=120 last=119.650 open=119.801 hold=False mode= size=None buy_done=20260811 pending=True cage=131.615
+
+[2026-08-11 09:20:26][HLBAND_PROD][SH513530][日线] HlBand live heartbeat 2026-08-11 09:20:26 PERIOD= 1d stock= 513530.SH  reason=outside_session
+
+[2026-08-11 09:20:26][HLBAND_PROD][SH601398][日线] HlBand live heartbeat 2026-08-11 09:20:26 PERIOD= 1d stock= 601398.SH  reason=outside_session
+
+[2026-08-11 09:20:26][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=633s cancel_req= False qok= True seen= False
+CbAuct pending timeout exempt intent= SZ_AM age=633s
+CbAuct live heartbeat 2026-08-11 09:20:26 PERIOD= 1m stock= 128134.SZ  reason=live
+CbAuct 20260811 092026 mkt=SZ n=120 last=119.650 open=119.801 hold=False mode= size=None buy_done=20260811 pending=True cage=131.615
+
+[2026-08-11 09:25:02][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=909s cancel_req= False qok= True seen= False
+CbAuct live heartbeat 2026-08-11 09:25:02 PERIOD= 1m stock= 128134.SZ  reason=live
+CbAuct 20260811 092502 mkt=SZ n=120 last=118.011 open=118.308 hold=False mode= size=None buy_done=20260811 pending=True cage=129.812
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:25:04][HLBAND_PROD][SH601398][日线] HlBand live heartbeat 2026-08-11 09:25:04 PERIOD= 1d stock= 601398.SH  reason=outside_session
+
+[2026-08-11 09:25:05][HLBAND_PROD][SH513530][日线] HlBand live heartbeat 2026-08-11 09:25:05 PERIOD= 1d stock= 513530.SH  reason=outside_session
+
+[2026-08-11 09:30:02][HLBAND_PROD][SH513530][日线] HlBand live heartbeat 2026-08-11 09:30:02 PERIOD= 1d stock= 513530.SH  reason=exec
+HlBand diag: d1_ok source= get_market_data_ex period= 1d n= 180 end= 20260811 last= 1.588
+
+[2026-08-11 09:30:02][HLBAND_PROD][SH513530][日线] HlBand diag: w1_ok source= get_market_data_ex period= 1w n= 120 end= 20260811 last= 1.566
+HlBand 20260811 0930 n1d=179 n1w=119 close=1.5830 sig_day=20260810 phase=exec prev=True w_bull=False w_bear=False w_ma5=1.5376 w_ma30=1.592 w_hist=-0.002 buy=False buyR=- sell=False sellR=- hold=True ret=0.19% pe=False px=True bt_held=- avail=-
+HlBand SELL by signal=weekly_bear label=周线转空强制清仓 all=weekly_bear(周线转空强制清仓) signal_day=20260810 @open=1.5880
+HlBand SELL weekly_bear 513530.SH x3100 20260811093002 @ 1.588
+HlBand SELL submitted 3100 weekly_bear HlBand SELL weekly_bear 513530.SH x3100 20260811093002
+HlBand sell submitted keep signal pending until fill
+
+[2026-08-11 09:30:02][HLBAND_PROD][SH601398][日线] HlBand live heartbeat 2026-08-11 09:30:02 PERIOD= 1d stock= 601398.SH  reason=exec
+HlBand diag: d1_ok source= get_market_data_ex period= 1d n= 180 end= 20260811 last= 7.52
+
+[2026-08-11 09:30:02][HLBAND_PROD][SH601398][日线] HlBand diag: w1_ok source= get_market_data_ex period= 1w n= 120 end= 20260811 last= 7.53
+HlBand 20260811 0930 n1d=179 n1w=119 close=7.5300 sig_day=20260810 phase=exec prev=True w_bull=True w_bear=False w_ma5=7.536 w_ma30=7.2893 w_hist=0.0674 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=0.13% pe=False px=False bt_held=- avail=-
+
+[2026-08-11 09:30:03][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1210s cancel_req= False qok= True seen= False
+CbAuct pending timeout exempt intent= SZ_AM age=1210s
+CbAuct live heartbeat 2026-08-11 09:30:03 PERIOD= 1m stock= 128134.SZ  reason=live
+CbAuct 20260811 093003 mkt=SZ n=120 last=119.801 open=118.308 hold=False mode= size=None buy_done=20260811 pending=True cage=131.781
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:30:03][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1210s cancel_req= False qok= True seen= False
+CbAuct 20260811 093003 mkt=SZ n=120 last=119.801 open=119.801 hold=False mode= size=None buy_done=20260811 pending=True cage=131.781
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:30:03][HLBAND_PROD][SH513530][日线] HlBand pending check weekly_bear deal= 0 traded= 0 status= 50 age=1s cancel_req= False
+
+[2026-08-11 09:30:05][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1212s cancel_req= False qok= True seen= False
+CbAuct 20260811 093005 mkt=SZ n=120 last=120.033 open=119.801 hold=False mode= size=None buy_done=20260811 pending=True cage=132.036
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:30:05][HLBAND_PROD][SH513530][日线] HlBand pending check weekly_bear deal= 0 traded= 0 status= 50 age=4s cancel_req= False
+
+[2026-08-11 09:30:08][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1215s cancel_req= False qok= True seen= False
+CbAuct 20260811 093008 mkt=SZ n=120 last=120.033 open=119.801 hold=False mode= size=None buy_done=20260811 pending=True cage=132.036
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:30:08][HLBAND_PROD][SH513530][日线] HlBand pending check weekly_bear deal= 0 traded= 0 status= 50 age=7s cancel_req= False
+
+[2026-08-11 09:30:11][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1218s cancel_req= False qok= True seen= False
+CbAuct 20260811 093011 mkt=SZ n=120 last=119.850 open=119.801 hold=False mode= size=None buy_done=20260811 pending=True cage=131.835
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:30:11][HLBAND_PROD][SH513530][日线] HlBand pending check weekly_bear deal= 0 traded= 0 status= 50 age=10s cancel_req= False
+
+[2026-08-11 09:30:13][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1221s cancel_req= False qok= True seen= False
+CbAuct 20260811 093013 mkt=SZ n=120 last=119.901 open=119.801 hold=False mode= size=None buy_done=20260811 pending=True cage=131.891
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:30:14][HLBAND_PROD][SH513530][日线] HlBand pending check weekly_bear deal= 3100 traded= 3100 status= 56 age=13s cancel_req= False
+HlBand SELL done weekly_bear last= 1.588 cleared {'shares': 3100, 'price': 1.58, 'cost': 4898.0, 'opened_at': '20260810101932'}
+
+[2026-08-11 09:30:14][HLBAND_PROD][SH513530][日线] HlBand pending clear filled HlBand SELL weekly_bear 513530.SH x3100 20260811093002
+
+[2026-08-11 09:30:17][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1224s cancel_req= False qok= True seen= False
+CbAuct 20260811 093017 mkt=SZ n=120 last=119.800 open=119.801 hold=False mode= size=None buy_done=20260811 pending=True cage=131.780
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:30:19][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1227s cancel_req= False qok= True seen= False
+CbAuct 20260811 093019 mkt=SZ n=120 last=119.209 open=119.801 hold=False mode= size=None buy_done=20260811 pending=True cage=131.130
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:30:23][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1230s cancel_req= False qok= True seen= False
+CbAuct 20260811 093023 mkt=SZ n=120 last=119.396 open=119.801 hold=False mode= size=None buy_done=20260811 pending=True cage=131.336
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:30:25][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1233s cancel_req= False qok= True seen= False
+CbAuct 20260811 093025 mkt=SZ n=120 last=119.396 open=119.801 hold=False mode= size=None buy_done=20260811 pending=True cage=131.336
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:30:28][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1236s cancel_req= False qok= True seen= False
+CbAuct 20260811 093028 mkt=SZ n=120 last=119.622 open=119.801 hold=False mode= size=None buy_done=20260811 pending=True cage=131.584
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:30:31][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1239s cancel_req= False qok= True seen= False
+CbAuct 20260811 093031 mkt=SZ n=120 last=119.623 open=119.801 hold=False mode= size=None buy_done=20260811 pending=True cage=131.585
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:30:35][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1242s cancel_req= False qok= True seen= False
+CbAuct 20260811 093035 mkt=SZ n=120 last=119.680 open=119.801 hold=False mode= size=None buy_done=20260811 pending=True cage=131.648
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:30:37][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1245s cancel_req= False qok= True seen= False
+CbAuct 20260811 093037 mkt=SZ n=120 last=119.812 open=119.801 hold=False mode= size=None buy_done=20260811 pending=True cage=131.793
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:30:40][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1248s cancel_req= False qok= True seen= False
+CbAuct 20260811 093040 mkt=SZ n=120 last=119.925 open=119.801 hold=False mode= size=None buy_done=20260811 pending=True cage=131.918
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:30:44][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1251s cancel_req= False qok= True seen= False
+CbAuct 20260811 093044 mkt=SZ n=120 last=119.802 open=119.801 hold=False mode= size=None buy_done=20260811 pending=True cage=131.782
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:30:47][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1254s cancel_req= False qok= True seen= False
+CbAuct 20260811 093047 mkt=SZ n=120 last=119.802 open=119.801 hold=False mode= size=None buy_done=20260811 pending=True cage=131.782
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:30:49][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1257s cancel_req= False qok= True seen= False
+CbAuct 20260811 093049 mkt=SZ n=120 last=119.850 open=119.801 hold=False mode= size=None buy_done=20260811 pending=True cage=131.835
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:30:53][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1260s cancel_req= False qok= True seen= False
+CbAuct 20260811 093053 mkt=SZ n=120 last=119.691 open=119.801 hold=False mode= size=None buy_done=20260811 pending=True cage=131.660
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:30:55][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1263s cancel_req= False qok= True seen= False
+CbAuct 20260811 093055 mkt=SZ n=120 last=119.563 open=119.801 hold=False mode= size=None buy_done=20260811 pending=True cage=131.519
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:30:58][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1266s cancel_req= False qok= True seen= False
+CbAuct 20260811 093058 mkt=SZ n=120 last=119.486 open=119.801 hold=False mode= size=None buy_done=20260811 pending=True cage=131.435
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:31:02][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1269s cancel_req= False qok= True seen= False
+CbAuct 20260811 093101 mkt=SZ n=120 last=118.997 open=119.056 hold=False mode= size=None buy_done=20260811 pending=True cage=130.897
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:31:04][HLBAND_PROD][SH601398][日线] HlBand live heartbeat 2026-08-11 09:31:04 PERIOD= 1d stock= 601398.SH  reason=exec
+HlBand 20260811 0931 n1d=179 n1w=119 close=7.5300 sig_day=20260810 phase=exec prev=True w_bull=True w_bear=False w_ma5=7.536 w_ma30=7.2893 w_hist=0.0674 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=0.13% pe=False px=False bt_held=- avail=-
+
+[2026-08-11 09:31:05][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1272s cancel_req= False qok= True seen= False
+CbAuct live heartbeat 2026-08-11 09:31:05 PERIOD= 1m stock= 128134.SZ  reason=live
+CbAuct 20260811 093105 mkt=SZ n=120 last=119.056 open=119.056 hold=False mode= size=None buy_done=20260811 pending=True cage=130.962
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:31:05][HLBAND_PROD][SH513530][日线] HlBand live heartbeat 2026-08-11 09:31:05 PERIOD= 1d stock= 513530.SH  reason=exec
+
+[2026-08-11 09:31:07][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1275s cancel_req= False qok= True seen= False
+CbAuct 20260811 093107 mkt=SZ n=120 last=119.204 open=119.056 hold=False mode= size=None buy_done=20260811 pending=True cage=131.124
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:31:10][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1278s cancel_req= False qok= True seen= False
+CbAuct 20260811 093110 mkt=SZ n=120 last=119.049 open=119.056 hold=False mode= size=None buy_done=20260811 pending=True cage=130.954
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:31:13][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1281s cancel_req= False qok= True seen= False
+CbAuct 20260811 093113 mkt=SZ n=120 last=119.179 open=119.056 hold=False mode= size=None buy_done=20260811 pending=True cage=131.097
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:31:16][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1284s cancel_req= False qok= True seen= False
+CbAuct 20260811 093116 mkt=SZ n=120 last=119.178 open=119.056 hold=False mode= size=None buy_done=20260811 pending=True cage=131.096
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:31:19][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1287s cancel_req= False qok= True seen= False
+CbAuct 20260811 093119 mkt=SZ n=120 last=119.178 open=119.056 hold=False mode= size=None buy_done=20260811 pending=True cage=131.096
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:31:23][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1290s cancel_req= False qok= True seen= False
+CbAuct 20260811 093122 mkt=SZ n=120 last=119.203 open=119.056 hold=False mode= size=None buy_done=20260811 pending=True cage=131.123
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:31:25][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1293s cancel_req= False qok= True seen= False
+CbAuct 20260811 093125 mkt=SZ n=120 last=119.100 open=119.056 hold=False mode= size=None buy_done=20260811 pending=True cage=131.010
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:31:29][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1296s cancel_req= False qok= True seen= False
+CbAuct 20260811 093129 mkt=SZ n=120 last=118.888 open=119.056 hold=False mode= size=None buy_done=20260811 pending=True cage=130.777
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:31:32][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1299s cancel_req= False qok= True seen= False
+CbAuct 20260811 093131 mkt=SZ n=120 last=119.149 open=119.056 hold=False mode= size=None buy_done=20260811 pending=True cage=131.064
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:31:34][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1302s cancel_req= False qok= True seen= False
+CbAuct 20260811 093134 mkt=SZ n=120 last=119.108 open=119.056 hold=False mode= size=None buy_done=20260811 pending=True cage=131.019
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:31:38][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1305s cancel_req= False qok= True seen= False
+CbAuct 20260811 093137 mkt=SZ n=120 last=118.988 open=119.056 hold=False mode= size=None buy_done=20260811 pending=True cage=130.887
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:31:40][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1308s cancel_req= False qok= True seen= False
+CbAuct 20260811 093140 mkt=SZ n=120 last=118.845 open=119.056 hold=False mode= size=None buy_done=20260811 pending=True cage=130.730
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:31:43][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1311s cancel_req= False qok= True seen= False
+CbAuct 20260811 093143 mkt=SZ n=120 last=118.800 open=119.056 hold=False mode= size=None buy_done=20260811 pending=True cage=130.680
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:31:46][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1314s cancel_req= False qok= True seen= False
+CbAuct 20260811 093146 mkt=SZ n=120 last=118.737 open=119.056 hold=False mode= size=None buy_done=20260811 pending=True cage=130.611
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:31:49][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1317s cancel_req= False qok= True seen= False
+CbAuct 20260811 093149 mkt=SZ n=120 last=118.819 open=119.056 hold=False mode= size=None buy_done=20260811 pending=True cage=130.701
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:31:52][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1320s cancel_req= False qok= True seen= False
+CbAuct 20260811 093152 mkt=SZ n=120 last=118.800 open=119.056 hold=False mode= size=None buy_done=20260811 pending=True cage=130.680
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:31:56][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1323s cancel_req= False qok= True seen= False
+CbAuct 20260811 093156 mkt=SZ n=120 last=118.825 open=119.056 hold=False mode= size=None buy_done=20260811 pending=True cage=130.708
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:31:58][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1326s cancel_req= False qok= True seen= False
+CbAuct 20260811 093158 mkt=SZ n=120 last=118.945 open=119.056 hold=False mode= size=None buy_done=20260811 pending=True cage=130.840
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:32:02][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1329s cancel_req= False qok= True seen= False
+CbAuct 20260811 093202 mkt=SZ n=120 last=118.988 open=118.846 hold=False mode= size=None buy_done=20260811 pending=True cage=130.887
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:32:05][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1332s cancel_req= False qok= True seen= False
+CbAuct live heartbeat 2026-08-11 09:32:05 PERIOD= 1m stock= 128134.SZ  reason=live
+CbAuct 20260811 093205 mkt=SZ n=120 last=118.846 open=118.846 hold=False mode= size=None buy_done=20260811 pending=True cage=130.731
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:32:07][HLBAND_PROD][SH601398][日线] HlBand live heartbeat 2026-08-11 09:32:07 PERIOD= 1d stock= 601398.SH  reason=exec
+
+[2026-08-11 09:32:07][HLBAND_PROD][SH601398][日线] HlBand 20260811 0932 n1d=179 n1w=119 close=7.5300 sig_day=20260810 phase=exec prev=True w_bull=True w_bear=False w_ma5=7.536 w_ma30=7.2893 w_hist=0.0674 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=0.13% pe=False px=False bt_held=- avail=-
+
+[2026-08-11 09:32:08][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1335s cancel_req= False qok= True seen= False
+CbAuct 20260811 093208 mkt=SZ n=120 last=118.908 open=118.846 hold=False mode= size=None buy_done=20260811 pending=True cage=130.799
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:32:08][HLBAND_PROD][SH513530][日线] HlBand live heartbeat 2026-08-11 09:32:08 PERIOD= 1d stock= 513530.SH  reason=exec
+
+[2026-08-11 09:32:11][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1338s cancel_req= False qok= True seen= False
+CbAuct 20260811 093211 mkt=SZ n=120 last=118.980 open=118.846 hold=False mode= size=None buy_done=20260811 pending=True cage=130.878
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:32:14][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1341s cancel_req= False qok= True seen= False
+CbAuct 20260811 093214 mkt=SZ n=120 last=118.988 open=118.846 hold=False mode= size=None buy_done=20260811 pending=True cage=130.887
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:32:17][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1344s cancel_req= False qok= True seen= False
+CbAuct 20260811 093217 mkt=SZ n=120 last=119.002 open=118.846 hold=False mode= size=None buy_done=20260811 pending=True cage=130.902
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:32:20][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1347s cancel_req= False qok= True seen= False
+CbAuct 20260811 093220 mkt=SZ n=120 last=118.910 open=118.846 hold=False mode= size=None buy_done=20260811 pending=True cage=130.801
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:32:22][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1350s cancel_req= False qok= True seen= False
+CbAuct 20260811 093222 mkt=SZ n=120 last=118.857 open=118.846 hold=False mode= size=None buy_done=20260811 pending=True cage=130.743
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:32:25][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1353s cancel_req= False qok= True seen= False
+CbAuct 20260811 093225 mkt=SZ n=120 last=118.738 open=118.846 hold=False mode= size=None buy_done=20260811 pending=True cage=130.612
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:32:28][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1356s cancel_req= False qok= True seen= False
+CbAuct 20260811 093228 mkt=SZ n=120 last=118.856 open=118.846 hold=False mode= size=None buy_done=20260811 pending=True cage=130.742
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:32:32][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1359s cancel_req= False qok= True seen= False
+CbAuct 20260811 093232 mkt=SZ n=120 last=118.755 open=118.846 hold=False mode= size=None buy_done=20260811 pending=True cage=130.631
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:32:34][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1362s cancel_req= False qok= True seen= False
+CbAuct 20260811 093234 mkt=SZ n=120 last=118.800 open=118.846 hold=False mode= size=None buy_done=20260811 pending=True cage=130.680
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:32:37][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1365s cancel_req= False qok= True seen= False
+CbAuct 20260811 093237 mkt=SZ n=120 last=118.872 open=118.846 hold=False mode= size=None buy_done=20260811 pending=True cage=130.759
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:32:41][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1368s cancel_req= False qok= True seen= False
+CbAuct 20260811 093241 mkt=SZ n=120 last=118.872 open=118.846 hold=False mode= size=None buy_done=20260811 pending=True cage=130.759
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:32:44][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1371s cancel_req= False qok= True seen= False
+CbAuct 20260811 093243 mkt=SZ n=120 last=118.793 open=118.846 hold=False mode= size=None buy_done=20260811 pending=True cage=130.672
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:32:47][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1374s cancel_req= False qok= True seen= False
+CbAuct 20260811 093247 mkt=SZ n=120 last=118.787 open=118.846 hold=False mode= size=None buy_done=20260811 pending=True cage=130.666
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:32:49][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1377s cancel_req= False qok= True seen= False
+CbAuct 20260811 093249 mkt=SZ n=120 last=119.200 open=118.846 hold=False mode= size=None buy_done=20260811 pending=True cage=131.120
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:32:53][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1380s cancel_req= False qok= True seen= False
+CbAuct 20260811 093253 mkt=SZ n=120 last=119.358 open=118.846 hold=False mode= size=None buy_done=20260811 pending=True cage=131.294
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:32:56][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1383s cancel_req= False qok= True seen= False
+CbAuct 20260811 093256 mkt=SZ n=120 last=119.068 open=118.846 hold=False mode= size=None buy_done=20260811 pending=True cage=130.975
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:32:58][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1386s cancel_req= False qok= True seen= False
+CbAuct 20260811 093258 mkt=SZ n=120 last=119.096 open=118.846 hold=False mode= size=None buy_done=20260811 pending=True cage=131.006
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:33:02][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1389s cancel_req= False qok= True seen= False
+CbAuct 20260811 093301 mkt=SZ n=120 last=119.000 open=119.000 hold=False mode= size=None buy_done=20260811 pending=True cage=130.900
+
+[2026-08-11 09:33:02][CBAUCT][SZ128134][1分钟] CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:33:04][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1392s cancel_req= False qok= True seen= False
+CbAuct 20260811 093304 mkt=SZ n=120 last=119.000 open=119.169 hold=False mode= size=None buy_done=20260811 pending=True cage=130.900
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:33:07][HLBAND_PROD][SH601398][日线] HlBand live heartbeat 2026-08-11 09:33:07 PERIOD= 1d stock= 601398.SH  reason=exec
+HlBand 20260811 0933 n1d=179 n1w=119 close=7.5300 sig_day=20260810 phase=exec prev=True w_bull=True w_bear=False w_ma5=7.536 w_ma30=7.2893 w_hist=0.0674 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=0.13% pe=False px=False bt_held=- avail=-
+
+[2026-08-11 09:33:08][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1395s cancel_req= False qok= True seen= False
+CbAuct live heartbeat 2026-08-11 09:33:08 PERIOD= 1m stock= 128134.SZ  reason=live
+CbAuct 20260811 093308 mkt=SZ n=120 last=119.169 open=119.169 hold=False mode= size=None buy_done=20260811 pending=True cage=131.086
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:33:08][HLBAND_PROD][SH513530][日线] HlBand live heartbeat 2026-08-11 09:33:08 PERIOD= 1d stock= 513530.SH  reason=exec
+
+[2026-08-11 09:33:11][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1398s cancel_req= False qok= True seen= False
+CbAuct 20260811 093311 mkt=SZ n=120 last=119.097 open=119.169 hold=False mode= size=None buy_done=20260811 pending=True cage=131.007
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:33:13][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1401s cancel_req= False qok= True seen= False
+CbAuct 20260811 093313 mkt=SZ n=120 last=119.000 open=119.169 hold=False mode= size=None buy_done=20260811 pending=True cage=130.900
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:33:17][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1404s cancel_req= False qok= True seen= False
+CbAuct 20260811 093316 mkt=SZ n=120 last=119.000 open=119.169 hold=False mode= size=None buy_done=20260811 pending=True cage=130.900
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:33:19][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1407s cancel_req= False qok= True seen= False
+
+[2026-08-11 09:33:19][CBAUCT][SZ128134][1分钟] CbAuct 20260811 093319 mkt=SZ n=120 last=119.057 open=119.169 hold=False mode= size=None buy_done=20260811 pending=True cage=130.963
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:33:22][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1410s cancel_req= False qok= True seen= False
+CbAuct 20260811 093322 mkt=SZ n=120 last=119.100 open=119.169 hold=False mode= size=None buy_done=20260811 pending=True cage=131.010
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:33:26][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1413s cancel_req= False qok= True seen= False
+CbAuct 20260811 093326 mkt=SZ n=120 last=119.100 open=119.169 hold=False mode= size=None buy_done=20260811 pending=True cage=131.010
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:33:28][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1416s cancel_req= False qok= True seen= False
+CbAuct 20260811 093328 mkt=SZ n=120 last=119.100 open=119.169 hold=False mode= size=None buy_done=20260811 pending=True cage=131.010
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:33:32][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1419s cancel_req= False qok= True seen= False
+CbAuct 20260811 093332 mkt=SZ n=120 last=119.067 open=119.169 hold=False mode= size=None buy_done=20260811 pending=True cage=130.974
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:33:34][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1422s cancel_req= False qok= True seen= False
+CbAuct 20260811 093334 mkt=SZ n=120 last=118.910 open=119.169 hold=False mode= size=None buy_done=20260811 pending=True cage=130.801
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:33:38][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1425s cancel_req= False qok= True seen= False
+CbAuct 20260811 093337 mkt=SZ n=120 last=119.000 open=119.169 hold=False mode= size=None buy_done=20260811 pending=True cage=130.900
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:33:40][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1428s cancel_req= False qok= True seen= False
+CbAuct 20260811 093340 mkt=SZ n=120 last=118.742 open=119.169 hold=False mode= size=None buy_done=20260811 pending=True cage=130.616
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:33:43][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1431s cancel_req= False qok= True seen= False
+CbAuct 20260811 093343 mkt=SZ n=120 last=118.760 open=119.169 hold=False mode= size=None buy_done=20260811 pending=True cage=130.636
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:33:46][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1434s cancel_req= False qok= True seen= False
+CbAuct 20260811 093346 mkt=SZ n=120 last=118.760 open=119.169 hold=False mode= size=None buy_done=20260811 pending=True cage=130.636
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:33:50][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1437s cancel_req= False qok= True seen= False
+CbAuct 20260811 093350 mkt=SZ n=120 last=118.839 open=119.169 hold=False mode= size=None buy_done=20260811 pending=True cage=130.723
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:33:53][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1440s cancel_req= False qok= True seen= False
+CbAuct 20260811 093352 mkt=SZ n=120 last=118.839 open=119.169 hold=False mode= size=None buy_done=20260811 pending=True cage=130.723
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:33:56][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1443s cancel_req= False qok= True seen= False
+CbAuct 20260811 093356 mkt=SZ n=120 last=118.762 open=119.169 hold=False mode= size=None buy_done=20260811 pending=True cage=130.638
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:33:58][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1446s cancel_req= False qok= True seen= False
+CbAuct 20260811 093358 mkt=SZ n=120 last=118.833 open=119.169 hold=False mode= size=None buy_done=20260811 pending=True cage=130.716
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:34:01][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1449s cancel_req= False qok= True seen= False
+CbAuct 20260811 093401 mkt=SZ n=120 last=118.848 open=118.848 hold=False mode= size=None buy_done=20260811 pending=True cage=130.733
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:34:05][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1452s cancel_req= False qok= True seen= False
+CbAuct 20260811 093405 mkt=SZ n=120 last=118.848 open=118.800 hold=False mode= size=None buy_done=20260811 pending=True cage=130.733
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:34:07][HLBAND_PROD][SH601398][日线] HlBand live heartbeat 2026-08-11 09:34:07 PERIOD= 1d stock= 601398.SH  reason=exec
+
+[2026-08-11 09:34:07][HLBAND_PROD][SH601398][日线] HlBand 20260811 0934 n1d=179 n1w=119 close=7.5300 sig_day=20260810 phase=exec prev=True w_bull=True w_bear=False w_ma5=7.536 w_ma30=7.2893 w_hist=0.0674 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=0.13% pe=False px=False bt_held=- avail=-
+
+[2026-08-11 09:34:07][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1455s cancel_req= False qok= True seen= False
+CbAuct 20260811 093407 mkt=SZ n=120 last=118.800 open=118.800 hold=False mode= size=None buy_done=20260811 pending=True cage=130.680
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:34:10][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1458s cancel_req= False qok= True seen= False
+CbAuct live heartbeat 2026-08-11 09:34:10 PERIOD= 1m stock= 128134.SZ  reason=live
+CbAuct 20260811 093410 mkt=SZ n=120 last=118.850 open=118.800 hold=False mode= size=None buy_done=20260811 pending=True cage=130.735
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:34:11][HLBAND_PROD][SH513530][日线] HlBand live heartbeat 2026-08-11 09:34:11 PERIOD= 1d stock= 513530.SH  reason=exec
+
+[2026-08-11 09:34:13][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1461s cancel_req= False qok= True seen= False
+CbAuct 20260811 093413 mkt=SZ n=120 last=118.850 open=118.800 hold=False mode= size=None buy_done=20260811 pending=True cage=130.735
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:34:16][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1464s cancel_req= False qok= True seen= False
+CbAuct 20260811 093416 mkt=SZ n=120 last=118.940 open=118.800 hold=False mode= size=None buy_done=20260811 pending=True cage=130.834
+CbAuct AM cancel unfilled intent=SZ_AM
+
+[2026-08-11 09:34:17][CBAUCT][SZ128134][1分钟] CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:34:20][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1467s cancel_req= False qok= True seen= False
+CbAuct 20260811 093419 mkt=SZ n=120 last=119.042 open=118.800 hold=False mode= size=None buy_done=20260811 pending=True cage=130.946
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:34:23][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1470s cancel_req= False qok= True seen= False
+CbAuct 20260811 093423 mkt=SZ n=120 last=119.065 open=118.800 hold=False mode= size=None buy_done=20260811 pending=True cage=130.972
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:34:26][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1473s cancel_req= False qok= True seen= False
+CbAuct 20260811 093425 mkt=SZ n=120 last=119.067 open=118.800 hold=False mode= size=None buy_done=20260811 pending=True cage=130.974
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:34:28][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1476s cancel_req= False qok= True seen= False
+CbAuct 20260811 093428 mkt=SZ n=120 last=119.067 open=118.800 hold=False mode= size=None buy_done=20260811 pending=True cage=130.974
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:34:31][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1479s cancel_req= False qok= True seen= False
+CbAuct 20260811 093431 mkt=SZ n=120 last=119.069 open=118.800 hold=False mode= size=None buy_done=20260811 pending=True cage=130.976
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:34:35][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1482s cancel_req= False qok= True seen= False
+CbAuct 20260811 093435 mkt=SZ n=120 last=119.159 open=118.800 hold=False mode= size=None buy_done=20260811 pending=True cage=131.075
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:34:38][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1485s cancel_req= False qok= True seen= False
+CbAuct 20260811 093438 mkt=SZ n=120 last=119.288 open=118.800 hold=False mode= size=None buy_done=20260811 pending=True cage=131.217
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:34:41][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1488s cancel_req= False qok= True seen= False
+CbAuct 20260811 093441 mkt=SZ n=120 last=119.352 open=118.800 hold=False mode= size=None buy_done=20260811 pending=True cage=131.287
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:34:43][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1491s cancel_req= False qok= True seen= False
+CbAuct 20260811 093443 mkt=SZ n=120 last=119.460 open=118.800 hold=False mode= size=None buy_done=20260811 pending=True cage=131.406
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:34:47][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1494s cancel_req= False qok= True seen= False
+CbAuct 20260811 093447 mkt=SZ n=120 last=119.334 open=118.800 hold=False mode= size=None buy_done=20260811 pending=True cage=131.267
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:34:49][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1497s cancel_req= False qok= True seen= False
+CbAuct 20260811 093449 mkt=SZ n=120 last=119.430 open=118.800 hold=False mode= size=None buy_done=20260811 pending=True cage=131.373
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:34:52][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1500s cancel_req= False qok= True seen= False
+CbAuct 20260811 093452 mkt=SZ n=120 last=119.482 open=118.800 hold=False mode= size=None buy_done=20260811 pending=True cage=131.430
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:34:56][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1503s cancel_req= False qok= True seen= False
+CbAuct 20260811 093456 mkt=SZ n=120 last=119.460 open=118.800 hold=False mode= size=None buy_done=20260811 pending=True cage=131.406
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:34:59][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1506s cancel_req= False qok= True seen= False
+CbAuct 20260811 093458 mkt=SZ n=120 last=119.500 open=118.800 hold=False mode= size=None buy_done=20260811 pending=True cage=131.450
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:35:02][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1509s cancel_req= False qok= True seen= False
+CbAuct 20260811 093502 mkt=SZ n=120 last=119.388 open=119.403 hold=False mode= size=None buy_done=20260811 pending=True cage=131.327
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:35:05][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1512s cancel_req= False qok= True seen= False
+CbAuct pending timeout exempt intent= SZ_AM age=1512s
+CbAuct 20260811 093504 mkt=SZ n=120 last=119.403 open=119.403 hold=False mode= size=None buy_done=20260811 pending=True cage=131.343
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:35:08][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1515s cancel_req= False qok= True seen= False
+CbAuct 20260811 093508 mkt=SZ n=120 last=119.417 open=119.403 hold=False mode= size=None buy_done=20260811 pending=True cage=131.359
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:35:10][HLBAND_PROD][SH601398][日线] HlBand live heartbeat 2026-08-11 09:35:10 PERIOD= 1d stock= 601398.SH  reason=exec
+
+[2026-08-11 09:35:10][HLBAND_PROD][SH601398][日线] HlBand 20260811 0935 n1d=179 n1w=119 close=7.5300 sig_day=20260810 phase=exec prev=True w_bull=True w_bear=False w_ma5=7.536 w_ma30=7.2893 w_hist=0.0674 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=0.13% pe=False px=False bt_held=- avail=-
+
+[2026-08-11 09:35:11][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1518s cancel_req= False qok= True seen= False
+CbAuct live heartbeat 2026-08-11 09:35:10 PERIOD= 1m stock= 128134.SZ  reason=live
+CbAuct 20260811 093510 mkt=SZ n=120 last=119.417 open=119.403 hold=False mode= size=None buy_done=20260811 pending=True cage=131.359
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:35:14][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1521s cancel_req= False qok= True seen= False
+CbAuct 20260811 093514 mkt=SZ n=120 last=119.480 open=119.403 hold=False mode= size=None buy_done=20260811 pending=True cage=131.428
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:35:14][HLBAND_PROD][SH513530][日线] HlBand live heartbeat 2026-08-11 09:35:14 PERIOD= 1d stock= 513530.SH  reason=exec
+
+[2026-08-11 09:35:17][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1524s cancel_req= False qok= True seen= False
+CbAuct 20260811 093517 mkt=SZ n=120 last=119.269 open=119.403 hold=False mode= size=None buy_done=20260811 pending=True cage=131.196
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:35:20][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1527s cancel_req= False qok= True seen= False
+CbAuct 20260811 093520 mkt=SZ n=120 last=119.417 open=119.403 hold=False mode= size=None buy_done=20260811 pending=True cage=131.359
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:35:22][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1530s cancel_req= False qok= True seen= False
+CbAuct 20260811 093522 mkt=SZ n=120 last=119.478 open=119.403 hold=False mode= size=None buy_done=20260811 pending=True cage=131.426
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:35:26][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1533s cancel_req= False qok= True seen= False
+CbAuct 20260811 093526 mkt=SZ n=120 last=119.690 open=119.403 hold=False mode= size=None buy_done=20260811 pending=True cage=131.659
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:35:29][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1536s cancel_req= False qok= True seen= False
+CbAuct 20260811 093529 mkt=SZ n=120 last=119.484 open=119.403 hold=False mode= size=None buy_done=20260811 pending=True cage=131.432
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:35:32][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1539s cancel_req= False qok= True seen= False
+CbAuct 20260811 093531 mkt=SZ n=120 last=119.497 open=119.403 hold=False mode= size=None buy_done=20260811 pending=True cage=131.447
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:35:35][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1542s cancel_req= False qok= True seen= False
+CbAuct 20260811 093534 mkt=SZ n=120 last=119.557 open=119.403 hold=False mode= size=None buy_done=20260811 pending=True cage=131.513
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:35:37][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1545s cancel_req= False qok= True seen= False
+CbAuct 20260811 093537 mkt=SZ n=120 last=119.555 open=119.403 hold=False mode= size=None buy_done=20260811 pending=True cage=131.511
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:35:40][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1548s cancel_req= False qok= True seen= False
+CbAuct 20260811 093540 mkt=SZ n=120 last=119.555 open=119.403 hold=False mode= size=None buy_done=20260811 pending=True cage=131.511
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:35:44][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1551s cancel_req= False qok= True seen= False
+CbAuct 20260811 093544 mkt=SZ n=120 last=119.555 open=119.403 hold=False mode= size=None buy_done=20260811 pending=True cage=131.511
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:35:47][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1554s cancel_req= False qok= True seen= False
+CbAuct 20260811 093547 mkt=SZ n=120 last=119.571 open=119.403 hold=False mode= size=None buy_done=20260811 pending=True cage=131.528
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:35:50][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1557s cancel_req= False qok= True seen= False
+CbAuct 20260811 093549 mkt=SZ n=120 last=119.571 open=119.403 hold=False mode= size=None buy_done=20260811 pending=True cage=131.528
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:35:52][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1560s cancel_req= False qok= True seen= False
+CbAuct 20260811 093552 mkt=SZ n=120 last=119.554 open=119.403 hold=False mode= size=None buy_done=20260811 pending=True cage=131.509
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:35:56][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1563s cancel_req= False qok= True seen= False
+CbAuct 20260811 093556 mkt=SZ n=120 last=119.554 open=119.403 hold=False mode= size=None buy_done=20260811 pending=True cage=131.509
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:35:58][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1566s cancel_req= False qok= True seen= False
+CbAuct 20260811 093558 mkt=SZ n=120 last=119.600 open=119.403 hold=False mode= size=None buy_done=20260811 pending=True cage=131.560
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:36:01][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1569s cancel_req= False qok= True seen= False
+CbAuct 20260811 093601 mkt=SZ n=120 last=119.601 open=119.697 hold=False mode= size=None buy_done=20260811 pending=True cage=131.561
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:36:05][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1572s cancel_req= False qok= True seen= False
+CbAuct 20260811 093605 mkt=SZ n=120 last=119.697 open=119.697 hold=False mode= size=None buy_done=20260811 pending=True cage=131.667
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:36:07][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1575s cancel_req= False qok= True seen= False
+CbAuct 20260811 093607 mkt=SZ n=120 last=119.800 open=119.697 hold=False mode= size=None buy_done=20260811 pending=True cage=131.780
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:36:10][HLBAND_PROD][SH601398][日线] HlBand live heartbeat 2026-08-11 09:36:10 PERIOD= 1d stock= 601398.SH  reason=exec
+HlBand 20260811 0936 n1d=179 n1w=119 close=7.5300 sig_day=20260810 phase=exec prev=True w_bull=True w_bear=False w_ma5=7.536 w_ma30=7.2893 w_hist=0.0674 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=0.13% pe=False px=False bt_held=- avail=-
+
+[2026-08-11 09:36:10][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1578s cancel_req= False qok= True seen= False
+CbAuct 20260811 093610 mkt=SZ n=120 last=119.800 open=119.697 hold=False mode= size=None buy_done=20260811 pending=True cage=131.780
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:36:13][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1581s cancel_req= False qok= True seen= False
+CbAuct live heartbeat 2026-08-11 09:36:13 PERIOD= 1m stock= 128134.SZ  reason=live
+CbAuct 20260811 093613 mkt=SZ n=120 last=119.850 open=119.697 hold=False mode= size=None buy_done=20260811 pending=True cage=131.835
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:36:14][HLBAND_PROD][SH513530][日线] HlBand live heartbeat 2026-08-11 09:36:14 PERIOD= 1d stock= 513530.SH  reason=exec
+
+[2026-08-11 09:36:17][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1584s cancel_req= False qok= True seen= False
+CbAuct 20260811 093617 mkt=SZ n=120 last=119.844 open=119.697 hold=False mode= size=None buy_done=20260811 pending=True cage=131.828
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:36:20][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1587s cancel_req= False qok= True seen= False
+CbAuct 20260811 093620 mkt=SZ n=120 last=119.749 open=119.697 hold=False mode= size=None buy_done=20260811 pending=True cage=131.724
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:36:23][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1590s cancel_req= False qok= True seen= False
+CbAuct 20260811 093623 mkt=SZ n=120 last=119.599 open=119.697 hold=False mode= size=None buy_done=20260811 pending=True cage=131.559
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:36:25][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1593s cancel_req= False qok= True seen= False
+CbAuct 20260811 093625 mkt=SZ n=120 last=119.564 open=119.697 hold=False mode= size=None buy_done=20260811 pending=True cage=131.520
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:36:29][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1596s cancel_req= False qok= True seen= False
+CbAuct 20260811 093628 mkt=SZ n=120 last=119.537 open=119.697 hold=False mode= size=None buy_done=20260811 pending=True cage=131.491
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:36:32][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1599s cancel_req= False qok= True seen= False
+CbAuct 20260811 093632 mkt=SZ n=120 last=119.432 open=119.697 hold=False mode= size=None buy_done=20260811 pending=True cage=131.375
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:36:35][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1602s cancel_req= False qok= True seen= False
+
+[2026-08-11 09:36:35][CBAUCT][SZ128134][1分钟] CbAuct 20260811 093635 mkt=SZ n=120 last=119.432 open=119.697 hold=False mode= size=None buy_done=20260811 pending=True cage=131.375
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:36:37][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1605s cancel_req= False qok= True seen= False
+CbAuct 20260811 093637 mkt=SZ n=120 last=119.492 open=119.697 hold=False mode= size=None buy_done=20260811 pending=True cage=131.441
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:36:40][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1608s cancel_req= False qok= True seen= False
+CbAuct 20260811 093640 mkt=SZ n=120 last=119.598 open=119.697 hold=False mode= size=None buy_done=20260811 pending=True cage=131.558
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:36:43][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1611s cancel_req= False qok= True seen= False
+CbAuct 20260811 093643 mkt=SZ n=120 last=119.726 open=119.697 hold=False mode= size=None buy_done=20260811 pending=True cage=131.699
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:36:46][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1614s cancel_req= False qok= True seen= False
+CbAuct 20260811 093646 mkt=SZ n=120 last=119.716 open=119.697 hold=False mode= size=None buy_done=20260811 pending=True cage=131.688
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:36:50][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1617s cancel_req= False qok= True seen= False
+CbAuct 20260811 093649 mkt=SZ n=120 last=119.682 open=119.697 hold=False mode= size=None buy_done=20260811 pending=True cage=131.650
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:36:53][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1620s cancel_req= False qok= True seen= False
+CbAuct 20260811 093653 mkt=SZ n=120 last=119.562 open=119.697 hold=False mode= size=None buy_done=20260811 pending=True cage=131.518
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:36:55][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1623s cancel_req= False qok= True seen= False
+CbAuct 20260811 093655 mkt=SZ n=120 last=119.553 open=119.697 hold=False mode= size=None buy_done=20260811 pending=True cage=131.508
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:36:59][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1626s cancel_req= False qok= True seen= False
+CbAuct 20260811 093658 mkt=SZ n=120 last=119.515 open=119.697 hold=False mode= size=None buy_done=20260811 pending=True cage=131.467
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:37:02][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1629s cancel_req= False qok= True seen= False
+CbAuct 20260811 093701 mkt=SZ n=120 last=119.432 open=119.472 hold=False mode= size=None buy_done=20260811 pending=True cage=131.375
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:37:04][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1632s cancel_req= False qok= True seen= False
+CbAuct 20260811 093704 mkt=SZ n=120 last=119.472 open=119.472 hold=False mode= size=None buy_done=20260811 pending=True cage=131.419
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:37:07][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1635s cancel_req= False qok= True seen= False
+CbAuct 20260811 093707 mkt=SZ n=120 last=119.466 open=119.472 hold=False mode= size=None buy_done=20260811 pending=True cage=131.413
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:37:11][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1638s cancel_req= False qok= True seen= False
+CbAuct 20260811 093711 mkt=SZ n=120 last=119.475 open=119.472 hold=False mode= size=None buy_done=20260811 pending=True cage=131.423
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:37:13][HLBAND_PROD][SH601398][日线] HlBand live heartbeat 2026-08-11 09:37:13 PERIOD= 1d stock= 601398.SH  reason=exec
+
+[2026-08-11 09:37:13][HLBAND_PROD][SH601398][日线] HlBand 20260811 0937 n1d=179 n1w=119 close=7.5300 sig_day=20260810 phase=exec prev=True w_bull=True w_bear=False w_ma5=7.536 w_ma30=7.2893 w_hist=0.0674 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=0.13% pe=False px=False bt_held=- avail=-
+
+[2026-08-11 09:37:14][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1641s cancel_req= False qok= True seen= False
+CbAuct live heartbeat 2026-08-11 09:37:14 PERIOD= 1m stock= 128134.SZ  reason=live
+CbAuct 20260811 093714 mkt=SZ n=120 last=119.596 open=119.472 hold=False mode= size=None buy_done=20260811 pending=True cage=131.556
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:37:17][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1644s cancel_req= False qok= True seen= False
+CbAuct 20260811 093717 mkt=SZ n=120 last=119.738 open=119.472 hold=False mode= size=None buy_done=20260811 pending=True cage=131.712
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:37:17][HLBAND_PROD][SH513530][日线] HlBand live heartbeat 2026-08-11 09:37:17 PERIOD= 1d stock= 513530.SH  reason=exec
+
+[2026-08-11 09:37:19][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1647s cancel_req= False qok= True seen= False
+CbAuct 20260811 093719 mkt=SZ n=120 last=119.798 open=119.472 hold=False mode= size=None buy_done=20260811 pending=True cage=131.778
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:37:23][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1650s cancel_req= False qok= True seen= False
+CbAuct 20260811 093722 mkt=SZ n=120 last=119.843 open=119.472 hold=False mode= size=None buy_done=20260811 pending=True cage=131.827
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:37:26][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1653s cancel_req= False qok= True seen= False
+CbAuct 20260811 093726 mkt=SZ n=120 last=119.740 open=119.472 hold=False mode= size=None buy_done=20260811 pending=True cage=131.714
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:37:29][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1656s cancel_req= False qok= True seen= False
+CbAuct 20260811 093729 mkt=SZ n=120 last=119.799 open=119.472 hold=False mode= size=None buy_done=20260811 pending=True cage=131.779
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:37:32][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1659s cancel_req= False qok= True seen= False
+CbAuct 20260811 093732 mkt=SZ n=120 last=119.710 open=119.472 hold=False mode= size=None buy_done=20260811 pending=True cage=131.681
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:37:35][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1662s cancel_req= False qok= True seen= False
+CbAuct 20260811 093735 mkt=SZ n=120 last=119.652 open=119.472 hold=False mode= size=None buy_done=20260811 pending=True cage=131.617
+CbAuct AM cancel unfilled intent=SZ_AM
+
+[2026-08-11 09:37:35][CBAUCT][SZ128134][1分钟] CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:37:37][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1665s cancel_req= False qok= True seen= False
+CbAuct 20260811 093737 mkt=SZ n=120 last=119.713 open=119.472 hold=False mode= size=None buy_done=20260811 pending=True cage=131.684
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:37:40][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1668s cancel_req= False qok= True seen= False
+CbAuct 20260811 093740 mkt=SZ n=120 last=119.580 open=119.472 hold=False mode= size=None buy_done=20260811 pending=True cage=131.538
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:37:44][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1671s cancel_req= False qok= True seen= False
+CbAuct 20260811 093744 mkt=SZ n=120 last=119.500 open=119.472 hold=False mode= size=None buy_done=20260811 pending=True cage=131.450
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:37:46][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1674s cancel_req= False qok= True seen= False
+CbAuct 20260811 093746 mkt=SZ n=120 last=119.495 open=119.472 hold=False mode= size=None buy_done=20260811 pending=True cage=131.445
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:37:49][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1677s cancel_req= False qok= True seen= False
+CbAuct 20260811 093749 mkt=SZ n=120 last=119.421 open=119.472 hold=False mode= size=None buy_done=20260811 pending=True cage=131.363
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:37:53][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1680s cancel_req= False qok= True seen= False
+CbAuct 20260811 093753 mkt=SZ n=120 last=119.426 open=119.472 hold=False mode= size=None buy_done=20260811 pending=True cage=131.369
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:37:55][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1683s cancel_req= False qok= True seen= False
+CbAuct 20260811 093755 mkt=SZ n=120 last=119.318 open=119.472 hold=False mode= size=None buy_done=20260811 pending=True cage=131.250
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:37:59][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1686s cancel_req= False qok= True seen= False
+CbAuct 20260811 093759 mkt=SZ n=120 last=119.300 open=119.472 hold=False mode= size=None buy_done=20260811 pending=True cage=131.230
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
+
+[2026-08-11 09:38:02][CBAUCT][SZ128134][1分钟] CbAuct pending check SZ_AM deal= 0 traded= 0 status= -1 age=1689s cancel_req= False qok= True seen= False
+CbAuct 20260811 093801 mkt=SZ n=120 last=119.278 open=119.278 hold=False mode= size=None buy_done=20260811 pending=True cage=131.206
+CbAuct AM cancel unfilled intent=SZ_AM
+CbAuct chase cancel defer: order not visible yet am_unfilled
