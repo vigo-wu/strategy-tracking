@@ -26,14 +26,12 @@ ENABLE_MODE_B = True          # 早盘失败 → 尾盘抢筹
 
 # ---- 时窗（HHmmss）----
 # 深市 Mode A：前夜清算窗 + 首日开盘前
-SZ_AM_EVE_START = "203000"
+SZ_AM_EVE_START = "173000"
 SZ_AM_EVE_END = "223000"
 SZ_AM_BUY_START = "000000"
 SZ_AM_BUY_END = "092459"
-# 沪市 Mode A：卡点毫秒（实盘）；回测用秒级窗
-SH_AM_BUY_MS_START = 850
-SH_AM_BUY_MS_END = 950
-SH_AM_BUY_START = "092459"
+# 沪市 Mode A：抢时间优先 → 09:15 起尽早挂 130
+SH_AM_BUY_START = "091500"
 SH_AM_BUY_END = "092459"
 AM_CANCEL_AFTER = "092501"    # 开盘集合结束后再撤未成早盘单
 # 早盘撤单请求后超过该秒数仍未清 pending → 强清影子，放行 Mode B
@@ -78,7 +76,7 @@ CANCEL_RETRY_SEC = 1.0
 LISTING_DAY_ONLY = True
 LISTING_DAY_FAIL_OPEN = False
 LISTING_DATE_MAP = {
-    # "118073.SH": "20260812",
+    "118073.SH": "20260812",
 }
 
 # ---- 行情与运行 ----
@@ -95,16 +93,19 @@ TICK_ALLOW_1M_FALLBACK = False
 # ---- 实盘定时器（竞价/临停准点；回测无效）----
 # True=init 注册 run_time；与分笔 handlebar 双驱动，busy 防重入
 ENABLE_LIVE_TIMER = True
-LIVE_TIMER_MS = 100                 # 建议 50–100；过低可能触 TPS
+LIVE_TIMER_MS = 50                  # 09:15 抢先；建议 50–100
 TIMER_QUICK_TRADE = 2               # 定时器内 passorder 立即报单
 TICK_QUICK_TRADE = 1                # 分笔 handlebar 内报单
+# 日志墙钟节流（定时器 50ms 下禁用 barpos%N 抽样）
+LOG_STATUS_SEC = 10.0               # 状态行 / bars.jsonl / 非上市日 skip
+LOG_WAIT_SEC = 5.0                  # 撤单等待 / 收盘就绪等待等
 
 STATE_FILE = r"D:\tradingStrategy\pbs_{stock}.json"
 LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "PbsRush"
-STRATEGY_VER = "v1.7"
+STRATEGY_VER = "v1.10"
 
 DRY_RUN_FILL_IMMEDIATE = False
 DRY_RUN_FILL_ON_LIMIT = True

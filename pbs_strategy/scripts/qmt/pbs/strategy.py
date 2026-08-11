@@ -356,13 +356,27 @@ def _now_ms(now):
         return 0.0
 
 
-def _now_ms_of_second(now):
-    if now is None:
-        now = datetime.datetime.now()
+def _log_due(key, now=None, sec=None):
+    """墙钟节流：到期返回 True 并打戳。定时器高频下代替 C.barpos % N。"""
+    if sec is None:
+        sec = globals().get("LOG_STATUS_SEC")
     try:
-        return int(now.microsecond // 1000)
+        sec = float(sec if sec is not None else 10.0)
     except Exception:
-        return 0
+        sec = 10.0
+    if sec <= 0:
+        return True
+    store = getattr(A, "_log_at_ms", None)
+    if not isinstance(store, dict):
+        store = {}
+        A._log_at_ms = store
+    k = str(key or "")
+    now_ms = _now_ms(now)
+    last = float(store.get(k, 0) or 0)
+    if last > 0 and (now_ms - last) < sec * 1000.0:
+        return False
+    store[k] = now_ms
+    return True
 
 
 def _listing_date_str(stock=None):
@@ -402,7 +416,7 @@ def _morning_buy_price():
 
 
 def _try_morning_buy(C, now, now_s, day):
-    """Mode A：深市隔夜/早盘挂 130；沪市卡点挂 130。"""
+    """Mode A：抢时间优先 — 深市隔夜/早盘、沪市 09:15 起尽早挂 130。"""
     if not bool(globals().get("ENABLE_MODE_A", True)):
         return False
     if _has_position() or getattr(A, "pending", None):
@@ -414,7 +428,6 @@ def _try_morning_buy(C, now, now_s, day):
 
     mkt = _market_tag()
     px = _morning_buy_price()
-    bt = getattr(A, "is_backtest", False)
 
     if mkt == "SZ":
         eve_s = str(globals().get("SZ_AM_EVE_START") or "203000")
@@ -428,8 +441,8 @@ def _try_morning_buy(C, now, now_s, day):
             ok = True
         if not ok:
             return False
-        print("%s SZ_AM buy @%.3f now=%s" % (STRATEGY_NAME, px, now_s))
-        _event_log("sz_am_buy", price=px, now_s=now_s)
+        print("%s SZ_AM buy @%.3f now=%s (time-priority)" % (STRATEGY_NAME, px, now_s))
+        _event_log("sz_am_buy", price=px, now_s=now_s, time_priority=True)
         if _order_buy_limit(C, px, now, intent="SZ_AM", entry_mode="A"):
             A.am_buy_day = day
             _save_state()
@@ -439,30 +452,15 @@ def _try_morning_buy(C, now, now_s, day):
     if mkt == "SH":
         if not _is_listing_day(C, day):
             return False
-        am_s = str(globals().get("SH_AM_BUY_START") or "092459")
+        am_s = str(globals().get("SH_AM_BUY_START") or "091500")
         am_e = str(globals().get("SH_AM_BUY_END") or "092459")
         if not _in_window(now_s, am_s, am_e):
             return False
-        # 实盘：毫秒卡点；分笔回测：该秒内每笔都允许（无可靠微秒则不筛 ms）
-        if not bt:
-            ms0 = int(globals().get("SH_AM_BUY_MS_START") or 850)
-            ms1 = int(globals().get("SH_AM_BUY_MS_END") or 950)
-            ms = _now_ms_of_second(now)
-            if ms < ms0 or ms > ms1:
-                return False
-        elif str(getattr(A, "period", "")) == "tick":
-            ms = _now_ms_of_second(now)
-            # 仅当 bar 带微秒时按卡点筛；秒级时间戳则放行该秒全部 tick
-            if getattr(now, "microsecond", 0) > 0:
-                ms0 = int(globals().get("SH_AM_BUY_MS_START") or 850)
-                ms1 = int(globals().get("SH_AM_BUY_MS_END") or 950)
-                if ms < ms0 or ms > ms1:
-                    return False
         print(
-            "%s SH_AM buy @%.3f card-point now=%s ms=%s"
-            % (STRATEGY_NAME, px, now_s, _now_ms_of_second(now))
+            "%s SH_AM buy @%.3f now=%s (time-priority)"
+            % (STRATEGY_NAME, px, now_s)
         )
-        _event_log("sh_am_buy", price=px, now_s=now_s, ms=_now_ms_of_second(now))
+        _event_log("sh_am_buy", price=px, now_s=now_s, time_priority=True)
         if _order_buy_limit(C, px, now, intent="SH_AM", entry_mode="A"):
             A.am_buy_day = day
             _save_state()
@@ -519,7 +517,8 @@ def _cleanup_am_pending(C, now, now_s):
         _save_state()
         return False
 
-    if C.barpos % 5 == 0:
+    wait_sec = float(globals().get("LOG_WAIT_SEC") or 5.0)
+    if _log_due("am_cancel_wait", now, wait_sec):
         print(
             "%s AM cancel in-flight intent=%s age=%.0fs stuck_after=%.0fs"
             % (STRATEGY_NAME, intent, age, stuck_sec)
@@ -631,7 +630,8 @@ def _handle_sz_mode_b(C, now, now_s, day, last_px):
     ready = last_px + 1e-9 >= ready_last
     force = str(now_s) >= force_at
     if (not ready) and (not force):
-        if C.barpos % 3 == 0:
+        wait_sec = float(globals().get("LOG_WAIT_SEC") or 5.0)
+        if _log_due("sz_close_wait", now, wait_sec):
             print(
                 "%s SZ_CLOSE wait reopen last=%.3f need>=%.3f cage=%.3f force_at=%s"
                 % (STRATEGY_NAME, last_px, ready_last, target, force_at)
@@ -720,10 +720,10 @@ def _handle_sh_mode_b(C, now, now_s, day, last_px):
 
 
 def _in_critical_live_window(now_s):
-    """卡点/撤补/深市升级等时窗：即使非末 bar 也要跑。"""
+    """早盘/撤补/深市升级等时窗：即使非末 bar 也要跑。"""
     windows = (
         (
-            str(globals().get("SH_AM_BUY_START") or "092459"),
+            str(globals().get("SH_AM_BUY_START") or "091500"),
             str(globals().get("SH_AM_BUY_END") or "092459"),
         ),
         (
@@ -793,6 +793,36 @@ def _handle(C):
         _live_heartbeat("no_cash_or_login")
         return
 
+    holding = _has_position() or (bt and _bt_held_vol() > 0)
+    mkt = _market_tag()
+
+    # 已持仓：抢筹目标达成，不再交易
+    if holding:
+        return
+
+    if ("BUY" in getattr(A, "acted", set())) and (not getattr(A, "pending", None)):
+        return
+
+    listing = _is_listing_day(C, day)
+    eve = _is_eve_before_listing(C, now, day)
+    if (not listing) and (not eve):
+        if _log_due("skip_not_listing", now, globals().get("LOG_STATUS_SEC")):
+            print("%s skip: not listing day" % STRATEGY_NAME, day, A.stock)
+            _event_log("skip_not_listing_day", day=day, stock=A.stock)
+        return
+
+    # Mode A：固定挂 130，不依赖 OHLCV（集合开始时常尚无成交/全推）
+    if _try_morning_buy(C, now, now_s, day):
+        return
+
+    # True=早盘撤单进行中；卡住超时已在 _cleanup_am_pending 强清，不再堵 Mode B
+    if _cleanup_am_pending(C, now, now_s):
+        return
+
+    if not listing:
+        return
+
+    # Mode B 需要最新价/笼子：此处才强制行情
     ohlcv = _get_ohlcv(C, A.stock)
     if ohlcv is None:
         _live_heartbeat("ohlcv_none")
@@ -814,13 +844,11 @@ def _handle(C):
     if bt:
         _bt_recover_position(now=now, last=last_px)
 
-    holding = _has_position() or (bt and _bt_held_vol() > 0)
-    mkt = _market_tag()
-
-    interesting = holding or getattr(A, "pending", None) or (
-        str(getattr(A, "buy_done_day", "") or "") == day
+    # 状态行：首次必打；其后按 LOG_STATUS_SEC 节流（pending 也不再跟定时器刷屏）
+    do_status = (not getattr(A, "ready_logged", False)) or _log_due(
+        "status", now, globals().get("LOG_STATUS_SEC")
     )
-    if (not getattr(A, "ready_logged", False)) or interesting or (C.barpos % 30 == 0):
+    if do_status:
         A.ready_logged = True
         print(
             "%s" % STRATEGY_NAME,
@@ -850,38 +878,14 @@ def _handle(C):
             mkt=mkt,
             buy_done=str(getattr(A, "buy_done_day", "") or ""),
             tag=tag,
+            pending=bool(getattr(A, "pending", None)),
         )
-
-    # 已持仓：抢筹目标达成，不再交易
-    if holding:
-        return
-
-    if ("BUY" in getattr(A, "acted", set())) and (not getattr(A, "pending", None)):
-        return
-
-    listing = _is_listing_day(C, day)
-    eve = _is_eve_before_listing(C, now, day)
-    if (not listing) and (not eve):
-        if C.barpos % 60 == 0:
-            print("%s skip: not listing day" % STRATEGY_NAME, day, A.stock)
-            _event_log("skip_not_listing_day", day=day, stock=A.stock)
-        return
-
-    if _try_morning_buy(C, now, now_s, day):
-        return
-
-    # True=早盘撤单进行中；卡住超时已在 _cleanup_am_pending 强清，不再堵 Mode B
-    if _cleanup_am_pending(C, now, now_s):
-        return
-
-    if not listing:
-        return
 
     if mkt == "SZ":
         _handle_sz_mode_b(C, now, now_s, day, last_px)
     elif mkt == "SH":
         _handle_sh_mode_b(C, now, now_s, day, chase_px)
     else:
-        if C.barpos % 60 == 0:
+        if _log_due("unknown_market", now, globals().get("LOG_STATUS_SEC")):
             print("%s unknown market stock=%s" % (STRATEGY_NAME, A.stock))
             _event_log("unknown_market", stock=A.stock)

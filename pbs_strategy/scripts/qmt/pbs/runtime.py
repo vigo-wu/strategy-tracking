@@ -31,6 +31,8 @@ def _ensure_day_flags():
     for k, v in defaults.items():
         if not hasattr(A, k):
             setattr(A, k, v)
+    if not isinstance(getattr(A, "_log_at_ms", None), dict):
+        A._log_at_ms = {}
 
 
 def _start_live_timer(C):
