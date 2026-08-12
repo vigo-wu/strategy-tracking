@@ -1,0 +1,38 @@
+{
+  "meta": {
+    "tag": "PbsRush",
+    "ver": "?",
+    "stock": "?",
+    "period": "?",
+    "backtest": "?",
+    "dry_run": "?",
+    "budget": 0.0
+  },
+  "diag": {
+    "first_bar": "20260812",
+    "last_bar": "20260812",
+    "last_state": null,
+    "buy_skip": 0,
+    "sell_skip": 0,
+    "sticky_pe": 0,
+    "sticky_px": 0,
+    "interrupt_noise": false
+  },
+  "price_info": {
+    "source": "log"
+  },
+  "n_buy": 0,
+  "n_sell": 0,
+  "sum_pnl": 0.0,
+  "avg_ret": 0.0,
+  "win_n": 0,
+  "loss_n": 0,
+  "win_rate": 0.0,
+  "max_win": 0.0,
+  "max_loss": 0.0,
+  "gross_profit": 0,
+  "gross_loss": 0,
+  "buy_dist": {},
+  "sell_dist": {},
+  "trades": []
+}

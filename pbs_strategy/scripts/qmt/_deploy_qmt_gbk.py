@@ -49,7 +49,7 @@ def main() -> None:
     deploy_gbk(text, TARGETS, compile_name="qmt_terminal_pbs.py")
     print("OK: 打开国金 QMT -> 模型交易 -> 加载 PbsRush / 转债首日抢筹")
     print("主图/回测: 分笔(tick); 实盘另开 run_time 定时器+分笔双驱动")
-    print("v1.10 log throttle; ModeA no-OHLCV; time-priority early 130")
+    print("v1.18 shadow deal_qok+cooldown; no same-pulse reorder")
     print("默认 DRY_RUN=True; LIVE_TIMER_MS=50; LOG_STATUS_SEC=10")
 
 

@@ -21,72 +21,51 @@ LOT_SIZE = 10  # 可转债：10 张 = 一手
 
 # ---- 价格锚点（发行价=100，见 model.md / docs）----
 ISSUE_PRICE = 100.0
-HALT_BASE_PRICE = 130.0       # 开盘集合上限 / 30% 临停基准
-MORNING_BUY_PRICE = 130.0
-CAGE_RATIO = 1.1              # 有效申报上沿比例
-REOPEN_CAP_PRICE = 143.0      # 130 * 1.1；临停复牌首档参考
-LIMIT_UP_PRICE = 157.30       # 首日涨幅 57.3%
+HALT_BASE_PRICE = 130.0       # 30% 临停基准（人工开盘参考）
+CAGE_RATIO = 1.1              # 状态日志笼子参考
+REOPEN_CAP_PRICE = 143.0      # 130 * 1.1；状态日志参考
+LIMIT_UP_PRICE = 157.30       # 首日涨幅 57.3% / 收盘申报价
 LIMIT_DOWN_PRICE = 56.70
 PRICE_DECIMALS = 3
-CHASE_MIN_STEP = 0.01         # 沪市撤补最小价差
 
 # ---- 模式开关（仅买入）----
-ENABLE_MODE_A = True          # 早盘 130 抢筹
-ENABLE_MODE_B = True          # 早盘失败 → 尾盘抢筹
+# 开盘/隔夜 130 由人工委托；本策略只跑尾盘 Mode B
+ENABLE_MODE_B = True
 
 # ---- 时窗（HHmmss）----
-# 深市 Mode A：前夜清算窗 + 首日开盘前
-SZ_AM_EVE_START = "193000"
-SZ_AM_EVE_END = "203000"
-SZ_AM_BUY_START = "000000"
-SZ_AM_BUY_END = "092459"
-# 沪市 Mode A：抢时间优先 → 09:15 起尽早挂 130
-SH_AM_BUY_START = "091500"
-SH_AM_BUY_END = "092459"
-AM_CANCEL_AFTER = "092501"    # 开盘集合结束后再撤未成早盘单
-# 早盘撤单请求后超过该秒数仍未清 pending → 强清影子，放行 Mode B
-AM_CANCEL_STUCK_SEC = 30.0
+# 14:57 起直接以涨停顶格申报，失败则持续重试直至申报成功
+CLOSE_BUY_START = "145700"
+CLOSE_BUY_END = "145955"
+# None = 用 LIMIT_UP_PRICE
+CLOSE_BUY_PRICE = None
 
-# 深市 Mode B：
-#   临停预挂 143（09:30 起，吃上午时间优先）→ 14:55-14:56 必须撤掉
-#   14:57 后：等复牌 last 就绪再按笼子顶挂；到点强制挂一笔
-SZ_PREPLACE_START = "093000"
-SZ_PREPLACE_END = "145459"
-SZ_ESCALATE_CANCEL_START = "145500"
-SZ_ESCALATE_CANCEL_END = "145659"
-SZ_CLOSE_BUY_START = "145701"
-SZ_CLOSE_BUY_END = "145950"
-# last >= 该价视为复牌已刷新（默认=REOPEN_CAP，笼子已能顶到 157.30）
-SZ_CLOSE_READY_LAST = 143.0
-# 仍未就绪则强制按当前笼子挂（保底抢筹）
-SZ_CLOSE_FORCE_AT = "145745"
-SZ_ESCALATE_ALERT_SEC = 2.0
-
-# 沪市 Mode B / 追单（连续匹配可撤）
-SH_CHASE_START = "145700"
-SH_CHASE_END = "145955"
-SH_CHASE_INTERVAL_MS = 50
-
-# pending：排队/追单/收盘集合意图不短超时自动撤
+# pending：收盘申报意图不短超时自动撤
 PENDING_TIMEOUT_EXEMPT_INTENTS = (
-    "SZ_AM",
-    "SH_AM",
-    "SZ_PREPLACE",
     "SZ_CLOSE",
-    "SH_OPEN",
-    "SH_CHASE",
+    "SH_CLOSE",
 )
 PENDING_TIMEOUT_EXEMPT_LOG_SEC = 300
 PENDING_TIMEOUT_SEC = 90
 PENDING_ORPHAN_SEC = 15
 CANCEL_RETRY_SEC = 1.0
+# passorder 后以柜台见单为委托成功；长期未见单则间隔命中 + 二次查委托后强清重挂
+PENDING_SHADOW_CLEAR_SEC = 3.0
+PENDING_SHADOW_CLEAR_HITS = 3
+PENDING_SHADOW_CLEAR_HIT_GAP_MS = 1000.0
+PENDING_SHADOW_REORDER_COOLDOWN_MS = 2000.0
+PENDING_SHADOW_CLEAR_INTENTS = (
+    "SZ_CLOSE",
+    "SH_CLOSE",
+)
+# pending_check 日志节流（显式配置才生效；查单仍 50ms）
+PENDING_CHECK_LOG_SEC = 5.0
 
 # ---- 上市首日门闩 ----
-# 实盘务必填写 LISTING_DATE_MAP，否则深市隔夜单/首日门闩可能 fail-closed
+# 实盘务必填写 LISTING_DATE_MAP，否则首日门闩可能 fail-closed
 LISTING_DAY_ONLY = True
 LISTING_DAY_FAIL_OPEN = False
 LISTING_DATE_MAP = {
-    "118073.SH": "20260812",
+    "110103.SH": "20260813",
 }
 
 # ---- 行情与运行 ----
@@ -100,22 +79,23 @@ DOWNLOAD_HIST_LIVE = False
 DOWNLOAD_HIST_BACKTEST = True
 TICK_ALLOW_1M_FALLBACK = False
 
-# ---- 实盘定时器（竞价/临停准点；回测无效）----
+# ---- 实盘定时器（收盘申报准点；回测无效）----
 # True=init 注册 run_time；与分笔 handlebar 双驱动，busy 防重入
 ENABLE_LIVE_TIMER = True
-LIVE_TIMER_MS = 50                  # 09:15 抢先；建议 50–100
+LIVE_TIMER_MS = 50                  # 收盘重试；建议 50–100
 TIMER_QUICK_TRADE = 2               # 定时器内 passorder 立即报单
 TICK_QUICK_TRADE = 1                # 分笔 handlebar 内报单
 # 日志墙钟节流（定时器 50ms 下禁用 barpos%N 抽样）
-LOG_STATUS_SEC = 10.0               # 状态行 / bars.jsonl / 非上市日 skip
-LOG_WAIT_SEC = 5.0                  # 撤单等待 / 收盘就绪等待等
+# 14:57 前默认静默（无状态行/心跳/skip 刷屏）；收盘窗内才按下列间隔打日志
+LOG_STATUS_SEC = 10.0               # 收盘窗内：状态行 / bars.jsonl
+LOG_WAIT_SEC = 5.0                  # 收盘窗内：申报重试 / buy_skip / passorder_fail 节流
 
 STATE_FILE = r"D:\tradingStrategy\pbs_{stock}.json"
 LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "PbsRush"
-STRATEGY_VER = "v1.10"
+STRATEGY_VER = "v1.18"
 
 DRY_RUN_FILL_IMMEDIATE = False
 DRY_RUN_FILL_ON_LIMIT = True
@@ -476,27 +456,11 @@ def _bar_end_str(C):
 # === pbs/state_extra.py ===
 def _state_extra_load(raw):
     A.buy_done_day = str(raw.get("buy_done_day", "") or "")
-    A.am_buy_day = str(raw.get("am_buy_day", "") or "")
-    A.sz_preplace_day = str(raw.get("sz_preplace_day", "") or "")
-    A.sz_close_buy_day = str(raw.get("sz_close_buy_day", "") or "")
-    A.sz_escalate_day = str(raw.get("sz_escalate_day", "") or "")
-    A.sz_escalate_alert_ms = float(raw.get("sz_escalate_alert_ms", 0) or 0)
-    A.sh_chase_day = str(raw.get("sh_chase_day", "") or "")
-    A.sh_last_order_px = float(raw.get("sh_last_order_px", 0) or 0)
-    A.sh_chase_at_ms = float(raw.get("sh_chase_at_ms", 0) or 0)
     A.entry_mode = str(raw.get("entry_mode", "") or "")
 
 
 def _state_extra_save(data):
     data["buy_done_day"] = str(getattr(A, "buy_done_day", "") or "")
-    data["am_buy_day"] = str(getattr(A, "am_buy_day", "") or "")
-    data["sz_preplace_day"] = str(getattr(A, "sz_preplace_day", "") or "")
-    data["sz_close_buy_day"] = str(getattr(A, "sz_close_buy_day", "") or "")
-    data["sz_escalate_day"] = str(getattr(A, "sz_escalate_day", "") or "")
-    data["sz_escalate_alert_ms"] = float(getattr(A, "sz_escalate_alert_ms", 0) or 0)
-    data["sh_chase_day"] = str(getattr(A, "sh_chase_day", "") or "")
-    data["sh_last_order_px"] = float(getattr(A, "sh_last_order_px", 0) or 0)
-    data["sh_chase_at_ms"] = float(getattr(A, "sh_chase_at_ms", 0) or 0)
     data["entry_mode"] = str(getattr(A, "entry_mode", "") or "")
 
 # === qmt_common/single/state_io.py ===
@@ -1754,8 +1718,11 @@ def _max_sell_vol(now=None):
 # 钩子(策略必须提供): _pending_on_buy_fill(pend, vol, px)
 #                     _pending_on_sell_fill(pend, now, vol, px)
 #                     _save_state
-def _deal_fill(remark, stock):
-    """汇总匹配 remark+标的 的成交 -> (量, 均价)。"""
+def _deal_fill_ex(remark, stock):
+    """汇总匹配 remark+标的 的成交 -> (量, 均价, query_ok)。
+
+    query_ok=False：接口失败；绝不能当成「无成交」去清影子 pending。
+    """
     vol = 0
     notional = 0.0
     try:
@@ -1763,9 +1730,10 @@ def _deal_fill(remark, stock):
     except Exception as e:
         print(_strategy_tag(), "deal query fail", e)
         _event_log("deal_query_fail", error=str(e))
-        return 0, 0.0
-    if not deals:
-        return 0, 0.0
+        return 0, 0.0, False
+    if deals is None:
+        _event_log("deal_query_fail", error="deals_none")
+        return 0, 0.0, False
     for d in deals:
         if str(getattr(d, "m_strRemark", "") or "") != remark:
             continue
@@ -1778,7 +1746,50 @@ def _deal_fill(remark, stock):
             vol += v
             notional += v * px
     avg = (notional / float(vol)) if vol > 0 else 0.0
+    return vol, avg, True
+
+
+def _deal_fill(remark, stock):
+    """汇总匹配 remark+标的 的成交 -> (量, 均价)。兼容旧调用。"""
+    vol, avg, _ok = _deal_fill_ex(remark, stock)
     return vol, avg
+
+
+def _shadow_reorder_block_arm():
+    """影子强清后短冷却，避免同轮/紧接重挂双开。"""
+    try:
+        ms = float(globals().get("PENDING_SHADOW_REORDER_COOLDOWN_MS") or 2000.0)
+    except Exception:
+        ms = 2000.0
+    if ms <= 0:
+        A._shadow_reorder_block_until_ms = 0.0
+        return
+    now_ms = 0.0
+    try:
+        now_ms = datetime.datetime.now().timestamp() * 1000.0
+    except Exception:
+        now_ms = 0.0
+    A._shadow_reorder_block_until_ms = now_ms + ms
+    _event_log(
+        "shadow_reorder_block",
+        cooldown_ms=ms,
+        until_ms=float(A._shadow_reorder_block_until_ms or 0),
+    )
+
+
+def _shadow_reorder_blocked(now=None):
+    until = float(getattr(A, "_shadow_reorder_block_until_ms", 0) or 0)
+    if until <= 0:
+        return False
+    now_ms = 0.0
+    try:
+        if now is not None and hasattr(now, "timestamp"):
+            now_ms = now.timestamp() * 1000.0
+        else:
+            now_ms = datetime.datetime.now().timestamp() * 1000.0
+    except Exception:
+        now_ms = 0.0
+    return now_ms < until
 
 
 def _find_order_ex(remark, stock):
@@ -1882,6 +1893,71 @@ def _clear_pending(reason=""):
         )
     A.pending = None
     _save_state()
+    if str(reason or "") == "shadow_never_seen":
+        _shadow_reorder_block_arm()
+
+
+def _pending_check_should_log(
+    intent, status, traded, cancel_req, order_seen, order_qok, age, force=False
+):
+    """pending_check 日志节流：状态变化、强制、或达到间隔才打。
+
+    PENDING_CHECK_LOG_SEC：未配置或 <=0 = 每次都打（opt-in 节流）；>0 才节流。
+    """
+    if force:
+        try:
+            now_ms = datetime.datetime.now().timestamp() * 1000.0
+        except Exception:
+            now_ms = 0.0
+        A._pending_check_log_ms = now_ms
+        return True
+
+    raw = globals().get("PENDING_CHECK_LOG_SEC", None)
+    if raw is None:
+        return True
+    try:
+        log_sec = float(raw)
+    except Exception:
+        return True
+    if log_sec <= 0:
+        return True
+
+    fp = "%s|%s|%s|%s|%s|%s" % (
+        str(intent or ""),
+        str(status),
+        str(int(traded or 0)),
+        "1" if cancel_req else "0",
+        "1" if order_seen else "0",
+        "1" if order_qok else "0",
+    )
+    last_fp = str(getattr(A, "_pending_check_fp", "") or "")
+    changed = fp != last_fp
+    now_ms = 0.0
+    try:
+        now_ms = datetime.datetime.now().timestamp() * 1000.0
+    except Exception:
+        now_ms = 0.0
+    last_ms = float(getattr(A, "_pending_check_log_ms", 0) or 0)
+    due = (last_ms <= 0) or ((now_ms - last_ms) >= log_sec * 1000.0)
+    if (not changed) and (not due):
+        return False
+    A._pending_check_fp = fp
+    A._pending_check_log_ms = now_ms
+    return True
+
+
+def _shadow_clear_intent_ok(intent):
+    """必须显式配置 PENDING_SHADOW_CLEAR_INTENTS；未配/空元组 = 不启用强清。"""
+    allow = globals().get("PENDING_SHADOW_CLEAR_INTENTS", None)
+    if allow is None:
+        return False
+    try:
+        s = set(str(x) for x in allow)
+    except Exception:
+        return False
+    if not s:
+        return False
+    return str(intent) in s
 
 
 def _new_remark(tag, side, vol):
@@ -1917,7 +1993,7 @@ def _process_pending(C, now):
     if submitted is not None and now is not None:
         age = (now - submitted).total_seconds()
 
-    deal_vol, deal_avg = _deal_fill(remark, stock)
+    deal_vol, deal_avg, deal_qok = _deal_fill_ex(remark, stock)
     od, order_qok = _find_order_ex(remark, stock)
     status = int(getattr(od, "m_nOrderStatus", -1) or -1) if od is not None else -1
     traded = max(deal_vol, _order_traded_vol(od))
@@ -1925,44 +2001,95 @@ def _process_pending(C, now):
     cancel_req = bool(pend.get("cancel_requested"))
     if od is not None and not pend.get("order_seen"):
         pend["order_seen"] = True
+        pend["shadow_miss_hits"] = 0
         A.pending = pend
         try:
             _save_state()
         except Exception:
             pass
+        # 委托成功确认：柜台查询已见到本 remark 委托（不以成交为准）
+        print(
+            _strategy_tag(),
+            "order acked intent=%s status=%s age=%.1fs remark=%s"
+            % (intent, status, age, remark),
+        )
+        _event_log(
+            "order_acked",
+            intent=intent,
+            status=status,
+            age_sec=round(age, 3),
+            remark=remark,
+            side=side,
+            vol=target,
+            price=float(pend.get("price_hint") or 0),
+        )
 
-    print(
-        _strategy_tag(),
-        "pending check",
+    order_seen = bool(pend.get("order_seen"))
+
+    shadow_sec = 0.0
+    try:
+        shadow_sec = float(globals().get("PENDING_SHADOW_CLEAR_SEC") or 0)
+    except Exception:
+        shadow_sec = 0.0
+    shadow_intent = _shadow_clear_intent_ok(intent)
+    # 影子=委托未见 + 成交查询成功且量为0（成交查询失败则不清，防漏记后双开）
+    shadow_candidate = (
+        shadow_sec > 0
+        and shadow_intent
+        and (not cancel_req)
+        and (not order_seen)
+        and order_qok
+        and (od is None)
+        and deal_qok
+        and int(deal_vol or 0) <= 0
+        and age >= shadow_sec
+    )
+    # 影子候选窗口内强制打 pending_check，保留未见单取证（通常仅数次命中）
+    force_pending_log = bool(shadow_candidate)
+
+    if _pending_check_should_log(
         intent,
-        "deal=",
-        deal_vol,
-        "traded=",
-        traded,
-        "status=",
         status,
-        "age=%.0fs" % age,
-        "cancel_req=",
+        traded,
         cancel_req,
-        "qok=",
+        order_seen,
         order_qok,
-        "seen=",
-        bool(pend.get("order_seen")),
-    )
-    _event_log(
-        "pending_check",
-        intent=intent,
-        side=side,
-        deal=deal_vol,
-        traded=traded,
-        status=status,
-        age_sec=int(age),
-        cancel_req=cancel_req,
-        target=target,
-        remark=remark,
-        order_qok=order_qok,
-        order_seen=bool(pend.get("order_seen")),
-    )
+        age,
+        force=force_pending_log,
+    ):
+        print(
+            _strategy_tag(),
+            "pending check",
+            intent,
+            "deal=",
+            deal_vol,
+            "traded=",
+            traded,
+            "status=",
+            status,
+            "age=%.0fs" % age,
+            "cancel_req=",
+            cancel_req,
+            "qok=",
+            order_qok,
+            "seen=",
+            order_seen,
+        )
+        _event_log(
+            "pending_check",
+            intent=intent,
+            side=side,
+            deal=deal_vol,
+            traded=traded,
+            status=status,
+            age_sec=int(age),
+            cancel_req=cancel_req,
+            target=target,
+            remark=remark,
+            order_qok=order_qok,
+            order_seen=order_seen,
+            shadow_candidate=bool(shadow_candidate),
+        )
 
     filled = globals().get("_ORDER_FILLED") or (56, 8)
     dead = globals().get("_ORDER_DEAD") or (54, 57, 53, 5, 6, 9)
@@ -1993,6 +2120,168 @@ def _process_pending(C, now):
         else:
             _clear_pending("rejected/cancelled")
         return False
+
+    # 委托已离簿但成交查询显示有量：先记账，禁止当影子重挂
+    if (
+        (not cancel_req)
+        and (not order_seen)
+        and order_qok
+        and (od is None)
+        and deal_qok
+        and int(deal_vol or 0) > 0
+    ):
+        use_vol = int(deal_vol)
+        print(
+            _strategy_tag(),
+            "deal without open order -> fill intent=%s vol=%s"
+            % (intent, use_vol),
+        )
+        _event_log(
+            "deal_without_order",
+            intent=intent,
+            vol=use_vol,
+            price=px,
+            remark=remark,
+            age_sec=round(age, 3),
+        )
+        if side == "buy":
+            _pending_on_buy_fill(pend, use_vol, px)
+        else:
+            _pending_on_sell_fill(pend, now, use_vol, px)
+        _clear_pending("deal_without_order")
+        return False
+
+    # 未见单影子 pending：委托未见 + 成交查询成功且为0；命中间隔 + 二次确认
+    # PENDING_SHADOW_CLEAR_INTENTS 必须显式配置
+    if shadow_sec > 0 and shadow_intent:
+        if shadow_candidate:
+            try:
+                need_hits = int(globals().get("PENDING_SHADOW_CLEAR_HITS") or 3)
+            except Exception:
+                need_hits = 3
+            if need_hits < 1:
+                need_hits = 1
+            try:
+                hit_gap_ms = float(globals().get("PENDING_SHADOW_CLEAR_HIT_GAP_MS") or 1000)
+            except Exception:
+                hit_gap_ms = 1000.0
+            if hit_gap_ms < 0:
+                hit_gap_ms = 0.0
+            now_ms = 0.0
+            try:
+                now_ms = datetime.datetime.now().timestamp() * 1000.0
+            except Exception:
+                now_ms = 0.0
+            last_hit_ms = float(pend.get("shadow_miss_hit_ms") or 0)
+            can_hit = (last_hit_ms <= 0) or ((now_ms - last_hit_ms) >= hit_gap_ms)
+            if can_hit:
+                hits = int(pend.get("shadow_miss_hits") or 0) + 1
+                pend["shadow_miss_hits"] = hits
+                pend["shadow_miss_hit_ms"] = now_ms
+                A.pending = pend
+                try:
+                    _save_state()
+                except Exception:
+                    pass
+            else:
+                hits = int(pend.get("shadow_miss_hits") or 0)
+            if can_hit and hits >= need_hits:
+                od2, qok2 = _find_order_ex(remark, stock)
+                deal2, avg2, deal_qok2 = _deal_fill_ex(remark, stock)
+                confirm_ok = (
+                    bool(qok2)
+                    and (od2 is None)
+                    and bool(deal_qok2)
+                    and int(deal2 or 0) <= 0
+                )
+                _event_log(
+                    "pending_shadow_confirm",
+                    intent=intent,
+                    age_sec=round(age, 3),
+                    shadow_sec=shadow_sec,
+                    hits=hits,
+                    need_hits=need_hits,
+                    hit_gap_ms=hit_gap_ms,
+                    order_qok=bool(order_qok),
+                    order_seen=bool(order_seen),
+                    deal_qok=bool(deal_qok),
+                    deal=int(deal_vol or 0),
+                    confirm_ok=confirm_ok,
+                    confirm_qok=bool(qok2),
+                    confirm_od=(od2 is not None),
+                    confirm_deal_qok=bool(deal_qok2),
+                    confirm_deal=int(deal2 or 0),
+                    remark=remark,
+                )
+                if confirm_ok:
+                    print(
+                        _strategy_tag(),
+                        "pending shadow clear: never acked intent=%s age=%.1fs hits=%d"
+                        % (intent, age, hits),
+                    )
+                    _event_log(
+                        "pending_shadow_clear",
+                        intent=intent,
+                        age_sec=round(age, 3),
+                        shadow_sec=shadow_sec,
+                        hits=hits,
+                        need_hits=need_hits,
+                        order_qok=True,
+                        order_seen=False,
+                        deal_qok=True,
+                        deal=0,
+                        status=status,
+                        remark=remark,
+                    )
+                    _clear_pending("shadow_never_seen")
+                    return False
+                if od2 is not None:
+                    pend["order_seen"] = True
+                    print(
+                        _strategy_tag(),
+                        "order acked (shadow confirm) intent=%s remark=%s"
+                        % (intent, remark),
+                    )
+                    _event_log(
+                        "order_acked",
+                        intent=intent,
+                        status=int(getattr(od2, "m_nOrderStatus", -1) or -1),
+                        age_sec=round(age, 3),
+                        remark=remark,
+                        side=side,
+                        via="shadow_confirm",
+                    )
+                elif deal_qok2 and int(deal2 or 0) > 0:
+                    use_vol = int(deal2)
+                    fill_px = avg2 if avg2 > 0 else px
+                    if side == "buy":
+                        _pending_on_buy_fill(pend, use_vol, fill_px)
+                    else:
+                        _pending_on_sell_fill(pend, now, use_vol, fill_px)
+                    _clear_pending("deal_without_order_confirm")
+                    return False
+                pend["shadow_miss_hits"] = 0
+                pend["shadow_miss_hit_ms"] = 0
+                A.pending = pend
+                try:
+                    _save_state()
+                except Exception:
+                    pass
+                if (not confirm_ok) and (od2 is None):
+                    print(
+                        _strategy_tag(),
+                        "pending shadow confirm fail; keep pending intent=%s"
+                        % intent,
+                    )
+        else:
+            if int(pend.get("shadow_miss_hits") or 0) > 0:
+                pend["shadow_miss_hits"] = 0
+                pend["shadow_miss_hit_ms"] = 0
+                A.pending = pend
+                try:
+                    _save_state()
+                except Exception:
+                    pass
 
     timeout = float(globals().get("PENDING_TIMEOUT_SEC") or 180)
     orphan = float(globals().get("PENDING_ORPHAN_SEC") or 60)
@@ -2419,7 +2708,7 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False):
     return True
 
 # === pbs/strategy.py ===
-# model.md v1.1 — 仅买入抢筹：Mode A 早盘 130 / Mode B 尾盘沪深分流
+# model.md — 仅买入抢筹：开盘/隔夜人工；策略只跑 Mode B 尾盘沪深分流
 
 
 def _has_position():
@@ -2453,9 +2742,7 @@ def _remaining_buy_budget(cash):
 
 
 def _intent_entry_mode(intent):
-    if intent in ("SZ_AM", "SH_AM"):
-        return "A"
-    if intent in ("SZ_PREPLACE", "SZ_CLOSE", "SH_OPEN", "SH_CHASE"):
+    if intent in ("SZ_CLOSE", "SH_CLOSE"):
         return "B"
     return ""
 
@@ -2533,13 +2820,21 @@ def _order_buy_limit(C, price, now, budget=None, intent="BUY", entry_mode=None):
     price = _px_round(price)
     if price <= 0:
         return False
+    wait_sec = float(globals().get("LOG_WAIT_SEC") or 5.0)
+    if _shadow_reorder_blocked(now):
+        if _log_due("shadow_reorder_block", now, wait_sec):
+            print(_strategy_tag(), "buy skip: shadow reorder cooldown")
+            _event_log("buy_skip", reason="shadow_reorder_cooldown")
+        return False
     if getattr(A, "pending", None):
-        print(_strategy_tag(), "buy skip: pending active")
-        _event_log("buy_skip", reason="pending_active")
+        if _log_due("buy_skip_pending", now, wait_sec):
+            print(_strategy_tag(), "buy skip: pending active")
+            _event_log("buy_skip", reason="pending_active")
         return False
     if _has_position() or (getattr(A, "is_backtest", False) and _bt_held_vol() > 0):
-        print(_strategy_tag(), "buy skip: already holding")
-        _event_log("buy_skip", reason="already_holding")
+        if _log_due("buy_skip_holding", now, wait_sec):
+            print(_strategy_tag(), "buy skip: already holding")
+            _event_log("buy_skip", reason="already_holding")
         return False
     if "BUY" in getattr(A, "acted", set()):
         return False
@@ -2549,15 +2844,17 @@ def _order_buy_limit(C, price, now, budget=None, intent="BUY", entry_mode=None):
         budget = _remaining_buy_budget(cash)
     vol = _cb_lot(price, budget)
     if vol < lot:
-        print(_strategy_tag(), "buy skip lot", "price=", price, "budget=", budget)
-        _event_log("buy_skip", reason="lot", price=price, budget=budget)
+        if _log_due("buy_skip_lot", now, wait_sec):
+            print(_strategy_tag(), "buy skip lot", "price=", price, "budget=", budget)
+            _event_log("buy_skip", reason="lot", price=price, budget=budget)
         return False
     cash = _available_cash()
     if cash is not None and cash < price * vol:
         vol = _cb_lot(price, min(budget, float(cash)))
         if vol < lot:
-            print(_strategy_tag(), "buy skip cash", cash)
-            _event_log("buy_skip", reason="cash", cash=cash, price=price)
+            if _log_due("buy_skip_cash", now, wait_sec):
+                print(_strategy_tag(), "buy skip cash", cash)
+                _event_log("buy_skip", reason="cash", cash=cash, price=price)
             return False
 
     if not entry_mode:
@@ -2568,7 +2865,9 @@ def _order_buy_limit(C, price, now, budget=None, intent="BUY", entry_mode=None):
 
     ot = (now or datetime.datetime.now()).strftime("%Y%m%d%H%M%S")
     msg = _new_remark(intent, "BUY", vol)
-    print(("[DRY] " if DRY_RUN else "") + msg, "@limit", price, intent)
+    # 重试路径下报单前日志节流；申报成功日志不节流
+    if _log_due("buy_order_try", now, wait_sec):
+        print(("[DRY] " if DRY_RUN else "") + msg, "@limit", price, intent)
     exempt = set(str(x) for x in (globals().get("PENDING_TIMEOUT_EXEMPT_INTENTS") or ()))
     no_timeout = str(intent) in exempt
     if DRY_RUN:
@@ -2622,8 +2921,9 @@ def _order_buy_limit(C, price, now, budget=None, intent="BUY", entry_mode=None):
             C,
         )
     except Exception as e:
-        print(_strategy_tag(), "passorder BUY limit fail", e)
-        _event_log("passorder_fail", side="buy", error=str(e), vol=vol, price=price)
+        if _log_due("passorder_fail", now, wait_sec):
+            print(_strategy_tag(), "passorder BUY limit fail", e)
+            _event_log("passorder_fail", side="buy", error=str(e), vol=vol, price=price)
         return False
     if getattr(A, "is_backtest", False):
         _apply_cb_buy_fill(vol, price, ot, **extra_pos)
@@ -2799,32 +3099,8 @@ def _log_due(key, now=None, sec=None):
     return True
 
 
-def _listing_date_str(stock=None):
-    stock = str(stock or getattr(A, "stock", "") or "")
-    mp = globals().get("LISTING_DATE_MAP") or {}
-    if stock in mp:
-        return str(mp.get(stock) or "")
-    return ""
-
-
-def _is_eve_before_listing(C, now, day):
-    if now is None:
-        return False
-    try:
-        tomorrow = (now + datetime.timedelta(days=1)).strftime("%Y%m%d")
-    except Exception:
-        return False
-    mapped = _listing_date_str()
-    if mapped:
-        return mapped == tomorrow
-    try:
-        return bool(_is_listing_day(C, tomorrow))
-    except Exception:
-        return False
-
-
-def _morning_buy_price():
-    cfg = globals().get("MORNING_BUY_PRICE")
+def _close_buy_price():
+    cfg = globals().get("CLOSE_BUY_PRICE")
     if cfg is not None:
         try:
             v = float(cfg)
@@ -2832,352 +3108,59 @@ def _morning_buy_price():
                 return _px_round(v)
         except Exception:
             pass
-    return _px_round(globals().get("HALT_BASE_PRICE") or 130.0)
+    return _limit_up()
 
 
-def _try_morning_buy(C, now, now_s, day):
-    """Mode A：抢时间优先 — 深市隔夜/早盘、沪市 09:15 起尽早挂 130。"""
-    if not bool(globals().get("ENABLE_MODE_A", True)):
-        return False
-    if _has_position() or getattr(A, "pending", None):
-        return False
-    if str(getattr(A, "am_buy_day", "") or "") == day:
-        return False
-    if "BUY" in getattr(A, "acted", set()):
-        return False
-
-    mkt = _market_tag()
-    px = _morning_buy_price()
-
-    if mkt == "SZ":
-        eve_s = str(globals().get("SZ_AM_EVE_START") or "203000")
-        eve_e = str(globals().get("SZ_AM_EVE_END") or "223000")
-        am_s = str(globals().get("SZ_AM_BUY_START") or "000000")
-        am_e = str(globals().get("SZ_AM_BUY_END") or "092459")
-        ok = False
-        if _in_window(now_s, am_s, am_e) and _is_listing_day(C, day):
-            ok = True
-        elif _in_window(now_s, eve_s, eve_e) and _is_eve_before_listing(C, now, day):
-            ok = True
-        if not ok:
-            return False
-        print("%s SZ_AM buy @%.3f now=%s (time-priority)" % (STRATEGY_NAME, px, now_s))
-        _event_log("sz_am_buy", price=px, now_s=now_s, time_priority=True)
-        if _order_buy_limit(C, px, now, intent="SZ_AM", entry_mode="A"):
-            A.am_buy_day = day
-            _save_state()
-            return True
-        return False
-
-    if mkt == "SH":
-        if not _is_listing_day(C, day):
-            return False
-        am_s = str(globals().get("SH_AM_BUY_START") or "091500")
-        am_e = str(globals().get("SH_AM_BUY_END") or "092459")
-        if not _in_window(now_s, am_s, am_e):
-            return False
-        print(
-            "%s SH_AM buy @%.3f now=%s (time-priority)"
-            % (STRATEGY_NAME, px, now_s)
-        )
-        _event_log("sh_am_buy", price=px, now_s=now_s, time_priority=True)
-        if _order_buy_limit(C, px, now, intent="SH_AM", entry_mode="A"):
-            A.am_buy_day = day
-            _save_state()
-            return True
-        return False
-
-    return False
-
-
-def _cleanup_am_pending(C, now, now_s):
-    """撤未成早盘单；撤单卡住超时则强清影子 pending，避免堵死 Mode B。
-
-    返回 True：本 bar 仍应等待早盘撤单（暂不进 Mode B）。
-    返回 False：不因早盘 pending 阻塞（无单 / 已清 / 未到撤单时点）。
-    """
-    after = str(globals().get("AM_CANCEL_AFTER") or "092501")
-    if str(now_s) < after:
-        return False
-    pend = getattr(A, "pending", None)
-    if not isinstance(pend, dict):
-        return False
-    intent = str(pend.get("intent", "") or "")
-    if intent not in ("SZ_AM", "SH_AM"):
-        return False
-
-    if not pend.get("cancel_requested"):
-        print("%s AM cancel unfilled intent=%s" % (STRATEGY_NAME, intent))
-        _event_log("am_cancel", intent=intent, now_s=now_s)
-        _request_pending_cancel(C, now, "am_unfilled")
-        return True
-
-    stuck_sec = float(globals().get("AM_CANCEL_STUCK_SEC") or 30.0)
-    cancel_at = _parse_opened_at(pend.get("cancel_at"))
-    age = 0.0
-    if cancel_at is not None and now is not None:
-        try:
-            age = (now - cancel_at).total_seconds()
-        except Exception:
-            age = 0.0
-    if age >= stuck_sec:
-        print(
-            "%s AM cancel stuck -> force clear pending intent=%s age=%.0fs"
-            % (STRATEGY_NAME, intent, age)
-        )
-        _event_log(
-            "am_cancel_stuck_clear",
-            intent=intent,
-            age_sec=int(age),
-            stuck_sec=stuck_sec,
-            price=pend.get("price_hint"),
-            remark=pend.get("remark"),
-        )
-        A.pending = None
-        _save_state()
-        return False
-
-    wait_sec = float(globals().get("LOG_WAIT_SEC") or 5.0)
-    if _log_due("am_cancel_wait", now, wait_sec):
-        print(
-            "%s AM cancel in-flight intent=%s age=%.0fs stuck_after=%.0fs"
-            % (STRATEGY_NAME, intent, age, stuck_sec)
-        )
-    return True
-
-
-def _handle_sz_mode_b(C, now, now_s, day, last_px):
-    """深市 Mode B：临停埋 143 → 14:55-14:56 撤单 → 等复牌就绪/到点强制按笼子顶挂。
-
-    关键：14:57 起收盘集合不可撤；撤 143 必须在 14:57 前；收盘只挂一次。
-    """
+def _handle_mode_b_close(C, now, now_s, day):
+    """尾盘：14:57 起顶格申报；以柜台见单为委托成功，成交非目标。"""
     if not bool(globals().get("ENABLE_MODE_B", True)):
         return
-    reopen = _reopen_cap()
-    limit_up = _limit_up()
-    pre_s = str(globals().get("SZ_PREPLACE_START") or "093000")
-    pre_e = str(globals().get("SZ_PREPLACE_END") or "145459")
-    esc_s = str(globals().get("SZ_ESCALATE_CANCEL_START") or "145500")
-    esc_e = str(globals().get("SZ_ESCALATE_CANCEL_END") or "145659")
-    close_s = str(globals().get("SZ_CLOSE_BUY_START") or "145701")
-    close_e = str(globals().get("SZ_CLOSE_BUY_END") or "145950")
-    alert_sec = float(globals().get("SZ_ESCALATE_ALERT_SEC") or 2.0)
-
-    # 1) 临停预挂 143
-    if _in_window(now_s, pre_s, pre_e):
-        if str(getattr(A, "sz_preplace_day", "") or "") == day:
-            return
-        if _has_position() or getattr(A, "pending", None):
-            return
-        print("%s SZ_PREPLACE buy @%.3f (禁挂涨停顶格)" % (STRATEGY_NAME, reopen))
-        _event_log("sz_preplace", price=reopen)
-        if _order_buy_limit(C, reopen, now, intent="SZ_PREPLACE", entry_mode="B"):
-            A.sz_preplace_day = day
-            _save_state()
-        return
-
-    # 2) 14:57 前必须撤掉未成 143（不可撤窗口前）
-    if _in_window(now_s, esc_s, esc_e):
-        pend = getattr(A, "pending", None)
-        if not isinstance(pend, dict):
-            return
-        intent = str(pend.get("intent", "") or "")
-        if intent not in ("SZ_PREPLACE",):
-            return
-        if pend.get("cancel_requested"):
-            now_ms = _now_ms(now)
-            last_alert = float(getattr(A, "sz_escalate_alert_ms", 0) or 0)
-            if last_alert <= 0 or (now_ms - last_alert) >= alert_sec * 1000.0:
-                A.sz_escalate_alert_ms = now_ms
-                print(
-                    "%s SZ_ESCALATE wait cancel intent=%s px=%.3f"
-                    % (STRATEGY_NAME, intent, float(pend.get("price_hint") or 0))
-                )
-                _event_log("sz_escalate_wait", intent=intent, price=pend.get("price_hint"))
-                _save_state()
-            return
-        A.sz_escalate_day = day
-        old_px = float(pend.get("price_hint") or 0)
-        print(
-            "%s SZ_ESCALATE pre-14:57 cancel old=%.3f intent=%s"
-            % (STRATEGY_NAME, old_px, intent)
-        )
-        _event_log("sz_escalate_cancel", old=old_px, intent=intent, window="%s-%s" % (esc_s, esc_e))
-        _request_pending_cancel(C, now, "sz_pre_1457_cancel")
-        A.sz_escalate_alert_ms = _now_ms(now)
-        _save_state()
-        return
-
-    # 3) 收盘集合：就绪后按笼子顶挂一次；到点强制挂（不可撤，故不再撤补）
-    if not _in_window(now_s, close_s, close_e):
-        return
-    if str(getattr(A, "sz_close_buy_day", "") or "") == day:
-        return
-    if _has_position():
-        return
-
-    pend = getattr(A, "pending", None)
-    if isinstance(pend, dict):
-        intent = str(pend.get("intent", "") or "")
-        old_px = float(pend.get("price_hint") or 0)
-        # 14:57 后仍挂着 143：不可再撤，只能告警
-        now_ms = _now_ms(now)
-        last_alert = float(getattr(A, "sz_escalate_alert_ms", 0) or 0)
-        if last_alert <= 0 or (now_ms - last_alert) >= alert_sec * 1000.0:
-            A.sz_escalate_alert_ms = now_ms
-            print(
-                "%s SZ_CLOSE BLOCKED: pending=%s px=%.3f (14:57后不可撤，错失升级)"
-                % (STRATEGY_NAME, intent, old_px)
-            )
-            _event_log(
-                "sz_close_blocked",
-                intent=intent,
-                price=old_px,
-                last=last_px,
-                cancel_requested=bool(pend.get("cancel_requested")),
-            )
-            _save_state()
-        return
-
-    target = _cage_cap(C, last_px if last_px > 0 else reopen)
-    if target <= 0:
-        return
-
-    ready_last = float(globals().get("SZ_CLOSE_READY_LAST") or 0)
-    if ready_last <= 0:
-        ready_last = float(reopen)
-    force_at = str(globals().get("SZ_CLOSE_FORCE_AT") or "145745")
-    ready = last_px + 1e-9 >= ready_last
-    force = str(now_s) >= force_at
-    if (not ready) and (not force):
-        wait_sec = float(globals().get("LOG_WAIT_SEC") or 5.0)
-        if _log_due("sz_close_wait", now, wait_sec):
-            print(
-                "%s SZ_CLOSE wait reopen last=%.3f need>=%.3f cage=%.3f force_at=%s"
-                % (STRATEGY_NAME, last_px, ready_last, target, force_at)
-            )
-            _event_log(
-                "sz_close_wait",
-                last=last_px,
-                ready_last=ready_last,
-                cage=target,
-                force_at=force_at,
-            )
-        return
-
-    reason = "force" if (force and not ready) else "ready"
-    print(
-        "%s SZ_CLOSE buy @%.3f last=%.3f limit=%.3f reason=%s"
-        % (STRATEGY_NAME, target, last_px, limit_up, reason)
-    )
-    _event_log(
-        "sz_close_buy",
-        price=target,
-        last=last_px,
-        limit_up=limit_up,
-        reason=reason,
-        ready=ready,
-        force=force,
-    )
-    if _order_buy_limit(C, target, now, intent="SZ_CLOSE", entry_mode="B"):
-        A.sz_close_buy_day = day
-        _save_state()
-
-
-def _handle_sh_mode_b(C, now, now_s, day, last_px):
-    """沪市 Mode B：按盘口笼子阶梯追至 157.30。"""
-    if not bool(globals().get("ENABLE_MODE_B", True)):
-        return
-    start = str(globals().get("SH_CHASE_START") or "145700")
-    end = str(globals().get("SH_CHASE_END") or "145955")
+    start = str(globals().get("CLOSE_BUY_START") or "145700")
+    end = str(globals().get("CLOSE_BUY_END") or "145955")
     if not _in_window(now_s, start, end):
         return
     if _has_position():
         return
-
-    limit_up = _limit_up()
-    target = _cage_cap(C, last_px)
-    if target <= 0:
+    if ("BUY" in getattr(A, "acted", set())) and (not getattr(A, "pending", None)):
         return
-    interval = float(globals().get("SH_CHASE_INTERVAL_MS") or 50)
-    min_step = float(globals().get("CHASE_MIN_STEP") or 0.01)
-    now_ms = _now_ms(now)
+
     pend = getattr(A, "pending", None)
-
     if isinstance(pend, dict):
-        last_ms = float(getattr(A, "sh_chase_at_ms", 0) or 0)
-        if last_ms > 0 and (now_ms - last_ms) < interval and (not pend.get("cancel_requested")):
-            return
-        old_px = float(pend.get("price_hint") or 0)
-        if old_px + 1e-9 >= limit_up:
-            return
-        if target > old_px + min_step:
-            if not pend.get("cancel_requested"):
-                A.sh_chase_at_ms = now_ms
-                print(
-                    "%s SH_CHASE cancel->%.3f old=%.3f last=%.3f"
-                    % (STRATEGY_NAME, target, old_px, last_px)
-                )
-                _event_log("sh_chase", target=target, old=old_px, last=last_px)
-                _request_pending_cancel(C, now, "cage_up")
-                if getattr(A, "pending", None):
-                    return
-            else:
-                return
-        else:
-            return
-
-    if "BUY" in getattr(A, "acted", set()):
+        # 已报出：等柜台 ack（order_seen）/ 废单 / 影子强清；顶格常不成交属正常
         return
-    A.sh_chase_at_ms = now_ms
-    intent = "SH_OPEN" if str(getattr(A, "sh_chase_day", "") or "") != day else "SH_CHASE"
-    print("%s %s buy @%.3f last=%.3f" % (STRATEGY_NAME, intent, target, last_px))
-    _event_log("sh_buy", intent=intent, price=target, last=last_px)
-    if _order_buy_limit(C, target, now, intent=intent, entry_mode="B"):
-        A.sh_chase_day = day
-        A.sh_last_order_px = float(target)
-        _save_state()
+
+    px = _close_buy_price()
+    if px <= 0:
+        return
+    mkt = _market_tag()
+    intent = "SZ_CLOSE" if mkt == "SZ" else "SH_CLOSE"
+    wait_sec = float(globals().get("LOG_WAIT_SEC") or 5.0)
+    # 仍按 50ms 重试；日志约 LOG_WAIT_SEC 一条，避免刷屏
+    if _log_due("close_buy_try", now, wait_sec):
+        print("%s %s buy @%.3f now=%s (limit-up until submit ok)" % (STRATEGY_NAME, intent, px, now_s))
+        _event_log("close_buy_try", intent=intent, price=px, now_s=now_s, mkt=mkt)
+    if _order_buy_limit(C, px, now, intent=intent, entry_mode="B"):
+        print("%s %s submitted @%.3f now=%s (wait order ack)" % (STRATEGY_NAME, intent, px, now_s))
+        _event_log("close_buy_submitted", intent=intent, price=px, now_s=now_s)
+        return
+    if _log_due("close_buy_retry", now, wait_sec):
+        print("%s %s submit fail -> retry @%.3f" % (STRATEGY_NAME, intent, px))
+        _event_log("close_buy_retry", intent=intent, price=px, now_s=now_s)
 
 
 def _in_critical_live_window(now_s):
-    """早盘/撤补/深市升级等时窗：即使非末 bar 也要跑。"""
-    windows = (
-        (
-            str(globals().get("SH_AM_BUY_START") or "091500"),
-            str(globals().get("SH_AM_BUY_END") or "092459"),
-        ),
-        (
-            str(globals().get("AM_CANCEL_AFTER") or "092501"),
-            "093000",
-        ),
-        (
-            str(globals().get("SZ_PREPLACE_START") or "093000"),
-            str(globals().get("SZ_PREPLACE_END") or "145459"),
-        ),
-        (
-            str(globals().get("SZ_ESCALATE_CANCEL_START") or "145500"),
-            str(globals().get("SZ_ESCALATE_CANCEL_END") or "145659"),
-        ),
-        (
-            str(globals().get("SZ_CLOSE_BUY_START") or "145701"),
-            str(globals().get("SZ_CLOSE_BUY_END") or "145950"),
-        ),
-        (
-            str(globals().get("SH_CHASE_START") or "145700"),
-            str(globals().get("SH_CHASE_END") or "145955"),
-        ),
-    )
-    for s, e in windows:
-        if _in_window(now_s, s, e):
-            return True
-    # 深市隔夜窗（若模型夜间仍在跑）
-    if _in_window(
+    """收盘申报时窗：即使非末 bar 也要跑。"""
+    return _in_window(
         now_s,
-        str(globals().get("SZ_AM_EVE_START") or "203000"),
-        str(globals().get("SZ_AM_EVE_END") or "223000"),
-    ):
-        return True
-    return False
+        str(globals().get("CLOSE_BUY_START") or "145700"),
+        str(globals().get("CLOSE_BUY_END") or "145955"),
+    )
+
+
+def _before_close_window(now_s):
+    """14:57 前：策略空转，尽量不打日志。"""
+    start = str(globals().get("CLOSE_BUY_START") or "145700")
+    return str(now_s) < start
 
 
 def _handle(C):
@@ -3187,6 +3170,8 @@ def _handle(C):
     now_s = _bar_hhmmss(now)
     day = now.strftime("%Y%m%d")
     tag = _bar_tag(bar_dt)
+    in_close = _in_critical_live_window(now_s)
+    before_close = _before_close_window(now_s)
 
     if not bt:
         if getattr(A, "pending", None):
@@ -3195,13 +3180,15 @@ def _handle(C):
         only_last = bool(globals().get("LIVE_ONLY_LAST_BAR", False))
         if str(getattr(A, "period", "")) == "tick":
             only_last = False
-        if only_last and (not _in_critical_live_window(now_s)):
+        if only_last and (not in_close):
             try:
                 if hasattr(C, "is_last_bar") and (not C.is_last_bar()):
                     return
             except Exception:
                 pass
-        _live_heartbeat("live")
+        # 收盘窗外不打心跳，避免全日刷屏
+        if in_close:
+            _live_heartbeat("live")
     else:
         _bt_roll_t1(day)
         _bt_recover_position(now=now)
@@ -3210,7 +3197,8 @@ def _handle(C):
 
     cash = _available_cash()
     if cash is None:
-        _live_heartbeat("no_cash_or_login")
+        if in_close:
+            _live_heartbeat("no_cash_or_login")
         return
 
     holding = _has_position() or (bt and _bt_held_vol() > 0)
@@ -3223,89 +3211,82 @@ def _handle(C):
     if ("BUY" in getattr(A, "acted", set())) and (not getattr(A, "pending", None)):
         return
 
+    # 14:57 前静默等待（init 日志仍保留；买卖关键事件仍会打）
+    if before_close:
+        return
+
     listing = _is_listing_day(C, day)
-    eve = _is_eve_before_listing(C, now, day)
-    if (not listing) and (not eve):
-        if _log_due("skip_not_listing", now, globals().get("LOG_STATUS_SEC")):
+    if not listing:
+        if in_close and _log_due("skip_not_listing", now, globals().get("LOG_STATUS_SEC")):
             print("%s skip: not listing day" % STRATEGY_NAME, day, A.stock)
             _event_log("skip_not_listing_day", day=day, stock=A.stock)
         return
 
-    # Mode A：固定挂 130，不依赖 OHLCV（集合开始时常尚无成交/全推）
-    if _try_morning_buy(C, now, now_s, day):
-        return
+    # 行情仅用于状态行；收盘顶格申报不依赖 OHLCV
+    last_px = 0.0
+    open_px = 0.0
+    n_bars = 0
+    ohlcv = None
+    if in_close:
+        ohlcv = _get_ohlcv(C, A.stock)
+    if ohlcv is not None:
+        opens, highs, lows, closes, vols = ohlcv
+        n_bars = len(closes)
+        open_px = float(opens[-1]) if opens else 0.0
+        bar_last = float(closes[-1]) if closes else 0.0
+        last_px = _tick_last(C, fallback=bar_last)
+        if last_px <= 0:
+            last_px = _px_round(bar_last)
+        if bt:
+            try:
+                bar_high = float(highs[-1])
+            except Exception:
+                bar_high = last_px
+            if bar_high > last_px:
+                last_px = _px_round(bar_high)
+            _bt_recover_position(now=now, last=last_px)
 
-    # True=早盘撤单进行中；卡住超时已在 _cleanup_am_pending 强清，不再堵 Mode B
-    if _cleanup_am_pending(C, now, now_s):
-        return
-
-    if not listing:
-        return
-
-    # Mode B 需要最新价/笼子：此处才强制行情
-    ohlcv = _get_ohlcv(C, A.stock)
-    if ohlcv is None:
-        _live_heartbeat("ohlcv_none")
-        return
-    opens, highs, lows, closes, vols = ohlcv
-    bar_last = float(closes[-1])
-    open_px = float(opens[-1])
-    try:
-        bar_high = float(highs[-1])
-    except Exception:
-        bar_high = bar_last
-    last_px = _tick_last(C, fallback=bar_last)
-    if last_px <= 0:
-        last_px = _px_round(bar_last)
-    chase_px = last_px
-    if bt and bar_high > chase_px:
-        chase_px = _px_round(bar_high)
-
-    if bt:
-        _bt_recover_position(now=now, last=last_px)
-
-    # 状态行：首次必打；其后按 LOG_STATUS_SEC 节流（pending 也不再跟定时器刷屏）
-    do_status = (not getattr(A, "ready_logged", False)) or _log_due(
-        "status", now, globals().get("LOG_STATUS_SEC")
-    )
-    if do_status:
-        A.ready_logged = True
-        print(
-            "%s" % STRATEGY_NAME,
-            day,
-            now_s,
-            "mkt=%s n=%d last=%.3f open=%.3f hold=%s mode=%s "
-            "buy_done=%s pending=%s cage=%.3f"
-            % (
-                mkt,
-                len(closes),
-                last_px,
-                open_px,
-                holding,
-                _entry_mode_of(),
-                getattr(A, "buy_done_day", ""),
-                bool(getattr(A, "pending", None)),
-                _cage_cap(C, last_px),
-            ),
+    # 仅收盘窗内打状态行 / bars.jsonl
+    if in_close:
+        do_status = (not getattr(A, "ready_logged", False)) or _log_due(
+            "status", now, globals().get("LOG_STATUS_SEC")
         )
-        _bar_log(
-            day=day,
-            hhmmss=now_s,
-            n=len(closes),
-            last=round(last_px, 6),
-            open=round(open_px, 6),
-            hold=holding,
-            mkt=mkt,
-            buy_done=str(getattr(A, "buy_done_day", "") or ""),
-            tag=tag,
-            pending=bool(getattr(A, "pending", None)),
-        )
+        if do_status:
+            A.ready_logged = True
+            print(
+                "%s" % STRATEGY_NAME,
+                day,
+                now_s,
+                "mkt=%s n=%d last=%.3f open=%.3f hold=%s mode=%s "
+                "buy_done=%s pending=%s close_px=%.3f"
+                % (
+                    mkt,
+                    n_bars,
+                    last_px,
+                    open_px,
+                    holding,
+                    _entry_mode_of(),
+                    getattr(A, "buy_done_day", ""),
+                    bool(getattr(A, "pending", None)),
+                    _close_buy_price(),
+                ),
+            )
+            _bar_log(
+                day=day,
+                hhmmss=now_s,
+                n=n_bars,
+                last=round(last_px, 6),
+                open=round(open_px, 6),
+                hold=holding,
+                mkt=mkt,
+                buy_done=str(getattr(A, "buy_done_day", "") or ""),
+                tag=tag,
+                pending=bool(getattr(A, "pending", None)),
+            )
 
-    if mkt == "SZ":
-        _handle_sz_mode_b(C, now, now_s, day, last_px)
-    elif mkt == "SH":
-        _handle_sh_mode_b(C, now, now_s, day, chase_px)
-    else:
+    if mkt in ("SZ", "SH"):
+        _handle_mode_b_close(C, now, now_s, day)
+    elif in_close:
         if _log_due("unknown_market", now, globals().get("LOG_STATUS_SEC")):
             print("%s unknown market stock=%s" % (STRATEGY_NAME, A.stock))
             _event_log("unknown_market", stock=A.stock)
@@ -3330,14 +3311,6 @@ def init(C):
 def _ensure_day_flags():
     defaults = {
         "buy_done_day": "",
-        "am_buy_day": "",
-        "sz_preplace_day": "",
-        "sz_close_buy_day": "",
-        "sz_escalate_day": "",
-        "sz_escalate_alert_ms": 0.0,
-        "sh_chase_day": "",
-        "sh_last_order_px": 0.0,
-        "sh_chase_at_ms": 0.0,
         "entry_mode": "",
     }
     for k, v in defaults.items():
@@ -3348,7 +3321,7 @@ def _ensure_day_flags():
 
 
 def _start_live_timer(C):
-    """实盘注册 run_time：竞价/临停准点驱动；回测无效。"""
+    """实盘注册 run_time：收盘申报准点驱动；回测无效。"""
     if getattr(A, "is_backtest", False):
         return False
     if not bool(globals().get("ENABLE_LIVE_TIMER", True)):
@@ -3416,7 +3389,7 @@ def _run_handle(C, drive):
 
 
 def _pbs_pulse(C):
-    """run_time 回调：墙钟驱动（竞价/临停/追单准点）。"""
+    """run_time 回调：墙钟驱动（收盘申报重试）。"""
     if getattr(A, "is_backtest", False):
         return
     _run_handle(C, "timer")
@@ -3480,14 +3453,6 @@ def _init_impl(C):
             A.acted = set()
             A.pending = None
             A.buy_done_day = ""
-            A.am_buy_day = ""
-            A.sz_preplace_day = ""
-            A.sz_close_buy_day = ""
-            A.sz_escalate_day = ""
-            A.sz_escalate_alert_ms = 0.0
-            A.sh_chase_day = ""
-            A.sh_last_order_px = 0.0
-            A.sh_chase_at_ms = 0.0
             A.entry_mode = ""
             A.bt_held = 0
             A.bt_locked = 0
@@ -3552,8 +3517,6 @@ def _init_impl(C):
         TRADE_BUDGET,
         "lot=",
         LOT_SIZE,
-        "modeA=",
-        bool(globals().get("ENABLE_MODE_A", True)),
         "modeB=",
         bool(globals().get("ENABLE_MODE_B", True)),
         "buy_only=1",
@@ -3561,26 +3524,12 @@ def _init_impl(C):
         timer_on,
         "timer_ms=",
         int(globals().get("LIVE_TIMER_MS") or 0),
-        "am_px=",
-        _morning_buy_price(),
-        "reopen_cap=",
-        _reopen_cap(),
+        "close=",
+        "%s-%s" % (CLOSE_BUY_START, CLOSE_BUY_END),
+        "close_px=",
+        _close_buy_price(),
         "limit_up=",
         _limit_up(),
-        "sz_pre=",
-        "%s-%s" % (SZ_PREPLACE_START, SZ_PREPLACE_END),
-        "sz_esc=",
-        "%s-%s" % (SZ_ESCALATE_CANCEL_START, SZ_ESCALATE_CANCEL_END),
-        "sz_close=",
-        "%s-%s" % (SZ_CLOSE_BUY_START, SZ_CLOSE_BUY_END),
-        "sz_ready=",
-        float(globals().get("SZ_CLOSE_READY_LAST") or 0),
-        "sz_force=",
-        str(globals().get("SZ_CLOSE_FORCE_AT") or ""),
-        "sh_chase=",
-        "%s-%s" % (SH_CHASE_START, SH_CHASE_END),
-        "chase_ms=",
-        SH_CHASE_INTERVAL_MS,
         "listing_only=",
         bool(globals().get("LISTING_DAY_ONLY", True)),
     )
@@ -3593,12 +3542,13 @@ def _init_impl(C):
         dry_run=DRY_RUN,
         budget=TRADE_BUDGET,
         mkt=mkt,
-        mode_a=bool(globals().get("ENABLE_MODE_A", True)),
         mode_b=bool(globals().get("ENABLE_MODE_B", True)),
         buy_only=True,
         timer=timer_on,
         timer_ms=int(globals().get("LIVE_TIMER_MS") or 0),
-        reopen_cap=_reopen_cap(),
+        close_start=str(globals().get("CLOSE_BUY_START") or ""),
+        close_end=str(globals().get("CLOSE_BUY_END") or ""),
+        close_px=_close_buy_price(),
         limit_up=_limit_up(),
         listing_day_only=bool(globals().get("LISTING_DAY_ONLY", True)),
         log_dir=str(globals().get("LOG_DIR") or ""),

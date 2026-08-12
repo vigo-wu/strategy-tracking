@@ -18,14 +18,6 @@ def init(C):
 def _ensure_day_flags():
     defaults = {
         "buy_done_day": "",
-        "am_buy_day": "",
-        "sz_preplace_day": "",
-        "sz_close_buy_day": "",
-        "sz_escalate_day": "",
-        "sz_escalate_alert_ms": 0.0,
-        "sh_chase_day": "",
-        "sh_last_order_px": 0.0,
-        "sh_chase_at_ms": 0.0,
         "entry_mode": "",
     }
     for k, v in defaults.items():
@@ -36,7 +28,7 @@ def _ensure_day_flags():
 
 
 def _start_live_timer(C):
-    """实盘注册 run_time：竞价/临停准点驱动；回测无效。"""
+    """实盘注册 run_time：收盘申报准点驱动；回测无效。"""
     if getattr(A, "is_backtest", False):
         return False
     if not bool(globals().get("ENABLE_LIVE_TIMER", True)):
@@ -104,7 +96,7 @@ def _run_handle(C, drive):
 
 
 def _pbs_pulse(C):
-    """run_time 回调：墙钟驱动（竞价/临停/追单准点）。"""
+    """run_time 回调：墙钟驱动（收盘申报重试）。"""
     if getattr(A, "is_backtest", False):
         return
     _run_handle(C, "timer")
@@ -168,14 +160,6 @@ def _init_impl(C):
             A.acted = set()
             A.pending = None
             A.buy_done_day = ""
-            A.am_buy_day = ""
-            A.sz_preplace_day = ""
-            A.sz_close_buy_day = ""
-            A.sz_escalate_day = ""
-            A.sz_escalate_alert_ms = 0.0
-            A.sh_chase_day = ""
-            A.sh_last_order_px = 0.0
-            A.sh_chase_at_ms = 0.0
             A.entry_mode = ""
             A.bt_held = 0
             A.bt_locked = 0
@@ -240,8 +224,6 @@ def _init_impl(C):
         TRADE_BUDGET,
         "lot=",
         LOT_SIZE,
-        "modeA=",
-        bool(globals().get("ENABLE_MODE_A", True)),
         "modeB=",
         bool(globals().get("ENABLE_MODE_B", True)),
         "buy_only=1",
@@ -249,26 +231,12 @@ def _init_impl(C):
         timer_on,
         "timer_ms=",
         int(globals().get("LIVE_TIMER_MS") or 0),
-        "am_px=",
-        _morning_buy_price(),
-        "reopen_cap=",
-        _reopen_cap(),
+        "close=",
+        "%s-%s" % (CLOSE_BUY_START, CLOSE_BUY_END),
+        "close_px=",
+        _close_buy_price(),
         "limit_up=",
         _limit_up(),
-        "sz_pre=",
-        "%s-%s" % (SZ_PREPLACE_START, SZ_PREPLACE_END),
-        "sz_esc=",
-        "%s-%s" % (SZ_ESCALATE_CANCEL_START, SZ_ESCALATE_CANCEL_END),
-        "sz_close=",
-        "%s-%s" % (SZ_CLOSE_BUY_START, SZ_CLOSE_BUY_END),
-        "sz_ready=",
-        float(globals().get("SZ_CLOSE_READY_LAST") or 0),
-        "sz_force=",
-        str(globals().get("SZ_CLOSE_FORCE_AT") or ""),
-        "sh_chase=",
-        "%s-%s" % (SH_CHASE_START, SH_CHASE_END),
-        "chase_ms=",
-        SH_CHASE_INTERVAL_MS,
         "listing_only=",
         bool(globals().get("LISTING_DAY_ONLY", True)),
     )
@@ -281,12 +249,13 @@ def _init_impl(C):
         dry_run=DRY_RUN,
         budget=TRADE_BUDGET,
         mkt=mkt,
-        mode_a=bool(globals().get("ENABLE_MODE_A", True)),
         mode_b=bool(globals().get("ENABLE_MODE_B", True)),
         buy_only=True,
         timer=timer_on,
         timer_ms=int(globals().get("LIVE_TIMER_MS") or 0),
-        reopen_cap=_reopen_cap(),
+        close_start=str(globals().get("CLOSE_BUY_START") or ""),
+        close_end=str(globals().get("CLOSE_BUY_END") or ""),
+        close_px=_close_buy_price(),
         limit_up=_limit_up(),
         listing_day_only=bool(globals().get("LISTING_DAY_ONLY", True)),
         log_dir=str(globals().get("LOG_DIR") or ""),

@@ -4,8 +4,11 @@
 # 钩子(策略必须提供): _pending_on_buy_fill(pend, vol, px)
 #                     _pending_on_sell_fill(pend, now, vol, px)
 #                     _save_state
-def _deal_fill(remark, stock):
-    """汇总匹配 remark+标的 的成交 -> (量, 均价)。"""
+def _deal_fill_ex(remark, stock):
+    """汇总匹配 remark+标的 的成交 -> (量, 均价, query_ok)。
+
+    query_ok=False：接口失败；绝不能当成「无成交」去清影子 pending。
+    """
     vol = 0
     notional = 0.0
     try:
@@ -13,9 +16,10 @@ def _deal_fill(remark, stock):
     except Exception as e:
         print(_strategy_tag(), "deal query fail", e)
         _event_log("deal_query_fail", error=str(e))
-        return 0, 0.0
-    if not deals:
-        return 0, 0.0
+        return 0, 0.0, False
+    if deals is None:
+        _event_log("deal_query_fail", error="deals_none")
+        return 0, 0.0, False
     for d in deals:
         if str(getattr(d, "m_strRemark", "") or "") != remark:
             continue
@@ -28,7 +32,50 @@ def _deal_fill(remark, stock):
             vol += v
             notional += v * px
     avg = (notional / float(vol)) if vol > 0 else 0.0
+    return vol, avg, True
+
+
+def _deal_fill(remark, stock):
+    """汇总匹配 remark+标的 的成交 -> (量, 均价)。兼容旧调用。"""
+    vol, avg, _ok = _deal_fill_ex(remark, stock)
     return vol, avg
+
+
+def _shadow_reorder_block_arm():
+    """影子强清后短冷却，避免同轮/紧接重挂双开。"""
+    try:
+        ms = float(globals().get("PENDING_SHADOW_REORDER_COOLDOWN_MS") or 2000.0)
+    except Exception:
+        ms = 2000.0
+    if ms <= 0:
+        A._shadow_reorder_block_until_ms = 0.0
+        return
+    now_ms = 0.0
+    try:
+        now_ms = datetime.datetime.now().timestamp() * 1000.0
+    except Exception:
+        now_ms = 0.0
+    A._shadow_reorder_block_until_ms = now_ms + ms
+    _event_log(
+        "shadow_reorder_block",
+        cooldown_ms=ms,
+        until_ms=float(A._shadow_reorder_block_until_ms or 0),
+    )
+
+
+def _shadow_reorder_blocked(now=None):
+    until = float(getattr(A, "_shadow_reorder_block_until_ms", 0) or 0)
+    if until <= 0:
+        return False
+    now_ms = 0.0
+    try:
+        if now is not None and hasattr(now, "timestamp"):
+            now_ms = now.timestamp() * 1000.0
+        else:
+            now_ms = datetime.datetime.now().timestamp() * 1000.0
+    except Exception:
+        now_ms = 0.0
+    return now_ms < until
 
 
 def _find_order_ex(remark, stock):
@@ -132,6 +179,71 @@ def _clear_pending(reason=""):
         )
     A.pending = None
     _save_state()
+    if str(reason or "") == "shadow_never_seen":
+        _shadow_reorder_block_arm()
+
+
+def _pending_check_should_log(
+    intent, status, traded, cancel_req, order_seen, order_qok, age, force=False
+):
+    """pending_check 日志节流：状态变化、强制、或达到间隔才打。
+
+    PENDING_CHECK_LOG_SEC：未配置或 <=0 = 每次都打（opt-in 节流）；>0 才节流。
+    """
+    if force:
+        try:
+            now_ms = datetime.datetime.now().timestamp() * 1000.0
+        except Exception:
+            now_ms = 0.0
+        A._pending_check_log_ms = now_ms
+        return True
+
+    raw = globals().get("PENDING_CHECK_LOG_SEC", None)
+    if raw is None:
+        return True
+    try:
+        log_sec = float(raw)
+    except Exception:
+        return True
+    if log_sec <= 0:
+        return True
+
+    fp = "%s|%s|%s|%s|%s|%s" % (
+        str(intent or ""),
+        str(status),
+        str(int(traded or 0)),
+        "1" if cancel_req else "0",
+        "1" if order_seen else "0",
+        "1" if order_qok else "0",
+    )
+    last_fp = str(getattr(A, "_pending_check_fp", "") or "")
+    changed = fp != last_fp
+    now_ms = 0.0
+    try:
+        now_ms = datetime.datetime.now().timestamp() * 1000.0
+    except Exception:
+        now_ms = 0.0
+    last_ms = float(getattr(A, "_pending_check_log_ms", 0) or 0)
+    due = (last_ms <= 0) or ((now_ms - last_ms) >= log_sec * 1000.0)
+    if (not changed) and (not due):
+        return False
+    A._pending_check_fp = fp
+    A._pending_check_log_ms = now_ms
+    return True
+
+
+def _shadow_clear_intent_ok(intent):
+    """必须显式配置 PENDING_SHADOW_CLEAR_INTENTS；未配/空元组 = 不启用强清。"""
+    allow = globals().get("PENDING_SHADOW_CLEAR_INTENTS", None)
+    if allow is None:
+        return False
+    try:
+        s = set(str(x) for x in allow)
+    except Exception:
+        return False
+    if not s:
+        return False
+    return str(intent) in s
 
 
 def _new_remark(tag, side, vol):
@@ -167,7 +279,7 @@ def _process_pending(C, now):
     if submitted is not None and now is not None:
         age = (now - submitted).total_seconds()
 
-    deal_vol, deal_avg = _deal_fill(remark, stock)
+    deal_vol, deal_avg, deal_qok = _deal_fill_ex(remark, stock)
     od, order_qok = _find_order_ex(remark, stock)
     status = int(getattr(od, "m_nOrderStatus", -1) or -1) if od is not None else -1
     traded = max(deal_vol, _order_traded_vol(od))
@@ -175,44 +287,95 @@ def _process_pending(C, now):
     cancel_req = bool(pend.get("cancel_requested"))
     if od is not None and not pend.get("order_seen"):
         pend["order_seen"] = True
+        pend["shadow_miss_hits"] = 0
         A.pending = pend
         try:
             _save_state()
         except Exception:
             pass
+        # 委托成功确认：柜台查询已见到本 remark 委托（不以成交为准）
+        print(
+            _strategy_tag(),
+            "order acked intent=%s status=%s age=%.1fs remark=%s"
+            % (intent, status, age, remark),
+        )
+        _event_log(
+            "order_acked",
+            intent=intent,
+            status=status,
+            age_sec=round(age, 3),
+            remark=remark,
+            side=side,
+            vol=target,
+            price=float(pend.get("price_hint") or 0),
+        )
 
-    print(
-        _strategy_tag(),
-        "pending check",
+    order_seen = bool(pend.get("order_seen"))
+
+    shadow_sec = 0.0
+    try:
+        shadow_sec = float(globals().get("PENDING_SHADOW_CLEAR_SEC") or 0)
+    except Exception:
+        shadow_sec = 0.0
+    shadow_intent = _shadow_clear_intent_ok(intent)
+    # 影子=委托未见 + 成交查询成功且量为0（成交查询失败则不清，防漏记后双开）
+    shadow_candidate = (
+        shadow_sec > 0
+        and shadow_intent
+        and (not cancel_req)
+        and (not order_seen)
+        and order_qok
+        and (od is None)
+        and deal_qok
+        and int(deal_vol or 0) <= 0
+        and age >= shadow_sec
+    )
+    # 影子候选窗口内强制打 pending_check，保留未见单取证（通常仅数次命中）
+    force_pending_log = bool(shadow_candidate)
+
+    if _pending_check_should_log(
         intent,
-        "deal=",
-        deal_vol,
-        "traded=",
-        traded,
-        "status=",
         status,
-        "age=%.0fs" % age,
-        "cancel_req=",
+        traded,
         cancel_req,
-        "qok=",
+        order_seen,
         order_qok,
-        "seen=",
-        bool(pend.get("order_seen")),
-    )
-    _event_log(
-        "pending_check",
-        intent=intent,
-        side=side,
-        deal=deal_vol,
-        traded=traded,
-        status=status,
-        age_sec=int(age),
-        cancel_req=cancel_req,
-        target=target,
-        remark=remark,
-        order_qok=order_qok,
-        order_seen=bool(pend.get("order_seen")),
-    )
+        age,
+        force=force_pending_log,
+    ):
+        print(
+            _strategy_tag(),
+            "pending check",
+            intent,
+            "deal=",
+            deal_vol,
+            "traded=",
+            traded,
+            "status=",
+            status,
+            "age=%.0fs" % age,
+            "cancel_req=",
+            cancel_req,
+            "qok=",
+            order_qok,
+            "seen=",
+            order_seen,
+        )
+        _event_log(
+            "pending_check",
+            intent=intent,
+            side=side,
+            deal=deal_vol,
+            traded=traded,
+            status=status,
+            age_sec=int(age),
+            cancel_req=cancel_req,
+            target=target,
+            remark=remark,
+            order_qok=order_qok,
+            order_seen=order_seen,
+            shadow_candidate=bool(shadow_candidate),
+        )
 
     filled = globals().get("_ORDER_FILLED") or (56, 8)
     dead = globals().get("_ORDER_DEAD") or (54, 57, 53, 5, 6, 9)
@@ -243,6 +406,168 @@ def _process_pending(C, now):
         else:
             _clear_pending("rejected/cancelled")
         return False
+
+    # 委托已离簿但成交查询显示有量：先记账，禁止当影子重挂
+    if (
+        (not cancel_req)
+        and (not order_seen)
+        and order_qok
+        and (od is None)
+        and deal_qok
+        and int(deal_vol or 0) > 0
+    ):
+        use_vol = int(deal_vol)
+        print(
+            _strategy_tag(),
+            "deal without open order -> fill intent=%s vol=%s"
+            % (intent, use_vol),
+        )
+        _event_log(
+            "deal_without_order",
+            intent=intent,
+            vol=use_vol,
+            price=px,
+            remark=remark,
+            age_sec=round(age, 3),
+        )
+        if side == "buy":
+            _pending_on_buy_fill(pend, use_vol, px)
+        else:
+            _pending_on_sell_fill(pend, now, use_vol, px)
+        _clear_pending("deal_without_order")
+        return False
+
+    # 未见单影子 pending：委托未见 + 成交查询成功且为0；命中间隔 + 二次确认
+    # PENDING_SHADOW_CLEAR_INTENTS 必须显式配置
+    if shadow_sec > 0 and shadow_intent:
+        if shadow_candidate:
+            try:
+                need_hits = int(globals().get("PENDING_SHADOW_CLEAR_HITS") or 3)
+            except Exception:
+                need_hits = 3
+            if need_hits < 1:
+                need_hits = 1
+            try:
+                hit_gap_ms = float(globals().get("PENDING_SHADOW_CLEAR_HIT_GAP_MS") or 1000)
+            except Exception:
+                hit_gap_ms = 1000.0
+            if hit_gap_ms < 0:
+                hit_gap_ms = 0.0
+            now_ms = 0.0
+            try:
+                now_ms = datetime.datetime.now().timestamp() * 1000.0
+            except Exception:
+                now_ms = 0.0
+            last_hit_ms = float(pend.get("shadow_miss_hit_ms") or 0)
+            can_hit = (last_hit_ms <= 0) or ((now_ms - last_hit_ms) >= hit_gap_ms)
+            if can_hit:
+                hits = int(pend.get("shadow_miss_hits") or 0) + 1
+                pend["shadow_miss_hits"] = hits
+                pend["shadow_miss_hit_ms"] = now_ms
+                A.pending = pend
+                try:
+                    _save_state()
+                except Exception:
+                    pass
+            else:
+                hits = int(pend.get("shadow_miss_hits") or 0)
+            if can_hit and hits >= need_hits:
+                od2, qok2 = _find_order_ex(remark, stock)
+                deal2, avg2, deal_qok2 = _deal_fill_ex(remark, stock)
+                confirm_ok = (
+                    bool(qok2)
+                    and (od2 is None)
+                    and bool(deal_qok2)
+                    and int(deal2 or 0) <= 0
+                )
+                _event_log(
+                    "pending_shadow_confirm",
+                    intent=intent,
+                    age_sec=round(age, 3),
+                    shadow_sec=shadow_sec,
+                    hits=hits,
+                    need_hits=need_hits,
+                    hit_gap_ms=hit_gap_ms,
+                    order_qok=bool(order_qok),
+                    order_seen=bool(order_seen),
+                    deal_qok=bool(deal_qok),
+                    deal=int(deal_vol or 0),
+                    confirm_ok=confirm_ok,
+                    confirm_qok=bool(qok2),
+                    confirm_od=(od2 is not None),
+                    confirm_deal_qok=bool(deal_qok2),
+                    confirm_deal=int(deal2 or 0),
+                    remark=remark,
+                )
+                if confirm_ok:
+                    print(
+                        _strategy_tag(),
+                        "pending shadow clear: never acked intent=%s age=%.1fs hits=%d"
+                        % (intent, age, hits),
+                    )
+                    _event_log(
+                        "pending_shadow_clear",
+                        intent=intent,
+                        age_sec=round(age, 3),
+                        shadow_sec=shadow_sec,
+                        hits=hits,
+                        need_hits=need_hits,
+                        order_qok=True,
+                        order_seen=False,
+                        deal_qok=True,
+                        deal=0,
+                        status=status,
+                        remark=remark,
+                    )
+                    _clear_pending("shadow_never_seen")
+                    return False
+                if od2 is not None:
+                    pend["order_seen"] = True
+                    print(
+                        _strategy_tag(),
+                        "order acked (shadow confirm) intent=%s remark=%s"
+                        % (intent, remark),
+                    )
+                    _event_log(
+                        "order_acked",
+                        intent=intent,
+                        status=int(getattr(od2, "m_nOrderStatus", -1) or -1),
+                        age_sec=round(age, 3),
+                        remark=remark,
+                        side=side,
+                        via="shadow_confirm",
+                    )
+                elif deal_qok2 and int(deal2 or 0) > 0:
+                    use_vol = int(deal2)
+                    fill_px = avg2 if avg2 > 0 else px
+                    if side == "buy":
+                        _pending_on_buy_fill(pend, use_vol, fill_px)
+                    else:
+                        _pending_on_sell_fill(pend, now, use_vol, fill_px)
+                    _clear_pending("deal_without_order_confirm")
+                    return False
+                pend["shadow_miss_hits"] = 0
+                pend["shadow_miss_hit_ms"] = 0
+                A.pending = pend
+                try:
+                    _save_state()
+                except Exception:
+                    pass
+                if (not confirm_ok) and (od2 is None):
+                    print(
+                        _strategy_tag(),
+                        "pending shadow confirm fail; keep pending intent=%s"
+                        % intent,
+                    )
+        else:
+            if int(pend.get("shadow_miss_hits") or 0) > 0:
+                pend["shadow_miss_hits"] = 0
+                pend["shadow_miss_hit_ms"] = 0
+                A.pending = pend
+                try:
+                    _save_state()
+                except Exception:
+                    pass
 
     timeout = float(globals().get("PENDING_TIMEOUT_SEC") or 180)
     orphan = float(globals().get("PENDING_ORPHAN_SEC") or 60)
