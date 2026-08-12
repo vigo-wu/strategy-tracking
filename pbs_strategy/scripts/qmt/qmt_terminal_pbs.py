@@ -10,12 +10,12 @@ import numpy as np
 
 # === pbs/config.py ===
 # ===================== 用户配置 =====================
-DRY_RUN = True
+DRY_RUN = False
 
 ACCOUNT_ID = "39953913"
 ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 
-TRADE_BUDGET = 50000.0
+TRADE_BUDGET = 10000.0
 CASH_RATIO = 0.8
 LOT_SIZE = 10  # 可转债：10 张 = 一手
 
@@ -36,8 +36,8 @@ ENABLE_MODE_B = True          # 早盘失败 → 尾盘抢筹
 
 # ---- 时窗（HHmmss）----
 # 深市 Mode A：前夜清算窗 + 首日开盘前
-SZ_AM_EVE_START = "173000"
-SZ_AM_EVE_END = "223000"
+SZ_AM_EVE_START = "193000"
+SZ_AM_EVE_END = "203000"
 SZ_AM_BUY_START = "000000"
 SZ_AM_BUY_END = "092459"
 # 沪市 Mode A：抢时间优先 → 09:15 起尽早挂 130
