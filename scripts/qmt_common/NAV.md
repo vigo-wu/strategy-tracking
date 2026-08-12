@@ -19,7 +19,7 @@
 | `backtest.py` | P0 | 回测影子仓 T+1（`bt_held` / `bt_locked`） |
 | `mode.py` | P0 | 暖机→实盘、`_bar_datetime` |
 | `broker_base.py` | P0 | 查资金 / 持仓 / `can_use` |
-| `orders_pending.py` | P0 | pending、成交查询（`_deal_fill_ex` 含 query_ok）、撤单；影子强清须成交查询成功且为 0，强清后 `PENDING_SHADOW_REORDER_COOLDOWN_MS`；opt-in `PENDING_CHECK_LOG_SEC` |
+| `orders_pending.py` | P0 | pending、成交查询（`_deal_fill_ex` 含 query_ok）、撤单；影子强清默认须成交查询成功且为 0，强清后 `PENDING_SHADOW_REORDER_COOLDOWN_MS`；opt-in：`PENDING_ACK_ORDER_ONLY` / `PENDING_SHADOW_ORDER_ONLY` / `PENDING_AFTER_ACK_POLL_SEC` / `PENDING_CHECK_LOG_SEC`；见单发 `order_acked` |
 | `market_util.py` | P1 | `_series_from_ex`、补历史、诊断、心跳 |
 | `single/state_io.py` | 单仓 | JSON 仓位读写（按 `A.stock` 分文件） |
 | `single/state_pos.py` | 单仓 | `A.position` 辅助 |

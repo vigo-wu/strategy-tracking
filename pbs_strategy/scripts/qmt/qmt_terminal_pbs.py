@@ -33,9 +33,12 @@ PRICE_DECIMALS = 3
 ENABLE_MODE_B = True
 
 # ---- 时窗（HHmmss）----
-# 14:57 起直接以涨停顶格申报，失败则持续重试直至申报成功
+# 14:56 预热手数；14:57 起顶格申报（准点 run_time + 50ms 轮询）
+CLOSE_PREWARM_START = "145600"
 CLOSE_BUY_START = "145700"
 CLOSE_BUY_END = "145955"
+CLOSE_PREWARM_TIMER = "2020-01-01 14:56:00"
+CLOSE_FIRE_TIMER = "2020-01-01 14:57:00"
 # None = 用 LIMIT_UP_PRICE
 CLOSE_BUY_PRICE = None
 
@@ -48,16 +51,20 @@ PENDING_TIMEOUT_EXEMPT_LOG_SEC = 300
 PENDING_TIMEOUT_SEC = 90
 PENDING_ORPHAN_SEC = 15
 CANCEL_RETRY_SEC = 1.0
-# passorder 后以柜台见单为委托成功；长期未见单则间隔命中 + 二次查委托后强清重挂
-PENDING_SHADOW_CLEAR_SEC = 3.0
-PENDING_SHADOW_CLEAR_HITS = 3
-PENDING_SHADOW_CLEAR_HIT_GAP_MS = 1000.0
+# 抢筹：见单前不查成交；影子只看委托；见单后降频轮询
+PENDING_ACK_ORDER_ONLY = True
+PENDING_SHADOW_ORDER_ONLY = True
+PENDING_AFTER_ACK_POLL_SEC = 5.0
+# 简化影子：超时未见单 → 查委托确认 → 冷却后重挂
+PENDING_SHADOW_CLEAR_SEC = 5.0
+PENDING_SHADOW_CLEAR_HITS = 1
+PENDING_SHADOW_CLEAR_HIT_GAP_MS = 0.0
 PENDING_SHADOW_REORDER_COOLDOWN_MS = 2000.0
 PENDING_SHADOW_CLEAR_INTENTS = (
     "SZ_CLOSE",
     "SH_CLOSE",
 )
-# pending_check 日志节流（显式配置才生效；查单仍 50ms）
+# pending_check 日志节流（显式配置才生效；查单仍按上面节奏）
 PENDING_CHECK_LOG_SEC = 5.0
 
 # ---- 上市首日门闩 ----
@@ -95,7 +102,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "PbsRush"
-STRATEGY_VER = "v1.18"
+STRATEGY_VER = "v1.19"
 
 DRY_RUN_FILL_IMMEDIATE = False
 DRY_RUN_FILL_ON_LIMIT = True
@@ -1993,7 +2000,30 @@ def _process_pending(C, now):
     if submitted is not None and now is not None:
         age = (now - submitted).total_seconds()
 
-    deal_vol, deal_avg, deal_qok = _deal_fill_ex(remark, stock)
+    # 见单后降频查 pending（抢筹场景见单即目标达成）
+    if bool(pend.get("order_seen")):
+        try:
+            after_sec = float(globals().get("PENDING_AFTER_ACK_POLL_SEC") or 0)
+        except Exception:
+            after_sec = 0.0
+        if after_sec > 0:
+            last_ms = float(getattr(A, "_pending_after_ack_ms", 0) or 0)
+            now_ms = 0.0
+            try:
+                now_ms = datetime.datetime.now().timestamp() * 1000.0
+            except Exception:
+                now_ms = 0.0
+            if last_ms > 0 and (now_ms - last_ms) < after_sec * 1000.0:
+                return True
+            A._pending_after_ack_ms = now_ms
+
+    ack_order_only = bool(globals().get("PENDING_ACK_ORDER_ONLY", False))
+    shadow_order_only = bool(globals().get("PENDING_SHADOW_ORDER_ONLY", False))
+    # 见单前可不查成交，优先确认委托进场
+    if ack_order_only and (not bool(pend.get("order_seen"))):
+        deal_vol, deal_avg, deal_qok = 0, 0.0, True
+    else:
+        deal_vol, deal_avg, deal_qok = _deal_fill_ex(remark, stock)
     od, order_qok = _find_order_ex(remark, stock)
     status = int(getattr(od, "m_nOrderStatus", -1) or -1) if od is not None else -1
     traded = max(deal_vol, _order_traded_vol(od))
@@ -2023,6 +2053,10 @@ def _process_pending(C, now):
             vol=target,
             price=float(pend.get("price_hint") or 0),
         )
+        try:
+            A._pending_after_ack_ms = datetime.datetime.now().timestamp() * 1000.0
+        except Exception:
+            A._pending_after_ack_ms = 0.0
 
     order_seen = bool(pend.get("order_seen"))
 
@@ -2032,18 +2066,29 @@ def _process_pending(C, now):
     except Exception:
         shadow_sec = 0.0
     shadow_intent = _shadow_clear_intent_ok(intent)
-    # 影子=委托未见 + 成交查询成功且量为0（成交查询失败则不清，防漏记后双开）
-    shadow_candidate = (
-        shadow_sec > 0
-        and shadow_intent
-        and (not cancel_req)
-        and (not order_seen)
-        and order_qok
-        and (od is None)
-        and deal_qok
-        and int(deal_vol or 0) <= 0
-        and age >= shadow_sec
-    )
+    # 影子：默认须成交查询成功且为0；PENDING_SHADOW_ORDER_ONLY 时只看委托
+    if shadow_order_only:
+        shadow_candidate = (
+            shadow_sec > 0
+            and shadow_intent
+            and (not cancel_req)
+            and (not order_seen)
+            and order_qok
+            and (od is None)
+            and age >= shadow_sec
+        )
+    else:
+        shadow_candidate = (
+            shadow_sec > 0
+            and shadow_intent
+            and (not cancel_req)
+            and (not order_seen)
+            and order_qok
+            and (od is None)
+            and deal_qok
+            and int(deal_vol or 0) <= 0
+            and age >= shadow_sec
+        )
     # 影子候选窗口内强制打 pending_check，保留未见单取证（通常仅数次命中）
     force_pending_log = bool(shadow_candidate)
 
@@ -2122,8 +2167,10 @@ def _process_pending(C, now):
         return False
 
     # 委托已离簿但成交查询显示有量：先记账，禁止当影子重挂
+    # 抢筹-only 模式（PENDING_SHADOW_ORDER_ONLY）不做成交补记，避免拖慢/误判
     if (
-        (not cancel_req)
+        (not shadow_order_only)
+        and (not cancel_req)
         and (not order_seen)
         and order_qok
         and (od is None)
@@ -2187,13 +2234,17 @@ def _process_pending(C, now):
                 hits = int(pend.get("shadow_miss_hits") or 0)
             if can_hit and hits >= need_hits:
                 od2, qok2 = _find_order_ex(remark, stock)
-                deal2, avg2, deal_qok2 = _deal_fill_ex(remark, stock)
-                confirm_ok = (
-                    bool(qok2)
-                    and (od2 is None)
-                    and bool(deal_qok2)
-                    and int(deal2 or 0) <= 0
-                )
+                if shadow_order_only:
+                    confirm_ok = bool(qok2) and (od2 is None)
+                    deal2, avg2, deal_qok2 = 0, 0.0, True
+                else:
+                    deal2, avg2, deal_qok2 = _deal_fill_ex(remark, stock)
+                    confirm_ok = (
+                        bool(qok2)
+                        and (od2 is None)
+                        and bool(deal_qok2)
+                        and int(deal2 or 0) <= 0
+                    )
                 _event_log(
                     "pending_shadow_confirm",
                     intent=intent,
@@ -2206,6 +2257,7 @@ def _process_pending(C, now):
                     order_seen=bool(order_seen),
                     deal_qok=bool(deal_qok),
                     deal=int(deal_vol or 0),
+                    shadow_order_only=bool(shadow_order_only),
                     confirm_ok=confirm_ok,
                     confirm_qok=bool(qok2),
                     confirm_od=(od2 is not None),
@@ -2228,8 +2280,8 @@ def _process_pending(C, now):
                         need_hits=need_hits,
                         order_qok=True,
                         order_seen=False,
-                        deal_qok=True,
-                        deal=0,
+                        deal_qok=bool(deal_qok2),
+                        deal=int(deal2 or 0),
                         status=status,
                         remark=remark,
                     )
@@ -2251,7 +2303,7 @@ def _process_pending(C, now):
                         side=side,
                         via="shadow_confirm",
                     )
-                elif deal_qok2 and int(deal2 or 0) > 0:
+                elif (not shadow_order_only) and deal_qok2 and int(deal2 or 0) > 0:
                     use_vol = int(deal2)
                     fill_px = avg2 if avg2 > 0 else px
                     if side == "buy":
@@ -2839,18 +2891,46 @@ def _order_buy_limit(C, price, now, budget=None, intent="BUY", entry_mode=None):
     if "BUY" in getattr(A, "acted", set()):
         return False
 
+    cash = None
     if budget is None:
-        cash = _available_cash()
-        budget = _remaining_buy_budget(cash)
-    vol = _cb_lot(price, budget)
+        pw = getattr(A, "close_prewarm", None)
+        day8 = (now or datetime.datetime.now()).strftime("%Y%m%d")
+        if (
+            isinstance(pw, dict)
+            and str(pw.get("day") or "") == day8
+            and abs(float(pw.get("price") or 0) - float(price)) < 1e-9
+            and int(pw.get("vol") or 0) >= lot
+        ):
+            vol = int(pw.get("vol") or 0)
+            try:
+                cash = float(pw.get("cash")) if pw.get("cash") is not None else None
+            except Exception:
+                cash = None
+            try:
+                budget = float(pw.get("budget") or 0) or None
+            except Exception:
+                budget = None
+        else:
+            cash = _available_cash()
+            budget = _remaining_buy_budget(cash)
+            vol = _cb_lot(price, budget)
+    else:
+        vol = _cb_lot(price, budget)
     if vol < lot:
         if _log_due("buy_skip_lot", now, wait_sec):
             print(_strategy_tag(), "buy skip lot", "price=", price, "budget=", budget)
             _event_log("buy_skip", reason="lot", price=price, budget=budget)
         return False
-    cash = _available_cash()
+    if cash is None:
+        cash = _available_cash()
     if cash is not None and cash < price * vol:
-        vol = _cb_lot(price, min(budget, float(cash)))
+        cap = float(cash)
+        if budget is not None:
+            try:
+                cap = min(cap, float(budget))
+            except Exception:
+                pass
+        vol = _cb_lot(price, cap)
         if vol < lot:
             if _log_due("buy_skip_cash", now, wait_sec):
                 print(_strategy_tag(), "buy skip cash", cash)
@@ -3111,6 +3191,54 @@ def _close_buy_price():
     return _limit_up()
 
 
+def _listing_fast(C, day):
+    """优先 LISTING_DATE_MAP（无行情查询）；未配置再走完整判定。"""
+    stock = str(getattr(A, "stock", "") or "")
+    mp = globals().get("LISTING_DATE_MAP") or {}
+    if stock in mp:
+        return str(mp.get(stock) or "") == str(day)
+    return bool(_is_listing_day(C, day))
+
+
+def _prewarm_close_buy(C, now, now_s, day):
+    """14:56 预热：算好价/量，到点只调 passorder。"""
+    start = str(globals().get("CLOSE_PREWARM_START") or "145600")
+    end = str(globals().get("CLOSE_BUY_START") or "145700")
+    if not (str(start) <= str(now_s) < str(end)):
+        return
+    if _has_position() or getattr(A, "pending", None):
+        return
+    if not _listing_fast(C, day):
+        return
+    px = _close_buy_price()
+    if px <= 0:
+        return
+    cash = _available_cash()
+    if cash is None:
+        return
+    budget = _remaining_buy_budget(cash)
+    lot = int(globals().get("LOT_SIZE") or 10)
+    vol = _cb_lot(px, budget)
+    if cash is not None and vol > 0 and cash < px * vol:
+        vol = _cb_lot(px, min(float(budget), float(cash)))
+    if vol < lot:
+        return
+    A.close_prewarm = {
+        "day": str(day),
+        "price": float(px),
+        "vol": int(vol),
+        "budget": float(budget or 0),
+        "cash": float(cash),
+        "at": str(now_s),
+    }
+    if _log_due("close_prewarm", now, globals().get("LOG_WAIT_SEC")):
+        print(
+            "%s close prewarm px=%.3f vol=%d cash=%.0f"
+            % (STRATEGY_NAME, px, vol, float(cash))
+        )
+        _event_log("close_prewarm", price=px, vol=vol, cash=cash, now_s=now_s)
+
+
 def _handle_mode_b_close(C, now, now_s, day):
     """尾盘：14:57 起顶格申报；以柜台见单为委托成功，成交非目标。"""
     if not bool(globals().get("ENABLE_MODE_B", True)):
@@ -3142,6 +3270,7 @@ def _handle_mode_b_close(C, now, now_s, day):
     if _order_buy_limit(C, px, now, intent=intent, entry_mode="B"):
         print("%s %s submitted @%.3f now=%s (wait order ack)" % (STRATEGY_NAME, intent, px, now_s))
         _event_log("close_buy_submitted", intent=intent, price=px, now_s=now_s)
+        A.close_prewarm = None
         return
     if _log_due("close_buy_retry", now, wait_sec):
         print("%s %s submit fail -> retry @%.3f" % (STRATEGY_NAME, intent, px))
@@ -3211,9 +3340,14 @@ def _handle(C):
     if ("BUY" in getattr(A, "acted", set())) and (not getattr(A, "pending", None)):
         return
 
-    # 14:57 前静默等待（init 日志仍保留；买卖关键事件仍会打）
+    # 14:56 预热；14:57 前静默
     if before_close:
+        _prewarm_close_buy(C, now, now_s, day)
         return
+
+    # ---- 收盘快路径：先挂单，再做行情/状态 ----
+    if mkt in ("SZ", "SH") and _listing_fast(C, day):
+        _handle_mode_b_close(C, now, now_s, day)
 
     listing = _is_listing_day(C, day)
     if not listing:
@@ -3222,12 +3356,16 @@ def _handle(C):
             _event_log("skip_not_listing_day", day=day, stock=A.stock)
         return
 
-    # 行情仅用于状态行；收盘顶格申报不依赖 OHLCV
+    # 行情仅用于状态行；已挂单后降频拉取
     last_px = 0.0
     open_px = 0.0
     n_bars = 0
     ohlcv = None
-    if in_close:
+    want_status = in_close and (
+        (not getattr(A, "ready_logged", False))
+        or _log_due("status", now, globals().get("LOG_STATUS_SEC"))
+    )
+    if want_status:
         ohlcv = _get_ohlcv(C, A.stock)
     if ohlcv is not None:
         opens, highs, lows, closes, vols = ohlcv
@@ -3246,47 +3384,40 @@ def _handle(C):
                 last_px = _px_round(bar_high)
             _bt_recover_position(now=now, last=last_px)
 
-    # 仅收盘窗内打状态行 / bars.jsonl
-    if in_close:
-        do_status = (not getattr(A, "ready_logged", False)) or _log_due(
-            "status", now, globals().get("LOG_STATUS_SEC")
+    if want_status:
+        A.ready_logged = True
+        print(
+            "%s" % STRATEGY_NAME,
+            day,
+            now_s,
+            "mkt=%s n=%d last=%.3f open=%.3f hold=%s mode=%s "
+            "buy_done=%s pending=%s close_px=%.3f"
+            % (
+                mkt,
+                n_bars,
+                last_px,
+                open_px,
+                holding,
+                _entry_mode_of(),
+                getattr(A, "buy_done_day", ""),
+                bool(getattr(A, "pending", None)),
+                _close_buy_price(),
+            ),
         )
-        if do_status:
-            A.ready_logged = True
-            print(
-                "%s" % STRATEGY_NAME,
-                day,
-                now_s,
-                "mkt=%s n=%d last=%.3f open=%.3f hold=%s mode=%s "
-                "buy_done=%s pending=%s close_px=%.3f"
-                % (
-                    mkt,
-                    n_bars,
-                    last_px,
-                    open_px,
-                    holding,
-                    _entry_mode_of(),
-                    getattr(A, "buy_done_day", ""),
-                    bool(getattr(A, "pending", None)),
-                    _close_buy_price(),
-                ),
-            )
-            _bar_log(
-                day=day,
-                hhmmss=now_s,
-                n=n_bars,
-                last=round(last_px, 6),
-                open=round(open_px, 6),
-                hold=holding,
-                mkt=mkt,
-                buy_done=str(getattr(A, "buy_done_day", "") or ""),
-                tag=tag,
-                pending=bool(getattr(A, "pending", None)),
-            )
+        _bar_log(
+            day=day,
+            hhmmss=now_s,
+            n=n_bars,
+            last=round(last_px, 6),
+            open=round(open_px, 6),
+            hold=holding,
+            mkt=mkt,
+            buy_done=str(getattr(A, "buy_done_day", "") or ""),
+            tag=tag,
+            pending=bool(getattr(A, "pending", None)),
+        )
 
-    if mkt in ("SZ", "SH"):
-        _handle_mode_b_close(C, now, now_s, day)
-    elif in_close:
+    if mkt not in ("SZ", "SH") and in_close:
         if _log_due("unknown_market", now, globals().get("LOG_STATUS_SEC")):
             print("%s unknown market stock=%s" % (STRATEGY_NAME, A.stock))
             _event_log("unknown_market", stock=A.stock)
@@ -3321,7 +3452,7 @@ def _ensure_day_flags():
 
 
 def _start_live_timer(C):
-    """实盘注册 run_time：收盘申报准点驱动；回测无效。"""
+    """实盘注册 run_time：50ms 轮询 + 14:56 预热 + 14:57 准点开火。"""
     if getattr(A, "is_backtest", False):
         return False
     if not bool(globals().get("ENABLE_LIVE_TIMER", True)):
@@ -3333,11 +3464,15 @@ def _start_live_timer(C):
     period = "%dnMilliSecond" % ms
     start = "2020-01-01 09:00:00"
     mkt = "SH" if _market_tag() == "SH" else "SZ"
+    prewarm_at = str(globals().get("CLOSE_PREWARM_TIMER") or "2020-01-01 14:56:00")
+    close_at = str(globals().get("CLOSE_FIRE_TIMER") or "2020-01-01 14:57:00")
+    ok_any = False
     try:
         try:
             C.run_time("_pbs_pulse", period, start, mkt)
         except TypeError:
             C.run_time("_pbs_pulse", period, start)
+        ok_any = True
         print(
             "%s live timer ON" % STRATEGY_NAME,
             period,
@@ -3353,13 +3488,28 @@ def _start_live_timer(C):
             quick_trade=int(globals().get("TIMER_QUICK_TRADE") or 2),
             market=mkt,
         )
-        A.live_timer_on = True
-        return True
     except Exception as e:
         print("%s live timer FAIL" % STRATEGY_NAME, e)
         _event_log("live_timer_fail", error=str(e), period=period)
-        A.live_timer_on = False
-        return False
+
+    for name, when, fn in (
+        ("prewarm", prewarm_at, "_pbs_prewarm_fire"),
+        ("close_fire", close_at, "_pbs_close_fire"),
+    ):
+        try:
+            try:
+                C.run_time(fn, "1nDay", when, mkt)
+            except TypeError:
+                C.run_time(fn, "1nDay", when)
+            ok_any = True
+            print("%s %s timer ON" % (STRATEGY_NAME, name), when, "mkt=", mkt)
+            _event_log("live_timer_slot", name=name, when=when, market=mkt)
+        except Exception as e:
+            print("%s %s timer FAIL" % (STRATEGY_NAME, name), e)
+            _event_log("live_timer_slot_fail", name=name, error=str(e), when=when)
+
+    A.live_timer_on = bool(ok_any)
+    return bool(ok_any)
 
 
 def _run_handle(C, drive):
@@ -3370,7 +3520,7 @@ def _run_handle(C, drive):
             return
         A.busy = True
         A.drive = str(drive or "")
-        if drive == "timer":
+        if drive in ("timer", "close_fire", "prewarm"):
             A.passorder_quick = int(globals().get("TIMER_QUICK_TRADE") or 2)
         else:
             A.passorder_quick = int(globals().get("TICK_QUICK_TRADE") or 1)
@@ -3393,6 +3543,20 @@ def _pbs_pulse(C):
     if getattr(A, "is_backtest", False):
         return
     _run_handle(C, "timer")
+
+
+def _pbs_prewarm_fire(C):
+    """14:56 准点预热。"""
+    if getattr(A, "is_backtest", False):
+        return
+    _run_handle(C, "prewarm")
+
+
+def _pbs_close_fire(C):
+    """14:57 准点开火。"""
+    if getattr(A, "is_backtest", False):
+        return
+    _run_handle(C, "close_fire")
 
 
 def _init_impl(C):

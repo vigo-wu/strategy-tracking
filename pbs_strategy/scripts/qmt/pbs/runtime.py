@@ -28,7 +28,7 @@ def _ensure_day_flags():
 
 
 def _start_live_timer(C):
-    """实盘注册 run_time：收盘申报准点驱动；回测无效。"""
+    """实盘注册 run_time：50ms 轮询 + 14:56 预热 + 14:57 准点开火。"""
     if getattr(A, "is_backtest", False):
         return False
     if not bool(globals().get("ENABLE_LIVE_TIMER", True)):
@@ -40,11 +40,15 @@ def _start_live_timer(C):
     period = "%dnMilliSecond" % ms
     start = "2020-01-01 09:00:00"
     mkt = "SH" if _market_tag() == "SH" else "SZ"
+    prewarm_at = str(globals().get("CLOSE_PREWARM_TIMER") or "2020-01-01 14:56:00")
+    close_at = str(globals().get("CLOSE_FIRE_TIMER") or "2020-01-01 14:57:00")
+    ok_any = False
     try:
         try:
             C.run_time("_pbs_pulse", period, start, mkt)
         except TypeError:
             C.run_time("_pbs_pulse", period, start)
+        ok_any = True
         print(
             "%s live timer ON" % STRATEGY_NAME,
             period,
@@ -60,13 +64,28 @@ def _start_live_timer(C):
             quick_trade=int(globals().get("TIMER_QUICK_TRADE") or 2),
             market=mkt,
         )
-        A.live_timer_on = True
-        return True
     except Exception as e:
         print("%s live timer FAIL" % STRATEGY_NAME, e)
         _event_log("live_timer_fail", error=str(e), period=period)
-        A.live_timer_on = False
-        return False
+
+    for name, when, fn in (
+        ("prewarm", prewarm_at, "_pbs_prewarm_fire"),
+        ("close_fire", close_at, "_pbs_close_fire"),
+    ):
+        try:
+            try:
+                C.run_time(fn, "1nDay", when, mkt)
+            except TypeError:
+                C.run_time(fn, "1nDay", when)
+            ok_any = True
+            print("%s %s timer ON" % (STRATEGY_NAME, name), when, "mkt=", mkt)
+            _event_log("live_timer_slot", name=name, when=when, market=mkt)
+        except Exception as e:
+            print("%s %s timer FAIL" % (STRATEGY_NAME, name), e)
+            _event_log("live_timer_slot_fail", name=name, error=str(e), when=when)
+
+    A.live_timer_on = bool(ok_any)
+    return bool(ok_any)
 
 
 def _run_handle(C, drive):
@@ -77,7 +96,7 @@ def _run_handle(C, drive):
             return
         A.busy = True
         A.drive = str(drive or "")
-        if drive == "timer":
+        if drive in ("timer", "close_fire", "prewarm"):
             A.passorder_quick = int(globals().get("TIMER_QUICK_TRADE") or 2)
         else:
             A.passorder_quick = int(globals().get("TICK_QUICK_TRADE") or 1)
@@ -100,6 +119,20 @@ def _pbs_pulse(C):
     if getattr(A, "is_backtest", False):
         return
     _run_handle(C, "timer")
+
+
+def _pbs_prewarm_fire(C):
+    """14:56 准点预热。"""
+    if getattr(A, "is_backtest", False):
+        return
+    _run_handle(C, "prewarm")
+
+
+def _pbs_close_fire(C):
+    """14:57 准点开火。"""
+    if getattr(A, "is_backtest", False):
+        return
+    _run_handle(C, "close_fire")
 
 
 def _init_impl(C):

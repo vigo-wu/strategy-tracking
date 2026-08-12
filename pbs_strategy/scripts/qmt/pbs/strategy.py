@@ -130,18 +130,46 @@ def _order_buy_limit(C, price, now, budget=None, intent="BUY", entry_mode=None):
     if "BUY" in getattr(A, "acted", set()):
         return False
 
+    cash = None
     if budget is None:
-        cash = _available_cash()
-        budget = _remaining_buy_budget(cash)
-    vol = _cb_lot(price, budget)
+        pw = getattr(A, "close_prewarm", None)
+        day8 = (now or datetime.datetime.now()).strftime("%Y%m%d")
+        if (
+            isinstance(pw, dict)
+            and str(pw.get("day") or "") == day8
+            and abs(float(pw.get("price") or 0) - float(price)) < 1e-9
+            and int(pw.get("vol") or 0) >= lot
+        ):
+            vol = int(pw.get("vol") or 0)
+            try:
+                cash = float(pw.get("cash")) if pw.get("cash") is not None else None
+            except Exception:
+                cash = None
+            try:
+                budget = float(pw.get("budget") or 0) or None
+            except Exception:
+                budget = None
+        else:
+            cash = _available_cash()
+            budget = _remaining_buy_budget(cash)
+            vol = _cb_lot(price, budget)
+    else:
+        vol = _cb_lot(price, budget)
     if vol < lot:
         if _log_due("buy_skip_lot", now, wait_sec):
             print(_strategy_tag(), "buy skip lot", "price=", price, "budget=", budget)
             _event_log("buy_skip", reason="lot", price=price, budget=budget)
         return False
-    cash = _available_cash()
+    if cash is None:
+        cash = _available_cash()
     if cash is not None and cash < price * vol:
-        vol = _cb_lot(price, min(budget, float(cash)))
+        cap = float(cash)
+        if budget is not None:
+            try:
+                cap = min(cap, float(budget))
+            except Exception:
+                pass
+        vol = _cb_lot(price, cap)
         if vol < lot:
             if _log_due("buy_skip_cash", now, wait_sec):
                 print(_strategy_tag(), "buy skip cash", cash)
@@ -402,6 +430,54 @@ def _close_buy_price():
     return _limit_up()
 
 
+def _listing_fast(C, day):
+    """优先 LISTING_DATE_MAP（无行情查询）；未配置再走完整判定。"""
+    stock = str(getattr(A, "stock", "") or "")
+    mp = globals().get("LISTING_DATE_MAP") or {}
+    if stock in mp:
+        return str(mp.get(stock) or "") == str(day)
+    return bool(_is_listing_day(C, day))
+
+
+def _prewarm_close_buy(C, now, now_s, day):
+    """14:56 预热：算好价/量，到点只调 passorder。"""
+    start = str(globals().get("CLOSE_PREWARM_START") or "145600")
+    end = str(globals().get("CLOSE_BUY_START") or "145700")
+    if not (str(start) <= str(now_s) < str(end)):
+        return
+    if _has_position() or getattr(A, "pending", None):
+        return
+    if not _listing_fast(C, day):
+        return
+    px = _close_buy_price()
+    if px <= 0:
+        return
+    cash = _available_cash()
+    if cash is None:
+        return
+    budget = _remaining_buy_budget(cash)
+    lot = int(globals().get("LOT_SIZE") or 10)
+    vol = _cb_lot(px, budget)
+    if cash is not None and vol > 0 and cash < px * vol:
+        vol = _cb_lot(px, min(float(budget), float(cash)))
+    if vol < lot:
+        return
+    A.close_prewarm = {
+        "day": str(day),
+        "price": float(px),
+        "vol": int(vol),
+        "budget": float(budget or 0),
+        "cash": float(cash),
+        "at": str(now_s),
+    }
+    if _log_due("close_prewarm", now, globals().get("LOG_WAIT_SEC")):
+        print(
+            "%s close prewarm px=%.3f vol=%d cash=%.0f"
+            % (STRATEGY_NAME, px, vol, float(cash))
+        )
+        _event_log("close_prewarm", price=px, vol=vol, cash=cash, now_s=now_s)
+
+
 def _handle_mode_b_close(C, now, now_s, day):
     """尾盘：14:57 起顶格申报；以柜台见单为委托成功，成交非目标。"""
     if not bool(globals().get("ENABLE_MODE_B", True)):
@@ -433,6 +509,7 @@ def _handle_mode_b_close(C, now, now_s, day):
     if _order_buy_limit(C, px, now, intent=intent, entry_mode="B"):
         print("%s %s submitted @%.3f now=%s (wait order ack)" % (STRATEGY_NAME, intent, px, now_s))
         _event_log("close_buy_submitted", intent=intent, price=px, now_s=now_s)
+        A.close_prewarm = None
         return
     if _log_due("close_buy_retry", now, wait_sec):
         print("%s %s submit fail -> retry @%.3f" % (STRATEGY_NAME, intent, px))
@@ -502,9 +579,14 @@ def _handle(C):
     if ("BUY" in getattr(A, "acted", set())) and (not getattr(A, "pending", None)):
         return
 
-    # 14:57 前静默等待（init 日志仍保留；买卖关键事件仍会打）
+    # 14:56 预热；14:57 前静默
     if before_close:
+        _prewarm_close_buy(C, now, now_s, day)
         return
+
+    # ---- 收盘快路径：先挂单，再做行情/状态 ----
+    if mkt in ("SZ", "SH") and _listing_fast(C, day):
+        _handle_mode_b_close(C, now, now_s, day)
 
     listing = _is_listing_day(C, day)
     if not listing:
@@ -513,12 +595,16 @@ def _handle(C):
             _event_log("skip_not_listing_day", day=day, stock=A.stock)
         return
 
-    # 行情仅用于状态行；收盘顶格申报不依赖 OHLCV
+    # 行情仅用于状态行；已挂单后降频拉取
     last_px = 0.0
     open_px = 0.0
     n_bars = 0
     ohlcv = None
-    if in_close:
+    want_status = in_close and (
+        (not getattr(A, "ready_logged", False))
+        or _log_due("status", now, globals().get("LOG_STATUS_SEC"))
+    )
+    if want_status:
         ohlcv = _get_ohlcv(C, A.stock)
     if ohlcv is not None:
         opens, highs, lows, closes, vols = ohlcv
@@ -537,47 +623,40 @@ def _handle(C):
                 last_px = _px_round(bar_high)
             _bt_recover_position(now=now, last=last_px)
 
-    # 仅收盘窗内打状态行 / bars.jsonl
-    if in_close:
-        do_status = (not getattr(A, "ready_logged", False)) or _log_due(
-            "status", now, globals().get("LOG_STATUS_SEC")
+    if want_status:
+        A.ready_logged = True
+        print(
+            "%s" % STRATEGY_NAME,
+            day,
+            now_s,
+            "mkt=%s n=%d last=%.3f open=%.3f hold=%s mode=%s "
+            "buy_done=%s pending=%s close_px=%.3f"
+            % (
+                mkt,
+                n_bars,
+                last_px,
+                open_px,
+                holding,
+                _entry_mode_of(),
+                getattr(A, "buy_done_day", ""),
+                bool(getattr(A, "pending", None)),
+                _close_buy_price(),
+            ),
         )
-        if do_status:
-            A.ready_logged = True
-            print(
-                "%s" % STRATEGY_NAME,
-                day,
-                now_s,
-                "mkt=%s n=%d last=%.3f open=%.3f hold=%s mode=%s "
-                "buy_done=%s pending=%s close_px=%.3f"
-                % (
-                    mkt,
-                    n_bars,
-                    last_px,
-                    open_px,
-                    holding,
-                    _entry_mode_of(),
-                    getattr(A, "buy_done_day", ""),
-                    bool(getattr(A, "pending", None)),
-                    _close_buy_price(),
-                ),
-            )
-            _bar_log(
-                day=day,
-                hhmmss=now_s,
-                n=n_bars,
-                last=round(last_px, 6),
-                open=round(open_px, 6),
-                hold=holding,
-                mkt=mkt,
-                buy_done=str(getattr(A, "buy_done_day", "") or ""),
-                tag=tag,
-                pending=bool(getattr(A, "pending", None)),
-            )
+        _bar_log(
+            day=day,
+            hhmmss=now_s,
+            n=n_bars,
+            last=round(last_px, 6),
+            open=round(open_px, 6),
+            hold=holding,
+            mkt=mkt,
+            buy_done=str(getattr(A, "buy_done_day", "") or ""),
+            tag=tag,
+            pending=bool(getattr(A, "pending", None)),
+        )
 
-    if mkt in ("SZ", "SH"):
-        _handle_mode_b_close(C, now, now_s, day)
-    elif in_close:
+    if mkt not in ("SZ", "SH") and in_close:
         if _log_due("unknown_market", now, globals().get("LOG_STATUS_SEC")):
             print("%s unknown market stock=%s" % (STRATEGY_NAME, A.stock))
             _event_log("unknown_market", stock=A.stock)

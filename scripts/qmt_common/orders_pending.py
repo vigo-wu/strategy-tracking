@@ -279,7 +279,30 @@ def _process_pending(C, now):
     if submitted is not None and now is not None:
         age = (now - submitted).total_seconds()
 
-    deal_vol, deal_avg, deal_qok = _deal_fill_ex(remark, stock)
+    # 见单后降频查 pending（抢筹场景见单即目标达成）
+    if bool(pend.get("order_seen")):
+        try:
+            after_sec = float(globals().get("PENDING_AFTER_ACK_POLL_SEC") or 0)
+        except Exception:
+            after_sec = 0.0
+        if after_sec > 0:
+            last_ms = float(getattr(A, "_pending_after_ack_ms", 0) or 0)
+            now_ms = 0.0
+            try:
+                now_ms = datetime.datetime.now().timestamp() * 1000.0
+            except Exception:
+                now_ms = 0.0
+            if last_ms > 0 and (now_ms - last_ms) < after_sec * 1000.0:
+                return True
+            A._pending_after_ack_ms = now_ms
+
+    ack_order_only = bool(globals().get("PENDING_ACK_ORDER_ONLY", False))
+    shadow_order_only = bool(globals().get("PENDING_SHADOW_ORDER_ONLY", False))
+    # 见单前可不查成交，优先确认委托进场
+    if ack_order_only and (not bool(pend.get("order_seen"))):
+        deal_vol, deal_avg, deal_qok = 0, 0.0, True
+    else:
+        deal_vol, deal_avg, deal_qok = _deal_fill_ex(remark, stock)
     od, order_qok = _find_order_ex(remark, stock)
     status = int(getattr(od, "m_nOrderStatus", -1) or -1) if od is not None else -1
     traded = max(deal_vol, _order_traded_vol(od))
@@ -309,6 +332,10 @@ def _process_pending(C, now):
             vol=target,
             price=float(pend.get("price_hint") or 0),
         )
+        try:
+            A._pending_after_ack_ms = datetime.datetime.now().timestamp() * 1000.0
+        except Exception:
+            A._pending_after_ack_ms = 0.0
 
     order_seen = bool(pend.get("order_seen"))
 
@@ -318,18 +345,29 @@ def _process_pending(C, now):
     except Exception:
         shadow_sec = 0.0
     shadow_intent = _shadow_clear_intent_ok(intent)
-    # 影子=委托未见 + 成交查询成功且量为0（成交查询失败则不清，防漏记后双开）
-    shadow_candidate = (
-        shadow_sec > 0
-        and shadow_intent
-        and (not cancel_req)
-        and (not order_seen)
-        and order_qok
-        and (od is None)
-        and deal_qok
-        and int(deal_vol or 0) <= 0
-        and age >= shadow_sec
-    )
+    # 影子：默认须成交查询成功且为0；PENDING_SHADOW_ORDER_ONLY 时只看委托
+    if shadow_order_only:
+        shadow_candidate = (
+            shadow_sec > 0
+            and shadow_intent
+            and (not cancel_req)
+            and (not order_seen)
+            and order_qok
+            and (od is None)
+            and age >= shadow_sec
+        )
+    else:
+        shadow_candidate = (
+            shadow_sec > 0
+            and shadow_intent
+            and (not cancel_req)
+            and (not order_seen)
+            and order_qok
+            and (od is None)
+            and deal_qok
+            and int(deal_vol or 0) <= 0
+            and age >= shadow_sec
+        )
     # 影子候选窗口内强制打 pending_check，保留未见单取证（通常仅数次命中）
     force_pending_log = bool(shadow_candidate)
 
@@ -408,8 +446,10 @@ def _process_pending(C, now):
         return False
 
     # 委托已离簿但成交查询显示有量：先记账，禁止当影子重挂
+    # 抢筹-only 模式（PENDING_SHADOW_ORDER_ONLY）不做成交补记，避免拖慢/误判
     if (
-        (not cancel_req)
+        (not shadow_order_only)
+        and (not cancel_req)
         and (not order_seen)
         and order_qok
         and (od is None)
@@ -473,13 +513,17 @@ def _process_pending(C, now):
                 hits = int(pend.get("shadow_miss_hits") or 0)
             if can_hit and hits >= need_hits:
                 od2, qok2 = _find_order_ex(remark, stock)
-                deal2, avg2, deal_qok2 = _deal_fill_ex(remark, stock)
-                confirm_ok = (
-                    bool(qok2)
-                    and (od2 is None)
-                    and bool(deal_qok2)
-                    and int(deal2 or 0) <= 0
-                )
+                if shadow_order_only:
+                    confirm_ok = bool(qok2) and (od2 is None)
+                    deal2, avg2, deal_qok2 = 0, 0.0, True
+                else:
+                    deal2, avg2, deal_qok2 = _deal_fill_ex(remark, stock)
+                    confirm_ok = (
+                        bool(qok2)
+                        and (od2 is None)
+                        and bool(deal_qok2)
+                        and int(deal2 or 0) <= 0
+                    )
                 _event_log(
                     "pending_shadow_confirm",
                     intent=intent,
@@ -492,6 +536,7 @@ def _process_pending(C, now):
                     order_seen=bool(order_seen),
                     deal_qok=bool(deal_qok),
                     deal=int(deal_vol or 0),
+                    shadow_order_only=bool(shadow_order_only),
                     confirm_ok=confirm_ok,
                     confirm_qok=bool(qok2),
                     confirm_od=(od2 is not None),
@@ -514,8 +559,8 @@ def _process_pending(C, now):
                         need_hits=need_hits,
                         order_qok=True,
                         order_seen=False,
-                        deal_qok=True,
-                        deal=0,
+                        deal_qok=bool(deal_qok2),
+                        deal=int(deal2 or 0),
                         status=status,
                         remark=remark,
                     )
@@ -537,7 +582,7 @@ def _process_pending(C, now):
                         side=side,
                         via="shadow_confirm",
                     )
-                elif deal_qok2 and int(deal2 or 0) > 0:
+                elif (not shadow_order_only) and deal_qok2 and int(deal2 or 0) > 0:
                     use_vol = int(deal2)
                     fill_px = avg2 if avg2 > 0 else px
                     if side == "buy":
