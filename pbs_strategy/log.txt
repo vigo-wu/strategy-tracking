@@ -1,12 +1,346 @@
 
-[2026-08-13 10:46:31][PBSRUSH][SH118074][分笔线] 0D:\service\GJQMT\python\PBSRUSH.py_11807453: 策略停止
-[2026-08-13 10:46:33][HLBAND_PROD][SH601398][日线] HlBand live heartbeat 2026-08-13 10:46:33 PERIOD= 1d stock= 601398.SH  reason=exec
-HlBand 20260813 1046 n1d=179 n1w=119 close=7.5200 sig_day=20260812 phase=exec prev=True w_bull=True w_bear=False w_ma5=7.536 w_ma30=7.2893 w_hist=0.0674 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=0.00% pe=False px=False bt_held=- avail=-
+[2026-08-13 14:40:06][HLBAND_PROD][SH601398][日线] HlBand live heartbeat 2026-08-13 14:40:06 PERIOD= 1d stock= 601398.SH  reason=exec
+HlBand 20260813 1440 n1d=179 n1w=119 close=7.5200 sig_day=20260812 phase=exec prev=True w_bull=True w_bear=False w_ma5=7.536 w_ma30=7.2893 w_hist=0.0674 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=0.00% pe=False px=False bt_held=- avail=-
 
-[2026-08-13 10:46:34][PBSRUSH][SH118074][分笔线] [trade]start trading mode
-[2026-08-13 10:46:34][PBSRUSH][SH118074][分笔线] PbsRush skip download_history tick
-PbsRush state loaded path= D:\tradingStrategy\pbs_118074_SH.json None pending= False
-PbsRush live timer ON 50nMilliSecond quickTrade= 2 mkt= SH
-PbsRush prewarm timer ON 2020-01-01 14:56:00 mkt= SH
-PbsRush close_fire timer ON 2020-01-01 14:57:00 mkt= SH
-PbsRush v1.19 init 118074.SH mkt= SH 39953913 STOCK PERIOD= tick BACKTEST= False DRY_RUN= False budget= 2000.0 lot= 10 modeB= True buy_only=1 timer= True timer_ms= 50 close= 145700-145955 close_px= 157.3 limit_up= 157.3 listing_only= False
+[2026-08-13 14:40:52][HLBAND_PROD][SH513530][日线] HlBand live heartbeat 2026-08-13 14:40:52 PERIOD= 1d stock= 513530.SH  reason=exec
+
+[2026-08-13 14:41:06][HLBAND_PROD][SH601398][日线] HlBand live heartbeat 2026-08-13 14:41:06 PERIOD= 1d stock= 601398.SH  reason=exec
+HlBand 20260813 1441 n1d=179 n1w=119 close=7.5200 sig_day=20260812 phase=exec prev=True w_bull=True w_bear=False w_ma5=7.536 w_ma30=7.2893 w_hist=0.0674 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=0.00% pe=False px=False bt_held=- avail=-
+
+[2026-08-13 14:41:55][HLBAND_PROD][SH513530][日线] HlBand live heartbeat 2026-08-13 14:41:55 PERIOD= 1d stock= 513530.SH  reason=exec
+
+[2026-08-13 14:42:09][HLBAND_PROD][SH601398][日线] HlBand live heartbeat 2026-08-13 14:42:09 PERIOD= 1d stock= 601398.SH  reason=exec
+HlBand 20260813 1442 n1d=179 n1w=119 close=7.5200 sig_day=20260812 phase=exec prev=True w_bull=True w_bear=False w_ma5=7.536 w_ma30=7.2893 w_hist=0.0674 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=0.00% pe=False px=False bt_held=- avail=-
+
+[2026-08-13 14:42:55][HLBAND_PROD][SH513530][日线] HlBand live heartbeat 2026-08-13 14:42:55 PERIOD= 1d stock= 513530.SH  reason=exec
+
+[2026-08-13 14:43:09][HLBAND_PROD][SH601398][日线] HlBand live heartbeat 2026-08-13 14:43:09 PERIOD= 1d stock= 601398.SH  reason=exec
+HlBand 20260813 1443 n1d=179 n1w=119 close=7.5200 sig_day=20260812 phase=exec prev=True w_bull=True w_bear=False w_ma5=7.536 w_ma30=7.2893 w_hist=0.0674 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=0.00% pe=False px=False bt_held=- avail=-
+
+[2026-08-13 14:43:58][HLBAND_PROD][SH513530][日线] HlBand live heartbeat 2026-08-13 14:43:58 PERIOD= 1d stock= 513530.SH  reason=exec
+
+[2026-08-13 14:44:12][HLBAND_PROD][SH601398][日线] HlBand live heartbeat 2026-08-13 14:44:12 PERIOD= 1d stock= 601398.SH  reason=exec
+HlBand 20260813 1444 n1d=179 n1w=119 close=7.5200 sig_day=20260812 phase=exec prev=True w_bull=True w_bear=False w_ma5=7.536 w_ma30=7.2893 w_hist=0.0674 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=0.00% pe=False px=False bt_held=- avail=-
+
+[2026-08-13 14:45:01][HLBAND_PROD][SH513530][日线] HlBand live heartbeat 2026-08-13 14:45:01 PERIOD= 1d stock= 513530.SH  reason=exec
+
+[2026-08-13 14:45:15][HLBAND_PROD][SH601398][日线] HlBand live heartbeat 2026-08-13 14:45:15 PERIOD= 1d stock= 601398.SH  reason=exec
+HlBand 20260813 1445 n1d=179 n1w=119 close=7.5200 sig_day=20260812 phase=exec prev=True w_bull=True w_bear=False w_ma5=7.536 w_ma30=7.2893 w_hist=0.0674 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=0.00% pe=False px=False bt_held=- avail=-
+
+[2026-08-13 14:46:01][HLBAND_PROD][SH513530][日线] HlBand live heartbeat 2026-08-13 14:46:01 PERIOD= 1d stock= 513530.SH  reason=exec
+
+[2026-08-13 14:46:15][HLBAND_PROD][SH601398][日线] HlBand live heartbeat 2026-08-13 14:46:15 PERIOD= 1d stock= 601398.SH  reason=exec
+HlBand 20260813 1446 n1d=179 n1w=119 close=7.5200 sig_day=20260812 phase=exec prev=True w_bull=True w_bear=False w_ma5=7.536 w_ma30=7.2893 w_hist=0.0674 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=0.00% pe=False px=False bt_held=- avail=-
+
+[2026-08-13 14:47:04][HLBAND_PROD][SH513530][日线] HlBand live heartbeat 2026-08-13 14:47:04 PERIOD= 1d stock= 513530.SH  reason=exec
+
+[2026-08-13 14:47:18][HLBAND_PROD][SH601398][日线] HlBand live heartbeat 2026-08-13 14:47:18 PERIOD= 1d stock= 601398.SH  reason=exec
+HlBand 20260813 1447 n1d=179 n1w=119 close=7.5200 sig_day=20260812 phase=exec prev=True w_bull=True w_bear=False w_ma5=7.536 w_ma30=7.2893 w_hist=0.0674 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=0.00% pe=False px=False bt_held=- avail=-
+
+[2026-08-13 14:48:04][HLBAND_PROD][SH513530][日线] HlBand live heartbeat 2026-08-13 14:48:04 PERIOD= 1d stock= 513530.SH  reason=exec
+
+[2026-08-13 14:48:18][HLBAND_PROD][SH601398][日线] HlBand live heartbeat 2026-08-13 14:48:18 PERIOD= 1d stock= 601398.SH  reason=exec
+HlBand 20260813 1448 n1d=179 n1w=119 close=7.5200 sig_day=20260812 phase=exec prev=True w_bull=True w_bear=False w_ma5=7.536 w_ma30=7.2893 w_hist=0.0674 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=0.00% pe=False px=False bt_held=- avail=-
+
+[2026-08-13 14:49:07][HLBAND_PROD][SH513530][日线] HlBand live heartbeat 2026-08-13 14:49:07 PERIOD= 1d stock= 513530.SH  reason=exec
+
+[2026-08-13 14:49:21][HLBAND_PROD][SH601398][日线] HlBand live heartbeat 2026-08-13 14:49:21 PERIOD= 1d stock= 601398.SH  reason=exec
+
+[2026-08-13 14:49:21][HLBAND_PROD][SH601398][日线] HlBand 20260813 1449 n1d=179 n1w=119 close=7.5200 sig_day=20260812 phase=exec prev=True w_bull=True w_bear=False w_ma5=7.536 w_ma30=7.2893 w_hist=0.0674 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=0.00% pe=False px=False bt_held=- avail=-
+
+[2026-08-13 14:50:07][HLBAND_PROD][SH513530][日线] HlBand live heartbeat 2026-08-13 14:50:07 PERIOD= 1d stock= 513530.SH  reason=exec
+
+[2026-08-13 14:50:21][HLBAND_PROD][SH601398][日线] HlBand live heartbeat 2026-08-13 14:50:21 PERIOD= 1d stock= 601398.SH  reason=exec
+HlBand 20260813 1450 n1d=179 n1w=119 close=7.5200 sig_day=20260812 phase=exec prev=True w_bull=True w_bear=False w_ma5=7.536 w_ma30=7.2893 w_hist=0.0674 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=0.00% pe=False px=False bt_held=- avail=-
+
+[2026-08-13 14:51:07][HLBAND_PROD][SH513530][日线] HlBand live heartbeat 2026-08-13 14:51:07 PERIOD= 1d stock= 513530.SH  reason=exec
+
+[2026-08-13 14:51:21][HLBAND_PROD][SH601398][日线] HlBand live heartbeat 2026-08-13 14:51:21 PERIOD= 1d stock= 601398.SH  reason=exec
+HlBand 20260813 1451 n1d=179 n1w=119 close=7.5200 sig_day=20260812 phase=exec prev=True w_bull=True w_bear=False w_ma5=7.536 w_ma30=7.2893 w_hist=0.0674 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=0.00% pe=False px=False bt_held=- avail=-
+
+[2026-08-13 14:52:10][HLBAND_PROD][SH513530][日线] HlBand live heartbeat 2026-08-13 14:52:10 PERIOD= 1d stock= 513530.SH  reason=exec
+
+[2026-08-13 14:52:24][HLBAND_PROD][SH601398][日线] HlBand live heartbeat 2026-08-13 14:52:24 PERIOD= 1d stock= 601398.SH  reason=exec
+HlBand 20260813 1452 n1d=179 n1w=119 close=7.5200 sig_day=20260812 phase=exec prev=True w_bull=True w_bear=False w_ma5=7.536 w_ma30=7.2893 w_hist=0.0674 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=0.00% pe=False px=False bt_held=- avail=-
+
+[2026-08-13 14:53:13][HLBAND_PROD][SH513530][日线] HlBand live heartbeat 2026-08-13 14:53:13 PERIOD= 1d stock= 513530.SH  reason=exec
+
+[2026-08-13 14:53:27][HLBAND_PROD][SH601398][日线] HlBand live heartbeat 2026-08-13 14:53:27 PERIOD= 1d stock= 601398.SH  reason=exec
+HlBand 20260813 1453 n1d=179 n1w=119 close=7.5200 sig_day=20260812 phase=exec prev=True w_bull=True w_bear=False w_ma5=7.536 w_ma30=7.2893 w_hist=0.0674 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=0.00% pe=False px=False bt_held=- avail=-
+
+[2026-08-13 14:54:16][HLBAND_PROD][SH513530][日线] HlBand live heartbeat 2026-08-13 14:54:16 PERIOD= 1d stock= 513530.SH  reason=exec
+
+[2026-08-13 14:54:27][HLBAND_PROD][SH601398][日线] HlBand live heartbeat 2026-08-13 14:54:27 PERIOD= 1d stock= 601398.SH  reason=exec
+HlBand 20260813 1454 n1d=179 n1w=119 close=7.5200 sig_day=20260812 phase=exec prev=True w_bull=True w_bear=False w_ma5=7.536 w_ma30=7.2893 w_hist=0.0674 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=0.00% pe=False px=False bt_held=- avail=-
+
+[2026-08-13 14:55:01][HLBAND_PROD][SH513530][日线] HlBand 20260813 1455 n1d=180 n1w=120 close=1.5690 sig_day=20260813 phase=confirm prev=False w_bull=False w_bear=True w_ma5=1.5578 w_ma30=1.5926 w_hist=-0.0006 buy=False buyR=weekly_bear,pullback_vol sell=True sellR=weekly_bear hold=False ret=None pe=False px=False bt_held=- avail=-
+
+[2026-08-13 14:55:16][HLBAND_PROD][SH513530][日线] HlBand live heartbeat 2026-08-13 14:55:16 PERIOD= 1d stock= 513530.SH  reason=confirm
+
+[2026-08-13 14:55:27][HLBAND_PROD][SH601398][日线] HlBand live heartbeat 2026-08-13 14:55:27 PERIOD= 1d stock= 601398.SH  reason=confirm
+HlBand 20260813 1455 n1d=180 n1w=120 close=7.5900 sig_day=20260813 phase=confirm prev=False w_bull=True w_bear=False w_ma5=7.634 w_ma30=7.282 w_hist=0.0518 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=0.93% pe=False px=False bt_held=- avail=-
+
+[2026-08-13 14:56:00][PBSRUSH][SH118074][分笔线] PbsRush close prewarm px=157.300 vol=10 cash=78842
+
+[2026-08-13 14:56:05][PBSRUSH][SH118074][分笔线] PbsRush close prewarm px=157.300 vol=10 cash=78842
+
+[2026-08-13 14:56:10][PBSRUSH][SH118074][分笔线] PbsRush close prewarm px=157.300 vol=10 cash=78842
+
+[2026-08-13 14:56:15][PBSRUSH][SH118074][分笔线] PbsRush close prewarm px=157.300 vol=10 cash=78842
+
+[2026-08-13 14:56:19][HLBAND_PROD][SH513530][日线] HlBand live heartbeat 2026-08-13 14:56:19 PERIOD= 1d stock= 513530.SH  reason=confirm
+
+[2026-08-13 14:56:20][PBSRUSH][SH118074][分笔线] PbsRush close prewarm px=157.300 vol=10 cash=78842
+
+[2026-08-13 14:56:25][PBSRUSH][SH118074][分笔线] PbsRush close prewarm px=157.300 vol=10 cash=78842
+
+[2026-08-13 14:56:27][HLBAND_PROD][SH601398][日线] HlBand live heartbeat 2026-08-13 14:56:27 PERIOD= 1d stock= 601398.SH  reason=confirm
+
+[2026-08-13 14:56:27][HLBAND_PROD][SH601398][日线] HlBand 20260813 1456 n1d=180 n1w=120 close=7.5900 sig_day=20260813 phase=confirm prev=False w_bull=True w_bear=False w_ma5=7.634 w_ma30=7.282 w_hist=0.0518 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=0.93% pe=False px=False bt_held=- avail=-
+
+[2026-08-13 14:56:30][PBSRUSH][SH118074][分笔线] PbsRush close prewarm px=157.300 vol=10 cash=78842
+
+[2026-08-13 14:56:35][PBSRUSH][SH118074][分笔线] PbsRush close prewarm px=157.300 vol=10 cash=78842
+
+[2026-08-13 14:56:40][PBSRUSH][SH118074][分笔线] PbsRush close prewarm px=157.300 vol=10 cash=78842
+
+[2026-08-13 14:56:45][PBSRUSH][SH118074][分笔线] PbsRush close prewarm px=157.300 vol=10 cash=78842
+
+[2026-08-13 14:56:50][PBSRUSH][SH118074][分笔线] PbsRush close prewarm px=157.300 vol=10 cash=78842
+
+[2026-08-13 14:56:55][PBSRUSH][SH118074][分笔线] PbsRush close prewarm px=157.300 vol=10 cash=78842
+
+[2026-08-13 14:57:00][PBSRUSH][SH118074][分笔线] PbsRush live heartbeat 2026-08-13 14:57:00 PERIOD= tick stock= 118074.SH  reason=live
+PbsRush SH_CLOSE buy @157.300 now=145700 (limit-up until submit ok)
+PbsRush BUY SH_CLOSE 118074.SH x10 20260813145700 @limit 157.3 SH_CLOSE
+
+[2026-08-13 14:57:00][PBSRUSH][SH118074][分笔线] PbsRush BUY submitted limit 10 @ 157.3 PbsRush BUY SH_CLOSE 118074.SH x10 20260813145700 SH_CLOSE
+PbsRush SH_CLOSE submitted @157.300 now=145700 (wait order ack)
+PbsRush diag: md_ok source= full_tick period= tick last= 130.0
+PbsRush 20260813 145700 mkt=SH n=1 last=130.000 open=130.000 hold=False mode= buy_done= pending=True close_px=157.300
+PbsRush pending check SH_CLOSE deal= 0 traded= 0 status= -1 age=0s cancel_req= False qok= True seen= False
+PbsRush 20260813 145700 mkt=SH n=1 last=130.000 open=130.000 hold=False mode= buy_done= pending=True close_px=157.300
+
+[2026-08-13 14:57:05][PBSRUSH][SH118074][分笔线] PbsRush pending check SH_CLOSE deal= 0 traded= 0 status= -1 age=5s cancel_req= False qok= True seen= False
+PbsRush pending shadow clear: never acked intent=SH_CLOSE age=5.0s hits=1
+PbsRush pending clear shadow_never_seen PbsRush BUY SH_CLOSE 118074.SH x10 20260813145700
+PbsRush SH_CLOSE buy @157.300 now=145705 (limit-up until submit ok)
+PbsRush buy skip: shadow reorder cooldown
+PbsRush SH_CLOSE submit fail -> retry @157.300
+
+[2026-08-13 14:57:07][PBSRUSH][SH118074][分笔线] PbsRush BUY SH_CLOSE 118074.SH x10 20260813145707 @limit 157.3 SH_CLOSE
+PbsRush BUY submitted limit 10 @ 157.3 PbsRush BUY SH_CLOSE 118074.SH x10 20260813145707 SH_CLOSE
+PbsRush SH_CLOSE submitted @157.300 now=145707 (wait order ack)
+
+[2026-08-13 14:57:10][PBSRUSH][SH118074][分笔线] PbsRush pending check SH_CLOSE deal= 0 traded= 0 status= -1 age=3s cancel_req= False qok= True seen= False
+PbsRush 20260813 145710 mkt=SH n=1 last=157.300 open=130.000 hold=False mode= buy_done= pending=True close_px=157.300
+
+[2026-08-13 14:57:12][PBSRUSH][SH118074][分笔线] PbsRush pending check SH_CLOSE deal= 0 traded= 0 status= -1 age=5s cancel_req= False qok= True seen= False
+PbsRush pending shadow clear: never acked intent=SH_CLOSE age=5.0s hits=1
+PbsRush pending clear shadow_never_seen PbsRush BUY SH_CLOSE 118074.SH x10 20260813145707
+PbsRush SH_CLOSE buy @157.300 now=145712 (limit-up until submit ok)
+PbsRush buy skip: shadow reorder cooldown
+PbsRush SH_CLOSE submit fail -> retry @157.300
+
+[2026-08-13 14:57:14][PBSRUSH][SH118074][分笔线] PbsRush BUY SH_CLOSE 118074.SH x10 20260813145714 @limit 157.3 SH_CLOSE
+PbsRush BUY submitted limit 10 @ 157.3 PbsRush BUY SH_CLOSE 118074.SH x10 20260813145714 SH_CLOSE
+PbsRush SH_CLOSE submitted @157.300 now=145714 (wait order ack)
+
+[2026-08-13 14:57:17][PBSRUSH][SH118074][分笔线] PbsRush pending check SH_CLOSE deal= 0 traded= 0 status= -1 age=3s cancel_req= False qok= True seen= False
+
+[2026-08-13 14:57:19][PBSRUSH][SH118074][分笔线] PbsRush pending check SH_CLOSE deal= 0 traded= 0 status= -1 age=5s cancel_req= False qok= True seen= False
+PbsRush pending shadow clear: never acked intent=SH_CLOSE age=5.0s hits=1
+PbsRush pending clear shadow_never_seen PbsRush BUY SH_CLOSE 118074.SH x10 20260813145714
+PbsRush SH_CLOSE buy @157.300 now=145719 (limit-up until submit ok)
+PbsRush buy skip: shadow reorder cooldown
+PbsRush SH_CLOSE submit fail -> retry @157.300
+
+[2026-08-13 14:57:20][PBSRUSH][SH118074][分笔线] PbsRush 20260813 145720 mkt=SH n=1 last=157.300 open=130.000 hold=False mode= buy_done= pending=False close_px=157.300
+
+[2026-08-13 14:57:21][PBSRUSH][SH118074][分笔线] PbsRush BUY SH_CLOSE 118074.SH x10 20260813145721 @limit 157.3 SH_CLOSE
+PbsRush BUY submitted limit 10 @ 157.3 PbsRush BUY SH_CLOSE 118074.SH x10 20260813145721 SH_CLOSE
+PbsRush SH_CLOSE submitted @157.300 now=145721 (wait order ack)
+
+[2026-08-13 14:57:22][HLBAND_PROD][SH513530][日线] HlBand live heartbeat 2026-08-13 14:57:22 PERIOD= 1d stock= 513530.SH  reason=confirm
+
+[2026-08-13 14:57:24][PBSRUSH][SH118074][分笔线] PbsRush pending check SH_CLOSE deal= 0 traded= 0 status= -1 age=3s cancel_req= False qok= True seen= False
+
+[2026-08-13 14:57:26][PBSRUSH][SH118074][分笔线] PbsRush pending check SH_CLOSE deal= 0 traded= 0 status= -1 age=5s cancel_req= False qok= True seen= False
+PbsRush pending shadow clear: never acked intent=SH_CLOSE age=5.0s hits=1
+PbsRush pending clear shadow_never_seen PbsRush BUY SH_CLOSE 118074.SH x10 20260813145721
+PbsRush SH_CLOSE buy @157.300 now=145726 (limit-up until submit ok)
+PbsRush buy skip: shadow reorder cooldown
+PbsRush SH_CLOSE submit fail -> retry @157.300
+
+[2026-08-13 14:57:27][HLBAND_PROD][SH601398][日线] HlBand live heartbeat 2026-08-13 14:57:27 PERIOD= 1d stock= 601398.SH  reason=confirm
+HlBand 20260813 1457 n1d=180 n1w=120 close=7.5900 sig_day=20260813 phase=confirm prev=False w_bull=True w_bear=False w_ma5=7.634 w_ma30=7.282 w_hist=0.0518 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=0.93% pe=False px=False bt_held=- avail=-
+
+[2026-08-13 14:57:28][PBSRUSH][SH118074][分笔线] PbsRush BUY SH_CLOSE 118074.SH x10 20260813145728 @limit 157.3 SH_CLOSE
+PbsRush BUY submitted limit 10 @ 157.3 PbsRush BUY SH_CLOSE 118074.SH x10 20260813145728 SH_CLOSE
+PbsRush SH_CLOSE submitted @157.300 now=145728 (wait order ack)
+
+[2026-08-13 14:57:30][PBSRUSH][SH118074][分笔线] PbsRush 20260813 145730 mkt=SH n=1 last=157.300 open=130.000 hold=False mode= buy_done= pending=True close_px=157.300
+
+[2026-08-13 14:57:31][PBSRUSH][SH118074][分笔线] PbsRush pending check SH_CLOSE deal= 0 traded= 0 status= -1 age=3s cancel_req= False qok= True seen= False
+
+[2026-08-13 14:57:33][PBSRUSH][SH118074][分笔线] PbsRush pending check SH_CLOSE deal= 0 traded= 0 status= -1 age=5s cancel_req= False qok= True seen= False
+PbsRush pending shadow clear: never acked intent=SH_CLOSE age=5.0s hits=1
+PbsRush pending clear shadow_never_seen PbsRush BUY SH_CLOSE 118074.SH x10 20260813145728
+PbsRush SH_CLOSE buy @157.300 now=145733 (limit-up until submit ok)
+PbsRush buy skip: shadow reorder cooldown
+PbsRush SH_CLOSE submit fail -> retry @157.300
+
+[2026-08-13 14:57:35][PBSRUSH][SH118074][分笔线] PbsRush BUY SH_CLOSE 118074.SH x10 20260813145735 @limit 157.3 SH_CLOSE
+PbsRush BUY submitted limit 10 @ 157.3 PbsRush BUY SH_CLOSE 118074.SH x10 20260813145735 SH_CLOSE
+PbsRush SH_CLOSE submitted @157.300 now=145735 (wait order ack)
+
+[2026-08-13 14:57:38][PBSRUSH][SH118074][分笔线] PbsRush pending check SH_CLOSE deal= 0 traded= 0 status= -1 age=3s cancel_req= False qok= True seen= False
+
+[2026-08-13 14:57:40][PBSRUSH][SH118074][分笔线] PbsRush pending check SH_CLOSE deal= 0 traded= 0 status= -1 age=5s cancel_req= False qok= True seen= False
+PbsRush pending shadow clear: never acked intent=SH_CLOSE age=5.0s hits=1
+PbsRush pending clear shadow_never_seen PbsRush BUY SH_CLOSE 118074.SH x10 20260813145735
+PbsRush SH_CLOSE buy @157.300 now=145740 (limit-up until submit ok)
+PbsRush buy skip: shadow reorder cooldown
+PbsRush SH_CLOSE submit fail -> retry @157.300
+
+[2026-08-13 14:57:40][PBSRUSH][SH118074][分笔线] PbsRush 20260813 145740 mkt=SH n=1 last=157.300 open=130.000 hold=False mode= buy_done= pending=False close_px=157.300
+
+[2026-08-13 14:57:42][PBSRUSH][SH118074][分笔线] PbsRush BUY SH_CLOSE 118074.SH x10 20260813145742 @limit 157.3 SH_CLOSE
+PbsRush BUY submitted limit 10 @ 157.3 PbsRush BUY SH_CLOSE 118074.SH x10 20260813145742 SH_CLOSE
+PbsRush SH_CLOSE submitted @157.300 now=145742 (wait order ack)
+
+[2026-08-13 14:57:45][PBSRUSH][SH118074][分笔线] PbsRush pending check SH_CLOSE deal= 0 traded= 0 status= -1 age=3s cancel_req= False qok= True seen= False
+
+[2026-08-13 14:57:47][PBSRUSH][SH118074][分笔线] PbsRush pending check SH_CLOSE deal= 0 traded= 0 status= -1 age=5s cancel_req= False qok= True seen= False
+PbsRush pending shadow clear: never acked intent=SH_CLOSE age=5.0s hits=1
+PbsRush pending clear shadow_never_seen PbsRush BUY SH_CLOSE 118074.SH x10 20260813145742
+PbsRush SH_CLOSE buy @157.300 now=145747 (limit-up until submit ok)
+PbsRush buy skip: shadow reorder cooldown
+PbsRush SH_CLOSE submit fail -> retry @157.300
+
+[2026-08-13 14:57:49][PBSRUSH][SH118074][分笔线] PbsRush BUY SH_CLOSE 118074.SH x10 20260813145749 @limit 157.3 SH_CLOSE
+PbsRush BUY submitted limit 10 @ 157.3 PbsRush BUY SH_CLOSE 118074.SH x10 20260813145749 SH_CLOSE
+PbsRush SH_CLOSE submitted @157.300 now=145749 (wait order ack)
+
+[2026-08-13 14:57:50][PBSRUSH][SH118074][分笔线] PbsRush 20260813 145750 mkt=SH n=1 last=157.300 open=130.000 hold=False mode= buy_done= pending=True close_px=157.300
+
+[2026-08-13 14:57:52][PBSRUSH][SH118074][分笔线] PbsRush pending check SH_CLOSE deal= 0 traded= 0 status= -1 age=3s cancel_req= False qok= True seen= False
+
+[2026-08-13 14:57:54][PBSRUSH][SH118074][分笔线] PbsRush pending check SH_CLOSE deal= 0 traded= 0 status= -1 age=5s cancel_req= False qok= True seen= False
+PbsRush pending shadow clear: never acked intent=SH_CLOSE age=5.0s hits=1
+PbsRush pending clear shadow_never_seen PbsRush BUY SH_CLOSE 118074.SH x10 20260813145749
+PbsRush SH_CLOSE buy @157.300 now=145754 (limit-up until submit ok)
+PbsRush buy skip: shadow reorder cooldown
+PbsRush SH_CLOSE submit fail -> retry @157.300
+
+[2026-08-13 14:57:56][PBSRUSH][SH118074][分笔线] PbsRush BUY SH_CLOSE 118074.SH x10 20260813145756 @limit 157.3 SH_CLOSE
+PbsRush BUY submitted limit 10 @ 157.3 PbsRush BUY SH_CLOSE 118074.SH x10 20260813145756 SH_CLOSE
+PbsRush SH_CLOSE submitted @157.300 now=145756 (wait order ack)
+
+[2026-08-13 14:57:59][PBSRUSH][SH118074][分笔线] PbsRush pending check SH_CLOSE deal= 0 traded= 0 status= -1 age=3s cancel_req= False qok= True seen= False
+
+[2026-08-13 14:58:00][PBSRUSH][SH118074][分笔线] PbsRush live heartbeat 2026-08-13 14:58:00 PERIOD= tick stock= 118074.SH  reason=live
+
+[2026-08-13 14:58:00][PBSRUSH][SH118074][分笔线] PbsRush 20260813 145800 mkt=SH n=1 last=157.300 open=130.000 hold=False mode= buy_done= pending=True close_px=157.300
+
+[2026-08-13 14:58:01][PBSRUSH][SH118074][分笔线] PbsRush pending check SH_CLOSE deal= 0 traded= 0 status= -1 age=5s cancel_req= False qok= True seen= False
+PbsRush pending shadow clear: never acked intent=SH_CLOSE age=5.0s hits=1
+PbsRush pending clear shadow_never_seen PbsRush BUY SH_CLOSE 118074.SH x10 20260813145756
+PbsRush SH_CLOSE buy @157.300 now=145801 (limit-up until submit ok)
+PbsRush buy skip: shadow reorder cooldown
+PbsRush SH_CLOSE submit fail -> retry @157.300
+
+[2026-08-13 14:58:03][PBSRUSH][SH118074][分笔线] PbsRush BUY SH_CLOSE 118074.SH x10 20260813145803 @limit 157.3 SH_CLOSE
+PbsRush BUY submitted limit 10 @ 157.3 PbsRush BUY SH_CLOSE 118074.SH x10 20260813145803 SH_CLOSE
+PbsRush SH_CLOSE submitted @157.300 now=145803 (wait order ack)
+
+[2026-08-13 14:58:06][PBSRUSH][SH118074][分笔线] PbsRush pending check SH_CLOSE deal= 0 traded= 0 status= -1 age=3s cancel_req= False qok= True seen= False
+
+[2026-08-13 14:58:08][PBSRUSH][SH118074][分笔线] PbsRush pending check SH_CLOSE deal= 0 traded= 0 status= -1 age=5s cancel_req= False qok= True seen= False
+PbsRush pending shadow clear: never acked intent=SH_CLOSE age=5.0s hits=1
+PbsRush pending clear shadow_never_seen PbsRush BUY SH_CLOSE 118074.SH x10 20260813145803
+PbsRush SH_CLOSE buy @157.300 now=145808 (limit-up until submit ok)
+PbsRush buy skip: shadow reorder cooldown
+PbsRush SH_CLOSE submit fail -> retry @157.300
+
+[2026-08-13 14:58:10][PBSRUSH][SH118074][分笔线] PbsRush BUY SH_CLOSE 118074.SH x10 20260813145810 @limit 157.3 SH_CLOSE
+PbsRush BUY submitted limit 10 @ 157.3 PbsRush BUY SH_CLOSE 118074.SH x10 20260813145810 SH_CLOSE
+PbsRush SH_CLOSE submitted @157.300 now=145810 (wait order ack)
+
+[2026-08-13 14:58:10][PBSRUSH][SH118074][分笔线] PbsRush 20260813 145810 mkt=SH n=1 last=157.300 open=130.000 hold=False mode= buy_done= pending=True close_px=157.300
+
+[2026-08-13 14:58:13][PBSRUSH][SH118074][分笔线] PbsRush pending check SH_CLOSE deal= 0 traded= 0 status= -1 age=3s cancel_req= False qok= True seen= False
+
+[2026-08-13 14:58:15][PBSRUSH][SH118074][分笔线] PbsRush pending check SH_CLOSE deal= 0 traded= 0 status= -1 age=5s cancel_req= False qok= True seen= False
+PbsRush pending shadow clear: never acked intent=SH_CLOSE age=5.0s hits=1
+PbsRush pending clear shadow_never_seen PbsRush BUY SH_CLOSE 118074.SH x10 20260813145810
+PbsRush SH_CLOSE buy @157.300 now=145815 (limit-up until submit ok)
+PbsRush buy skip: shadow reorder cooldown
+PbsRush SH_CLOSE submit fail -> retry @157.300
+
+[2026-08-13 14:58:17][PBSRUSH][SH118074][分笔线] PbsRush BUY SH_CLOSE 118074.SH x10 20260813145817 @limit 157.3 SH_CLOSE
+PbsRush BUY submitted limit 10 @ 157.3 PbsRush BUY SH_CLOSE 118074.SH x10 20260813145817 SH_CLOSE
+PbsRush SH_CLOSE submitted @157.300 now=145817 (wait order ack)
+
+[2026-08-13 14:58:20][PBSRUSH][SH118074][分笔线] PbsRush pending check SH_CLOSE deal= 0 traded= 0 status= -1 age=3s cancel_req= False qok= True seen= False
+
+[2026-08-13 14:58:20][PBSRUSH][SH118074][分笔线] PbsRush 20260813 145820 mkt=SH n=1 last=157.300 open=130.000 hold=False mode= buy_done= pending=True close_px=157.300
+
+[2026-08-13 14:58:22][PBSRUSH][SH118074][分笔线] PbsRush pending check SH_CLOSE deal= 0 traded= 0 status= -1 age=5s cancel_req= False qok= True seen= False
+PbsRush pending shadow clear: never acked intent=SH_CLOSE age=5.0s hits=1
+PbsRush pending clear shadow_never_seen PbsRush BUY SH_CLOSE 118074.SH x10 20260813145817
+PbsRush SH_CLOSE buy @157.300 now=145822 (limit-up until submit ok)
+PbsRush buy skip: shadow reorder cooldown
+PbsRush SH_CLOSE submit fail -> retry @157.300
+
+[2026-08-13 14:58:24][PBSRUSH][SH118074][分笔线] PbsRush BUY SH_CLOSE 118074.SH x10 20260813145824 @limit 157.3 SH_CLOSE
+PbsRush BUY submitted limit 10 @ 157.3 PbsRush BUY SH_CLOSE 118074.SH x10 20260813145824 SH_CLOSE
+PbsRush SH_CLOSE submitted @157.300 now=145824 (wait order ack)
+
+[2026-08-13 14:58:25][HLBAND_PROD][SH513530][日线] HlBand live heartbeat 2026-08-13 14:58:25 PERIOD= 1d stock= 513530.SH  reason=confirm
+
+[2026-08-13 14:58:27][PBSRUSH][SH118074][分笔线] PbsRush pending check SH_CLOSE deal= 0 traded= 0 status= -1 age=3s cancel_req= False qok= True seen= False
+
+[2026-08-13 14:58:29][PBSRUSH][SH118074][分笔线] PbsRush pending check SH_CLOSE deal= 0 traded= 0 status= -1 age=5s cancel_req= False qok= True seen= False
+PbsRush pending shadow clear: never acked intent=SH_CLOSE age=5.0s hits=1
+PbsRush pending clear shadow_never_seen PbsRush BUY SH_CLOSE 118074.SH x10 20260813145824
+PbsRush SH_CLOSE buy @157.300 now=145829 (limit-up until submit ok)
+PbsRush buy skip: shadow reorder cooldown
+PbsRush SH_CLOSE submit fail -> retry @157.300
+
+[2026-08-13 14:58:30][PBSRUSH][SH118074][分笔线] PbsRush 20260813 145830 mkt=SH n=1 last=157.300 open=130.000 hold=False mode= buy_done= pending=False close_px=157.300
+
+[2026-08-13 14:58:30][HLBAND_PROD][SH601398][日线] HlBand live heartbeat 2026-08-13 14:58:30 PERIOD= 1d stock= 601398.SH  reason=confirm
+HlBand 20260813 1458 n1d=180 n1w=120 close=7.5900 sig_day=20260813 phase=confirm prev=False w_bull=True w_bear=False w_ma5=7.634 w_ma30=7.282 w_hist=0.0518 buy=True buyR=pullback_vol sell=False sellR=- hold=True ret=0.93% pe=False px=False bt_held=- avail=-
+
+[2026-08-13 14:58:31][PBSRUSH][SH118074][分笔线] PbsRush BUY SH_CLOSE 118074.SH x10 20260813145831 @limit 157.3 SH_CLOSE
+PbsRush BUY submitted limit 10 @ 157.3 PbsRush BUY SH_CLOSE 118074.SH x10 20260813145831 SH_CLOSE
+PbsRush SH_CLOSE submitted @157.300 now=145831 (wait order ack)
+
+[2026-08-13 14:58:34][PBSRUSH][SH118074][分笔线] PbsRush pending check SH_CLOSE deal= 0 traded= 0 status= -1 age=3s cancel_req= False qok= True seen= False
+
+[2026-08-13 14:58:36][PBSRUSH][SH118074][分笔线] PbsRush pending check SH_CLOSE deal= 0 traded= 0 status= -1 age=5s cancel_req= False qok= True seen= False
+PbsRush pending shadow clear: never acked intent=SH_CLOSE age=5.0s hits=1
+PbsRush pending clear shadow_never_seen PbsRush BUY SH_CLOSE 118074.SH x10 20260813145831
+PbsRush SH_CLOSE buy @157.300 now=145836 (limit-up until submit ok)
+PbsRush buy skip: shadow reorder cooldown
+PbsRush SH_CLOSE submit fail -> retry @157.300
+
+[2026-08-13 14:58:38][PBSRUSH][SH118074][分笔线] PbsRush BUY SH_CLOSE 118074.SH x10 20260813145838 @limit 157.3 SH_CLOSE
+PbsRush BUY submitted limit 10 @ 157.3 PbsRush BUY SH_CLOSE 118074.SH x10 20260813145838 SH_CLOSE
+PbsRush SH_CLOSE submitted @157.300 now=145838 (wait order ack)
+
+[2026-08-13 14:58:40][PBSRUSH][SH118074][分笔线] PbsRush 20260813 145840 mkt=SH n=1 last=157.300 open=130.000 hold=False mode= buy_done= pending=True close_px=157.300
+
+[2026-08-13 14:58:41][PBSRUSH][SH118074][分笔线] PbsRush pending check SH_CLOSE deal= 0 traded= 0 status= -1 age=3s cancel_req= False qok= True seen= False
+
+[2026-08-13 14:58:43][PBSRUSH][SH118074][分笔线] PbsRush pending check SH_CLOSE deal= 0 traded= 0 status= -1 age=5s cancel_req= False qok= True seen= False
+PbsRush pending shadow clear: never acked intent=SH_CLOSE age=5.0s hits=1
+PbsRush pending clear shadow_never_seen PbsRush BUY SH_CLOSE 118074.SH x10 20260813145838
+PbsRush SH_CLOSE buy @157.300 now=145843 (limit-up until submit ok)
+PbsRush buy skip: shadow reorder cooldown
+PbsRush SH_CLOSE submit fail -> retry @157.300
+
+[2026-08-13 14:58:45][PBSRUSH][SH118074][分笔线] PbsRush BUY SH_CLOSE 118074.SH x10 20260813145845 @limit 157.3 SH_CLOSE
+PbsRush BUY submitted limit 10 @ 157.3 PbsRush BUY SH_CLOSE 118074.SH x10 20260813145845 SH_CLOSE
+PbsRush SH_CLOSE submitted @157.300 now=145845 (wait order ack)
