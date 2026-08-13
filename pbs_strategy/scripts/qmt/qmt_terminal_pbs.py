@@ -15,7 +15,7 @@ DRY_RUN = False
 ACCOUNT_ID = "39953913"
 ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 
-TRADE_BUDGET = 10000.0
+TRADE_BUDGET = 2000.0
 CASH_RATIO = 0.8
 LOT_SIZE = 10  # 可转债：10 张 = 一手
 
@@ -69,11 +69,9 @@ PENDING_CHECK_LOG_SEC = 5.0
 
 # ---- 上市首日门闩 ----
 # 实盘务必填写 LISTING_DATE_MAP，否则首日门闩可能 fail-closed
-LISTING_DAY_ONLY = True
+LISTING_DAY_ONLY = False
 LISTING_DAY_FAIL_OPEN = False
-LISTING_DATE_MAP = {
-    "110103.SH": "20260813",
-}
+LISTING_DATE_MAP = {}
 
 # ---- 行情与运行 ----
 # 实盘/回测统一：主图挂「分笔/tick」
