@@ -11,7 +11,12 @@ PREVIEW = HERE / "qmt_terminal_hlband.py"
 REPO = HERE.parents[2]
 sys.path.insert(0, str(REPO / "scripts"))
 
-from qmt_common._deploy_lib import build_bundle, deploy_gbk, write_preview  # noqa: E402
+from qmt_common._deploy_lib import (  # noqa: E402
+    build_bundle,
+    deploy_formula_layout,
+    deploy_gbk,
+    write_preview,
+)
 
 QMT_DIR = Path(r"D:\service\GJQMT") / "python"
 TARGETS = [
@@ -47,9 +52,14 @@ def main() -> None:
     text = build_bundle(MODULE_ORDER, HLBAND)
     write_preview(text, PREVIEW)
     deploy_gbk(text, TARGETS, compile_name="qmt_terminal_hlband.py")
-    print("OK: 打开国金 QMT -> 模型交易 -> 加载 HlBand / 红利波段")
+    deploy_formula_layout(
+        HLBAND / "panel.xml",
+        QMT_DIR,
+        stems=[p.stem for p in TARGETS],
+    )
+    print("OK: 打开国金 QMT -> 模型交易 -> 新建策略交易 -> HlBand / 红利波段")
     print("主图: 红利标的(如银行/煤炭/电力/红利ETF) | 周期=日线 | 前复权")
-    print("编辑 hlband/*.py 与 scripts/qmt_common/；DRY_RUN 以 hlband/config.py 为准")
+    print("编辑 hlband/*.py 与 panel.xml；策略交易改参，编辑器回测仍用 config.py")
 
 
 if __name__ == "__main__":

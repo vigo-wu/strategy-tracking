@@ -4,7 +4,7 @@
 
 **约定**：片段之间不要 `import`；运行时靠拼接顺序定义符号。
 
-**Agent**：新建/修改策略必须遵循 [`.cursor/skills/qmt-common-modules/`](../../.cursor/skills/qmt-common-modules/)；编辑本目录或 `**/scripts/qmt/**` 时 Rule [`.cursor/rules/qmt-common-modules.mdc`](../../.cursor/rules/qmt-common-modules.mdc) 生效。
+**Agent**：新建/修改策略必须遵循 [`.cursor/skills/qmt-common-modules/`](../../.cursor/skills/qmt-common-modules/)；编辑本目录或 `**/scripts/qmt/**` 时 Rule [`.cursor/rules/qmt-common-modules.mdc`](../../.cursor/rules/qmt-common-modules.mdc) 生效。终端参数面板见 [`.cursor/skills/qmt-param-panel/`](../../.cursor/skills/qmt-param-panel/)。
 
 ---
 

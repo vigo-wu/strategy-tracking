@@ -1,8 +1,56 @@
 # === hlband/runtime.py ===
+def _as_bool(val):
+    if isinstance(val, bool):
+        return val
+    s = str(val).strip().lower()
+    return s in ("1", "true", "yes", "y", "是")
+
+
+def _apply_panel():
+    """策略交易注入 bind → 写回 config 全局。须由 init() 直接调用。"""
+    g = globals()
+    names = dict(g)
+    try:
+        import sys
+        fr = sys._getframe(1)
+        for _ in range(3):
+            if fr is None:
+                break
+            names.update(fr.f_globals)
+            names.update(fr.f_locals)
+            fr = fr.f_back
+    except Exception:
+        pass
+    applied = []
+    for bind, const, kind in (g.get("PANEL_BINDS") or ()):
+        if bind not in names:
+            continue
+        val = names[bind]
+        cur = g.get(const)
+        if kind == "bool":
+            new = _as_bool(val)
+        elif kind == "int":
+            new = int(float(val))
+        elif kind == "float":
+            new = float(val)
+        else:
+            new = str(val)
+        g[const] = new
+        applied.append(const)
+        if new != cur:
+            print(_strategy_tag(), "panel", const, cur, "->", new)
+        if const == "TRADE_BUDGET":
+            g["TRADE_BUDGET_BY_STOCK"] = {}
+    if applied:
+        g["_PANEL_APPLIED"] = set(applied)
+        print(_strategy_tag(), "panel applied", ",".join(applied))
+
+
 def init(C):
     A.busy = False
     A._hb_at = None
     try:
+        _apply_panel()
         _init_impl(C)
     except Exception as e:
         print("%s init error" % STRATEGY_NAME, e)

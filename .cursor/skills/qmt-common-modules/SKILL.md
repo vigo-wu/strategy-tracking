@@ -15,14 +15,15 @@ description: >-
 
 联调踩坑仍走 [qmt-model-script](../qmt-model-script/SKILL.md) / [reference-pitfalls.md](../qmt-model-script/reference-pitfalls.md)。  
 模块清单真源：[scripts/qmt_common/NAV.md](../../../scripts/qmt_common/NAV.md)。  
-布局与模板：[reference-layout.md](reference-layout.md)。
+布局与模板：[reference-layout.md](reference-layout.md)。  
+终端「新建策略交易」参数面板：[qmt-param-panel](../qmt-param-panel/SKILL.md)（仓库 `panel.xml` → `formulaLayout`）。
 
 ---
 
 ## 硬性约束（违反即错）
 
 1. **禁止**跨片段 `import`；只靠 `_deploy_qmt_gbk.py` 的 `MODULE_ORDER` 拼接。
-2. **禁止**手改 `qmt_terminal_*.py` 与 QMT `python\` 下 GBK 产物；只改片段后 re-deploy。
+2. **禁止**手改 `qmt_terminal_*.py`、QMT `python\` 下 GBK 产物、以及 `python\formulaLayout\` XML；只改片段 / `panel.xml` 后 re-deploy。
 3. **禁止**在策略里复制 `_process_pending` / `_bt_roll_t1` / `_series_from_ex` / `_refresh_mode` / `_broker_position` 等已进 common 的逻辑。
 4. **禁止** `__file__` 定 STATE 路径；用绝对路径 `STATE_FILE`（基路径或含 `{stock}`）。
 5. **多模型实例挂不同主图**：单仓必须按标的分状态文件。`common:single/state_io` 会把 `A.stock` 写入路径（`{stock}` 占位或自动后缀 `_513530_SH`）。**禁止**假定「同一策略脚本 + 同一 `STATE_FILE` 字符串」可安全并行多标的；否则后写覆盖、加载 `state stock mismatch`。双浮仓自研 `state_io` 同样须按标的隔离。详见 [reference-pitfalls §2.1](../qmt-model-script/reference-pitfalls.md)。
@@ -40,6 +41,7 @@ description: >-
 | 新建单仓策略（一票一仓） | **A. 单仓骨架** |
 | 新建双浮仓/底仓隔离（类红利T） | **B. 双浮仓骨架** |
 | 改信号/阈值/周期 | 只动策略侧 `config` / `indicators` / `market` / `strategy` |
+| 终端对话框改参（不改代码） | [qmt-param-panel](../qmt-param-panel/SKILL.md) |
 | 改下单/T+1/暖机/行情解析 | 改 `scripts/qmt_common/`，**所有**消费者 re-deploy |
 | 迁旧单文件策略 | **C. 迁移** |
 
@@ -99,6 +101,7 @@ description: >-
 | :--- | :--- |
 | 买卖点、止损、持仓天数 | 策略 `strategy.py` / `indicators.py` |
 | 预算、周期、决策窗 | 策略 `config.py` |
+| 「新建策略交易」参数表 | `<简名>/panel.xml` + `PANEL_BINDS`；见 [qmt-param-panel](../qmt-param-panel/SKILL.md) |
 | 拉数字段/多周期 | 策略 `market.py` |
 | pending/撤单/T+1/暖机 | `scripts/qmt_common/` → **全策略 re-deploy** |
 | 单仓 fill/可卖 | `qmt_common/single/` |

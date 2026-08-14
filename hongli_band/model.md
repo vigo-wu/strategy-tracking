@@ -1,7 +1,7 @@
 # 红利板块波段策略：周线定方向，日线找买卖点
 
-**主题目录**：`hongli_band/`｜**版本**：v1.20｜**运行**：国金 QMT 终端模型（见 §5）  
-**参数真源**：`hongli_band/scripts/qmt/hlband/config.py`（本文数值与之对齐；改参只改 config 后 re-deploy）
+**主题目录**：`hongli_band/`｜**版本**：v1.24｜**运行**：国金 QMT 终端模型（见 §5）  
+**参数默认值**：`hongli_band/scripts/qmt/hlband/config.py`。实盘在「模型交易 → 新建/编辑策略交易」面板覆盖（`hlband/panel.xml`）；编辑器回测无注入时用 config。阶梯止盈 `TRAIL_TIERS`、均线周期、路径仍只在 config。
 
 ---
 
@@ -78,14 +78,16 @@
 
 ## 五、QMT 运行
 
-**部署**：`python hongli_band/scripts/qmt/_deploy_qmt_gbk.py` → `HlBand.py` / `红利波段.py`  
+**部署**：`python hongli_band/scripts/qmt/_deploy_qmt_gbk.py` → `HlBand.py` / `红利波段.py`，以及 `formulaLayout/HlBand.xml` / `红利波段.xml`  
 **报告**：`python hongli_band/gen_report.py` → `report/`  
-**片段**：`hongli_band/scripts/qmt/hlband/`（只改片段后 re-deploy，勿手改终端 GBK）
+**片段**：`hongli_band/scripts/qmt/hlband/`（只改片段 / `panel.xml` 后 re-deploy，勿手改终端 GBK 或 `formulaLayout`）
+
+实盘改参：模型交易里打开本策略实例，改「基础 / 周线 / 买入 / 卖出」后确定再运行。策略交易注入了单笔预算时**不再**读 `TRADE_BUDGET_BY_STOCK`（每个实例自己填预算）。编辑器回测仍用 config 与按标的覆盖。
 
 | 配置 | 当前值 | 说明 |
 | :--- | :--- | :--- |
 | `DRY_RUN` | `False` | 真下单；联调可改 `True` 只打日志 |
-| `TRADE_BUDGET` | `25000` | 默认单笔预算；可被 `TRADE_BUDGET_BY_STOCK` 覆盖 |
+| `TRADE_BUDGET` | `25000` | 默认单笔预算；编辑器回测可被 `TRADE_BUDGET_BY_STOCK` 覆盖；策略交易以面板为准 |
 | `CASH_RATIO` | `0.8` | 实盘可用现金占用比例 |
 | `W_BIAS_HARD` | `0.08` | 周线高位乖离禁开 |
 | `W_BIAS_LOW` | `0.02` | 低位区阈值（配合斜率） |
@@ -104,4 +106,4 @@
 | `STATE_FILE` | `D:\tradingStrategy\hlband_{stock}.json` | 实盘状态；按主图标的分文件 |
 | `LOG_DIR` | `D:\tradingStrategy\logs` | 实盘结构化日志根目录 |
 
-日志确认 `HlBand v1.19 init`（`dMA=20/60`，`DRY_RUN=` 与 config 一致）后再挂实盘。
+日志确认 `HlBand v1.24 init`（`dMA=20/60`，`DRY_RUN=` 与面板或 config 一致）后再挂实盘。策略交易下应另有 `panel applied ...` 行。

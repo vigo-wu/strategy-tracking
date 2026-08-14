@@ -10,10 +10,7 @@ ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 # 未在 TRADE_BUDGET_BY_STOCK 中单独配置的标的用此默认值
 TRADE_BUDGET = 25000.0
 # 按标的覆盖预算（key 须与 A.stock 一致，如 513530.SH）
-TRADE_BUDGET_BY_STOCK = {
-    "513530.SH": 50000.0,
-    "601398.SH": 50000.0,
-}
+TRADE_BUDGET_BY_STOCK = {}
 # 可用现金占用比例（预留下单缓冲，避免满仓打满失败）
 CASH_RATIO = 0.8
 
@@ -86,6 +83,27 @@ W_BEAR_CONFIRM_DAYS = 2
 
 # （另有 weekly_bear：周线空头判定见 _eval_weekly；清仓见上）
 
+# 策略交易面板 bind → 模块常量。编辑器/回测无注入时用上面默认值。
+# TRAIL_TIERS、均线周期、路径、账号不在面板。
+PANEL_BINDS = (
+    ("panel_dry_run", "DRY_RUN", "bool"),
+    ("panel_budget", "TRADE_BUDGET", "float"),
+    ("panel_cash_ratio", "CASH_RATIO", "float"),
+    ("panel_w_bias_hard", "W_BIAS_HARD", "float"),
+    ("panel_w_bias_low", "W_BIAS_LOW", "float"),
+    ("panel_w_slope_weeks", "W_MA30_SLOPE_WEEKS", "int"),
+    ("panel_w_bear_days", "W_BEAR_CONFIRM_DAYS", "int"),
+    ("panel_ma_touch_tol", "MA_TOUCH_TOL", "float"),
+    ("panel_vol_pb_n", "VOL_PULLBACK_N", "int"),
+    ("panel_vol_pb_ratio", "VOL_PULLBACK_RATIO", "float"),
+    ("panel_vol_dry_n", "VOL_DRY_N", "int"),
+    ("panel_vol_dry_ratio", "VOL_DRY_RATIO", "float"),
+    ("panel_chase_pct", "CHASE_MAX_PCT", "float"),
+    ("panel_stop_loss", "STOP_LOSS", "float"),
+    ("panel_time_force_bars", "TIME_FORCE_BARS", "int"),
+    ("panel_time_force_grace", "TIME_FORCE_GRACE_BARS", "int"),
+)
+
 # ---- 行情与运行 ----
 # 主图周期；周线另拉 1w 跨周期
 PERIOD = "1d"
@@ -133,7 +151,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.23"
+STRATEGY_VER = "v1.24"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）

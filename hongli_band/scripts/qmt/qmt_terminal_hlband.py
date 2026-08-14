@@ -96,6 +96,27 @@ W_BEAR_CONFIRM_DAYS = 2
 
 # （另有 weekly_bear：周线空头判定见 _eval_weekly；清仓见上）
 
+# 策略交易面板 bind → 模块常量。编辑器/回测无注入时用上面默认值。
+# TRAIL_TIERS、均线周期、路径、账号不在面板。
+PANEL_BINDS = (
+    ("panel_dry_run", "DRY_RUN", "bool"),
+    ("panel_budget", "TRADE_BUDGET", "float"),
+    ("panel_cash_ratio", "CASH_RATIO", "float"),
+    ("panel_w_bias_hard", "W_BIAS_HARD", "float"),
+    ("panel_w_bias_low", "W_BIAS_LOW", "float"),
+    ("panel_w_slope_weeks", "W_MA30_SLOPE_WEEKS", "int"),
+    ("panel_w_bear_days", "W_BEAR_CONFIRM_DAYS", "int"),
+    ("panel_ma_touch_tol", "MA_TOUCH_TOL", "float"),
+    ("panel_vol_pb_n", "VOL_PULLBACK_N", "int"),
+    ("panel_vol_pb_ratio", "VOL_PULLBACK_RATIO", "float"),
+    ("panel_vol_dry_n", "VOL_DRY_N", "int"),
+    ("panel_vol_dry_ratio", "VOL_DRY_RATIO", "float"),
+    ("panel_chase_pct", "CHASE_MAX_PCT", "float"),
+    ("panel_stop_loss", "STOP_LOSS", "float"),
+    ("panel_time_force_bars", "TIME_FORCE_BARS", "int"),
+    ("panel_time_force_grace", "TIME_FORCE_GRACE_BARS", "int"),
+)
+
 # ---- 行情与运行 ----
 # 主图周期；周线另拉 1w 跨周期
 PERIOD = "1d"
@@ -143,7 +164,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.23"
+STRATEGY_VER = "v1.24"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
@@ -3051,10 +3072,57 @@ def _handle(C):
         _mark_signal_eval_done(day, is_confirm)
 
 # === hlband/runtime.py ===
+def _as_bool(val):
+    if isinstance(val, bool):
+        return val
+    s = str(val).strip().lower()
+    return s in ("1", "true", "yes", "y", "是")
+
+
+def _apply_panel():
+    """策略交易注入 bind → 写回 config 全局。须由 init() 直接调用。"""
+    g = globals()
+    names = dict(g)
+    try:
+        fr = sys._getframe(1)
+        for _ in range(3):
+            if fr is None:
+                break
+            names.update(fr.f_globals)
+            names.update(fr.f_locals)
+            fr = fr.f_back
+    except Exception:
+        pass
+    applied = []
+    for bind, const, kind in (g.get("PANEL_BINDS") or ()):
+        if bind not in names:
+            continue
+        val = names[bind]
+        cur = g.get(const)
+        if kind == "bool":
+            new = _as_bool(val)
+        elif kind == "int":
+            new = int(float(val))
+        elif kind == "float":
+            new = float(val)
+        else:
+            new = str(val)
+        g[const] = new
+        applied.append(const)
+        if new != cur:
+            print(_strategy_tag(), "panel", const, cur, "->", new)
+        if const == "TRADE_BUDGET":
+            g["TRADE_BUDGET_BY_STOCK"] = {}
+    if applied:
+        g["_PANEL_APPLIED"] = set(applied)
+        print(_strategy_tag(), "panel applied", ",".join(applied))
+
+
 def init(C):
     A.busy = False
     A._hb_at = None
     try:
+        _apply_panel()
         _init_impl(C)
     except Exception as e:
         print("%s init error" % STRATEGY_NAME, e)

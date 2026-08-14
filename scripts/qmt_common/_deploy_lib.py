@@ -5,6 +5,8 @@
   - \"foo.py\"           -> 策略目录下的 foo.py
   - \"common:bar.py\"    -> scripts/qmt_common/bar.py
   - \"common:single/x.py\" -> scripts/qmt_common/single/x.py
+
+参数面板 XML 用 deploy_formula_layout 拷到 python/formulaLayout/<入口stem>.xml。
 """
 from __future__ import annotations
 
@@ -112,6 +114,33 @@ def write_preview(text: str, preview: Path) -> None:
     preview.parent.mkdir(parents=True, exist_ok=True)
     preview.write_text(text, encoding="utf-8", newline="\n")
     print("wrote preview", preview, "chars", len(text))
+
+
+def deploy_formula_layout(
+    src: Path,
+    qmt_python_dir: Path,
+    stems: Iterable[str],
+) -> None:
+    """Copy panel XML to python/formulaLayout/<stem>.xml for each deployed entry."""
+    if not src.is_file():
+        raise SystemExit("missing panel xml: %s" % src)
+    text = src.read_text(encoding="utf-8")
+    if "<TCStageLayout>" not in text:
+        raise SystemExit("formula layout missing TCStageLayout: %s" % src)
+    dest_dir = qmt_python_dir / "formulaLayout"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    data = src.read_bytes()
+    wrote = 0
+    for stem in stems:
+        stem = str(stem).strip()
+        if not stem:
+            continue
+        dest = dest_dir / ("%s.xml" % stem)
+        dest.write_bytes(data)
+        print("wrote formulaLayout", dest, "bytes", len(data))
+        wrote += 1
+    if wrote == 0:
+        raise SystemExit("deploy_formula_layout: empty stems")
 
 
 def deploy_gbk(
