@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TCStageLayout>
+    <control note="控件">
+        <variable note="控件">
+            <item bind="panel_dry_run" name="模拟下单" note="勾选=只打日志不下单（DRY_RUN）" value="True" type="checkBox"/>
+            <item bind="panel_budget" name="单笔预算" note="元；下单前再按整手取整" value="25000" type="intput"/>
+            <item bind="panel_cash_ratio" name="现金占用比例" note="0~1，预留下单缓冲" value="0.8" type="intput"/>
+            <item bind="panel_chase_pct" name="买入 追高禁开" note="当日涨幅达到此比例则禁开，0.05=5%" value="0.05" type="intput"/>
+            <item bind="panel_stop_loss" name="卖出 硬止损" note="收盘相对成本回撤达到此比例则清仓，0.05=5%" value="0.05" type="intput"/>
+        </variable>
+    </control>
+</TCStageLayout>

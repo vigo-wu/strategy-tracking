@@ -37,6 +37,7 @@ description: >-
 | 终端报错 / 回测无日志 / 盈利异常 | **C. 排障** → [reference-pitfalls.md](reference-pitfalls.md) |
 | 策略变更后同步脚本 | **B. 对齐** |
 | 部署到 `QMT\python\` | `python <主题>/scripts/qmt/_deploy_qmt_gbk.py`（拼接 `scripts/qmt_common` + 策略片段） |
+| 终端「新建策略交易」参数面板 | [qmt-param-panel](../qmt-param-panel/SKILL.md)（`panel.xml` → `formulaLayout`） |
 
 ---
 
@@ -128,6 +129,7 @@ xtquant 骨架见 [reference-template.md](reference-template.md)。
 ## 附加资源
 
 - [qmt-common-modules](../qmt-common-modules/SKILL.md) — **终端策略模块化新建/修改（必遵）**
+- [qmt-param-panel](../qmt-param-panel/SKILL.md) — 策略交易参数面板（`panel.xml` / `formulaLayout`）
 - [scripts/qmt_common/NAV.md](../../../scripts/qmt_common/NAV.md) — 共用模块清单
 - [reference-pitfalls.md](reference-pitfalls.md) — **国金终端联调踩坑（优先读，含 T+1）**
 - [reference-xtquant.md](reference-xtquant.md) — 外部 xtquant 要点  

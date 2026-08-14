@@ -18,6 +18,7 @@
     qmt_terminal_<简名>.py      # AUTO 预览，勿手改
     <简名>/                     # 策略片段（UTF-8）
       config.py
+      panel.xml                 # 可选；策略交易参数面板，见 qmt-param-panel
       indicators.py
       market.py
       strategy.py
@@ -115,7 +116,7 @@ PREVIEW = HERE / "qmt_terminal_<简名>.py"
 REPO = HERE.parents[2]
 sys.path.insert(0, str(REPO / "scripts"))
 
-from qmt_common._deploy_lib import build_bundle, deploy_gbk, write_preview
+from qmt_common._deploy_lib import build_bundle, deploy_gbk, deploy_formula_layout, write_preview
 
 QMT_DIR = Path(r"D:\service\GJQMT") / "python"
 TARGETS = [QMT_DIR / "<入口名>.py"]
@@ -125,6 +126,8 @@ def main() -> None:
     text = build_bundle(MODULE_ORDER, STRAT)
     write_preview(text, PREVIEW)
     deploy_gbk(text, TARGETS, compile_name=PREVIEW.name)
+    # 若有参数面板：
+    # deploy_formula_layout(STRAT / "panel.xml", QMT_DIR, stems=[p.stem for p in TARGETS])
 
 if __name__ == "__main__":
     main()

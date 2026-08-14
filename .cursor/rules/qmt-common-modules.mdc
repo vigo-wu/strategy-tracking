@@ -11,12 +11,13 @@ alwaysApply: true
 
 - 策略逻辑放在 `<主题>/scripts/qmt/<简名>/` 片段；基础设施用 `common:` / `common:single:`
 - 用 `_deploy_qmt_gbk.py` + `qmt_common._deploy_lib` 拼接；改完立即 deploy
+- 终端「新建策略交易」参数面板按 `.cursor/skills/qmt-param-panel`（仓库 `panel.xml` → `formulaLayout/<入口>.xml`）
 - `DRY_RUN=True` 默认；`STATE_FILE` 绝对路径（多实例不同主图用 `{stock}` / 按标的分文件）；`handlebar` 调 `_refresh_mode`
 - 日志前缀用 `STRATEGY_NAME` / `_strategy_tag()`
 
 ## 禁止
 
-- 手改 `qmt_terminal_*.py` 或 QMT `python\` 下 GBK 文件
+- 手改 `qmt_terminal_*.py`、QMT `python\` 下 GBK 文件、或 `python\formulaLayout\` 下 XML
 - 片段间 `import`；在策略里重写 pending / T+1 / `series_from_ex` / mode 暖机
 - 用 `__file__` 定位状态文件；多实盘实例共用同一 STATE JSON（串标的）
 - 片段内重复 `import datetime/numpy`（preamble 已有）
@@ -26,7 +27,8 @@ alwaysApply: true
 
 | 变更 | 位置 |
 | :--- | :--- |
-| 信号/指标/参数 | 策略片段 |
+| 信号/指标/config 常量 | 策略片段 |
+| 策略交易参数面板 | `<简名>/panel.xml`（技能 `qmt-param-panel`） |
 | 下单/T+1/暖机/行情解析 | `scripts/qmt_common/` 后**全策略** re-deploy |
 
 单仓范本：`波段3-5天策略/scripts/qmt/`。双浮仓范本：`红利T策略/scripts/qmt/hongli/`。
