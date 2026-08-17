@@ -25,7 +25,8 @@
 | `single/state_pos.py` | 单仓 | `A.position` 辅助 |
 | `single/bt_recover.py` | 单仓 | 回测仓恢复 |
 | `single/broker.py` | 单仓 | `_max_sell_vol` |
-| `single/orders.py` | 单仓 | `_order_buy` / `_order_sell` / fill；`add=True` 可均价加仓（默认仍一票一仓） |
+| `single/lots.py` | 单仓 | 同标的多笔 `A.lots`；`SCALE_LOTS` 默认关，开则 `add` 记独立笔、`_order_sell(lot_ids=)` 按笔平 |
+| `single/orders.py` | 单仓 | `_order_buy` / `_order_sell` / fill；`add=True` 加仓（默认均价合并，一票一仓） |
 
 红利 T（双浮仓）用 `broker_base` + `orders_pending`，自带 `hongli/broker.py` / `orders.py`。
 
@@ -59,7 +60,7 @@ LOG_DIR/<stock_tag>/
 ## 典型拼接顺序（单仓）
 
 ```
-config → ctx → live_log → time_util → period → state_io → backtest → state_pos → bt_recover
+config → ctx → live_log → time_util → period → state_io → backtest → state_pos → lots → bt_recover
 → indicators → market_util → market → mode → broker_base → single/broker
 → orders_pending → single/orders → strategy → runtime
 ```
@@ -72,3 +73,5 @@ python 波段3-5天策略/scripts/qmt/_deploy_qmt_gbk.py
 python 高胜率T1策略/scripts/qmt/_deploy_qmt_gbk.py
 python 均线双周期策略/scripts/qmt/_deploy_qmt_gbk.py
 ```
+
+同标的多仓（不是双浮仓）：单仓模板已含 `single/lots.py`。config `SCALE_LOTS=True` 后，`A.position` 仍是合计，`A.lots` 为各笔；策略只评信号并传 `lot_ids`，不要在策略里再写 fill/T+1。未设该开关时行为与一票一仓相同。

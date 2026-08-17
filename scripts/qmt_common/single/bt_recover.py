@@ -19,4 +19,7 @@ def _bt_recover_position(now=None, last=None):
         "opened_at": ot,
     }
     print(_strategy_tag(), "bt recover position from held", A.position)
+    fn = globals().get("_ensure_lots")
+    if callable(fn) and bool(globals().get("SCALE_LOTS")):
+        fn()
     return True

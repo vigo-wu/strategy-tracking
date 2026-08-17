@@ -46,6 +46,7 @@ def _state_load_path():
 
 def _load_state():
     A.position = None
+    A.lots = []
     A.acted_day = ""
     A.acted = set()
     A.pending = None
@@ -79,6 +80,13 @@ def _load_state():
         A.position["price"] = float(pos.get("price", 0) or 0)
         A.position["cost"] = float(pos.get("cost", 0) or 0)
         A.position["opened_at"] = str(pos.get("opened_at", "") or "")
+    lots = raw.get("lots")
+    cleaned = []
+    if isinstance(lots, list):
+        for lot in lots:
+            if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) >= 100:
+                cleaned.append(dict(lot))
+    A.lots = cleaned
     A.acted_day = str(raw.get("acted_day", "") or "")
     acted = raw.get("acted") or []
     A.acted = set([str(x) for x in acted]) if isinstance(acted, list) else set()
@@ -111,6 +119,7 @@ def _save_state():
         "stock": getattr(A, "stock", ""),
         "version": str(globals().get("STRATEGY_VER") or ""),
         "position": getattr(A, "position", None),
+        "lots": list(getattr(A, "lots", None) or []) if isinstance(getattr(A, "lots", None), list) else [],
         "acted_day": getattr(A, "acted_day", ""),
         "acted": sorted(list(getattr(A, "acted", set()) or [])),
         "pending": getattr(A, "pending", None),

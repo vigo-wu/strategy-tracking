@@ -3,7 +3,15 @@
 # 主要符号: _order_buy, _order_sell, _apply_buy_fill, _apply_sell_fill
 # 钩子实现: _pending_on_buy_fill / _pending_on_sell_fill
 # 预算: TRADE_BUDGET；可选 TRADE_BUDGET_BY_STOCK[A.stock]；可选 CASH_RATIO
-# add=True: 已有仓上加仓并均价（默认 False，一票一仓）
+# add=True: 已有仓上加仓；SCALE_LOTS 时记独立笔，否则均价合并（默认仍一票一仓）
+def _try_lots_buy(px, add, vol, opened_at):
+    if not bool(globals().get("SCALE_LOTS")):
+        return
+    fn = globals().get("_lots_on_buy_fill")
+    if callable(fn):
+        fn(px, add=add, vol=vol, opened_at=opened_at)
+
+
 def _trade_budget_cap():
     """单笔预算上限：优先 TRADE_BUDGET_BY_STOCK[A.stock]，否则 TRADE_BUDGET。"""
     stock = str(getattr(A, "stock", "") or "").strip()
@@ -52,6 +60,7 @@ def _apply_buy_fill(vol, price, opened_at, **extra):
         A.acted.add("BUY")
         buy_day = ot[:8] if len(ot) >= 8 else None
         _bt_held_add(vol, buy_day=buy_day)
+        _try_lots_buy(price, True, vol, ot)
         _save_state()
         print(
             _strategy_tag(),
@@ -89,20 +98,29 @@ def _apply_buy_fill(vol, price, opened_at, **extra):
         A.bt_opened_at = ot
     buy_day = ot[:8] if len(ot) >= 8 else None
     _bt_held_add(vol, buy_day=buy_day)
+    _try_lots_buy(price, False, vol, ot)
     _save_state()
     print(_strategy_tag(), "BUY filled", A.position)
     _event_log("buy_filled", position=A.position, vol=vol, price=price, opened_at=ot)
 
 
-def _apply_sell_fill(now, reason, last_hint, filled_vol, mark_half=False):
-    """卖出成交后清空或缩减持仓. 仅按实际成交量改状态."""
+def _apply_sell_fill(now, reason, last_hint, filled_vol, mark_half=False, lot_ids=None):
+    """卖出成交后清空或缩减持仓. 仅按实际成交量改状态.
+    SCALE_LOTS + lot_ids: 按笔减仓，不因 95% 误清剩余笔。"""
     want = _pos_shares()
     if getattr(A, "is_backtest", False):
         want = max(want, _bt_held_vol())
     filled_vol = int(filled_vol)
     if filled_vol < 100:
         return
-    if filled_vol >= max(100, int(want * 0.95)) or filled_vol >= want:
+    partial_lots = False
+    if bool(globals().get("SCALE_LOTS")) and lot_ids:
+        fn = globals().get("_exit_is_partial")
+        if callable(fn):
+            partial_lots = bool(fn(lot_ids))
+    if (not partial_lots) and (
+        filled_vol >= max(100, int(want * 0.95)) or filled_vol >= want
+    ):
         _clear_after_sell(now, reason, last=last_hint)
         if mark_half:
             A.acted.add("HALF")
@@ -116,15 +134,22 @@ def _apply_sell_fill(now, reason, last_hint, filled_vol, mark_half=False):
         filled_vol=filled_vol,
         remain=remain,
         last=last_hint,
+        lot_ids=lot_ids,
     )
-    if A.position:
-        A.position["shares"] = remain
     _bt_held_set(remain)
-    if remain < 100:
+    lots_fn = globals().get("_lots_on_sell_fill")
+    if bool(globals().get("SCALE_LOTS")) and callable(lots_fn):
+        lots_fn(lot_ids, filled_vol)
+    elif A.position:
+        A.position["shares"] = remain
+    if remain < 100 or not _has_position():
         _clear_after_sell(now, str(reason) + "/partial", last=last_hint)
     else:
         if mark_half:
             A.acted.add("HALF")
+        acted = getattr(A, "acted", None)
+        if isinstance(acted, set):
+            acted.discard("SELL")
         _save_state()
 
 
@@ -139,12 +164,13 @@ def _pending_on_sell_fill(pend, now, vol, px):
     if last_hint is None:
         last_hint = px
     mark_half = bool(pend.get("mark_half"))
-    _apply_sell_fill(now, intent, last_hint, vol, mark_half=mark_half)
+    lot_ids = pend.get("lot_ids")
+    _apply_sell_fill(now, intent, last_hint, vol, mark_half=mark_half, lot_ids=lot_ids)
 
 
 def _order_buy(C, price, now, budget=None, add=False, **extra_pos):
     """提交买入. DRY 即时; 回测 passorder+即时; 实盘 pending 至成交.
-    add=True 允许在已有仓上加仓（均价合并）；默认仍一票一仓。"""
+    add=True 允许在已有仓上加仓；SCALE_LOTS 时每笔独立，否则均价合并。默认仍一票一仓。"""
     if getattr(A, "pending", None):
         print(_strategy_tag(), "buy skip: pending active")
         _event_log("buy_skip", reason="pending_active")
@@ -213,14 +239,23 @@ def _order_buy(C, price, now, budget=None, add=False, **extra_pos):
     return True
 
 
-def _order_sell(C, reason, price, now, want_vol=None, mark_half=False):
-    """提交卖出. T+1: 下单量不超过可卖; skip 绝不清仓."""
+def _order_sell(C, reason, price, now, want_vol=None, mark_half=False, lot_ids=None):
+    """提交卖出. T+1: 下单量不超过可卖; skip 绝不清仓.
+    lot_ids: SCALE_LOTS 时指定要平的笔；部分笔自动 mark_half。"""
     if getattr(A, "pending", None):
         print(_strategy_tag(), "sell skip: pending active")
         _event_log("sell_skip", reason="pending_active", sell_reason=reason)
         return False
     if not _has_position() and not (getattr(A, "is_backtest", False) and _bt_held_vol() >= 100):
         return False
+    if lot_ids:
+        fn = globals().get("_exit_is_partial")
+        if callable(fn) and fn(lot_ids):
+            mark_half = True
+        if want_vol is None:
+            wv = globals().get("_lots_want_vol")
+            if callable(wv):
+                want_vol = wv(lot_ids)
     if (not mark_half) and ("SELL" in getattr(A, "acted", set())):
         return False
 
@@ -299,7 +334,7 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False):
     msg = _new_remark(reason or "SELL", "SELL", vol)
     print(("[DRY] " if DRY_RUN else "") + msg, "@", price)
     if DRY_RUN:
-        _apply_sell_fill(now, reason, price, vol, mark_half=mark_half)
+        _apply_sell_fill(now, reason, price, vol, mark_half=mark_half, lot_ids=lot_ids)
         return True
     try:
         passorder(A.sell_code, 1101, A.acct, A.stock, 14, -1, vol, _strategy_tag(), 1, msg, C)
@@ -315,7 +350,7 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False):
         )
         return False
     if getattr(A, "is_backtest", False):
-        _apply_sell_fill(now, reason, price, vol, mark_half=mark_half)
+        _apply_sell_fill(now, reason, price, vol, mark_half=mark_half, lot_ids=lot_ids)
         return True
     A.pending = {
         "remark": msg,
@@ -328,6 +363,7 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False):
         "submitted_at": (now or datetime.datetime.now()).strftime("%Y%m%d%H%M%S"),
         "cancel_requested": False,
         "mark_half": bool(mark_half),
+        "lot_ids": list(lot_ids) if lot_ids else None,
     }
     _save_state()
     print(_strategy_tag(), "SELL submitted", vol, reason, msg)
