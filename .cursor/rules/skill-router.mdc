@@ -1,0 +1,30 @@
+---
+description: 本仓库 Agent Skill 路由：按用户意图先 Read 对应 SKILL.md，再动手
+alwaysApply: true
+---
+
+# Skill 自动选用
+
+接到任务后对照下表，**先 Read 该路径的 `SKILL.md`**（及其中指向的 reference），再改代码/跑脚本。可叠加；勿把无关 skill 全文读入。
+
+| 意图 / 触发词 | 读取 |
+| :--- | :--- |
+| 新建/改终端策略、片段、`qmt_common`、`MODULE_ORDER`、拼接部署、单仓/双浮仓 | `.cursor/skills/qmt-common-modules/SKILL.md` |
+| 策略→QMT 脚本、xtquant、`handlebar`/`passorder`、联调踩坑（0xb9、T+1、孤儿仓、回测盈利） | `.cursor/skills/qmt-model-script/SKILL.md` |
+| 参数面板、`panel.xml`、`formulaLayout`、新建/编辑策略交易、bind | `.cursor/skills/qmt-param-panel/SKILL.md` |
+| 回测 log→报告、成交表、权益曲线、持仓 K 线、`generate_report.py` | `.cursor/skills/qmt-backtest-report/SKILL.md` |
+| Sharpe 是否真实、过拟合、DSR、PBO、Haircut、MinTRL | `.cursor/skills/skill-backtest-overfit/SKILL.md` |
+| 因子正交化/中性化、剥离行业市值风格、残差因子 | `.cursor/skills/skill-factor-orthogonalize/SKILL.md` |
+| 批量把 OHLCV alpha 做成 QuantSkills 因子 Skill 并验证 | `.cursor/skills/skill-quant-factor-skill-factory/SKILL.md` |
+
+## 叠加（不是二选一）
+
+- **新建/重构国金终端模块**：`qmt-model-script` + `qmt-common-modules`
+- **终端改参 UI**：`qmt-param-panel`；deploy/拼接仍跟 `qmt-common-modules`
+- **QMT API 手册**（非工作流 skill）：需要 API 细节时再读 `.cursor/skills/qmt-skill/`（无 `SKILL.md`）
+
+## 不要用错
+
+- 改 `qmt_terminal_*.py` / 终端 GBK / `formulaLayout` XML → 禁止；走片段 + deploy
+- 「回测报告」= 解析 QMT log 画图；「过拟合检验」= 对收益序列做 DSR/PBO，不是同一条路
+- `qmt-backtest-report` 只读日志画图，不改策略、不 deploy
