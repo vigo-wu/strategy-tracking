@@ -34,6 +34,7 @@ MODULE_ORDER = [
     "common:single/state_io.py",
     "common:backtest.py",
     "common:single/state_pos.py",
+    "common:single/lots.py",
     "common:single/bt_recover.py",
     "indicators.py",
     "common:market_util.py",

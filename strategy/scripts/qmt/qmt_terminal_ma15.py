@@ -70,11 +70,13 @@ GIVEBACK_TIGHT_AFTER = 0.04
 
 # 盈利后加仓：浮盈达到 SCALE_ARM 后，下一笔回踩信号加第二笔（仍 1*TRADE_BUDGET）
 # 等加仓期间硬止盈让路（趋势仍在且未超过 SCALE_GIVEUP_BARS）；账户需能再拿出一笔预算
-# 加仓成交后重置收盘最高：不继承第一笔峰值，否则均价下降会立刻触发整仓 giveback
+# SCALE_LOTS=True：每笔独立成本/峰值/止盈（多仓）；False：均价合并后整仓出（v1.2）
+# SCALE_RESET_PEAK 仅合并模式有效；多仓不继承、不重置
 SCALE_ENABLE = True
 SCALE_MAX = 2
 SCALE_ARM = 0.015
 SCALE_GIVEUP_BARS = 80
+SCALE_LOTS = True
 SCALE_RESET_PEAK = True
 
 # 允许开仓的 15m 结束时刻 HHmm。
@@ -102,6 +104,7 @@ PANEL_BINDS = (
     ("panel_stall_bars", "STALL_BARS", "int"),
     ("panel_stall_abort", "STALL_ABORT_RET", "float"),
     ("panel_scale", "SCALE_ENABLE", "bool"),
+    ("panel_scale_lots", "SCALE_LOTS", "bool"),
 )
 
 PERIOD = "15m"
@@ -126,7 +129,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "Ma15"
-STRATEGY_VER = "v1.3"
+STRATEGY_VER = "v1.4"
 
 _ORDER_FILLED = (56, 8)
 _ORDER_DEAD = (54, 57, 53, 5, 6, 9)
@@ -560,6 +563,7 @@ def _state_load_path():
 
 def _load_state():
     A.position = None
+    A.lots = []
     A.acted_day = ""
     A.acted = set()
     A.pending = None
@@ -593,6 +597,13 @@ def _load_state():
         A.position["price"] = float(pos.get("price", 0) or 0)
         A.position["cost"] = float(pos.get("cost", 0) or 0)
         A.position["opened_at"] = str(pos.get("opened_at", "") or "")
+    lots = raw.get("lots")
+    cleaned = []
+    if isinstance(lots, list):
+        for lot in lots:
+            if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) >= 100:
+                cleaned.append(dict(lot))
+    A.lots = cleaned
     A.acted_day = str(raw.get("acted_day", "") or "")
     acted = raw.get("acted") or []
     A.acted = set([str(x) for x in acted]) if isinstance(acted, list) else set()
@@ -625,6 +636,7 @@ def _save_state():
         "stock": getattr(A, "stock", ""),
         "version": str(globals().get("STRATEGY_VER") or ""),
         "position": getattr(A, "position", None),
+        "lots": list(getattr(A, "lots", None) or []) if isinstance(getattr(A, "lots", None), list) else [],
         "acted_day": getattr(A, "acted_day", ""),
         "acted": sorted(list(getattr(A, "acted", set()) or [])),
         "pending": getattr(A, "pending", None),
@@ -744,12 +756,337 @@ def _clear_after_sell(now, reason, last=None):
     print(_strategy_tag(), "SELL done", reason, "last=", last, "cleared", cleared)
     _event_log("sell_done", sell_reason=reason, last=last, cleared=cleared)
     A.position = None
+    A.lots = []
     A.acted.add("SELL")
     if getattr(A, "is_backtest", False):
         A.bt_held = 0
         A.bt_locked = 0
         A.bt_opened_at = ""
     _save_state()
+
+# === qmt_common/single/lots.py ===
+# 作用: 同一标的多笔独立仓（SCALE_LOTS）；A.position 仍是合计，供经纪/T+1
+# 主要符号: _lots_enabled, _ensure_lots, _pos_lots, _lots_on_buy_fill,
+#           _lots_on_sell_fill, _order_sell(lot_ids=)
+# 默认关：未设 SCALE_LOTS 时一票一仓，行为与无本片段时相同
+# 策略可在 lot 字典上挂 hold_peak 等字段；本模块原样保留
+def _lots_enabled():
+    return bool(globals().get("SCALE_LOTS", False))
+
+
+def _scale_lots():
+    """兼容旧策略名；与 _lots_enabled 相同。"""
+    return _lots_enabled()
+
+
+def _lot_from_agg():
+    pos = getattr(A, "position", None) or {}
+    px = float(pos.get("price", 0) or 0)
+    peak = getattr(A, "hold_peak", None)
+    cp = getattr(A, "hold_close_peak", None)
+    if peak is None:
+        peak = px
+    if cp is None:
+        cp = px
+    return {
+        "id": 1,
+        "shares": int(pos.get("shares", 0) or 0),
+        "price": px,
+        "opened_at": str(pos.get("opened_at", "") or ""),
+        "hold_peak": peak,
+        "hold_close_peak": cp,
+        "hold_max_ret": float(getattr(A, "hold_max_ret", 0) or 0),
+        "hold_bars": int(getattr(A, "hold_bars", 0) or 0),
+        "hold_count_bar": str(getattr(A, "_hold_count_bar", "") or ""),
+    }
+
+
+def _ensure_lots():
+    lots = getattr(A, "lots", None)
+    cleaned = []
+    if isinstance(lots, list):
+        for lot in lots:
+            if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) >= 100:
+                cleaned.append(lot)
+    if cleaned:
+        A.lots = cleaned
+        return cleaned
+    if _has_position():
+        A.lots = [_lot_from_agg()]
+        return A.lots
+    A.lots = []
+    return A.lots
+
+
+def _next_lot_id():
+    mx = 0
+    for lot in getattr(A, "lots", None) or []:
+        try:
+            mx = max(mx, int(lot.get("id") or 0))
+        except Exception:
+            pass
+    return mx + 1
+
+
+def _new_lot(shares, price, opened_at=""):
+    px = float(price) if price else 0.0
+    ot = str(opened_at or "")
+    if not ot:
+        pos = getattr(A, "position", None)
+        if isinstance(pos, dict):
+            ot = str(pos.get("opened_at") or "")
+    if not ot:
+        ot = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+    return {
+        "id": _next_lot_id(),
+        "shares": int(shares),
+        "price": px,
+        "opened_at": ot,
+        "hold_peak": px,
+        "hold_close_peak": px,
+        "hold_max_ret": 0.0,
+        "hold_bars": 0,
+        "hold_count_bar": "",
+    }
+
+
+def _sync_position_from_lots():
+    lots = []
+    for lot in getattr(A, "lots", None) or []:
+        if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) >= 100:
+            lots.append(lot)
+    A.lots = lots
+    if not lots:
+        A.position = None
+        return
+    total = 0
+    cost_sum = 0.0
+    ot = ""
+    for lot in lots:
+        sh = int(lot.get("shares") or 0)
+        px = float(lot.get("price") or 0)
+        total += sh
+        cost_sum += sh * px
+        if not ot:
+            ot = str(lot.get("opened_at") or "")
+    avg = (cost_sum / float(total)) if total else 0.0
+    A.position = {
+        "shares": int(total),
+        "price": float(avg),
+        "cost": round(total * avg, 2),
+        "opened_at": ot,
+        "lots": len(lots),
+    }
+    if getattr(A, "is_backtest", False):
+        held = _bt_held_vol()
+        if held < 100 and total >= 100:
+            print(_strategy_tag(), "restore bt_held from lots", total)
+            A.bt_held = total
+        elif held != total:
+            print(
+                _strategy_tag(),
+                "lots vs bt_held mismatch lots=",
+                total,
+                "held=",
+                held,
+            )
+
+
+def _mirror_hold_from_lots():
+    lots = getattr(A, "lots", None) or []
+    if not lots:
+        A.hold_peak = None
+        A.hold_close_peak = None
+        A.hold_max_ret = 0.0
+        A.hold_bars = 0
+        A._hold_count_bar = ""
+        return
+    lot = lots[0]
+    A.hold_peak = lot.get("hold_peak")
+    A.hold_close_peak = lot.get("hold_close_peak")
+    A.hold_max_ret = float(lot.get("hold_max_ret") or 0)
+    A.hold_bars = int(lot.get("hold_bars") or 0)
+    A._hold_count_bar = str(lot.get("hold_count_bar") or "")
+
+
+def _bump_lot_bars(lot, bar_tag):
+    if str(lot.get("hold_count_bar") or "") == str(bar_tag):
+        return False
+    lot["hold_bars"] = int(lot.get("hold_bars") or 0) + 1
+    lot["hold_count_bar"] = str(bar_tag)
+    return True
+
+
+def _update_lot_peaks(lot, high_px, close_px):
+    hi = float(high_px)
+    cl = float(close_px)
+    cost = float(lot.get("price") or 0)
+    changed = False
+    peak = lot.get("hold_peak")
+    if peak is None:
+        base = cost if cost > 0 else hi
+        lot["hold_peak"] = max(base, hi)
+        changed = True
+    elif hi > float(peak):
+        lot["hold_peak"] = hi
+        changed = True
+    cp = lot.get("hold_close_peak")
+    if cp is None:
+        lot["hold_close_peak"] = cl
+        changed = True
+    elif cl > float(cp):
+        lot["hold_close_peak"] = cl
+        changed = True
+    if cost > 0:
+        mx = max((cl - cost) / cost, (hi - cost) / cost)
+        prev = lot.get("hold_max_ret")
+        try:
+            prev_f = float(prev) if prev is not None else None
+        except Exception:
+            prev_f = None
+        if prev_f is None or mx > prev_f:
+            lot["hold_max_ret"] = mx
+            changed = True
+    return changed
+
+
+def _pos_lots():
+    if _lots_enabled():
+        return len(_ensure_lots())
+    pos = getattr(A, "position", None)
+    if not isinstance(pos, dict):
+        return 0
+    try:
+        return max(1, int(pos.get("lots", 1) or 1))
+    except Exception:
+        return 1
+
+
+def _lots_want_vol(lot_ids):
+    if not lot_ids:
+        return None
+    try:
+        idset = set(int(x) for x in lot_ids)
+    except Exception:
+        return None
+    total = 0
+    for lot in getattr(A, "lots", None) or []:
+        try:
+            if int(lot.get("id") or 0) in idset:
+                total += int(lot.get("shares") or 0)
+        except Exception:
+            pass
+    if total < 100:
+        return None
+    return int(total)
+
+
+def _exit_is_partial(lot_ids):
+    if (not _lots_enabled()) or (not lot_ids):
+        return False
+    try:
+        idset = set(int(x) for x in lot_ids)
+    except Exception:
+        return False
+    for lot in _ensure_lots():
+        try:
+            if int(lot.get("id") or 0) not in idset:
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def _lots_on_buy_fill(px, add=False, vol=None, opened_at=""):
+    if not _lots_enabled():
+        return
+    if vol is None:
+        total = _pos_shares()
+        if getattr(A, "is_backtest", False):
+            total = max(total, _bt_held_vol())
+        have = 0
+        if add:
+            for lot in getattr(A, "lots", None) or []:
+                try:
+                    have += int(lot.get("shares") or 0)
+                except Exception:
+                    pass
+        vol = total if not add else (total - have)
+    vol = int(vol or 0)
+    if not add:
+        A.lots = []
+    elif not (getattr(A, "lots", None) or []):
+        A.lots = [_lot_from_agg()]
+        _sync_position_from_lots()
+        _mirror_hold_from_lots()
+        return
+    if vol < 100:
+        if add and not (getattr(A, "lots", None) or []):
+            A.lots = [_lot_from_agg()]
+        _sync_position_from_lots()
+        _mirror_hold_from_lots()
+        return
+    A.lots.append(_new_lot(vol, px, opened_at))
+    _sync_position_from_lots()
+    _mirror_hold_from_lots()
+    print(_strategy_tag(), "lots now n=%s" % len(A.lots), A.lots)
+    _event_log("lots_update", action="buy", add=add, lots=A.lots)
+
+
+def _lots_on_sell_fill(lot_ids, filled_vol):
+    if not _lots_enabled():
+        return
+    lots = list(getattr(A, "lots", None) or [])
+    if not lots:
+        return
+    remain_fill = int(filled_vol or 0)
+    idset = None
+    if lot_ids:
+        try:
+            idset = set(int(x) for x in lot_ids)
+        except Exception:
+            idset = None
+    new_lots = []
+    for lot in lots:
+        try:
+            lid = int(lot.get("id") or 0)
+        except Exception:
+            lid = 0
+        if idset is not None and lid not in idset:
+            new_lots.append(lot)
+            continue
+        if remain_fill < 100:
+            new_lots.append(lot)
+            continue
+        sh = int(lot.get("shares") or 0)
+        if sh <= remain_fill:
+            remain_fill -= sh
+        else:
+            lot = dict(lot)
+            lot["shares"] = sh - remain_fill
+            remain_fill = 0
+            new_lots.append(lot)
+    A.lots = new_lots
+    _sync_position_from_lots()
+    _mirror_hold_from_lots()
+    print(_strategy_tag(), "lots now n=%s" % len(A.lots), A.lots)
+    _event_log("lots_update", action="sell", lot_ids=lot_ids, lots=A.lots)
+
+
+def _heartbeat_extra():
+    lots = getattr(A, "lots", None) or []
+    if not lots:
+        return ""
+    bits = []
+    for lot in lots:
+        try:
+            bits.append(
+                "L%s:%s@%.4f"
+                % (lot.get("id"), lot.get("shares"), float(lot.get("price") or 0))
+            )
+        except Exception:
+            pass
+    return "lots=" + ",".join(bits)
 
 # === qmt_common/single/bt_recover.py ===
 # 作用: 单仓回测影子仓恢复为 A.position
@@ -772,6 +1109,9 @@ def _bt_recover_position(now=None, last=None):
         "opened_at": ot,
     }
     print(_strategy_tag(), "bt recover position from held", A.position)
+    fn = globals().get("_ensure_lots")
+    if callable(fn) and bool(globals().get("SCALE_LOTS")):
+        fn()
     return True
 
 # === ma15/indicators.py ===
@@ -1541,7 +1881,15 @@ def _process_pending(C, now):
 # 主要符号: _order_buy, _order_sell, _apply_buy_fill, _apply_sell_fill
 # 钩子实现: _pending_on_buy_fill / _pending_on_sell_fill
 # 预算: TRADE_BUDGET；可选 TRADE_BUDGET_BY_STOCK[A.stock]；可选 CASH_RATIO
-# add=True: 已有仓上加仓并均价（默认 False，一票一仓）
+# add=True: 已有仓上加仓；SCALE_LOTS 时记独立笔，否则均价合并（默认仍一票一仓）
+def _try_lots_buy(px, add, vol, opened_at):
+    if not bool(globals().get("SCALE_LOTS")):
+        return
+    fn = globals().get("_lots_on_buy_fill")
+    if callable(fn):
+        fn(px, add=add, vol=vol, opened_at=opened_at)
+
+
 def _trade_budget_cap():
     """单笔预算上限：优先 TRADE_BUDGET_BY_STOCK[A.stock]，否则 TRADE_BUDGET。"""
     stock = str(getattr(A, "stock", "") or "").strip()
@@ -1590,6 +1938,7 @@ def _apply_buy_fill(vol, price, opened_at, **extra):
         A.acted.add("BUY")
         buy_day = ot[:8] if len(ot) >= 8 else None
         _bt_held_add(vol, buy_day=buy_day)
+        _try_lots_buy(price, True, vol, ot)
         _save_state()
         print(
             _strategy_tag(),
@@ -1627,20 +1976,29 @@ def _apply_buy_fill(vol, price, opened_at, **extra):
         A.bt_opened_at = ot
     buy_day = ot[:8] if len(ot) >= 8 else None
     _bt_held_add(vol, buy_day=buy_day)
+    _try_lots_buy(price, False, vol, ot)
     _save_state()
     print(_strategy_tag(), "BUY filled", A.position)
     _event_log("buy_filled", position=A.position, vol=vol, price=price, opened_at=ot)
 
 
-def _apply_sell_fill(now, reason, last_hint, filled_vol, mark_half=False):
-    """卖出成交后清空或缩减持仓. 仅按实际成交量改状态."""
+def _apply_sell_fill(now, reason, last_hint, filled_vol, mark_half=False, lot_ids=None):
+    """卖出成交后清空或缩减持仓. 仅按实际成交量改状态.
+    SCALE_LOTS + lot_ids: 按笔减仓，不因 95% 误清剩余笔。"""
     want = _pos_shares()
     if getattr(A, "is_backtest", False):
         want = max(want, _bt_held_vol())
     filled_vol = int(filled_vol)
     if filled_vol < 100:
         return
-    if filled_vol >= max(100, int(want * 0.95)) or filled_vol >= want:
+    partial_lots = False
+    if bool(globals().get("SCALE_LOTS")) and lot_ids:
+        fn = globals().get("_exit_is_partial")
+        if callable(fn):
+            partial_lots = bool(fn(lot_ids))
+    if (not partial_lots) and (
+        filled_vol >= max(100, int(want * 0.95)) or filled_vol >= want
+    ):
         _clear_after_sell(now, reason, last=last_hint)
         if mark_half:
             A.acted.add("HALF")
@@ -1654,15 +2012,22 @@ def _apply_sell_fill(now, reason, last_hint, filled_vol, mark_half=False):
         filled_vol=filled_vol,
         remain=remain,
         last=last_hint,
+        lot_ids=lot_ids,
     )
-    if A.position:
-        A.position["shares"] = remain
     _bt_held_set(remain)
-    if remain < 100:
+    lots_fn = globals().get("_lots_on_sell_fill")
+    if bool(globals().get("SCALE_LOTS")) and callable(lots_fn):
+        lots_fn(lot_ids, filled_vol)
+    elif A.position:
+        A.position["shares"] = remain
+    if remain < 100 or not _has_position():
         _clear_after_sell(now, str(reason) + "/partial", last=last_hint)
     else:
         if mark_half:
             A.acted.add("HALF")
+        acted = getattr(A, "acted", None)
+        if isinstance(acted, set):
+            acted.discard("SELL")
         _save_state()
 
 
@@ -1677,12 +2042,13 @@ def _pending_on_sell_fill(pend, now, vol, px):
     if last_hint is None:
         last_hint = px
     mark_half = bool(pend.get("mark_half"))
-    _apply_sell_fill(now, intent, last_hint, vol, mark_half=mark_half)
+    lot_ids = pend.get("lot_ids")
+    _apply_sell_fill(now, intent, last_hint, vol, mark_half=mark_half, lot_ids=lot_ids)
 
 
 def _order_buy(C, price, now, budget=None, add=False, **extra_pos):
     """提交买入. DRY 即时; 回测 passorder+即时; 实盘 pending 至成交.
-    add=True 允许在已有仓上加仓（均价合并）；默认仍一票一仓。"""
+    add=True 允许在已有仓上加仓；SCALE_LOTS 时每笔独立，否则均价合并。默认仍一票一仓。"""
     if getattr(A, "pending", None):
         print(_strategy_tag(), "buy skip: pending active")
         _event_log("buy_skip", reason="pending_active")
@@ -1751,14 +2117,23 @@ def _order_buy(C, price, now, budget=None, add=False, **extra_pos):
     return True
 
 
-def _order_sell(C, reason, price, now, want_vol=None, mark_half=False):
-    """提交卖出. T+1: 下单量不超过可卖; skip 绝不清仓."""
+def _order_sell(C, reason, price, now, want_vol=None, mark_half=False, lot_ids=None):
+    """提交卖出. T+1: 下单量不超过可卖; skip 绝不清仓.
+    lot_ids: SCALE_LOTS 时指定要平的笔；部分笔自动 mark_half。"""
     if getattr(A, "pending", None):
         print(_strategy_tag(), "sell skip: pending active")
         _event_log("sell_skip", reason="pending_active", sell_reason=reason)
         return False
     if not _has_position() and not (getattr(A, "is_backtest", False) and _bt_held_vol() >= 100):
         return False
+    if lot_ids:
+        fn = globals().get("_exit_is_partial")
+        if callable(fn) and fn(lot_ids):
+            mark_half = True
+        if want_vol is None:
+            wv = globals().get("_lots_want_vol")
+            if callable(wv):
+                want_vol = wv(lot_ids)
     if (not mark_half) and ("SELL" in getattr(A, "acted", set())):
         return False
 
@@ -1837,7 +2212,7 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False):
     msg = _new_remark(reason or "SELL", "SELL", vol)
     print(("[DRY] " if DRY_RUN else "") + msg, "@", price)
     if DRY_RUN:
-        _apply_sell_fill(now, reason, price, vol, mark_half=mark_half)
+        _apply_sell_fill(now, reason, price, vol, mark_half=mark_half, lot_ids=lot_ids)
         return True
     try:
         passorder(A.sell_code, 1101, A.acct, A.stock, 14, -1, vol, _strategy_tag(), 1, msg, C)
@@ -1853,7 +2228,7 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False):
         )
         return False
     if getattr(A, "is_backtest", False):
-        _apply_sell_fill(now, reason, price, vol, mark_half=mark_half)
+        _apply_sell_fill(now, reason, price, vol, mark_half=mark_half, lot_ids=lot_ids)
         return True
     A.pending = {
         "remark": msg,
@@ -1866,6 +2241,7 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False):
         "submitted_at": (now or datetime.datetime.now()).strftime("%Y%m%d%H%M%S"),
         "cancel_requested": False,
         "mark_half": bool(mark_half),
+        "lot_ids": list(lot_ids) if lot_ids else None,
     }
     _save_state()
     print(_strategy_tag(), "SELL submitted", vol, reason, msg)
@@ -2131,16 +2507,13 @@ def _eval_sell(price, cost, close_peak, closes, ma20_arr, hold_bars, hhmm, hold_
             if bool(globals().get("SCALE_ENABLE")) and trend_ok:
                 max_lots = int(globals().get("SCALE_MAX") or 1)
                 giveup = int(globals().get("SCALE_GIVEUP_BARS") or 0)
-                lots = 1
-                pos = getattr(A, "position", None)
-                if isinstance(pos, dict):
-                    try:
-                        lots = max(1, int(pos.get("lots", 1) or 1))
-                    except Exception:
-                        lots = 1
+                try:
+                    n_lots = max(1, int(_pos_lots() or 1))
+                except Exception:
+                    n_lots = 1
                 arm = float(globals().get("SCALE_ARM") or TAKE_PROFIT)
                 bars = int(hold_bars or 0)
-                if lots < max_lots and mx >= arm and (giveup <= 0 or bars < giveup):
+                if n_lots < max_lots and mx >= arm and (giveup <= 0 or bars < giveup):
                     wait_scale = True
             if not wait_scale:
                 reasons.append("take_profit")
@@ -2213,16 +2586,6 @@ def _update_peaks(high_px, close_px, cost):
     return changed
 
 
-def _pos_lots():
-    pos = getattr(A, "position", None)
-    if not isinstance(pos, dict):
-        return 0
-    try:
-        return max(1, int(pos.get("lots", 1) or 1))
-    except Exception:
-        return 1
-
-
 def _scale_ready():
     if not bool(globals().get("SCALE_ENABLE")):
         return False
@@ -2233,14 +2596,57 @@ def _scale_ready():
         return False
     if _pos_lots() >= int(globals().get("SCALE_MAX") or 1):
         return False
-    try:
-        mx = float(getattr(A, "hold_max_ret", 0) or 0)
-    except Exception:
-        mx = 0.0
+    mx = 0.0
+    if _scale_lots():
+        for lot in _ensure_lots():
+            try:
+                mx = max(mx, float(lot.get("hold_max_ret") or 0))
+            except Exception:
+                pass
+    else:
+        try:
+            mx = float(getattr(A, "hold_max_ret", 0) or 0)
+        except Exception:
+            mx = 0.0
     arm = float(globals().get("SCALE_ARM") or 0)
     if arm <= 0:
         arm = float(TAKE_PROFIT)
     return mx >= arm
+
+
+def _collect_lot_exits(price, closes, ma20_arr, hhmm, trend_ok):
+    lots = _ensure_lots()
+    if not lots:
+        return False, [], [], 0
+    exits = []
+    for lot in lots:
+        ok, reasons = _eval_sell(
+            price,
+            float(lot.get("price") or 0),
+            lot.get("hold_close_peak"),
+            closes,
+            ma20_arr,
+            lot.get("hold_bars", 0),
+            hhmm,
+            lot.get("hold_max_ret", 0),
+            bool(trend_ok),
+        )
+        if ok:
+            exits.append((lot, reasons))
+    if not exits:
+        return False, [], [], 0
+    if any((item[1] and item[1][0] == "stop_ma") for item in exits):
+        lot_ids = [int(l.get("id") or 0) for l in lots]
+        shares = sum(int(l.get("shares") or 0) for l in lots)
+        return True, ["stop_ma"], lot_ids, shares
+    lot_ids = [int(item[0].get("id") or 0) for item in exits]
+    shares = sum(int(item[0].get("shares") or 0) for item in exits)
+    reasons = []
+    for _lot, rs in exits:
+        for r in rs:
+            if r not in reasons:
+                reasons.append(r)
+    return True, reasons, lot_ids, shares
 
 
 def _pending_ready(pend, day, exec_tag):
@@ -2283,6 +2689,9 @@ def _reset_peaks_after_scale(px):
 def _after_signal_buy_filled(px, day, add=False):
     A.pending_entry = None
     A.pending_exit = None
+    if _lots_enabled():
+        _save_state()
+        return
     if add:
         _reset_peaks_after_scale(px)
         _save_state()
@@ -2301,12 +2710,24 @@ def _after_signal_buy_filled(px, day, add=False):
 def _after_signal_sell_filled():
     A.pending_exit = None
     A.pending_entry = None
+    A.lots = []
     _clear_hold_meta()
     acted = getattr(A, "acted", None)
     if isinstance(acted, set):
         acted.discard("BUY")
         acted.discard("SELL")
     _save_state()
+
+
+def _finish_sell_fill():
+    if _lots_enabled() and getattr(A, "lots", None):
+        A.pending_exit = None
+        acted = getattr(A, "acted", None)
+        if isinstance(acted, set):
+            acted.discard("SELL")
+        _save_state()
+        return
+    _after_signal_sell_filled()
 
 
 def _pending_on_buy_fill(pend, vol, px):
@@ -2323,14 +2744,13 @@ def _pending_on_sell_fill(pend, now, vol, px):
     if last_hint is None:
         last_hint = px
     mark_half = bool(pend.get("mark_half"))
-    _apply_sell_fill(now, intent, last_hint, vol, mark_half=mark_half)
-    if not _has_position() and not (
-        getattr(A, "is_backtest", False) and _bt_held_vol() >= 100
-    ):
-        _after_signal_sell_filled()
-    else:
-        A.pending_exit = None
-        _save_state()
+    lot_ids = pend.get("lot_ids")
+    if not lot_ids:
+        pe = getattr(A, "pending_exit", None)
+        if isinstance(pe, dict):
+            lot_ids = pe.get("lot_ids")
+    _apply_sell_fill(now, intent, last_hint, vol, mark_half=mark_half, lot_ids=lot_ids)
+    _finish_sell_fill()
 
 
 def _on_signal_order_ok(side, px=None, day=None, add=False):
@@ -2344,8 +2764,8 @@ def _on_signal_order_ok(side, px=None, day=None, add=False):
         return
     if side == "buy":
         _after_signal_buy_filled(px, day, add=add)
-    else:
-        _after_signal_sell_filled()
+        return
+    _finish_sell_fill()
 
 
 _SELL_LABELS = {
@@ -2512,7 +2932,31 @@ def _handle(C):
 
     holding = _has_position() or (bt and _bt_held_vol() >= 100)
     cost = _pos_cost_price()
-    if not holding:
+    exit_ids = []
+    exit_shares = 0
+    if _scale_lots():
+        if not holding:
+            if getattr(A, "lots", None):
+                A.lots = []
+            if (
+                getattr(A, "hold_peak", None) is not None
+                or getattr(A, "hold_close_peak", None) is not None
+                or int(getattr(A, "hold_bars", 0) or 0)
+                or float(getattr(A, "hold_max_ret", 0) or 0)
+            ):
+                _clear_hold_meta()
+        else:
+            _ensure_lots()
+            changed = False
+            for lot in A.lots:
+                if _bump_lot_bars(lot, complete_tag):
+                    changed = True
+                if _update_lot_peaks(lot, high_px, price):
+                    changed = True
+            _mirror_hold_from_lots()
+            if changed:
+                _save_state()
+    elif not holding:
         if (
             getattr(A, "hold_peak", None) is not None
             or getattr(A, "hold_close_peak", None) is not None
@@ -2527,17 +2971,22 @@ def _handle(C):
 
     sell_ok, sell_reasons = False, []
     if holding:
-        sell_ok, sell_reasons = _eval_sell(
-            price,
-            cost,
-            getattr(A, "hold_close_peak", None),
-            closes,
-            ma20_arr,
-            getattr(A, "hold_bars", 0),
-            sig_hhmm,
-            getattr(A, "hold_max_ret", 0),
-            bool(b_detail.get("trend_ok")),
-        )
+        if _scale_lots():
+            sell_ok, sell_reasons, exit_ids, exit_shares = _collect_lot_exits(
+                price, closes, ma20_arr, sig_hhmm, bool(b_detail.get("trend_ok"))
+            )
+        else:
+            sell_ok, sell_reasons = _eval_sell(
+                price,
+                cost,
+                getattr(A, "hold_close_peak", None),
+                closes,
+                ma20_arr,
+                getattr(A, "hold_bars", 0),
+                sig_hhmm,
+                getattr(A, "hold_max_ret", 0),
+                bool(b_detail.get("trend_ok")),
+            )
 
     skip_codes = (
         "time_skip",
@@ -2568,7 +3017,7 @@ def _handle(C):
             day,
             sig_hhmm,
             "n15=%d n1h=%d close=%.4f drop=%s "
-            "h1=%s buy=%s buyR=%s sell=%s sellR=%s hold=%s ret=%s pe=%s px=%s"
+            "h1=%s buy=%s buyR=%s sell=%s sellR=%s hold=%s nlot=%s ret=%s pe=%s px=%s"
             % (
                 len(closes),
                 len(closes_h),
@@ -2580,6 +3029,7 @@ def _handle(C):
                 sell_ok,
                 ",".join(sell_reasons) if sell_reasons else "-",
                 holding,
+                _pos_lots() if holding else 0,
                 None if ret_pct is None else ("%.2f%%" % (ret_pct * 100.0)),
                 pe_now,
                 px_now,
@@ -2598,6 +3048,7 @@ def _handle(C):
             sell=sell_ok,
             sellR=",".join(sell_reasons) if sell_reasons else "-",
             hold=holding,
+            nlot=_pos_lots() if holding else 0,
             ret=None if ret_pct is None else round(ret_pct * 100.0, 4),
             pe=pe_now,
             px=px_now,
@@ -2620,13 +3071,17 @@ def _handle(C):
     if holding and isinstance(pe_exit, dict) and _pending_ready(pe_exit, day, exec_tag):
         reason = str(pe_exit.get("reason", "SELL") or "SELL")
         reasons = pe_exit.get("reasons") or [reason]
+        lot_ids = pe_exit.get("lot_ids")
+        want_vol = pe_exit.get("shares")
         print(
-            "%s SELL by signal=%s label=%s all=%s signal_day=%s signal_tag=%s @open=%.4f"
+            "%s SELL by signal=%s label=%s all=%s lots=%s shares=%s signal_day=%s signal_tag=%s @open=%.4f"
             % (
                 STRATEGY_NAME,
                 reason,
                 _reason_label(reason, "sell"),
                 _format_reasons(reasons, "sell"),
+                lot_ids or "-",
+                want_vol if want_vol is not None else _pos_shares(),
                 pe_exit.get("signal_day"),
                 pe_exit.get("signal_tag"),
                 exec_open,
@@ -2637,8 +3092,17 @@ def _handle(C):
             signal=reason,
             signal_tag=pe_exit.get("signal_tag"),
             open=exec_open,
+            lot_ids=lot_ids,
+            shares=want_vol,
         )
-        ok = _order_sell(C, reason, exec_open, now)
+        ok = _order_sell(
+            C,
+            reason,
+            exec_open,
+            now,
+            want_vol=None if want_vol is None else int(want_vol),
+            lot_ids=lot_ids,
+        )
         if ok:
             _on_signal_order_ok("sell")
         else:
@@ -2733,15 +3197,20 @@ def _handle(C):
                 "close": price,
                 "reasons": list(sell_reasons),
             }
+            if _scale_lots() and exit_ids:
+                A.pending_exit["lot_ids"] = list(exit_ids)
+                A.pending_exit["shares"] = int(exit_shares)
             A.pending_entry = None
             _mark_eval(complete_tag)
             print(
-                "%s pending_exit set signal=%s label=%s all=%s tag=%s close=%.4f"
+                "%s pending_exit set signal=%s label=%s all=%s lots=%s shares=%s tag=%s close=%.4f"
                 % (
                     STRATEGY_NAME,
                     reason,
                     _reason_label(reason, "sell"),
                     _format_reasons(sell_reasons, "sell"),
+                    exit_ids or "-",
+                    exit_shares or _pos_shares(),
                     complete_tag,
                     price,
                 )
@@ -2751,6 +3220,8 @@ def _handle(C):
                 signal=reason,
                 signal_tag=complete_tag,
                 close=price,
+                lot_ids=exit_ids or None,
+                shares=exit_shares or None,
             )
         elif buy_sig and _scale_ready():
             if isinstance(getattr(A, "pending_entry", None), dict):
@@ -2944,6 +3415,7 @@ def _init_impl(C):
             A._hold_count_bar = ""
             A._eval_bar_tag = ""
             A.stall_cool_day = ""
+            A.lots = []
             A.bt_held = 0
             A.bt_locked = 0
             A.bt_lock_day = ""
@@ -2976,6 +3448,8 @@ def _init_impl(C):
                 A._eval_bar_tag = ""
             if not hasattr(A, "stall_cool_day"):
                 A.stall_cool_day = ""
+            if not hasattr(A, "lots") or A.lots is None:
+                A.lots = []
             _bt_recover_position()
             print(
                 "%s backtest re-init preserve barpos=" % STRATEGY_NAME,
@@ -3008,6 +3482,8 @@ def _init_impl(C):
             A._eval_bar_tag = ""
         if not hasattr(A, "stall_cool_day"):
             A.stall_cool_day = ""
+        if not hasattr(A, "lots") or A.lots is None:
+            A.lots = []
 
     try:
         C.set_universe([A.stock])
@@ -3043,6 +3519,8 @@ def _init_impl(C):
         GIVEBACK,
         "scale=",
         SCALE_ENABLE,
+        "scale_lots=",
+        SCALE_LOTS,
         "scale_reset_peak=",
         SCALE_RESET_PEAK,
     )
@@ -3054,6 +3532,8 @@ def _init_impl(C):
         backtest=A.is_backtest,
         dry_run=DRY_RUN,
         allow_t0=ALLOW_T0,
+        scale=SCALE_ENABLE,
+        scale_lots=SCALE_LOTS,
         budget=_trade_budget_cap(),
         log_dir=str(globals().get("LOG_DIR") or ""),
     )

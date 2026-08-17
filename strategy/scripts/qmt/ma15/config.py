@@ -60,11 +60,13 @@ GIVEBACK_TIGHT_AFTER = 0.04
 
 # 盈利后加仓：浮盈达到 SCALE_ARM 后，下一笔回踩信号加第二笔（仍 1*TRADE_BUDGET）
 # 等加仓期间硬止盈让路（趋势仍在且未超过 SCALE_GIVEUP_BARS）；账户需能再拿出一笔预算
-# 加仓成交后重置收盘最高：不继承第一笔峰值，否则均价下降会立刻触发整仓 giveback
+# SCALE_LOTS=True：每笔独立成本/峰值/止盈（多仓）；False：均价合并后整仓出（v1.2）
+# SCALE_RESET_PEAK 仅合并模式有效；多仓不继承、不重置
 SCALE_ENABLE = True
 SCALE_MAX = 2
 SCALE_ARM = 0.015
 SCALE_GIVEUP_BARS = 80
+SCALE_LOTS = True
 SCALE_RESET_PEAK = True
 
 # 允许开仓的 15m 结束时刻 HHmm。
@@ -92,6 +94,7 @@ PANEL_BINDS = (
     ("panel_stall_bars", "STALL_BARS", "int"),
     ("panel_stall_abort", "STALL_ABORT_RET", "float"),
     ("panel_scale", "SCALE_ENABLE", "bool"),
+    ("panel_scale_lots", "SCALE_LOTS", "bool"),
 )
 
 PERIOD = "15m"
@@ -116,7 +119,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "Ma15"
-STRATEGY_VER = "v1.3"
+STRATEGY_VER = "v1.4"
 
 _ORDER_FILLED = (56, 8)
 _ORDER_DEAD = (54, 57, 53, 5, 6, 9)

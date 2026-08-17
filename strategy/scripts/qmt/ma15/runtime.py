@@ -120,6 +120,7 @@ def _init_impl(C):
             A._hold_count_bar = ""
             A._eval_bar_tag = ""
             A.stall_cool_day = ""
+            A.lots = []
             A.bt_held = 0
             A.bt_locked = 0
             A.bt_lock_day = ""
@@ -152,6 +153,8 @@ def _init_impl(C):
                 A._eval_bar_tag = ""
             if not hasattr(A, "stall_cool_day"):
                 A.stall_cool_day = ""
+            if not hasattr(A, "lots") or A.lots is None:
+                A.lots = []
             _bt_recover_position()
             print(
                 "%s backtest re-init preserve barpos=" % STRATEGY_NAME,
@@ -184,6 +187,8 @@ def _init_impl(C):
             A._eval_bar_tag = ""
         if not hasattr(A, "stall_cool_day"):
             A.stall_cool_day = ""
+        if not hasattr(A, "lots") or A.lots is None:
+            A.lots = []
 
     try:
         C.set_universe([A.stock])
@@ -219,6 +224,8 @@ def _init_impl(C):
         GIVEBACK,
         "scale=",
         SCALE_ENABLE,
+        "scale_lots=",
+        SCALE_LOTS,
         "scale_reset_peak=",
         SCALE_RESET_PEAK,
     )
@@ -230,6 +237,8 @@ def _init_impl(C):
         backtest=A.is_backtest,
         dry_run=DRY_RUN,
         allow_t0=ALLOW_T0,
+        scale=SCALE_ENABLE,
+        scale_lots=SCALE_LOTS,
         budget=_trade_budget_cap(),
         log_dir=str(globals().get("LOG_DIR") or ""),
     )

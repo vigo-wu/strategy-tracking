@@ -39,6 +39,7 @@ description: >-
 | 意图 | 动作 |
 | :--- | :--- |
 | 新建单仓策略（一票一仓） | **A. 单仓骨架** |
+| 新建同标的多仓（分笔独立止盈） | **A. 单仓骨架** + `SCALE_LOTS=True`（模板已含 `single/lots.py`） |
 | 新建双浮仓/底仓隔离（类红利T） | **B. 双浮仓骨架** |
 | 改信号/阈值/周期 | 只动策略侧 `config` / `indicators` / `market` / `strategy` |
 | 终端对话框改参（不改代码） | [qmt-param-panel](../qmt-param-panel/SKILL.md) |
@@ -61,7 +62,8 @@ description: >-
 - [ ] 6. deploy → 预览 qmt_terminal_*.py → QMT 回测见 diag: ok
 ```
 
-**只写策略特有逻辑**；买卖/pending/T+1/经纪查询一律 `common:` / `common:single:`。
+**只写策略特有逻辑**；买卖/pending/T+1/经纪查询一律 `common:` / `common:single:`。  
+同标的多仓：config 设 `SCALE_LOTS=True`，买卖仍走 `single/orders`（`add=True` 加一笔，`_order_sell(..., lot_ids=)` 按笔平）；禁止为此去接双浮仓 `orders.py`。
 
 范本：`波段3-5天策略/scripts/qmt/band35/` + `_deploy_qmt_gbk.py`。
 
@@ -105,6 +107,7 @@ description: >-
 | 拉数字段/多周期 | 策略 `market.py` |
 | pending/撤单/T+1/暖机 | `scripts/qmt_common/` → **全策略 re-deploy** |
 | 单仓 fill/可卖 | `qmt_common/single/` |
+| 同标的多仓分笔 | `qmt_common/single/lots.py`（`SCALE_LOTS`） |
 | 红利浮仓 fill/底仓 | 该主题 `orders.py` / `broker.py` |
 
 ---

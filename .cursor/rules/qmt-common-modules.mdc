@@ -22,6 +22,7 @@ alwaysApply: true
 - 用 `__file__` 定位状态文件；多实盘实例共用同一 STATE JSON（串标的）
 - 片段内重复 `import datetime/numpy`（preamble 已有）
 - 单仓/双浮仓 MODULE_ORDER 混用（错接 `single/orders` 与自研浮仓 orders）
+- 同标的多仓去接双浮仓 `orders.py`；应留在 `common:single` + `SCALE_LOTS`
 
 ## 改哪里
 
@@ -30,5 +31,6 @@ alwaysApply: true
 | 信号/指标/config 常量 | 策略片段 |
 | 策略交易参数面板 | `<简名>/panel.xml`（技能 `qmt-param-panel`） |
 | 下单/T+1/暖机/行情解析 | `scripts/qmt_common/` 后**全策略** re-deploy |
+| 同标的多仓分笔 | `qmt_common/single/lots.py` + config `SCALE_LOTS` |
 
-单仓范本：`波段3-5天策略/scripts/qmt/`。双浮仓范本：`红利T策略/scripts/qmt/hongli/`。
+单仓范本：`波段3-5天策略/scripts/qmt/`。多仓：同一单仓模板，`SCALE_LOTS=True`（如 `strategy/scripts/qmt/ma15/`）。双浮仓范本：`红利T策略/scripts/qmt/hongli/`。

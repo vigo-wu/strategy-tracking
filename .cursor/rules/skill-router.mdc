@@ -9,7 +9,7 @@ alwaysApply: true
 
 | 意图 / 触发词 | 读取 |
 | :--- | :--- |
-| 新建/改终端策略、片段、`qmt_common`、`MODULE_ORDER`、拼接部署、单仓/双浮仓 | `.cursor/skills/qmt-common-modules/SKILL.md` |
+| 新建/改终端策略、片段、`qmt_common`、`MODULE_ORDER`、拼接部署、单仓/多仓/双浮仓 | `.cursor/skills/qmt-common-modules/SKILL.md` |
 | 策略→QMT 脚本、xtquant、`handlebar`/`passorder`、联调踩坑（0xb9、T+1、孤儿仓、回测盈利） | `.cursor/skills/qmt-model-script/SKILL.md` |
 | 参数面板、`panel.xml`、`formulaLayout`、新建/编辑策略交易、bind | `.cursor/skills/qmt-param-panel/SKILL.md` |
 | 回测 log→报告、成交表、权益曲线、持仓 K 线、`generate_report.py` | `.cursor/skills/qmt-backtest-report/SKILL.md` |

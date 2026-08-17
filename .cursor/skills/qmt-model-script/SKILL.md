@@ -47,7 +47,7 @@ description: >-
 
 ```
 转写进度:
-- [ ] 1. 读 model.md；判定单仓 vs 双浮仓 → 打开 qmt-common-modules
+- [ ] 1. 读 model.md；判定单仓 / 同标的多仓（`SCALE_LOTS`）/ 双浮仓 → 打开 qmt-common-modules
 - [ ] 2. 建 <主题>/scripts/qmt/<简名>/ 策略片段 + _deploy_qmt_gbk.py（MODULE_ORDER 含 common:）
 - [ ] 3. ACCOUNT_ID 兜底；STATE 绝对路径 + `{stock}`/按标的分文件（禁 __file__、禁多实例共写一文件）；DRY_RUN=True
 - [ ] 4. 行情：download_history_data + get_market_data_ex（走 common market_util）；禁 get_history_data
@@ -134,4 +134,4 @@ xtquant 骨架见 [reference-template.md](reference-template.md)。
 - [reference-pitfalls.md](reference-pitfalls.md) — **国金终端联调踩坑（优先读，含 T+1）**
 - [reference-xtquant.md](reference-xtquant.md) — 外部 xtquant 要点  
 - [reference-template.md](reference-template.md) — xtquant / 历史骨架说明  
-- 范本：`波段3-5天策略/scripts/qmt/`（单仓）、`红利T策略/scripts/qmt/hongli/`（双浮仓）
+- 范本：`波段3-5天策略/scripts/qmt/`（单仓）、`strategy/scripts/qmt/ma15/`（单仓+多仓）、`红利T策略/scripts/qmt/hongli/`（双浮仓）

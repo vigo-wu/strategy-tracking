@@ -17,6 +17,7 @@
             <item bind="panel_stall_bars" name="卖出 贴线根数" note="连续贴MA20的15分钟根数，16约1日" value="16" type="intput"/>
             <item bind="panel_stall_abort" name="卖出 贴线作废浮盈" note="持仓期曾达此浮盈则不再贴线出场，0.005=0.5%" value="0.005" type="intput"/>
             <item bind="panel_scale" name="盈利后加仓" note="勾选=浮盈1.5%后下一笔回踩再买一笔预算；需账户有第二笔资金" value="True" type="checkBox"/>
+            <item bind="panel_scale_lots" name="加仓分笔独立" note="勾选=多仓，每笔自己止盈回吐；不勾选=均价合并整仓出" value="True" type="checkBox"/>
         </variable>
     </control>
 </TCStageLayout>

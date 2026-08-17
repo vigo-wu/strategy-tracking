@@ -45,6 +45,7 @@ MODULE_ORDER = [
     "common:single/state_io.py",
     "common:backtest.py",
     "common:single/state_pos.py",
+    "common:single/lots.py",      # 同标的多仓；SCALE_LOTS 默认关
     "common:single/bt_recover.py",
     # 可选: "helpers.py",
     "indicators.py",
@@ -145,7 +146,10 @@ STRATEGY_NAME = "Foo"
 STRATEGY_VER = "v1.0"
 ACCOUNT_ID = "..."
 ACCOUNT_TYPE = "STOCK"
-TRADE_BUDGET = 50000.0          # 单仓；双浮仓用 FLOAT_*_BUDGET
+TRADE_BUDGET = 50000.0          # 单仓/多仓单笔；双浮仓用 FLOAT_*_BUDGET
+# 同标的多仓：True 时 add 记独立笔、_order_sell(lot_ids=) 按笔平；默认 False 一票一仓
+# SCALE_LOTS = True
+# SCALE_MAX = 2
 PERIOD = "15m"                  # 或 "follow"
 OHLC_COUNT = 480
 # 绝对路径；多实例不同主图时用 {stock}（或基名由 single/state_io 自动加 _代码_市场 后缀）
@@ -171,8 +175,9 @@ _VALID_PERIODS = ("1m", "3m", "5m", "15m", "30m", "1h", "1d", "1w", "1mon", "1q"
 | 钩子 | 何时需要 |
 | :--- | :--- |
 | `_pending_on_buy_fill` / `_pending_on_sell_fill` | 双浮仓必写；单仓由 `single/orders` 提供 |
+| `_order_sell(..., lot_ids=)` | 同标的多仓按笔平；`SCALE_LOTS` |
 | `_reconcile_with_broker` | 暖机→实盘对账（红利 T） |
-| `_heartbeat_extra` | 心跳附加仓位摘要 |
+| `_heartbeat_extra` | 心跳附加仓位摘要；`single/lots.py` 已提供多仓摘要 |
 | `_state_extra_load` / `_state_extra_save` | JSON 扩展字段 |
 | `_buy_budget` | 单仓已有；可用 `CASH_RATIO` |
 
@@ -198,6 +203,6 @@ A.period = _resolve_period(C, default="15m")  # 与主图默认一致
 
 ## 策略侧应写 / 不应写
 
-**应写**：信号、指标组合、策略特有行情组装、仓位语义（单仓以外）、`config`。
+**应写**：信号、指标组合、策略特有行情组装、仓位语义（单仓合计以外的出场规则）、`config`。
 
-**不应写**：`passorder` 封装、pending 状态机、T+1 影子仓、`get_market_data_ex` 解析、暖机模式切换、资金/可卖查询（除非双浮仓扩展 `_max_sell_vol`）。
+**不应写**：`passorder` 封装、pending 状态机、T+1 影子仓、`A.lots` 记账、`get_market_data_ex` 解析、暖机模式切换、资金/可卖查询（除非双浮仓扩展 `_max_sell_vol`）。
