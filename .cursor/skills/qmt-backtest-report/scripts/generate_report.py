@@ -84,7 +84,7 @@ def parse_meta(seg: str, tag: str) -> dict:
     m = re.search(
         rf"{re.escape(tag)}\s+(v[\d.]+)\s+init\s+(\S+)\s+(\S+)\s+(\S+)\s+"
         r"PERIOD=\s*(\S+)\s+BACKTEST=\s*(\S+)\s+DRY_RUN=\s*(\S+)\s+"
-        r"budget=\s*([0-9.]+)"
+        r"(?:ALLOW_T0=\s*\S+\s+)?budget=\s*([0-9.]+)"
         r"(?:\s+wMA=\s*(\S+)\s+dMA=\s*(\S+)\s+bias5>=\s*([0-9.]+)\s+"
         r"stop=\s*([0-9.]+)\s+chase<\s*([0-9.]+))?",
         seg,
@@ -125,32 +125,35 @@ def parse_trades(seg: str, tag: str, stock: str) -> list[dict]:
     buy_meta = []
     for m in re.finditer(
         rf"{tag_esc}\s+BUY by signal=(\S+)\s+label=([^\s]+)\s+all=([^\s]+)\s+"
-        rf"signal_day=(\d+)\s+@open=([0-9.]+)",
+        rf"(?:signal_day=(\d+)\s+)?(?:signal_tag=(\d+)\s+)?@open=([0-9.]+)",
         seg,
     ):
+        day = str(m.group(4) or m.group(5) or "")[:8]
         buy_meta.append(
             {
                 "pos": m.start(),
                 "signal": m.group(1),
                 "label": m.group(2),
-                "signal_day": m.group(4),
+                "signal_day": day,
             }
         )
 
     sell_meta = []
     for m in re.finditer(
-        rf"{tag_esc}\s+(20\d{{6}})\s+[^\n]*\r?\n"
+        rf"(?:{tag_esc}\s+(20\d{{6}})\s+[^\n]*\r?\n)?"
         rf"{tag_esc}\s+SELL by signal=(\S+)\s+label=([^\s]+)\s+all=([^\s]+)\s+"
-        rf"signal_day=(\d+)\s+@open=([0-9.]+)",
+        rf"(?:signal_day=(\d+)\s+)?(?:signal_tag=(\d+)\s+)?@open=([0-9.]+)",
         seg,
     ):
+        day = str(m.group(5) or m.group(6) or "")[:8]
+        exec_day = str(m.group(1) or day or "")[:8]
         sell_meta.append(
             {
                 "pos": m.start(),
-                "exec_day": m.group(1),
+                "exec_day": exec_day,
                 "signal": m.group(2),
                 "label": m.group(3),
-                "signal_day": m.group(5),
+                "signal_day": day or exec_day,
             }
         )
     if not sell_meta:
@@ -172,7 +175,7 @@ def parse_trades(seg: str, tag: str, stock: str) -> list[dict]:
     fills = []
     for m in re.finditer(
         rf"{tag_esc}\s+BUY filled \{{'shares': (\d+), 'price': ([0-9.]+), "
-        rf"'cost': ([0-9.]+), 'opened_at': '(\d+)'\}}",
+        rf"'cost': ([0-9.]+), 'opened_at': '(\d+)'[^}}]*\}}",
         seg,
     ):
         fills.append(
@@ -189,7 +192,7 @@ def parse_trades(seg: str, tag: str, stock: str) -> list[dict]:
     for m in re.finditer(
         rf"{tag_esc}\s+SELL done (\S+)\s+last=\s*([0-9.]+)\s+"
         rf"cleared \{{'shares': (\d+), 'price': ([0-9.]+), 'cost': ([0-9.]+), "
-        rf"'opened_at': '(\d+)'\}}",
+        rf"'opened_at': '(\d+)'[^}}]*\}}",
         seg,
     ):
         dones.append(
@@ -325,21 +328,41 @@ def parse_terminal_rounds(path: Path) -> list[dict]:
         if not pending_buys:
             print(f"warn: orphan sell {r['day']} in terminal csv", file=sys.stderr)
             continue
-        b = pending_buys.pop(0)
-        if b["shares"] != r["shares"]:
+        sell_p = float(r["price"])
+        remain_sh = int(r["shares"])
+        taken: list[dict] = []
+        while remain_sh >= 100 and pending_buys:
+            b = pending_buys[0]
+            bsh = int(b["shares"])
+            if bsh <= remain_sh:
+                taken.append(pending_buys.pop(0))
+                remain_sh -= bsh
+            else:
+                part = dict(b)
+                part["shares"] = remain_sh
+                taken.append(part)
+                pending_buys[0] = dict(b)
+                pending_buys[0]["shares"] = bsh - remain_sh
+                remain_sh = 0
+        if not taken:
+            print(f"warn: orphan sell {r['day']} in terminal csv", file=sys.stderr)
+            continue
+        tot_sh = sum(int(x["shares"]) for x in taken)
+        tot_cost = sum(float(x["price"]) * int(x["shares"]) for x in taken)
+        buy_p = tot_cost / tot_sh if tot_sh else float(taken[0]["price"])
+        sh = int(r["shares"] or tot_sh)
+        if tot_sh != int(r["shares"]):
             print(
-                f"warn: shares mismatch buy {b['day']}x{b['shares']} vs sell {r['day']}x{r['shares']}",
+                f"warn: shares mismatch buys {tot_sh} vs sell {r['day']}x{r['shares']}",
                 file=sys.stderr,
             )
-        buy_p, sell_p = float(b["price"]), float(r["price"])
-        sh = int(r["shares"] or b["shares"])
         pnl = r["pnl"]
         if pnl is None:
             pnl = (sell_p - buy_p) * sh
         ret = (sell_p - buy_p) / buy_p * 100.0 if buy_p else 0.0
         rounds.append(
             {
-                "buy_open_day": b["day"],
+                "buy_open_day": taken[0]["day"],
                 "sell_exec_day": r["day"],
                 "buy_price": buy_p,
                 "sell_price": sell_p,

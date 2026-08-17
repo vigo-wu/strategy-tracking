@@ -3,6 +3,7 @@
 # 主要符号: _order_buy, _order_sell, _apply_buy_fill, _apply_sell_fill
 # 钩子实现: _pending_on_buy_fill / _pending_on_sell_fill
 # 预算: TRADE_BUDGET；可选 TRADE_BUDGET_BY_STOCK[A.stock]；可选 CASH_RATIO
+# add=True: 已有仓上加仓并均价（默认 False，一票一仓）
 def _trade_budget_cap():
     """单笔预算上限：优先 TRADE_BUDGET_BY_STOCK[A.stock]，否则 TRADE_BUDGET。"""
     stock = str(getattr(A, "stock", "") or "").strip()
@@ -33,14 +34,51 @@ def _apply_buy_fill(vol, price, opened_at, **extra):
     price = float(price) if price and price > 0 else 0.0
     if vol < 100:
         return
+    add = bool(extra.pop("add", False))
     ot = str(opened_at or "").strip()
     if not ot:
         ot = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+    if add and _has_position():
+        old_s = _pos_shares()
+        old_px = _pos_cost_price()
+        new_s = old_s + vol
+        new_px = (old_s * old_px + vol * price) / float(new_s)
+        pos = dict(A.position)
+        pos["shares"] = int(new_s)
+        pos["price"] = float(new_px)
+        pos["cost"] = round(new_s * new_px, 2)
+        pos["lots"] = int(pos.get("lots", 1) or 1) + 1
+        A.position = pos
+        A.acted.add("BUY")
+        buy_day = ot[:8] if len(ot) >= 8 else None
+        _bt_held_add(vol, buy_day=buy_day)
+        _save_state()
+        print(
+            _strategy_tag(),
+            "BUY add filled",
+            {
+                "add_shares": vol,
+                "price": price,
+                "lots": pos["lots"],
+                "total": new_s,
+                "avg": new_px,
+            },
+        )
+        _event_log(
+            "buy_add_filled",
+            add_shares=vol,
+            price=price,
+            lots=pos["lots"],
+            total=new_s,
+            avg=new_px,
+        )
+        return
     pos = {
         "shares": vol,
         "price": price,
         "cost": round(vol * price, 2),
         "opened_at": ot,
+        "lots": 1,
     }
     for k, v in extra.items():
         if v is not None:
@@ -104,17 +142,23 @@ def _pending_on_sell_fill(pend, now, vol, px):
     _apply_sell_fill(now, intent, last_hint, vol, mark_half=mark_half)
 
 
-def _order_buy(C, price, now, budget=None, **extra_pos):
-    """提交买入. DRY 即时; 回测 passorder+即时; 实盘 pending 至成交."""
+def _order_buy(C, price, now, budget=None, add=False, **extra_pos):
+    """提交买入. DRY 即时; 回测 passorder+即时; 实盘 pending 至成交.
+    add=True 允许在已有仓上加仓（均价合并）；默认仍一票一仓。"""
     if getattr(A, "pending", None):
         print(_strategy_tag(), "buy skip: pending active")
         _event_log("buy_skip", reason="pending_active")
         return False
-    if _has_position() or (getattr(A, "is_backtest", False) and _bt_held_vol() >= 100):
+    holding_now = _has_position() or (
+        getattr(A, "is_backtest", False) and _bt_held_vol() >= 100
+    )
+    if holding_now and not add:
         print(_strategy_tag(), "buy skip: already holding")
         _event_log("buy_skip", reason="already_holding")
         return False
-    if "BUY" in getattr(A, "acted", set()):
+    if add and not holding_now:
+        add = False
+    if (not add) and ("BUY" in getattr(A, "acted", set())):
         return False
 
     if budget is None:
@@ -133,8 +177,11 @@ def _order_buy(C, price, now, budget=None, **extra_pos):
             _event_log("buy_skip", reason="cash", cash=cash, price=price)
             return False
 
+    extra_pos = dict(extra_pos or {})
+    if add:
+        extra_pos["add"] = True
     ot = (now or datetime.datetime.now()).strftime("%Y%m%d%H%M%S")
-    msg = _new_remark("BUY", "BUY", vol)
+    msg = _new_remark("BUY", "ADD" if add else "BUY", vol)
     print(("[DRY] " if DRY_RUN else "") + msg, "@", price)
     if DRY_RUN:
         _apply_buy_fill(vol, price, ot, **extra_pos)

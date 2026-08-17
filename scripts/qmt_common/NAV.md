@@ -16,7 +16,7 @@
 | `live_log.py` | P0 | 实盘落盘：`_event_log` / `_bar_log` / `_heartbeat_persist` / `_live_state_snapshot` |
 | `time_util.py` | 核心 | `_parse_opened_at`、日历日差 |
 | `period.py` | 核心 | 周期解析、OHLC 根数、`end_time` |
-| `backtest.py` | P0 | 回测影子仓 T+1（`bt_held` / `bt_locked`） |
+| `backtest.py` | P0 | 回测影子仓 T+1（`bt_held` / `bt_locked`）；策略可设 `ALLOW_T0=True` 不锁当日仓 |
 | `mode.py` | P0 | 暖机→实盘、`_bar_datetime` |
 | `broker_base.py` | P0 | 查资金 / 持仓 / `can_use` |
 | `orders_pending.py` | P0 | pending、成交查询、撤单；钩子 `_pending_on_*` |
@@ -25,7 +25,7 @@
 | `single/state_pos.py` | 单仓 | `A.position` 辅助 |
 | `single/bt_recover.py` | 单仓 | 回测仓恢复 |
 | `single/broker.py` | 单仓 | `_max_sell_vol` |
-| `single/orders.py` | 单仓 | `_order_buy` / `_order_sell` / fill |
+| `single/orders.py` | 单仓 | `_order_buy` / `_order_sell` / fill；`add=True` 可均价加仓（默认仍一票一仓） |
 
 红利 T（双浮仓）用 `broker_base` + `orders_pending`，自带 `hongli/broker.py` / `orders.py`。
 

@@ -2,12 +2,14 @@
 # 作用: 单仓可卖上限（T+1 / can_use）
 # 主要符号: _max_sell_vol, _dry_t1_sellable
 def _dry_t1_sellable(want, now):
-    """DRY_RUN 的 T+1: 禁止同日历日卖出当日买入仓。"""
+    """DRY_RUN 可卖: 默认禁止同日历日卖出当日买入仓; ALLOW_T0 则放行。"""
     want = int(want)
     if want < 100:
         return 0
     if not _has_position():
         return 0
+    if _allow_t0():
+        return want
     ot = _parse_opened_at(A.position.get("opened_at"))
     if ot is not None and now is not None and ot.date() == now.date():
         return 0
@@ -15,7 +17,7 @@ def _dry_t1_sellable(want, now):
 
 
 def _max_sell_vol(now=None):
-    """最多可卖股数; 始终受 T+1 约束. skip 时调用方绝不清仓."""
+    """最多可卖股数; 默认 T+1, ALLOW_T0 时回测/DRY 不锁当日仓. skip 时调用方绝不清仓."""
     want = _pos_shares()
     if getattr(A, "is_backtest", False):
         if now is not None:

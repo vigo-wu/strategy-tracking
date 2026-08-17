@@ -8,163 +8,126 @@ import traceback
 import numpy as np
 
 
-# === hlband/config.py ===
-# ===================== 用户配置 =====================
+# === ma15/config.py ===
 # True=只打日志不下单；回测/实盘真下单前务必确认
 DRY_RUN = False
 
 ACCOUNT_ID = "39953913"
 ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 
-# 单笔下单资金上限（元）；实际股数 = floor(预算/开盘价/100)*100
-# 未在 TRADE_BUDGET_BY_STOCK 中单独配置的标的用此默认值
-TRADE_BUDGET = 25000.0
-# 按标的覆盖预算（key 须与 A.stock 一致，如 513530.SH）
+# 只交易此代码（主图须为 513530.SH）
+TRADE_CODE = "513530"
+
+# ETF T+0：回测不锁当日买入；实盘可卖以券商为准
+ALLOW_T0 = True
+
+TRADE_BUDGET = 50000.0
 TRADE_BUDGET_BY_STOCK = {}
-# 可用现金占用比例（预留下单缓冲，避免满仓打满失败）
 CASH_RATIO = 0.8
 
-# ---- 周线过滤（跨周期；主图仍是日线）----
-# 周线均线周期：快/中/生命线/慢线
-#   MA5 vs MA10 + MACD → 多头/空头判定
-#   MA30 → 生命线（收盘跌破即周线空，强制清仓）；乖离/斜率过滤也用它
-#   MA60 → 数据暖机长度参考（market 取数 need）
-W_MA_FAST = 5
-W_MA_MID = 13
-W_MA_LIFE = 34
-W_MA_SLOW = 55
-# 周线 MACD 参数（DIF/DEA/柱）；多头要求 DIF>0 且柱>0；死叉且双线在零轴下 → 空
-MACD_FAST = 12
-MACD_SLOW = 26
-MACD_SIGNAL = 9
-# 高位禁开：周线乖离 (MA5-MA30)/MA30 >= 此值 → 不做新开（追高风险）
-# 例 0.08 = MA5 相对 MA30 高 8% 以上禁开
-W_BIAS_HARD = 0.08
-# 低位斜率过滤：乖离 < 此值视为「低位区」；此时若 MA30 未连续向上则禁开
-# 例 0.02 = 乖离不足 2% 时要求生命线已拐头向上
-W_BIAS_LOW = 0.02
-# 低位区判定「连续向上」的周数：需 ma30[t]>ma30[t-1]>ma30[t-2]（即 2 周斜率）
-W_MA30_SLOPE_WEEKS = 2
+# ---- 15m / 1h 均线 ----
+MA_FAST = 20
+MA_SLOW = 60
+H_MA_FAST = 20
+H_MA_SLOW = 60
+VOL_MA_N = 20
 
-# ---- 日线买卖 ----
-# 日线均线：MA20→回踩/站上/无量阴跌；MA60→回踩支撑 + 时间成本线
-D_MA_MID = 20
-D_MA_SLOW = 60
+# 触线 / 未有效跌破（0.4%：ETF 1 跳约 0.001，0.2% 经常够不着）
+MA_TOUCH_TOL = 0.004
+MA_BREAK_TOL = 0.002
 
-# 买点 pullback_vol：缩量回踩强支撑
-#   价格贴近 MA20 或 MA60（|价-均线|/均线 <= 容差）且当日量 < N 日均量 * 比例
-MA_TOUCH_TOL = 0.025          # 0.025 = 距均线 ±2.5% 内算「回踩到位」
-VOL_PULLBACK_N = 10           # 缩量比较的均量窗口（日）
-VOL_PULLBACK_RATIO = 0.9      # 量 < 均量*0.9 视为缩量
+# 缩量：只比 20 均量（不再 AND 前波上涨量，否则多头里经常 vol_skip）
+VOL_PULLBACK_RATIO = 0.85
+VOL_UP_LOOKBACK = 8
+VOL_UP_RATIO = 0.70
 
-# 全局禁开 vol_dry_skip（无量阴跌不言底）：
-#   收盘跌破 MA20 且量 < N 日均量 * 比例 → 当天任何买点失效
-VOL_DRY_N = 20
-VOL_DRY_RATIO = 0.60          # 量 < 20 日均量的 60% 视为无量阴跌
+# 锤子：下影相对实体、实体占振幅上限
+HAMMER_LOWER_MULT = 1.5
+HAMMER_BODY_MAX = 0.50
 
-# 卖① trail_stop：阶梯式移动止盈
-#   按历史最高浮盈 (peak-cost)/cost 选档；触发条件：
-#     自峰值回撤 > giveback，或（若设了 profit_floor）当前浮盈 < 底线
-#   元组：(peak_lo, peak_hi, giveback, profit_floor)
-#     peak_hi=None 无上限；profit_floor=None 不设硬底线
-#   档1 起步保护 [3%,6%)：回撤>1.5%（同旧版，防破本）
-#   档2 落袋为安 [6%,10%)：回撤>3% 或 利润跌破 3%
-#   档3 放鹰吃肉 >=10%：回撤>4%（利润垫扛日线洗盘）
-TRAIL_TIERS = (
-    (0.03, 0.06, 0.015, None),
-    (0.06, 0.10, 0.03, 0.03),
-    (0.10, None, 0.04, None),
+# 大盘 15m 放量杀跌
+INDEX_CODE = "000001.SH"
+INDEX_DUMP_RET = -0.004
+INDEX_DUMP_VOL = 1.5
+
+# 卖出
+STOP_MA_PCT = 0.008
+STOP_MA_AFTER_HHMM = "1015"  # 早盘第一根不按隔夜缺口打 MA 止损
+STOP_LOSS = 0.02
+STALL_BARS = 16              # 约 1 个交易日；6 根=1.5h 会把回踩本身当成衰竭
+STALL_BAND = 0.005
+STALL_MA_FLAT = 0.002
+STALL_ABORT_RET = 0.005      # 持仓期曾有 >=0.5% 浮盈则不再用 stall 砍
+TREND_BREAK_ABORT_RET = 0.001  # 曾有 >=0.1% 浮盈则不用 trend_break（避免砍 7/16 这类回撤后再止盈）
+TREND_BREAK_MIN_RET = -0.004   # 当前浮亏至少 0.4%，避免 4/17 那种 -0.06% 噪声
+# 硬止盈：浮盈达标且离开 MA20。默认开（v1.0 关掉会少赚）
+TAKE_PROFIT_HARD = True
+TAKE_PROFIT = 0.015          # 回吐启动阈值（收盘最高浮盈）
+TAKE_LEAVE = 0.008           # 仅 TAKE_PROFIT_HARD=True 时用
+GIVEBACK = 0.008             # 启动后相对收盘最高回吐；硬止盈打开时作辅层
+GIVEBACK_TIGHT = 0.008       # 最高浮盈达到 GIVEBACK_TIGHT_AFTER 后收紧
+GIVEBACK_TIGHT_AFTER = 0.04
+
+# 盈利后加仓：浮盈达到 SCALE_ARM 后，下一笔回踩信号加第二笔（仍 1*TRADE_BUDGET）
+# 等加仓期间硬止盈让路（趋势仍在且未超过 SCALE_GIVEUP_BARS）；账户需能再拿出一笔预算
+# 加仓成交后重置收盘最高：不继承第一笔峰值，否则均价下降会立刻触发整仓 giveback
+SCALE_ENABLE = True
+SCALE_MAX = 2
+SCALE_ARM = 0.015
+SCALE_GIVEUP_BARS = 80
+SCALE_RESET_PEAK = True
+
+# 允许开仓的 15m 结束时刻 HHmm。
+# 不含 1400/1415：次根 1415/1430 成交，T+0 来不及当日止损，隔夜缺口（v0.3 的 1430 同因）
+ENTRY_HHMM_ALLOW = (
+    "1000", "1015", "1030", "1045", "1100", "1115", "1130",
+    "1315", "1330", "1345",
 )
-# 卖② time_force：智能时间成本（防长期磨人）
-#   持仓 bar 数 > BARS 后：收盘破日线 MA60 → 立即强制平仓；
-#   仍站上 MA60 → 豁免一次，再观察 GRACE_BARS 日，期满仍强制平仓
-TIME_FORCE_BARS = 30
-TIME_FORCE_GRACE_BARS = 5
+# 这些结束时刻的 15m 不开新买（已挂 pending 也作废）
+ENTRY_FILL_BAN = ("1415", "1430", "1445", "1500")
 
-# 兜底风控（优先级高）
-# chase_skip：当日涨幅 (收-昨收)/昨收 >= 此值 → 禁开（防追高）
-CHASE_MAX_PCT = 0.05
-# stop_loss：收盘价 <= 成本 * (1 - 此值) → 硬止损清仓
-STOP_LOSS = 0.08
-# weekly_bear 强制清仓：连续 N 个信号日（日 K）仍为空头才挂 pending_exit
-#   N<=0 或 1：当天空头即挂（与改前一致）；N=2：连续两日仍空才挂
-#   禁开 / 撤买入 pending 仍按「当日」空头即时生效，不要求满 N 日
-W_BEAR_CONFIRM_DAYS = 2
-
-# （另有 weekly_bear：周线空头判定见 _eval_weekly；清仓见上）
-
-# 策略交易面板 bind → 模块常量。编辑器/回测无注入时用上面默认值。
-# TRAIL_TIERS、均线周期、路径、账号不在面板。
 PANEL_BINDS = (
     ("panel_dry_run", "DRY_RUN", "bool"),
     ("panel_budget", "TRADE_BUDGET", "float"),
     ("panel_cash_ratio", "CASH_RATIO", "float"),
-    ("panel_w_bias_hard", "W_BIAS_HARD", "float"),
-    ("panel_w_bias_low", "W_BIAS_LOW", "float"),
-    ("panel_w_slope_weeks", "W_MA30_SLOPE_WEEKS", "int"),
-    ("panel_w_bear_days", "W_BEAR_CONFIRM_DAYS", "int"),
-    ("panel_ma_touch_tol", "MA_TOUCH_TOL", "float"),
-    ("panel_vol_pb_n", "VOL_PULLBACK_N", "int"),
-    ("panel_vol_pb_ratio", "VOL_PULLBACK_RATIO", "float"),
-    ("panel_vol_dry_n", "VOL_DRY_N", "int"),
-    ("panel_vol_dry_ratio", "VOL_DRY_RATIO", "float"),
-    ("panel_chase_pct", "CHASE_MAX_PCT", "float"),
+    ("panel_allow_t0", "ALLOW_T0", "bool"),
+    ("panel_ma_touch", "MA_TOUCH_TOL", "float"),
+    ("panel_ma_break", "MA_BREAK_TOL", "float"),
+    ("panel_vol_ratio", "VOL_PULLBACK_RATIO", "float"),
+    ("panel_stop_ma", "STOP_MA_PCT", "float"),
     ("panel_stop_loss", "STOP_LOSS", "float"),
-    ("panel_time_force_bars", "TIME_FORCE_BARS", "int"),
-    ("panel_time_force_grace", "TIME_FORCE_GRACE_BARS", "int"),
+    ("panel_hard_tp", "TAKE_PROFIT_HARD", "bool"),
+    ("panel_take_profit", "TAKE_PROFIT", "float"),
+    ("panel_giveback", "GIVEBACK", "float"),
+    ("panel_stall_bars", "STALL_BARS", "int"),
+    ("panel_stall_abort", "STALL_ABORT_RET", "float"),
+    ("panel_scale", "SCALE_ENABLE", "bool"),
 )
 
-# ---- 行情与运行 ----
-# 主图周期；周线另拉 1w 跨周期
-PERIOD = "1d"
-# 日/周 K 拉取根数（须覆盖最慢均线 + 指标暖机）
-OHLC_COUNT = 180
-WEEKLY_OHLC_COUNT = 120
+PERIOD = "15m"
+OHLC_COUNT = 400
+HOUR_OHLC_COUNT = 240
+INDEX_OHLC_COUNT = 120
 
-# 实盘只在最新一根 bar 决策；回测逐 bar 扫
 LIVE_ONLY_LAST_BAR = True
-# 实盘：盘中(DECISION_*)只执行 pending；收盘后(SIGNAL_CONFIRM_*)用当日完整日/周 K 确认信号并挂起 → 次日开盘成交
-# 若收盘窗口未跑到，次日开盘对「上一根已收盘日」兜底评估并挂起（同日可成交）
-# 判定：confirmed_eval_day < 上一完整交易日 且今日尚未 fallback
-# 周线：bt/confirm/开盘 exec·兜底一律含本周未收盘根；日线开盘仍去未收盘日 K
-LIVE_CLOSE_CONFIRM = True
-# 实盘决策时窗（HHmmss）：盘中处理券商 pending / 心跳；信号成交见 PENDING_EXEC_*
 DECISION_START = "093000"
 DECISION_END = "150000"
-# 信号 pending（pending_entry/exit）仅在开盘附近成交；错过则保留到下一交易日开盘窗
-# 须覆盖「开盘兜底挂起 → 同窗内下一根成交」；收盘确认窗绝不按开盘价成交
-PENDING_EXEC_START = "093000"
-PENDING_EXEC_END = "094500"
-# 收盘确认信号时窗（须与 DECISION 衔接；含尾盘近似收盘 + 盘后）
-# 日线盘后常无新 tick，故从 14:55 起用当日 K 确认；16:00 前仍可确认
-SIGNAL_CONFIRM_START = "145500"
-SIGNAL_CONFIRM_END = "160000"
-# 实盘心跳日志间隔（秒）；持仓无事件时的状态行也按此节流
 LIVE_HEARTBEAT_SEC = 60
 
-# download_history_data 最长回溯（自然日）；回测暖机用
-HIST_MAX_LOOKBACK_DAYS = 800
+HIST_MAX_LOOKBACK_DAYS = 400
 DOWNLOAD_HIST_LIVE = False
 DOWNLOAD_HIST_BACKTEST = True
 
-# pending 委托超时/孤儿清理（秒）
 PENDING_TIMEOUT_SEC = 180
 PENDING_ORPHAN_SEC = 60
 
-# QMT 模型无 __file__；状态绝对路径（含 {stock}，多实例不同主图互不覆盖）
-#   513530.SH → ...\hlband_513530_SH.json
-STATE_FILE = r"D:\tradingStrategy\hlband_{stock}.json"
-# 实盘结构化日志根目录；落盘为 LOG_DIR/<stock_tag>/{tag}_events.jsonl 等
-# 空字符串关闭落盘（仍保留终端 print）
+STATE_FILE = r"D:\tradingStrategy\ma15_{stock}.json"
 LOG_DIR = r"D:\tradingStrategy\logs"
-# True=回测也写日志（默认关，避免回测刷爆磁盘）
 LOG_IN_BACKTEST = False
 
-STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.24"
-# =======================================================
+STRATEGY_NAME = "Ma15"
+STRATEGY_VER = "v1.3"
 
-# 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
 _ORDER_FILLED = (56, 8)
 _ORDER_DEAD = (54, 57, 53, 5, 6, 9)
 
@@ -507,7 +470,7 @@ def _bar_end_str(C):
         return dt.strftime("%Y%m%d%H%M%S")
     return dt.strftime("%Y%m%d")
 
-# === hlband/state_extra.py ===
+# === ma15/state_extra.py ===
 def _state_extra_load(raw):
     pe = raw.get("pending_entry")
     A.pending_entry = pe if isinstance(pe, dict) else None
@@ -518,23 +481,22 @@ def _state_extra_load(raw):
         A.hold_peak = float(peak) if peak is not None else None
     except Exception:
         A.hold_peak = None
+    cp = raw.get("hold_close_peak")
+    try:
+        A.hold_close_peak = float(cp) if cp is not None else None
+    except Exception:
+        A.hold_close_peak = None
     try:
         A.hold_bars = int(raw.get("hold_bars", 0) or 0)
     except Exception:
         A.hold_bars = 0
-    A._hold_count_day = str(raw.get("hold_count_day", "") or "")
-    gu = raw.get("time_force_grace_until")
+    A._hold_count_bar = str(raw.get("hold_count_bar", "") or "")
     try:
-        A.time_force_grace_until = None if gu is None else int(gu)
+        A.hold_max_ret = float(raw.get("hold_max_ret", 0) or 0)
     except Exception:
-        A.time_force_grace_until = None
-    A._confirmed_eval_day = str(raw.get("confirmed_eval_day", "") or "")
-    A._fallback_done_day = str(raw.get("fallback_done_day", "") or "")
-    try:
-        A._w_bear_streak = int(raw.get("w_bear_streak", 0) or 0)
-    except Exception:
-        A._w_bear_streak = 0
-    A._w_bear_last_day = str(raw.get("w_bear_last_day", "") or "")
+        A.hold_max_ret = 0.0
+    A._eval_bar_tag = str(raw.get("eval_bar_tag", "") or "")
+    A.stall_cool_day = str(raw.get("stall_cool_day", "") or "")
 
 
 def _state_extra_save(data):
@@ -542,14 +504,13 @@ def _state_extra_save(data):
     data["pending_exit"] = getattr(A, "pending_exit", None)
     peak = getattr(A, "hold_peak", None)
     data["hold_peak"] = None if peak is None else float(peak)
+    cp = getattr(A, "hold_close_peak", None)
+    data["hold_close_peak"] = None if cp is None else float(cp)
     data["hold_bars"] = int(getattr(A, "hold_bars", 0) or 0)
-    data["hold_count_day"] = str(getattr(A, "_hold_count_day", "") or "")
-    gu = getattr(A, "time_force_grace_until", None)
-    data["time_force_grace_until"] = None if gu is None else int(gu)
-    data["confirmed_eval_day"] = str(getattr(A, "_confirmed_eval_day", "") or "")
-    data["fallback_done_day"] = str(getattr(A, "_fallback_done_day", "") or "")
-    data["w_bear_streak"] = int(getattr(A, "_w_bear_streak", 0) or 0)
-    data["w_bear_last_day"] = str(getattr(A, "_w_bear_last_day", "") or "")
+    data["hold_count_bar"] = str(getattr(A, "_hold_count_bar", "") or "")
+    data["hold_max_ret"] = float(getattr(A, "hold_max_ret", 0) or 0)
+    data["eval_bar_tag"] = str(getattr(A, "_eval_bar_tag", "") or "")
+    data["stall_cool_day"] = str(getattr(A, "stall_cool_day", "") or "")
 
 # === qmt_common/single/state_io.py ===
 # 作用: 单仓 JSON 状态读写（回测不落盘）
@@ -813,7 +774,7 @@ def _bt_recover_position(now=None, last=None):
     print(_strategy_tag(), "bt recover position from held", A.position)
     return True
 
-# === hlband/indicators.py ===
+# === ma15/indicators.py ===
 def _sma(closes, n):
     c = np.asarray(closes, dtype=float)
     n = int(n)
@@ -827,45 +788,6 @@ def _sma(closes, n):
     return out
 
 
-def _ema(closes, n):
-    c = np.asarray(closes, dtype=float)
-    n = int(n)
-    if n <= 0 or len(c) < n:
-        return None
-    out = np.full(len(c), np.nan, dtype=float)
-    alpha = 2.0 / (n + 1.0)
-    out[n - 1] = float(np.mean(c[:n]))
-    for i in range(n, len(c)):
-        out[i] = alpha * c[i] + (1.0 - alpha) * out[i - 1]
-    return out
-
-
-def _calc_macd(closes, fast=None, slow=None, signal=None):
-    """返回 (dif, dea, hist) 或 None。hist = dif - dea。"""
-    fast = int(fast if fast is not None else MACD_FAST)
-    slow = int(slow if slow is not None else MACD_SLOW)
-    signal = int(signal if signal is not None else MACD_SIGNAL)
-    c = np.asarray(closes, dtype=float)
-    if len(c) < slow + signal:
-        return None
-    ema_f = _ema(c, fast)
-    ema_s = _ema(c, slow)
-    if ema_f is None or ema_s is None:
-        return None
-    dif = ema_f - ema_s
-    start = slow - 1
-    dif_valid = dif[start:]
-    if len(dif_valid) < signal:
-        return None
-    dea_tail = _ema(dif_valid, signal)
-    if dea_tail is None:
-        return None
-    dea = np.full(len(c), np.nan, dtype=float)
-    dea[start:] = dea_tail
-    hist = dif - dea
-    return dif, dea, hist
-
-
 def _last_valid(arr, i=-1):
     if arr is None:
         return None
@@ -875,11 +797,49 @@ def _last_valid(arr, i=-1):
     return float(v)
 
 
-def _near_ma(price, ma, tol=None):
-    tol = float(tol if tol is not None else MA_TOUCH_TOL)
-    if price is None or ma is None or ma <= 0:
+def _is_hammer(o, h, l, c):
+    rng = float(h) - float(l)
+    if rng <= 0:
         return False
-    return abs(float(price) - float(ma)) / float(ma) <= tol
+    body = abs(float(c) - float(o))
+    lower = min(float(o), float(c)) - float(l)
+    lower_mult = float(globals().get("HAMMER_LOWER_MULT") or 1.5)
+    body_max = float(globals().get("HAMMER_BODY_MAX") or 0.50)
+    if lower < lower_mult * body:
+        return False
+    if body / rng > body_max:
+        return False
+    if float(c) < float(o):
+        return False
+    return float(c) >= (float(h) + float(l)) / 2.0
+
+
+def _is_bounce(o, h, l, c):
+    """弱于锤子：收阳、有下影、收在区间上半（回踩确认，不要求 2 倍下影）。"""
+    rng = float(h) - float(l)
+    if rng <= 0:
+        return False
+    if float(c) < float(o):
+        return False
+    body = abs(float(c) - float(o))
+    lower = min(float(o), float(c)) - float(l)
+    if lower < max(body, rng * 0.20):
+        return False
+    if body / rng > 0.70:
+        return False
+    return float(c) >= (float(h) + float(l)) / 2.0
+
+
+def _is_engulf(o0, c0, o1, c1, v0, v1):
+    if float(c0) >= float(o0):
+        return False
+    if float(c1) <= float(o1):
+        return False
+    if float(c1) < float(o0):
+        return False
+    if float(o1) > float(c0):
+        return False
+    return float(v1) > float(v0)
 
 # === qmt_common/market_util.py ===
 # 作用: 行情辅助：诊断、序列解析、补历史、心跳
@@ -1008,105 +968,10 @@ def _live_heartbeat(reason=""):
         )
     )
 
-# === hlband/market.py ===
-def _norm_bar_day(x):
-    """行情时间戳/索引 → yyyymmdd。"""
-    if x is None:
-        return ""
-    try:
-        if hasattr(x, "strftime"):
-            return x.strftime("%Y%m%d")
-    except Exception:
-        pass
-    s = str(x).strip()
-    digits = []
-    for ch in s:
-        if ch.isdigit():
-            digits.append(ch)
-        elif digits:
-            break
-    if len(digits) >= 8:
-        return "".join(digits[:8])
-    return ""
-
-
-def _days_from_ex(md, stock):
-    """从 get_market_data_ex 结果解析交易日列表（与 close 序列对齐时优先 index/time）。"""
-    if md is None:
-        return None
-    df = None
-    if isinstance(md, dict) and stock in md:
-        df = md[stock]
-    elif isinstance(md, dict):
-        for v in md.values():
-            df = v
-            break
-    if df is None:
-        return None
-    raw = None
-    if hasattr(df, "index"):
-        try:
-            raw = list(df.index)
-        except Exception:
-            raw = None
-    if (not raw) and hasattr(df, "columns"):
-        for col in ("time", "date", "datetime", "stime"):
-            try:
-                cols = getattr(df, "columns", [])
-                if col in cols:
-                    raw = list(df[col])
-                    break
-            except Exception:
-                continue
-    if not raw:
-        return None
-    out = []
-    for x in raw:
-        d = _norm_bar_day(x)
-        if d:
-            out.append(d)
-    return out if out else None
-
-
-def _get_daily_bar_days(C, stock, count=8):
-    """最近若干根日线交易日（yyyymmdd），失败返回 None。"""
-    end = _bar_end_str(C)
-    if len(end) >= 8:
-        end = end[:8]
-    fields = ["close"]
-    md = None
-    try:
-        md = C.get_market_data_ex(
-            fields=fields,
-            stock_code=[stock],
-            period=getattr(A, "period", "1d"),
-            end_time=end,
-            count=int(count),
-            dividend_type="front_ratio",
-            fill_data=True,
-            subscribe=False,
-        )
-    except TypeError:
-        try:
-            md = C.get_market_data_ex(
-                fields,
-                [stock],
-                period=getattr(A, "period", "1d"),
-                start_time="",
-                end_time=end,
-                count=int(count),
-                dividend_type="front_ratio",
-            )
-        except Exception:
-            md = None
-    except Exception:
-        md = None
-    days = _days_from_ex(md, stock) if md is not None else None
-    return days
-
-
-def _get_ohlcv_period(C, stock, period, count, need, diag_key):
-    end = _bar_end_str(C)
+# === ma15/market.py ===
+def _get_ohlcv_period(C, stock, period, count, need, diag_key, end=None):
+    if end is None:
+        end = _bar_end_str(C)
     if period in ("1d", "1w", "1mon", "1q", "1hy", "1y"):
         end = end[:8] if len(end) >= 8 else end
     md = None
@@ -1213,17 +1078,25 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
     return open_, high, low, close, volume
 
 
-def _get_ohlcv_1d(C, stock):
-    need = max(int(D_MA_SLOW), int(VOL_PULLBACK_N), int(VOL_DRY_N)) + 10
+def _get_ohlcv_15m(C, stock, end=None):
+    need = max(int(MA_SLOW), int(VOL_MA_N), int(VOL_UP_LOOKBACK)) + 10
     return _get_ohlcv_period(
-        C, stock, getattr(A, "period", "1d"), int(OHLC_COUNT), need, "d1"
+        C, stock, getattr(A, "period", "15m"), int(OHLC_COUNT), need, "m15", end=end
     )
 
 
-def _get_ohlcv_1w(C, stock):
-    need = max(int(W_MA_SLOW), int(MACD_SLOW) + int(MACD_SIGNAL)) + 5
+def _get_ohlcv_1h(C, stock, end=None):
+    need = int(H_MA_SLOW) + 10
     return _get_ohlcv_period(
-        C, stock, "1w", int(WEEKLY_OHLC_COUNT), need, "w1"
+        C, stock, "1h", int(HOUR_OHLC_COUNT), need, "h1", end=end
+    )
+
+
+def _get_ohlcv_index_15m(C, end=None):
+    code = str(globals().get("INDEX_CODE") or "000001.SH")
+    need = int(VOL_MA_N) + 5
+    return _get_ohlcv_period(
+        C, code, "15m", int(INDEX_OHLC_COUNT), need, "idx15", end=end
     )
 
 # === qmt_common/mode.py ===
@@ -2006,7 +1879,7 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False):
     )
     return True
 
-# === hlband/strategy.py ===
+# === ma15/strategy.py ===
 def _bar_hhmm(dt):
     if dt is None:
         return "0000"
@@ -2025,524 +1898,426 @@ def _bar_tag(dt):
     return dt.strftime("%Y%m%d%H%M%S")
 
 
-def _cross_down(a_prev, b_prev, a_now, b_now):
-    if None in (a_prev, b_prev, a_now, b_now):
+def _stock_allowed():
+    code = str(globals().get("TRADE_CODE") or "").strip()
+    if not code:
+        return True
+    stock = str(getattr(A, "stock", "") or "")
+    return stock.startswith(code)
+
+
+def _in_entry_window(hhmm):
+    allow = globals().get("ENTRY_HHMM_ALLOW") or ()
+    return str(hhmm) in set([str(x) for x in allow])
+
+
+def _entry_fill_banned(hhmm):
+    ban = globals().get("ENTRY_FILL_BAN") or ()
+    return str(hhmm) in set([str(x) for x in ban])
+
+
+def _prev_15m_dt(dt):
+    if dt is None:
+        return None
+    h = int(dt.hour)
+    m = int(dt.minute)
+    if h == 13 and m == 15:
+        return dt.replace(hour=11, minute=30, second=0, microsecond=0)
+    if h == 9 and m == 45:
+        prev = dt - datetime.timedelta(days=1)
+        return prev.replace(hour=15, minute=0, second=0, microsecond=0)
+    return dt - datetime.timedelta(minutes=15)
+
+
+def _drop_live_forming(C, now, bar_dt):
+    if getattr(A, "is_backtest", False):
         return False
-    return (a_prev >= b_prev) and (a_now < b_now)
-
-
-def _eval_weekly(closes_w):
-    """返回 (bull, bear, detail)。对照表: 多头=5周在上+零轴上红柱; 空头=破30周或零轴下死叉。"""
-    detail = {
-        "ma5": None,
-        "ma10": None,
-        "ma30": None,
-        "dif": None,
-        "dea": None,
-        "hist": None,
-        "close": None,
-    }
-    ma5 = _sma(closes_w, W_MA_FAST)
-    ma10 = _sma(closes_w, W_MA_MID)
-    ma30 = _sma(closes_w, W_MA_LIFE)
-    macd = _calc_macd(closes_w)
-    if ma5 is None or ma10 is None or ma30 is None or macd is None:
-        return False, False, detail
-    dif, dea, hist = macd
-    i = len(closes_w) - 1
-    if i < 1:
-        return False, False, detail
-    c = float(closes_w[i])
-    m5 = _last_valid(ma5, i)
-    m10 = _last_valid(ma10, i)
-    m30 = _last_valid(ma30, i)
-    m30_prev = _last_valid(ma30, i - 1)
-    d0 = _last_valid(dif, i)
-    e0 = _last_valid(dea, i)
-    h0 = _last_valid(hist, i)
-    h1 = _last_valid(hist, i - 1)
-    d1 = _last_valid(dif, i - 1)
-    e1 = _last_valid(dea, i - 1)
-    slope_weeks = int(globals().get("W_MA30_SLOPE_WEEKS", 2) or 2)
-    slope_up_n = False
-    if slope_weeks > 0 and i >= slope_weeks:
-        slope_up_n = True
-        for k in range(slope_weeks):
-            a = _last_valid(ma30, i - k)
-            b = _last_valid(ma30, i - k - 1)
-            if a is None or b is None or not (a > b):
-                slope_up_n = False
-                break
-    detail.update(
-        {
-            "ma5": m5,
-            "ma10": m10,
-            "ma30": m30,
-            "ma30_prev": m30_prev,
-            "ma30_slope_up2": slope_up_n,
-            "dif": d0,
-            "dea": e0,
-            "hist": h0,
-            "hist_prev": h1,
-            "close": c,
-        }
-    )
-    if None in (m5, m10, m30, d0, e0, h0):
-        return False, False, detail
-
-    ma30_ok = (m30_prev is None) or (m30 >= m30_prev * 0.998)
-    bull = (m5 > m10) and (d0 > 0) and (h0 > 0) and ma30_ok
-    death_below = _cross_down(d1, e1, d0, e0) and (d0 < 0) and (e0 < 0)
-    bear = (c < m30) or death_below
-    return bull, bear, detail
-
-
-def _w_bear_confirm_need():
-    """最少 1：当天空头即可挂清仓；勿用 `x or 2`（0 会被当成缺省翻成 2）。"""
-    raw = globals().get("W_BEAR_CONFIRM_DAYS", 2)
     try:
-        n = int(2 if raw is None else raw)
+        if hasattr(C, "is_last_bar") and (not C.is_last_bar()):
+            return False
     except Exception:
-        n = 2
-    return max(1, n)
+        pass
+    if now is None or bar_dt is None:
+        return True
+    return now < bar_dt
 
 
-def _update_w_bear_streak(weekly_bear, sig_day, track):
-    """
-    连续 N 个信号日仍周线空头才确认清仓。
-    track=False（实盘盘中 exec）不改计数，避免半成品 K 抖动。
-    返回 (force_empty, streak)。
-    """
-    need = _w_bear_confirm_need()
-    sig_day = str(sig_day or "")
-    streak = int(getattr(A, "_w_bear_streak", 0) or 0)
-    last = str(getattr(A, "_w_bear_last_day", "") or "")
-    if not track:
-        return bool(weekly_bear) and streak >= need, streak
-    if not sig_day:
-        return False, streak
-
-    prev_streak = streak
-    prev_last = last
-    changed = False
-
-    if sig_day == last:
-        # 同一信号日：confirm 窗内可能先空后翻多（或相反），须跟最终电平
-        if weekly_bear:
-            if streak <= 0:
-                streak = 1
-                changed = True
-        else:
-            if streak > 0:
-                streak = 0
-                changed = True
-    elif weekly_bear:
-        if streak > 0 and last and sig_day > last:
-            streak = streak + 1
-        else:
-            streak = 1
-        changed = True
-    else:
-        streak = 0
-        changed = True
-
-    A._w_bear_streak = int(streak)
-    A._w_bear_last_day = sig_day
-    if changed or (sig_day != prev_last):
-        if not getattr(A, "is_backtest", False):
-            _save_state()
-        if weekly_bear and (streak != prev_streak or sig_day != prev_last):
-            print(
-                "%s w_bear streak=%d/%d day=%s"
-                % (STRATEGY_NAME, streak, need, sig_day)
-            )
-            _event_log(
-                "w_bear_streak",
-                streak=streak,
-                need=need,
-                signal_day=sig_day,
-            )
-        elif (not weekly_bear) and prev_streak:
-            print(
-                "%s w_bear streak reset day=%s (was %d)"
-                % (STRATEGY_NAME, sig_day, prev_streak)
-            )
-            _event_log(
-                "w_bear_streak_reset",
-                signal_day=sig_day,
-                was=prev_streak,
-            )
-    return streak >= need, streak
+def _slice_ohlcv(opens, highs, lows, closes, vols):
+    if closes is None or len(closes) < 2:
+        return None
+    return opens[:-1], highs[:-1], lows[:-1], closes[:-1], vols[:-1]
 
 
-def _eval_daily_buy(closes, volumes):
-    """买点：缩量回踩 MA20/MA60。"""
+def _h1_ok(closes_h):
+    ma_f = _sma(closes_h, H_MA_FAST)
+    ma_s = _sma(closes_h, H_MA_SLOW)
+    if ma_f is None or ma_s is None:
+        return False, {}
+    i = len(closes_h) - 1
+    if i < 1:
+        return False, {}
+    f0 = _last_valid(ma_f, i)
+    s0 = _last_valid(ma_s, i)
+    f1 = _last_valid(ma_f, i - 1)
+    detail = {"h_ma20": f0, "h_ma60": s0}
+    if None in (f0, s0, f1):
+        return False, detail
+    ok = (f0 > s0) and (f0 >= f1)
+    return ok, detail
+
+
+def _trend_ok(closes):
+    ma_f = _sma(closes, MA_FAST)
+    ma_s = _sma(closes, MA_SLOW)
+    if ma_f is None or ma_s is None:
+        return False, None, None, {}
+    i = len(closes) - 1
+    if i < 1:
+        return False, None, None, {}
+    f0 = _last_valid(ma_f, i)
+    s0 = _last_valid(ma_s, i)
+    s1 = _last_valid(ma_s, i - 1)
+    c0 = float(closes[i])
+    detail = {"ma20": f0, "ma60": s0}
+    if None in (f0, s0, s1):
+        return False, ma_f, ma_s, detail
+    ok = (f0 > s0) and (s0 >= s1) and (c0 > s0)
+    return ok, ma_f, ma_s, detail
+
+
+def _index_dump(opens, closes, vols):
+    if not closes or len(closes) < int(VOL_MA_N):
+        return True, "index_na_skip", {}
+    i = len(closes) - 1
+    o0 = float(opens[i])
+    c0 = float(closes[i])
+    v0 = float(vols[i])
+    vm = _sma(vols, VOL_MA_N)
+    vma = _last_valid(vm, i) if vm is not None else None
+    detail = {"idx_ret": None if o0 <= 0 else (c0 - o0) / o0, "idx_vol": v0, "idx_mavol": vma}
+    if o0 <= 0 or vma is None or vma <= 0:
+        return True, "index_na_skip", detail
+    ret = (c0 - o0) / o0
+    dump = (ret <= float(INDEX_DUMP_RET)) and (v0 >= vma * float(INDEX_DUMP_VOL))
+    if dump:
+        return True, "index_dump_skip", detail
+    return False, "", detail
+
+
+def _vol_ok(closes, vols):
+    i = len(closes) - 1
+    v0 = float(vols[i])
+    vm = _sma(vols, VOL_MA_N)
+    vma = _last_valid(vm, i) if vm is not None else None
+    if vma is None or vma <= 0:
+        return False, {}
+    if v0 >= vma * float(VOL_PULLBACK_RATIO):
+        return False, {"mavol": vma, "vol": v0}
+    return True, {"mavol": vma, "vol": v0}
+
+
+def _eval_buy(opens, highs, lows, closes, vols, hhmm, h1_ok, idx_block, idx_why):
     reasons = []
-    ma20 = _sma(closes, D_MA_MID)
-    ma60 = _sma(closes, D_MA_SLOW)
-    vol10 = _sma(volumes, VOL_PULLBACK_N)
-    vol20 = _sma(volumes, VOL_DRY_N)
-    if ma20 is None or ma60 is None or vol10 is None or vol20 is None:
-        return False, reasons, {}
+    trend, ma20_arr, _ma60_arr, t_detail = _trend_ok(closes)
+    detail = dict(t_detail)
+    detail["trend_ok"] = trend
+    if idx_block:
+        return False, [idx_why or "index_na_skip"], detail
+    if not h1_ok:
+        return False, ["h1_skip"], detail
+    if not trend:
+        return False, ["trend_skip"], detail
+    if not _in_entry_window(hhmm):
+        return False, ["time_skip"], detail
+    vok, v_detail = _vol_ok(closes, vols)
+    detail.update(v_detail)
+    if not vok:
+        return False, ["vol_skip"], detail
     i = len(closes) - 1
-    if i < 2:
-        return False, reasons, {}
-    price = float(closes[i])
-    vol = float(volumes[i])
-    m20 = _last_valid(ma20, i)
-    m60 = _last_valid(ma60, i)
-    v10 = _last_valid(vol10, i)
-    v20 = _last_valid(vol20, i)
-    detail = {
-        "ma20": m20,
-        "ma60": m60,
-        "vol10": v10,
-        "vol20": v20,
-    }
-
-    prev = float(closes[i - 1]) if closes[i - 1] else 0.0
-    if prev > 0 and (price - prev) / prev >= float(CHASE_MAX_PCT):
-        return False, ["chase_skip"], detail
-
-    # 无量阴跌不言底：跌破 MA20 且量 < 20 日均量 * VOL_DRY_RATIO → 全局禁开
-    dry_below = (
-        m20 is not None
-        and price < m20
-        and v20 is not None
-        and v20 > 0
-        and vol < v20 * float(VOL_DRY_RATIO)
+    if i < 1:
+        return False, ["short"], detail
+    ma20 = _last_valid(ma20_arr, i)
+    if ma20 is None or ma20 <= 0:
+        return False, ["ma_na"], detail
+    low = float(lows[i])
+    close = float(closes[i])
+    if low > ma20 * (1.0 + float(MA_TOUCH_TOL)):
+        return False, ["touch_skip"], detail
+    if close < ma20 * (1.0 - float(MA_BREAK_TOL)):
+        return False, ["break_skip"], detail
+    hammer = _is_hammer(opens[i], highs[i], lows[i], closes[i])
+    bounce = _is_bounce(opens[i], highs[i], lows[i], closes[i])
+    engulf = _is_engulf(
+        opens[i - 1], closes[i - 1], opens[i], closes[i], vols[i - 1], vols[i]
     )
-    if dry_below:
-        return False, ["vol_dry_skip"], detail
-
-    # 缩量回踩 MA20/MA60 + 量 < 10 日均量 * 0.9
-    near = _near_ma(price, m20) or _near_ma(price, m60)
-    shrink = v10 is not None and v10 > 0 and vol < v10 * float(VOL_PULLBACK_RATIO)
-    if near and shrink:
-        reasons.append("pullback_vol")
-
-    return bool(reasons), reasons, detail
-
-
-def _weekly_bias_guard(w_detail):
-    """周线 (MA5-MA30)/MA30 >= W_BIAS_HARD → 禁开。"""
-    m5 = w_detail.get("ma5")
-    m30 = w_detail.get("ma30")
-    if m5 is None or m30 is None or m30 <= 0:
-        return False, None
-    bias = (float(m5) - float(m30)) / float(m30)
-    return bias >= float(W_BIAS_HARD), bias
+    if hammer:
+        reasons.append("hammer")
+    elif bounce:
+        reasons.append("bounce")
+    if engulf:
+        reasons.append("engulf")
+    if not reasons:
+        return False, ["pattern_skip"], detail
+    return True, reasons, detail
 
 
-def _weekly_low_slope_guard(w_detail):
-    """低位 (MA5-MA30)/MA30 < W_BIAS_LOW 且 MA30 未连续 2 周向上 → 禁开。"""
-    m5 = w_detail.get("ma5")
-    m30 = w_detail.get("ma30")
-    if m5 is None or m30 is None or m30 <= 0:
-        return False, None
-    bias = (float(m5) - float(m30)) / float(m30)
-    if bias >= float(W_BIAS_LOW):
-        return False, bias
-    slope_ok = bool(w_detail.get("ma30_slope_up2"))
-    return (not slope_ok), bias
-
-
-def _update_hold_peak(high_px, cost):
-    """持仓期跟踪最高价（移动止盈用）。"""
-    hi = float(high_px)
-    peak = getattr(A, "hold_peak", None)
-    if peak is None:
-        base = float(cost) if cost and cost > 0 else hi
-        A.hold_peak = max(base, hi)
-        return True
-    if hi > float(peak):
-        A.hold_peak = hi
-        return True
-    return False
-
-
-def _trail_tier_params(max_profit):
-    """按峰值浮盈选档，返回 (giveback, profit_floor)；未达起步档则 (None, None)。"""
-    mp = float(max_profit)
-    for lo, hi, giveback, floor in TRAIL_TIERS:
-        if mp < float(lo):
-            continue
-        if hi is not None and mp >= float(hi):
-            continue
-        fl = None if floor is None else float(floor)
-        return float(giveback), fl
-    return None, None
-
-
-def _trail_stop_hit(price, cost):
-    """阶梯移动止盈：峰值浮盈落档后，回撤超容忍 或 跌破利润底线。"""
-    if cost is None or cost <= 0:
+def _stall_hit(closes, ma20_arr, hold_bars, hold_max_ret):
+    abort = float(globals().get("STALL_ABORT_RET") or 0)
+    try:
+        mx = float(hold_max_ret) if hold_max_ret is not None else 0.0
+    except Exception:
+        mx = 0.0
+    if abort > 0 and mx >= abort:
         return False
-    peak = getattr(A, "hold_peak", None)
-    if peak is None or peak <= 0:
-        return False
-    max_profit = (float(peak) - float(cost)) / float(cost)
-    giveback_lim, profit_floor = _trail_tier_params(max_profit)
-    if giveback_lim is None:
-        return False
-    giveback = (float(peak) - float(price)) / float(peak)
-    if giveback > giveback_lim:
-        return True
-    if profit_floor is not None:
-        cur_profit = (float(price) - float(cost)) / float(cost)
-        if cur_profit < profit_floor:
-            return True
-    return False
-
-
-def _time_force_hit(price, closes, hold_bars):
-    """智能时间成本：持仓 > TIME_FORCE_BARS 后，破日线 MA60 强制平仓；
-    仍站上 MA60 则豁免一次并再观察 TIME_FORCE_GRACE_BARS 日，期满强制平仓。"""
-    if hold_bars is None or int(hold_bars) <= int(TIME_FORCE_BARS):
-        return False
-    ma60_arr = _sma(closes, D_MA_SLOW)
-    if ma60_arr is None:
+    need = int(STALL_BARS)
+    if hold_bars is None or int(hold_bars) < need:
         return False
     i = len(closes) - 1
-    ma60 = _last_valid(ma60_arr, i)
-    if ma60 is None or price is None:
+    if i < need:
         return False
-    px = float(price)
-    m60 = float(ma60)
-
-    if px < m60:
-        return True
-
-    # 站上 MA60：豁免一次，多观察 GRACE 日；期满仍强制平仓
-    grace_until = getattr(A, "time_force_grace_until", None)
-    if grace_until is None:
-        until = int(hold_bars) + int(TIME_FORCE_GRACE_BARS)
-        A.time_force_grace_until = until
-        print(
-            "%s time_force grace ma60=%.4f hold=%s until_bars=%s"
-            % (STRATEGY_NAME, m60, hold_bars, until)
-        )
-        _event_log(
-            "time_force_grace",
-            ma60=m60,
-            hold_bars=hold_bars,
-            until_bars=until,
-        )
+    ma_now = _last_valid(ma20_arr, i)
+    ma_old = _last_valid(ma20_arr, i - need)
+    if ma_now is None or ma_old is None or ma_now <= 0:
         return False
-    return int(hold_bars) > int(grace_until)
+    band = float(STALL_BAND)
+    for k in range(need):
+        px = float(closes[i - k])
+        ma = _last_valid(ma20_arr, i - k)
+        if ma is None or ma <= 0:
+            return False
+        if abs(px - ma) / ma > band:
+            return False
+    flat = abs(ma_now - ma_old) / ma_now <= float(STALL_MA_FLAT)
+    return flat
+
+
+def _eval_sell(price, cost, close_peak, closes, ma20_arr, hold_bars, hhmm, hold_max_ret, trend_ok):
+    reasons = []
+    ma20 = _last_valid(ma20_arr, -1) if ma20_arr is not None else None
+    stop_after = str(globals().get("STOP_MA_AFTER_HHMM") or "1015")
+    if (
+        ma20 is not None
+        and ma20 > 0
+        and str(hhmm) >= stop_after
+        and price < ma20 * (1.0 - float(STOP_MA_PCT))
+    ):
+        reasons.append("stop_ma")
+        return True, reasons
+    if cost > 0 and price <= cost * (1.0 - float(STOP_LOSS)):
+        reasons.append("stop_loss")
+        return True, reasons
+    try:
+        mx = float(hold_max_ret) if hold_max_ret is not None else 0.0
+    except Exception:
+        mx = 0.0
+    abort_tb = float(globals().get("TREND_BREAK_ABORT_RET") or 0.001)
+    min_red = float(globals().get("TREND_BREAK_MIN_RET") or -0.004)
+    cur_ret = (price - cost) / cost if cost > 0 else 0.0
+    if (
+        (not trend_ok)
+        and cost > 0
+        and cur_ret <= min_red
+        and mx < abort_tb
+        and str(hhmm) >= stop_after
+    ):
+        reasons.append("trend_break")
+        return True, reasons
+    if cost > 0:
+        ret = (price - cost) / cost
+        hard_tp = bool(globals().get("TAKE_PROFIT_HARD"))
+        leave_ok = (ma20 is not None and ma20 > 0 and price >= ma20 * (1.0 + float(TAKE_LEAVE)))
+        if hard_tp and ret >= float(TAKE_PROFIT) and leave_ok:
+            wait_scale = False
+            if bool(globals().get("SCALE_ENABLE")) and trend_ok:
+                max_lots = int(globals().get("SCALE_MAX") or 1)
+                giveup = int(globals().get("SCALE_GIVEUP_BARS") or 0)
+                lots = 1
+                pos = getattr(A, "position", None)
+                if isinstance(pos, dict):
+                    try:
+                        lots = max(1, int(pos.get("lots", 1) or 1))
+                    except Exception:
+                        lots = 1
+                arm = float(globals().get("SCALE_ARM") or TAKE_PROFIT)
+                bars = int(hold_bars or 0)
+                if lots < max_lots and mx >= arm and (giveup <= 0 or bars < giveup):
+                    wait_scale = True
+            if not wait_scale:
+                reasons.append("take_profit")
+                return True, reasons
+    if close_peak is not None and cost > 0:
+        pk = float(close_peak)
+        peak_ret = (pk - float(cost)) / float(cost) if pk > 0 else 0.0
+        arm = float(TAKE_PROFIT)
+        if peak_ret >= arm and pk > 0:
+            gb = float(GIVEBACK)
+            tight_after = float(globals().get("GIVEBACK_TIGHT_AFTER") or 0)
+            tight = float(globals().get("GIVEBACK_TIGHT") or 0)
+            if tight_after > 0 and tight > 0 and peak_ret >= tight_after:
+                gb = tight
+            if (pk - price) / pk >= gb:
+                reasons.append("giveback")
+                return True, reasons
+    if _stall_hit(closes, ma20_arr, hold_bars, hold_max_ret):
+        reasons.append("stall")
+        return True, reasons
+    return False, reasons
 
 
 def _clear_hold_meta():
     A.hold_peak = None
+    A.hold_close_peak = None
+    A.hold_max_ret = 0.0
     A.hold_bars = 0
-    A._hold_count_day = ""
-    A.time_force_grace_until = None
+    A._hold_count_bar = ""
 
 
-def _bump_hold_bars(day):
-    """每个交易日持仓计 1 根。"""
-    if getattr(A, "_hold_count_day", "") == day:
+def _bump_hold_bars(bar_tag):
+    if getattr(A, "_hold_count_bar", "") == bar_tag:
         return
     A.hold_bars = int(getattr(A, "hold_bars", 0) or 0) + 1
-    A._hold_count_day = day
+    A._hold_count_bar = bar_tag
 
 
-def _drop_forming_bar(seq):
-    """去掉正在形成的最新一根（实盘未收盘 K）。"""
-    if seq is None:
-        return None
-    if len(seq) < 2:
-        return list(seq) if seq else seq
-    return list(seq[:-1])
+def _update_peaks(high_px, close_px, cost):
+    hi = float(high_px)
+    cl = float(close_px)
+    changed = False
+    peak = getattr(A, "hold_peak", None)
+    if peak is None:
+        base = float(cost) if cost and cost > 0 else hi
+        A.hold_peak = max(base, hi)
+        changed = True
+    elif hi > float(peak):
+        A.hold_peak = hi
+        changed = True
+    cp = getattr(A, "hold_close_peak", None)
+    if cp is None:
+        A.hold_close_peak = cl
+        changed = True
+    elif cl > float(cp):
+        A.hold_close_peak = cl
+        changed = True
+    if cost and float(cost) > 0:
+        r_cl = (cl - float(cost)) / float(cost)
+        r_hi = (hi - float(cost)) / float(cost)
+        mx = max(r_cl, r_hi)
+        prev = getattr(A, "hold_max_ret", None)
+        try:
+            prev_f = float(prev) if prev is not None else None
+        except Exception:
+            prev_f = None
+        if prev_f is None or mx > prev_f:
+            A.hold_max_ret = mx
+            changed = True
+    return changed
 
 
-def _live_close_confirm_on():
-    return (not getattr(A, "is_backtest", False)) and bool(
-        globals().get("LIVE_CLOSE_CONFIRM", True)
+def _pos_lots():
+    pos = getattr(A, "position", None)
+    if not isinstance(pos, dict):
+        return 0
+    try:
+        return max(1, int(pos.get("lots", 1) or 1))
+    except Exception:
+        return 1
+
+
+def _scale_ready():
+    if not bool(globals().get("SCALE_ENABLE")):
+        return False
+    holding_now = _has_position() or (
+        getattr(A, "is_backtest", False) and _bt_held_vol() >= 100
     )
-
-
-def _calendar_prev_weekday(yyyymmdd):
-    """自然日回退到上一工作日（跳过周末；节假日以行情轴为准）。"""
+    if not holding_now:
+        return False
+    if _pos_lots() >= int(globals().get("SCALE_MAX") or 1):
+        return False
     try:
-        d = datetime.datetime.strptime(str(yyyymmdd), "%Y%m%d")
+        mx = float(getattr(A, "hold_max_ret", 0) or 0)
     except Exception:
-        return str(yyyymmdd)
-    d -= datetime.timedelta(days=1)
-    while int(d.weekday()) >= 5:
-        d -= datetime.timedelta(days=1)
-    return d.strftime("%Y%m%d")
+        mx = 0.0
+    arm = float(globals().get("SCALE_ARM") or 0)
+    if arm <= 0:
+        arm = float(TAKE_PROFIT)
+    return mx >= arm
 
 
-def _last_closed_bar_day(C, today):
-    """上一根已收盘日线交易日；优先行情时间轴，否则跳过周末的自然日。"""
-    today = str(today)
-    days = None
-    try:
-        days = _get_daily_bar_days(C, A.stock, count=8)
-    except Exception:
-        days = None
-    if days:
-        last = str(days[-1])
-        if last >= today and len(days) >= 2:
-            return str(days[-2])
-        if last and last < today:
-            return last
-    return _calendar_prev_weekday(today)
-
-
-def _live_signal_day(C, today):
-    """开盘兜底/盘中校验用的信号日：上一根已收盘交易日（保证 signal_day < 今日可成交）。"""
-    return _last_closed_bar_day(C, today)
-
-
-def _mark_confirmed_eval(day):
-    """收盘确认完成（当日完整 K）。"""
-    A._confirmed_eval_day = str(day)
-    _save_state()
-
-
-def _mark_fallback_done(day):
-    """开盘兜底评估完成；不写 confirmed，以免挡住今日收盘确认。"""
-    A._fallback_done_day = str(day)
-    _save_state()
-
-
-def _mark_signal_eval_done(day, is_confirm):
-    if is_confirm:
-        _mark_confirmed_eval(day)
-    else:
-        _mark_fallback_done(day)
-
-
-def _pending_ready(pend, day, bar_tag, mode):
+def _pending_ready(pend, day, exec_tag):
     if not isinstance(pend, dict):
         return False
     sig_tag = str(pend.get("signal_tag", "") or "")
+    if sig_tag and exec_tag:
+        return sig_tag < exec_tag
     sig_day = str(pend.get("signal_day", "") or "")
-    if mode == "day":
-        return bool(sig_day) and sig_day < day
-    if sig_tag and bar_tag:
-        return sig_tag < bar_tag
-    if sig_day and sig_day < day:
-        return True
-    return False
+    return bool(sig_day) and sig_day < day
 
 
-def _in_pending_exec_window(now_s):
-    """回测不限时；实盘仅开盘附近允许按开盘价成交信号 pending。"""
-    if getattr(A, "is_backtest", False):
-        return True
-    start = str(globals().get("PENDING_EXEC_START", "093000") or "093000")
-    end = str(globals().get("PENDING_EXEC_END", "094500") or "094500")
-    return start <= str(now_s) < end
-
-
-def _log_pending_defer_once(kind, day, now_s, signal_day):
-    """开盘窗外 defer 每个交易日每种 pending 只打一次日志，避免盘中刷屏。"""
-    kind = str(kind or "")
-    day = str(day or "")
-    attr = "_defer_log_%s_day" % kind
-    if str(getattr(A, attr, "") or "") == day:
+def _reset_peaks_after_scale(px):
+    """加仓后回吐从新高起算，不把第一笔收盘最高带到更低均价上。"""
+    if not bool(globals().get("SCALE_RESET_PEAK", True)):
         return
-    setattr(A, attr, day)
-    print(
-        "%s pending_%s defer outside open window now=%s signal_day=%s"
-        % (STRATEGY_NAME, kind, now_s, signal_day)
-    )
-    _event_log(
-        "pending_%s_defer" % kind,
-        now=now_s,
-        signal_day=signal_day,
-        exec_end=str(globals().get("PENDING_EXEC_END", "094500") or "094500"),
-    )
-
-
-def _should_emit_bar_status(C, now, force, status_idle):
-    """
-    状态行是否输出。
-    force（信号上升沿）立刻打；回测逐 bar 对 idle 不节流；
-    实盘仅持仓/挂起、无新沿时按 LIVE_HEARTBEAT_SEC 节流。
-    """
-    if not getattr(A, "ready_logged", False):
-        return True
-    if force:
-        return True
-    if getattr(A, "is_backtest", False):
-        if status_idle:
-            return True
-        try:
-            return int(getattr(C, "barpos", 0) or 0) % 20 == 0
-        except Exception:
-            return False
-    if status_idle:
-        sec = int(globals().get("LIVE_HEARTBEAT_SEC") or 60)
-        if sec <= 0:
-            return True
-        last = getattr(A, "_bar_status_at", None)
-        if last is not None and now is not None:
-            try:
-                if (now - last).total_seconds() < float(sec):
-                    return False
-            except Exception:
-                pass
-        return True
     try:
-        return int(getattr(C, "barpos", 0) or 0) % 20 == 0
+        pxf = float(px) if px else 0.0
     except Exception:
-        return False
-
-
-def _bar_signal_rising_edge(buy_sig, sell_ok, force_empty):
-    """
-    相对上一 tick 的买卖/强平上升沿。
-    电平一直为真时不再强制打状态行（避免收盘确认窗刷屏）。
-    """
-    cur = (bool(buy_sig), bool(sell_ok), bool(force_empty))
-    prev = getattr(A, "_bar_sig_prev", None)
-    A._bar_sig_prev = cur
-    if prev is None:
-        return bool(cur[0] or cur[1] or cur[2])
-    return (
-        (cur[0] and not prev[0])
-        or (cur[1] and not prev[1])
-        or (cur[2] and not prev[2])
+        pxf = 0.0
+    if pxf <= 0:
+        return
+    A.hold_peak = pxf
+    A.hold_close_peak = pxf
+    cost = _pos_cost_price()
+    try:
+        cost_f = float(cost) if cost else 0.0
+    except Exception:
+        cost_f = 0.0
+    prev = float(getattr(A, "hold_max_ret", 0) or 0)
+    if cost_f > 0:
+        A.hold_max_ret = max(prev, (pxf - cost_f) / cost_f)
+    print(
+        "%s scale peak reset px=%.4f avg=%.4f max_ret=%.2f%%"
+        % (STRATEGY_NAME, pxf, cost_f, float(A.hold_max_ret) * 100.0)
     )
+    _event_log("scale_peak_reset", px=pxf, avg=cost_f, max_ret=A.hold_max_ret)
 
 
-def _after_signal_buy_filled(px, day):
-    """买入成交后初始化持仓元数据并清信号 pending。"""
+def _after_signal_buy_filled(px, day, add=False):
     A.pending_entry = None
     A.pending_exit = None
+    if add:
+        _reset_peaks_after_scale(px)
+        _save_state()
+        return
     try:
         A.hold_peak = float(px) if px else None
     except Exception:
         A.hold_peak = None
+    A.hold_close_peak = A.hold_peak
+    A.hold_max_ret = 0.0
     A.hold_bars = 0
-    A._hold_count_day = str(day or "")
-    A.time_force_grace_until = None
+    A._hold_count_bar = ""
     _save_state()
 
 
 def _after_signal_sell_filled():
-    """卖出成交（或已空仓）后清信号 pending 与持仓元数据。"""
     A.pending_exit = None
     A.pending_entry = None
     _clear_hold_meta()
+    acted = getattr(A, "acted", None)
+    if isinstance(acted, set):
+        acted.discard("BUY")
+        acted.discard("SELL")
     _save_state()
 
 
 def _pending_on_buy_fill(pend, vol, px):
-    """覆盖 common：成交后再清 pending_entry / 写 hold_meta（废单则保留信号 pending）。"""
     extra = pend.get("extra_pos") if isinstance(pend.get("extra_pos"), dict) else {}
     _apply_buy_fill(vol, px, pend.get("opened_at") or pend.get("submitted_at"), **extra)
     ot = str(pend.get("opened_at") or pend.get("submitted_at") or "")
     day = ot[:8] if len(ot) >= 8 else datetime.datetime.now().strftime("%Y%m%d")
-    _after_signal_buy_filled(px, day)
+    _after_signal_buy_filled(px, day, add=bool(extra.get("add")))
 
 
 def _pending_on_sell_fill(pend, now, vol, px):
-    """覆盖 common：成交后再清 pending_exit；部分成交仍持仓则保留 hold_meta。"""
     intent = str(pend.get("intent", "") or "")
     last_hint = pend.get("last_hint")
     if last_hint is None:
@@ -2558,38 +2333,44 @@ def _pending_on_sell_fill(pend, now, vol, px):
         _save_state()
 
 
-def _on_signal_order_ok(side, px=None, day=None):
-    """下单返回 True：实盘等成交回调；回测/DRY 立即清信号 pending 并写 hold_meta。"""
+def _on_signal_order_ok(side, px=None, day=None, add=False):
     live_waiting = (not getattr(A, "is_backtest", False)) and (
         not DRY_RUN
     ) and isinstance(getattr(A, "pending", None), dict)
     if live_waiting:
-        print(
-            "%s %s submitted keep signal pending until fill"
-            % (STRATEGY_NAME, side)
-        )
+        print("%s %s submitted keep signal pending until fill" % (STRATEGY_NAME, side))
         _event_log("signal_pending_keep_until_fill", side=side)
         _save_state()
         return
     if side == "buy":
-        _after_signal_buy_filled(px, day)
+        _after_signal_buy_filled(px, day, add=add)
     else:
         _after_signal_sell_filled()
 
 
 _SELL_LABELS = {
-    "trail_stop": "卖点1-移动止盈回撤",
-    "time_force": "卖点2-时间成本智能平仓",
-    "weekly_bear": "周线转空强制清仓",
-    "stop_loss": "硬止损",
+    "stop_ma": "MA20硬止损",
+    "stop_loss": "成本止损",
+    "trend_break": "15m趋势破坏",
+    "stall": "贴线动能衰竭",
+    "take_profit": "浮盈止盈",
+    "giveback": "收盘最高回吐",
 }
 _BUY_LABELS = {
-    "pullback_vol": "买点1-缩量回踩强支撑",
-    "chase_skip": "追高过滤跳过",
-    "w_bias_skip": "周线高位乖离禁开",
-    "w_slope_skip": "低位周线MA30未连升禁开",
-    "vol_dry_skip": "无量阴跌禁开",
-    "weekly_bear": "周线空头禁开",
+    "hammer": "长脚十字/假阴护盘",
+    "bounce": "回踩收阳",
+    "engulf": "放量反包",
+    "time_skip": "时段过滤",
+    "vol_skip": "缩量未达标",
+    "h1_skip": "小时趋势未向上",
+    "trend_skip": "15m非多头排列",
+    "index_dump_skip": "大盘放量杀跌",
+    "index_na_skip": "指数数据缺失",
+    "touch_skip": "未触及MA20",
+    "break_skip": "收盘有效跌破MA20",
+    "pattern_skip": "无锤子/回踩阳/反包",
+    "entry_expire": "买入pending隔日作废",
+    "entry_late_skip": "尾盘不买",
 }
 
 
@@ -2603,8 +2384,31 @@ def _format_reasons(codes, kind="sell"):
     codes = [str(x) for x in (codes or []) if x]
     if not codes:
         return "-"
-    parts = ["%s(%s)" % (c, _reason_label(c, kind)) for c in codes]
-    return ",".join(parts)
+    return ",".join(["%s(%s)" % (c, _reason_label(c, kind)) for c in codes])
+
+
+def _mark_eval(tag):
+    A._eval_bar_tag = str(tag or "")
+    _save_state()
+
+
+def _should_log_bar(C, now, force):
+    if force:
+        return True
+    if getattr(A, "is_backtest", False):
+        try:
+            return int(getattr(C, "barpos", 0) or 0) % 16 == 0
+        except Exception:
+            return True
+    sec = int(globals().get("LIVE_HEARTBEAT_SEC") or 60)
+    last = getattr(A, "_bar_status_at", None)
+    if last is not None and now is not None and sec > 0:
+        try:
+            if (now - last).total_seconds() < float(sec):
+                return False
+        except Exception:
+            pass
+    return True
 
 
 def _handle(C):
@@ -2614,39 +2418,26 @@ def _handle(C):
     now_s = _bar_hhmmss(now)
     day = now.strftime("%Y%m%d")
     tag = _bar_tag(bar_dt)
-    hhmm = _bar_hhmm(bar_dt if bt else now)
-    live_cc = _live_close_confirm_on()
-    conf_start = str(globals().get("SIGNAL_CONFIRM_START", "150000") or "150000")
-    conf_end = str(globals().get("SIGNAL_CONFIRM_END", "160000") or "160000")
-    in_exec = (not bt) and (DECISION_START <= now_s < conf_start)
-    in_confirm = (not bt) and (conf_start <= now_s <= conf_end)
-    # 收盘确认：用当日完整 K；开盘：日 K 去未收盘根，周 K 含未收盘根
-    prev_d = False
-    prev_w = False
-    phase = "bt" if bt else "live"
+
+    if not _stock_allowed():
+        _diag_once("stock_skip", "want=", TRADE_CODE, "got=", getattr(A, "stock", ""))
+        return
 
     if not bt:
         if getattr(A, "pending", None):
             if _process_pending(C, now):
                 _live_heartbeat("pending")
                 return
-        if live_cc:
-            if (not in_exec) and (not in_confirm):
-                _live_heartbeat("outside_session")
-                return
-            phase = "confirm" if in_confirm else "exec"
-        else:
-            if now_s < DECISION_START or now_s > DECISION_END:
-                _live_heartbeat("outside_session")
-                return
-            phase = "session"
+        if now_s < DECISION_START or now_s > DECISION_END:
+            _live_heartbeat("outside_session")
+            return
         if LIVE_ONLY_LAST_BAR:
             try:
                 if hasattr(C, "is_last_bar") and (not C.is_last_bar()):
                     return
             except Exception:
                 pass
-        _live_heartbeat(phase)
+        _live_heartbeat("session")
     else:
         _bt_roll_t1(day)
         _bt_recover_position(now=now)
@@ -2658,475 +2449,380 @@ def _handle(C):
         _live_heartbeat("no_cash_or_login")
         return
 
-    ohlcv_d = _get_ohlcv_1d(C, A.stock)
-    if ohlcv_d is None:
-        _live_heartbeat("ohlcv_1d_none")
+    ohlcv = _get_ohlcv_15m(C, A.stock)
+    if ohlcv is None:
+        _live_heartbeat("ohlcv_15m_none")
         return
-    opens_d, highs_d, lows_d, closes_d, vols_d = ohlcv_d
-
-    ohlcv_w = _get_ohlcv_1w(C, A.stock)
-    if ohlcv_w is None:
-        _live_heartbeat("ohlcv_1w_none")
-        return
-    _ow, _hw, _lw, closes_w, _vw = ohlcv_w
-
-    open_px = float(opens_d[-1])
-    # v1.10 误把开盘兜底写成 confirmed=今日，会挡收盘确认；盘中执行时段自动清掉
-    if (
-        live_cc
-        and phase == "exec"
-        and str(getattr(A, "_confirmed_eval_day", "") or "") == day
-    ):
-        print(
-            "%s clear mis-marked confirmed_eval_day=%s (was open fallback)"
-            % (STRATEGY_NAME, day)
-        )
-        _event_log("clear_mis_confirmed_eval_day", day=day)
-        A._confirmed_eval_day = ""
-        _save_state()
-    # 开盘兜底：上一根已收盘日尚未确认、今日尚未兜底、无挂起
-    prev_closed_day = _last_closed_bar_day(C, day) if live_cc else day
-    confirmed_day = str(getattr(A, "_confirmed_eval_day", "") or "")
-    need_fallback = (
-        live_cc
-        and phase == "exec"
-        and confirmed_day < str(prev_closed_day)
-        and str(getattr(A, "_fallback_done_day", "") or "") != day
-        and (not isinstance(getattr(A, "pending_entry", None), dict))
-        and (not isinstance(getattr(A, "pending_exit", None), dict))
-    )
-    if live_cc and phase == "confirm":
-        highs_s, closes_s, vols_s = highs_d, closes_d, vols_d
-        closes_ws = closes_w
-        sig_day_daily = day
-        sig_day_weekly = day
-    elif need_fallback or (live_cc and phase == "exec"):
-        # 开盘兜底 / 盘中执行：日 K 去掉未收盘根，避免未完成日线误触 vol_dry 等；
-        # 周 K 含本周未收盘根，与 confirm/回测一致（新周首日即可 weekly_bear 撤买入 pending）
-        # 日信号日=上一完整交易日；周线 streak/清仓信号日=今日（与含未收盘周根对齐）
-        prev_d = True
-        prev_w = False
-        highs_s = _drop_forming_bar(highs_d)
-        closes_s = _drop_forming_bar(closes_d)
-        vols_s = _drop_forming_bar(vols_d)
-        closes_ws = closes_w
-        if closes_s is None or len(closes_s) < 3 or closes_ws is None or len(closes_ws) < 3:
-            _live_heartbeat("ohlcv_confirm_short")
+    opens, highs, lows, closes, vols = ohlcv
+    exec_open = float(opens[-1])
+    exec_tag = tag
+    drop = _drop_live_forming(C, now, bar_dt)
+    if drop:
+        sliced = _slice_ohlcv(opens, highs, lows, closes, vols)
+        if sliced is None:
+            _live_heartbeat("ohlcv_forming_short")
             return
-        sig_day_daily = prev_closed_day
-        sig_day_weekly = day
+        opens, highs, lows, closes, vols = sliced
+        complete_dt = _prev_15m_dt(bar_dt)
     else:
-        # 回测：信号评估用完整序列
-        highs_s, closes_s, vols_s = highs_d, closes_d, vols_d
-        closes_ws = closes_w
-        sig_day_daily = day
-        sig_day_weekly = day
+        complete_dt = bar_dt
+    complete_tag = _bar_tag(complete_dt)
+    sig_hhmm = _bar_hhmm(complete_dt)
+    sig_day = complete_dt.strftime("%Y%m%d") if complete_dt else day
+    end_sig = complete_dt.strftime("%Y%m%d%H%M%S") if complete_dt else None
 
-    price = float(closes_s[-1])
-    high_px = float(highs_s[-1])
+    if len(closes) < max(int(MA_SLOW), 80):
+        _diag_once("m15_short", "n=", len(closes))
+        return
+
+    ohlcv_h = _get_ohlcv_1h(C, A.stock, end=end_sig)
+    if ohlcv_h is None:
+        _live_heartbeat("ohlcv_1h_none")
+        return
+    _oh, _hh, _lh, closes_h, _vh = ohlcv_h
+    if drop and closes_h is not None and len(closes_h) >= 2:
+        closes_h = list(closes_h[:-1])
+    if closes_h is None or len(closes_h) < int(H_MA_SLOW) + 2:
+        _diag_once("h1_short", "n=", 0 if not closes_h else len(closes_h))
+        return
+
+    idx = _get_ohlcv_index_15m(C, end=end_sig)
+    idx_block = False
+    idx_why = ""
+    idx_detail = {}
+    if idx is None:
+        idx_block = True
+        idx_why = "index_na_skip"
+    else:
+        io, _ih, _il, ic, iv = idx
+        if drop and ic is not None and len(ic) >= 2:
+            io, ic, iv = io[:-1], ic[:-1], iv[:-1]
+        idx_block, idx_why, idx_detail = _index_dump(io, ic, iv)
+
+    price = float(closes[-1])
+    high_px = float(highs[-1])
     if bt:
-        _bt_recover_position(now=now, last=float(closes_d[-1]))
+        _bt_recover_position(now=now, last=price)
 
-    weekly_bull, weekly_bear, w_detail = _eval_weekly(closes_ws)
-    # 清仓二次确认只在 bt / confirm / 开盘兜底累计；盘中 exec 不改 streak
-    track_bear = (not live_cc) or (phase == "confirm") or bool(need_fallback)
-    force_empty, w_bear_n = _update_w_bear_streak(
-        weekly_bear, sig_day_weekly, track=track_bear
+    h1_ok, h_detail = _h1_ok(closes_h)
+    buy_ok, buy_reasons, b_detail = _eval_buy(
+        opens, highs, lows, closes, vols, sig_hhmm, h1_ok, idx_block, idx_why
     )
-    w_bias_block, w_bias = _weekly_bias_guard(w_detail)
-    w_slope_block, _w_bias_low = _weekly_low_slope_guard(w_detail)
-    buy_ok, buy_reasons, b_detail = _eval_daily_buy(closes_s, vols_s)
-    if weekly_bear:
-        buy_ok = False
-        buy_reasons = ["weekly_bear"] + [
-            r for r in buy_reasons if r not in ("weekly_bear",)
-        ]
-    elif w_bias_block:
-        buy_ok = False
-        buy_reasons = ["w_bias_skip"] + [
-            r for r in buy_reasons if r not in ("w_bias_skip",)
-        ]
-    elif w_slope_block:
-        buy_ok = False
-        buy_reasons = ["w_slope_skip"] + [
-            r for r in buy_reasons if r not in ("w_slope_skip",)
-        ]
-    sell_ok = False
-    sell_reasons = []
+    ma20_arr = _sma(closes, MA_FAST)
 
     holding = _has_position() or (bt and _bt_held_vol() >= 100)
     cost = _pos_cost_price()
     if not holding:
         if (
             getattr(A, "hold_peak", None) is not None
+            or getattr(A, "hold_close_peak", None) is not None
             or int(getattr(A, "hold_bars", 0) or 0)
-            or getattr(A, "time_force_grace_until", None) is not None
+            or float(getattr(A, "hold_max_ret", 0) or 0)
         ):
             _clear_hold_meta()
     else:
-        _bump_hold_bars(day)
-        if _update_hold_peak(high_px, cost):
+        _bump_hold_bars(complete_tag)
+        if _update_peaks(high_px, price, cost):
             _save_state()
 
-    stop_hit = False
-    if holding and cost > 0 and price <= cost * (1.0 - float(STOP_LOSS)):
-        stop_hit = True
-        sell_reasons = list(sell_reasons) + ["stop_loss"]
-        sell_ok = True
-
-    trail_hit = False
-    if holding and (not stop_hit) and _trail_stop_hit(price, cost):
-        trail_hit = True
-        sell_reasons = list(sell_reasons) + ["trail_stop"]
-        sell_ok = True
-
-    ret_pct = None
-    if holding and cost > 0:
-        ret_pct = (price - cost) / cost
-
-    time_force_hit = False
-    grace_before = getattr(A, "time_force_grace_until", None)
-    if holding and (not stop_hit) and (not trail_hit) and _time_force_hit(
-        price, closes_s, getattr(A, "hold_bars", 0)
-    ):
-        time_force_hit = True
-        sell_reasons = list(sell_reasons) + ["time_force"]
-        sell_ok = True
-    elif (
-        holding
-        and grace_before is None
-        and getattr(A, "time_force_grace_until", None) is not None
-    ):
-        _save_state()
+    sell_ok, sell_reasons = False, []
+    if holding:
+        sell_ok, sell_reasons = _eval_sell(
+            price,
+            cost,
+            getattr(A, "hold_close_peak", None),
+            closes,
+            ma20_arr,
+            getattr(A, "hold_bars", 0),
+            sig_hhmm,
+            getattr(A, "hold_max_ret", 0),
+            bool(b_detail.get("trend_ok")),
+        )
 
     skip_codes = (
-        "chase_skip",
-        "w_bias_skip",
-        "w_slope_skip",
-        "vol_dry_skip",
-        "weekly_bear",
+        "time_skip",
+        "vol_skip",
+        "h1_skip",
+        "trend_skip",
+        "index_dump_skip",
+        "index_na_skip",
+        "touch_skip",
+        "break_skip",
+        "pattern_skip",
+        "ma_na",
+        "short",
     )
     real_buys = [r for r in buy_reasons if r not in skip_codes]
-    buy_sig = bool(
-        (not weekly_bear)
-        and (not w_bias_block)
-        and (not w_slope_block)
-        and buy_ok
-        and real_buys
-    )
-    vol_dry_block = "vol_dry_skip" in buy_reasons
+    buy_sig = bool(real_buys)
 
     pe_now = bool(getattr(A, "pending_entry", None))
     px_now = bool(getattr(A, "pending_exit", None))
-    # 信号上升沿强制打；电平持续为真时走 idle 节流（避免 confirm 窗刷屏）
-    force_bar_log = _bar_signal_rising_edge(buy_sig, sell_ok, force_empty)
-    status_idle = (bool(holding) or pe_now or px_now) and (not force_bar_log)
-    if _should_emit_bar_status(C, now, force_bar_log, status_idle):
-        A.ready_logged = True
-        if not getattr(A, "is_backtest", False):
+    ret_pct = None
+    if holding and cost > 0:
+        ret_pct = (price - cost) / cost
+    if _should_log_bar(C, now, bool(buy_sig or sell_ok)):
+        if not bt:
             A._bar_status_at = now
         print(
             "%s" % STRATEGY_NAME,
             day,
-            hhmm,
-            "n1d=%d n1w=%d close=%.4f sig_d=%s sig_w=%s phase=%s prev_d=%s prev_w=%s "
-            "w_bull=%s w_bear=%s w_bn=%s/%s w_ma5=%s w_ma30=%s w_hist=%s "
-            "buy=%s buyR=%s sell=%s sellR=%s "
-            "hold=%s ret=%s pe=%s px=%s bt_held=%s avail=%s"
+            sig_hhmm,
+            "n15=%d n1h=%d close=%.4f drop=%s "
+            "h1=%s buy=%s buyR=%s sell=%s sellR=%s hold=%s ret=%s pe=%s px=%s"
             % (
-                len(closes_s),
-                len(closes_ws),
+                len(closes),
+                len(closes_h),
                 price,
-                sig_day_daily,
-                sig_day_weekly,
-                phase,
-                prev_d,
-                prev_w,
-                weekly_bull,
-                weekly_bear,
-                w_bear_n,
-                _w_bear_confirm_need(),
-                None if w_detail.get("ma5") is None else round(w_detail["ma5"], 4),
-                None if w_detail.get("ma30") is None else round(w_detail["ma30"], 4),
-                None if w_detail.get("hist") is None else round(w_detail["hist"], 4),
+                drop,
+                h1_ok,
                 buy_sig,
                 ",".join(buy_reasons) if buy_reasons else "-",
-                sell_ok or force_empty,
-                ",".join((["weekly_bear"] if force_empty else []) + sell_reasons) or "-",
+                sell_ok,
+                ",".join(sell_reasons) if sell_reasons else "-",
                 holding,
                 None if ret_pct is None else ("%.2f%%" % (ret_pct * 100.0)),
                 pe_now,
                 px_now,
-                _bt_held_vol() if bt else "-",
-                _bt_available_vol() if bt else "-",
             ),
         )
         _bar_log(
             day=day,
-            hhmm=hhmm,
-            n1d=len(closes_s),
-            n1w=len(closes_ws),
+            hhmm=sig_hhmm,
+            n15=len(closes),
+            n1h=len(closes_h),
             close=round(price, 6),
-            sig_d=sig_day_daily,
-            sig_w=sig_day_weekly,
-            phase=phase,
-            prev_d=prev_d,
-            prev_w=prev_w,
-            w_bull=weekly_bull,
-            w_bear=weekly_bear,
-            w_bn=w_bear_n,
-            w_bn_need=_w_bear_confirm_need(),
-            w_ma5=None if w_detail.get("ma5") is None else round(w_detail["ma5"], 4),
-            w_ma30=None if w_detail.get("ma30") is None else round(w_detail["ma30"], 4),
-            w_hist=None if w_detail.get("hist") is None else round(w_detail["hist"], 4),
+            drop=drop,
+            h1=h1_ok,
             buy=buy_sig,
             buyR=",".join(buy_reasons) if buy_reasons else "-",
-            sell=bool(sell_ok or force_empty),
-            sellR=",".join((["weekly_bear"] if force_empty else []) + sell_reasons) or "-",
+            sell=sell_ok,
+            sellR=",".join(sell_reasons) if sell_reasons else "-",
             hold=holding,
             ret=None if ret_pct is None else round(ret_pct * 100.0, 4),
             pe=pe_now,
             px=px_now,
+            idx=idx_why or "-",
+            ma20=None if b_detail.get("ma20") is None else round(b_detail["ma20"], 4),
+            h_ma20=None if h_detail.get("h_ma20") is None else round(h_detail["h_ma20"], 4),
         )
 
-    # ---- 先执行挂起的卖/买（仅开盘窗；收盘确认不按开盘价成交）----
-    can_exec_pending = (not live_cc) or _in_pending_exec_window(now_s)
-    pe_exit = getattr(A, "pending_exit", None)
-    if holding and isinstance(pe_exit, dict):
-        if _pending_ready(pe_exit, day, tag, "day"):
-            if not can_exec_pending:
-                _log_pending_defer_once(
-                    "exit", day, now_s, pe_exit.get("signal_day")
-                )
-            else:
-                reason = str(pe_exit.get("reason", "SELL") or "SELL")
-                reasons = pe_exit.get("reasons") or [reason]
-                print(
-                    "%s SELL by signal=%s label=%s all=%s signal_day=%s @open=%.4f"
-                    % (
-                        STRATEGY_NAME,
-                        reason,
-                        _reason_label(reason, "sell"),
-                        _format_reasons(reasons, "sell"),
-                        pe_exit.get("signal_day"),
-                        open_px,
-                    )
-                )
-                _event_log(
-                    "sell_by_signal",
-                    signal=reason,
-                    label=_reason_label(reason, "sell"),
-                    all_reasons=_format_reasons(reasons, "sell"),
-                    signal_day=pe_exit.get("signal_day"),
-                    open=open_px,
-                )
-                ok = _order_sell(C, reason, open_px, now)
-                if ok:
-                    _on_signal_order_ok("sell")
-                else:
-                    print(
-                        "%s pending_exit keep after sell fail/skip signal=%s"
-                        % (STRATEGY_NAME, reason)
-                    )
-                    _event_log(
-                        "pending_exit_keep_after_fail",
-                        sell_reason=reason,
-                        signal_day=pe_exit.get("signal_day"),
-                    )
-                return
-
     pe_entry = getattr(A, "pending_entry", None)
-    if (
-        (not holding)
-        and isinstance(pe_entry, dict)
-        and ("BUY" not in getattr(A, "acted", set()))
-        and _pending_ready(pe_entry, day, tag, "day")
-    ):
-        # 撤单校验用当 bar 周线（含未收盘周根）与日线过滤；与 confirm/bt 一致
-        if weekly_bear or w_bias_block or w_slope_block or vol_dry_block:
+    if isinstance(pe_entry, dict):
+        sig_d = str(pe_entry.get("signal_day", "") or "")
+        if sig_d and sig_d < day:
             A.pending_entry = None
             _save_state()
-            if weekly_bear:
-                why = "weekly_bear"
-            elif w_bias_block:
-                why = "w_bias_skip"
-            elif w_slope_block:
-                why = "w_slope_skip"
-            else:
-                why = "vol_dry_skip"
-            print("%s pending_entry cancel %s" % (STRATEGY_NAME, why))
-            _event_log(
-                "pending_entry_cancel",
-                reason=why,
-                signal_day=pe_entry.get("signal_day"),
-            )
-            return
-        if not can_exec_pending:
-            _log_pending_defer_once(
-                "entry", day, now_s, pe_entry.get("signal_day")
-            )
-        else:
-            reasons = pe_entry.get("reasons") or []
-            primary = reasons[0] if reasons else "entry"
-            print(
-                "%s BUY by signal=%s label=%s all=%s signal_day=%s @open=%.4f"
-                % (
-                    STRATEGY_NAME,
-                    primary,
-                    _reason_label(primary, "buy"),
-                    _format_reasons(reasons, "buy"),
-                    pe_entry.get("signal_day"),
-                    open_px,
-                )
-            )
-            _event_log(
-                "buy_by_signal",
-                signal=primary,
-                label=_reason_label(primary, "buy"),
-                all_reasons=_format_reasons(reasons, "buy"),
-                signal_day=pe_entry.get("signal_day"),
-                open=open_px,
-            )
-            budget = _buy_budget(cash)
-            ok = _order_buy(C, open_px, now, budget)
-            if ok:
-                _on_signal_order_ok("buy", px=open_px, day=day)
-            else:
-                print(
-                    "%s pending_entry keep after buy fail/skip signal=%s"
-                    % (STRATEGY_NAME, primary)
-                )
-                _event_log(
-                    "pending_entry_keep_after_fail",
-                    signal=primary,
-                    signal_day=pe_entry.get("signal_day"),
-                )
-            return
+            print("%s pending_entry cancel entry_expire signal_day=%s" % (STRATEGY_NAME, sig_d))
+            _event_log("pending_entry_cancel", reason="entry_expire", signal_day=sig_d)
+            pe_entry = None
 
-    # ---- 新信号：回测当根；实盘仅收盘确认或开盘兜底 ----
-    allow_new = True
-    is_confirm = live_cc and phase == "confirm"
-    if live_cc:
-        if is_confirm:
-            if getattr(A, "_confirmed_eval_day", "") == day:
-                allow_new = False
-        elif need_fallback:
-            allow_new = True
+    pe_exit = getattr(A, "pending_exit", None)
+    if holding and isinstance(pe_exit, dict) and _pending_ready(pe_exit, day, exec_tag):
+        reason = str(pe_exit.get("reason", "SELL") or "SELL")
+        reasons = pe_exit.get("reasons") or [reason]
+        print(
+            "%s SELL by signal=%s label=%s all=%s signal_day=%s signal_tag=%s @open=%.4f"
+            % (
+                STRATEGY_NAME,
+                reason,
+                _reason_label(reason, "sell"),
+                _format_reasons(reasons, "sell"),
+                pe_exit.get("signal_day"),
+                pe_exit.get("signal_tag"),
+                exec_open,
+            )
+        )
+        _event_log(
+            "sell_by_signal",
+            signal=reason,
+            signal_tag=pe_exit.get("signal_tag"),
+            open=exec_open,
+        )
+        ok = _order_sell(C, reason, exec_open, now)
+        if ok:
+            _on_signal_order_ok("sell")
         else:
-            allow_new = False
-    if not allow_new:
+            print("%s pending_exit keep after sell fail/skip signal=%s" % (STRATEGY_NAME, reason))
+            _event_log("pending_exit_keep_after_fail", sell_reason=reason)
+        return
+
+    pe_entry = getattr(A, "pending_entry", None)
+    exec_hhmm = _bar_hhmm(bar_dt)
+    pe_is_add = isinstance(pe_entry, dict) and bool(pe_entry.get("add"))
+    if (
+        ((not holding) or pe_is_add)
+        and isinstance(pe_entry, dict)
+        and _pending_ready(pe_entry, day, exec_tag)
+        and _entry_fill_banned(exec_hhmm)
+    ):
+        A.pending_entry = None
+        _save_state()
+        print(
+            "%s pending_entry cancel entry_late_skip hhmm=%s signal_day=%s"
+            % (STRATEGY_NAME, exec_hhmm, pe_entry.get("signal_day"))
+        )
+        _event_log(
+            "pending_entry_cancel",
+            reason="entry_late_skip",
+            hhmm=exec_hhmm,
+            signal_day=pe_entry.get("signal_day"),
+        )
+        return
+
+    pe_entry = getattr(A, "pending_entry", None)
+    pe_is_add = isinstance(pe_entry, dict) and bool(pe_entry.get("add"))
+    if (
+        ((not holding) or pe_is_add)
+        and isinstance(pe_entry, dict)
+        and _pending_ready(pe_entry, day, exec_tag)
+    ):
+        if pe_is_add and not holding:
+            A.pending_entry = None
+            _save_state()
+            print("%s pending_entry cancel add_no_pos" % STRATEGY_NAME)
+            _event_log("pending_entry_cancel", reason="add_no_pos")
+            return
+        reasons = pe_entry.get("reasons") or []
+        primary = reasons[0] if reasons else "entry"
+        kind = "add" if pe_is_add else "buy"
+        print(
+            "%s %s by signal=%s label=%s all=%s signal_day=%s signal_tag=%s @open=%.4f"
+            % (
+                STRATEGY_NAME,
+                "BUY add" if pe_is_add else "BUY",
+                primary,
+                _reason_label(primary, "buy"),
+                _format_reasons(reasons, "buy"),
+                pe_entry.get("signal_day"),
+                pe_entry.get("signal_tag"),
+                exec_open,
+            )
+        )
+        _event_log(
+            "buy_by_signal" if not pe_is_add else "buy_add_by_signal",
+            signal=primary,
+            signal_tag=pe_entry.get("signal_tag"),
+            open=exec_open,
+            add=pe_is_add,
+        )
+        budget = _buy_budget(cash)
+        ok = _order_buy(C, exec_open, now, budget, add=pe_is_add)
+        if ok:
+            _on_signal_order_ok("buy", px=exec_open, day=day, add=pe_is_add)
+        else:
+            print(
+                "%s pending_entry keep after %s fail/skip signal=%s"
+                % (STRATEGY_NAME, kind, primary)
+            )
+            _event_log("pending_entry_keep_after_fail", signal=primary, add=pe_is_add)
+        return
+
+    if str(getattr(A, "_eval_bar_tag", "") or "") == complete_tag:
         return
 
     if holding:
-        cur_ex = getattr(A, "pending_exit", None)
-        if force_empty or sell_ok or stop_hit or trail_hit or time_force_hit:
-            if isinstance(cur_ex, dict):
-                if live_cc:
-                    _mark_signal_eval_done(day, is_confirm)
+        if sell_ok:
+            if isinstance(getattr(A, "pending_exit", None), dict):
+                _mark_eval(complete_tag)
                 return
-            if force_empty:
-                reason = "weekly_bear"
-            elif stop_hit:
-                reason = "stop_loss"
-            elif trail_hit:
-                reason = "trail_stop"
-            elif time_force_hit:
-                reason = "time_force"
-            else:
-                reason = sell_reasons[0] if sell_reasons else "SELL"
-            reasons = (["weekly_bear"] if force_empty else []) + list(sell_reasons)
-            seen = set()
-            uniq = []
-            for r in reasons:
-                if r not in seen:
-                    seen.add(r)
-                    uniq.append(r)
-            # 周线清仓用 sig_w；日线卖点用 sig_d
-            exit_sig_day = (
-                sig_day_weekly
-                if (force_empty or reason == "weekly_bear")
-                else sig_day_daily
-            )
+            reason = sell_reasons[0] if sell_reasons else "SELL"
             A.pending_exit = {
-                "mode": "day",
                 "reason": reason,
-                "signal_day": exit_sig_day,
-                "signal_tag": tag,
+                "signal_day": sig_day,
+                "signal_tag": complete_tag,
                 "close": price,
-                "reasons": uniq,
+                "reasons": list(sell_reasons),
             }
             A.pending_entry = None
-            if live_cc:
-                _mark_signal_eval_done(day, is_confirm)
-            else:
-                _save_state()
+            _mark_eval(complete_tag)
             print(
-                "%s pending_exit set signal=%s label=%s all=%s day=%s close=%.4f phase=%s"
+                "%s pending_exit set signal=%s label=%s all=%s tag=%s close=%.4f"
                 % (
                     STRATEGY_NAME,
                     reason,
                     _reason_label(reason, "sell"),
-                    _format_reasons(uniq, "sell"),
-                    exit_sig_day,
+                    _format_reasons(sell_reasons, "sell"),
+                    complete_tag,
                     price,
-                    phase,
                 )
             )
             _event_log(
                 "pending_exit_set",
                 signal=reason,
-                label=_reason_label(reason, "sell"),
-                all_reasons=_format_reasons(uniq, "sell"),
-                signal_day=exit_sig_day,
+                signal_tag=complete_tag,
                 close=price,
-                phase=phase,
             )
-        elif live_cc:
-            _mark_signal_eval_done(day, is_confirm)
+        elif buy_sig and _scale_ready():
+            if isinstance(getattr(A, "pending_entry", None), dict):
+                _mark_eval(complete_tag)
+                return
+            A.pending_entry = {
+                "signal_day": sig_day,
+                "signal_tag": complete_tag,
+                "close": price,
+                "reasons": list(real_buys),
+                "add": True,
+            }
+            A.pending_exit = None
+            _mark_eval(complete_tag)
+            primary = real_buys[0] if real_buys else "entry"
+            print(
+                "%s pending_entry set add signal=%s label=%s all=%s tag=%s close=%.4f lots=%s"
+                % (
+                    STRATEGY_NAME,
+                    primary,
+                    _reason_label(primary, "buy"),
+                    _format_reasons(real_buys, "buy"),
+                    complete_tag,
+                    price,
+                    _pos_lots(),
+                )
+            )
+            _event_log(
+                "pending_entry_set",
+                signal=primary,
+                signal_tag=complete_tag,
+                close=price,
+                add=True,
+            )
+        else:
+            _mark_eval(complete_tag)
         return
 
-    if buy_sig and ("BUY" not in getattr(A, "acted", set())):
+    if buy_sig:
         if isinstance(getattr(A, "pending_entry", None), dict):
-            if live_cc:
-                _mark_signal_eval_done(day, is_confirm)
+            _mark_eval(complete_tag)
             return
         A.pending_entry = {
-            "signal_day": sig_day_daily,
-            "signal_tag": tag,
+            "signal_day": sig_day,
+            "signal_tag": complete_tag,
             "close": price,
             "reasons": list(real_buys),
         }
         A.pending_exit = None
-        if live_cc:
-            _mark_signal_eval_done(day, is_confirm)
-        else:
-            _save_state()
+        _mark_eval(complete_tag)
         primary = real_buys[0] if real_buys else "entry"
         print(
-            "%s pending_entry set signal=%s label=%s all=%s day=%s close=%.4f phase=%s"
+            "%s pending_entry set signal=%s label=%s all=%s tag=%s close=%.4f"
             % (
                 STRATEGY_NAME,
                 primary,
                 _reason_label(primary, "buy"),
                 _format_reasons(real_buys, "buy"),
-                sig_day_daily,
+                complete_tag,
                 price,
-                phase,
             )
         )
         _event_log(
             "pending_entry_set",
             signal=primary,
-            label=_reason_label(primary, "buy"),
-            all_reasons=_format_reasons(real_buys, "buy"),
-            signal_day=sig_day_daily,
+            signal_tag=complete_tag,
             close=price,
-            phase=phase,
         )
-    elif live_cc:
-        _mark_signal_eval_done(day, is_confirm)
+    else:
+        _mark_eval(complete_tag)
 
-# === hlband/runtime.py ===
+# === ma15/runtime.py ===
 def _as_bool(val):
     if isinstance(val, bool):
         return val
@@ -3139,7 +2835,7 @@ def _apply_panel():
     g = globals()
     names = dict(g)
     try:
-        fr = sys._getframe(1)
+        fr = __import__("sys")._getframe(1)
         for _ in range(3):
             if fr is None:
                 break
@@ -3190,7 +2886,7 @@ def init(C):
 
 def _init_impl(C):
     A.stock = C.stockcode + "." + C.market
-    A.period = _resolve_period(C, default="1d")
+    A.period = _resolve_period(C, default="15m")
     if "account" in globals() and account:
         A.acct = str(account)
     elif hasattr(C, "accountid") and C.accountid:
@@ -3216,14 +2912,16 @@ def _init_impl(C):
     A._diag = set()
 
     do_dl = DOWNLOAD_HIST_BACKTEST if A.is_backtest else DOWNLOAD_HIST_LIVE
+    idx = str(globals().get("INDEX_CODE") or "000001.SH")
     if do_dl:
         try:
             _download_hist(A.stock, A.period)
-            _download_hist(A.stock, "1w")
+            _download_hist(A.stock, "1h")
+            _download_hist(idx, "15m")
         except Exception as e:
             print("%s download_hist abort-safe" % STRATEGY_NAME, e)
     else:
-        print("%s skip download_history (live)" % STRATEGY_NAME, A.period, "+1w")
+        print("%s skip download_history (live)" % STRATEGY_NAME, A.period, "+1h +index")
 
     if A.is_backtest:
         barpos = 0
@@ -3240,13 +2938,12 @@ def _init_impl(C):
             A.pending_entry = None
             A.pending_exit = None
             A.hold_peak = None
+            A.hold_close_peak = None
+            A.hold_max_ret = 0.0
             A.hold_bars = 0
-            A._hold_count_day = ""
-            A.time_force_grace_until = None
-            A._confirmed_eval_day = ""
-            A._fallback_done_day = ""
-            A._w_bear_streak = 0
-            A._w_bear_last_day = ""
+            A._hold_count_bar = ""
+            A._eval_bar_tag = ""
+            A.stall_cool_day = ""
             A.bt_held = 0
             A.bt_locked = 0
             A.bt_lock_day = ""
@@ -3267,20 +2964,18 @@ def _init_impl(C):
                 A.pending_exit = None
             if not hasattr(A, "hold_peak"):
                 A.hold_peak = None
+            if not hasattr(A, "hold_close_peak"):
+                A.hold_close_peak = None
+            if not hasattr(A, "hold_max_ret"):
+                A.hold_max_ret = 0.0
             if not hasattr(A, "hold_bars"):
                 A.hold_bars = 0
-            if not hasattr(A, "_hold_count_day"):
-                A._hold_count_day = ""
-            if not hasattr(A, "time_force_grace_until"):
-                A.time_force_grace_until = None
-            if not hasattr(A, "_confirmed_eval_day"):
-                A._confirmed_eval_day = ""
-            if not hasattr(A, "_fallback_done_day"):
-                A._fallback_done_day = ""
-            if not hasattr(A, "_w_bear_streak"):
-                A._w_bear_streak = 0
-            if not hasattr(A, "_w_bear_last_day"):
-                A._w_bear_last_day = ""
+            if not hasattr(A, "_hold_count_bar"):
+                A._hold_count_bar = ""
+            if not hasattr(A, "_eval_bar_tag"):
+                A._eval_bar_tag = ""
+            if not hasattr(A, "stall_cool_day"):
+                A.stall_cool_day = ""
             _bt_recover_position()
             print(
                 "%s backtest re-init preserve barpos=" % STRATEGY_NAME,
@@ -3301,20 +2996,18 @@ def _init_impl(C):
             A.pending_exit = None
         if not hasattr(A, "hold_peak"):
             A.hold_peak = None
+        if not hasattr(A, "hold_close_peak"):
+            A.hold_close_peak = None
+        if not hasattr(A, "hold_max_ret"):
+            A.hold_max_ret = 0.0
         if not hasattr(A, "hold_bars"):
             A.hold_bars = 0
-        if not hasattr(A, "_hold_count_day"):
-            A._hold_count_day = ""
-        if not hasattr(A, "time_force_grace_until"):
-            A.time_force_grace_until = None
-        if not hasattr(A, "_confirmed_eval_day"):
-            A._confirmed_eval_day = ""
-        if not hasattr(A, "_fallback_done_day"):
-            A._fallback_done_day = ""
-        if not hasattr(A, "_w_bear_streak"):
-            A._w_bear_streak = 0
-        if not hasattr(A, "_w_bear_last_day"):
-            A._w_bear_last_day = ""
+        if not hasattr(A, "_hold_count_bar"):
+            A._hold_count_bar = ""
+        if not hasattr(A, "_eval_bar_tag"):
+            A._eval_bar_tag = ""
+        if not hasattr(A, "stall_cool_day"):
+            A.stall_cool_day = ""
 
     try:
         C.set_universe([A.stock])
@@ -3332,16 +3025,26 @@ def _init_impl(C):
         A.is_backtest,
         "DRY_RUN=",
         DRY_RUN,
+        "ALLOW_T0=",
+        ALLOW_T0,
         "budget=",
         _trade_budget_cap(),
-        "wMA=",
-        "%d/%d/%d" % (W_MA_FAST, W_MA_MID, W_MA_LIFE),
         "dMA=",
-        "%d/%d" % (D_MA_MID, D_MA_SLOW),
-        "stop=",
-        STOP_LOSS,
-        "chase<",
-        CHASE_MAX_PCT,
+        "%d/%d" % (MA_FAST, MA_SLOW),
+        "hMA=",
+        "%d/%d" % (H_MA_FAST, H_MA_SLOW),
+        "stop_ma=",
+        STOP_MA_PCT,
+        "hard_tp=",
+        TAKE_PROFIT_HARD,
+        "take=",
+        TAKE_PROFIT,
+        "giveback=",
+        GIVEBACK,
+        "scale=",
+        SCALE_ENABLE,
+        "scale_reset_peak=",
+        SCALE_RESET_PEAK,
     )
     _event_log(
         "init",
@@ -3350,6 +3053,7 @@ def _init_impl(C):
         period=A.period,
         backtest=A.is_backtest,
         dry_run=DRY_RUN,
+        allow_t0=ALLOW_T0,
         budget=_trade_budget_cap(),
         log_dir=str(globals().get("LOG_DIR") or ""),
     )

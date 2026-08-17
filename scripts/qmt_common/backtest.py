@@ -1,7 +1,12 @@
 # === qmt_common/backtest.py ===
 # 作用: 回测影子持仓与 T+1 锁定
-# 主要符号: _bt_held_*, _bt_locked_*, _bt_roll_t1
+# 主要符号: _bt_held_*, _bt_locked_*, _bt_roll_t1, _allow_t0
 # 说明: 仓位恢复（_bt_recover_*）由策略侧实现
+# 策略可设 ALLOW_T0=True（ETF 等当日可卖）；默认 False 保持 T+1
+def _allow_t0():
+    return bool(globals().get("ALLOW_T0", False))
+
+
 def _bt_held_vol():
     return max(0, int(getattr(A, "bt_held", 0) or 0))
 
@@ -11,7 +16,9 @@ def _bt_locked_vol():
 
 
 def _bt_available_vol():
-    """回测 T+1: 非当日买入的可卖股数（对应 QMT 可卖）。"""
+    """回测可卖：T+1 为 held-locked；ALLOW_T0 时为 held。"""
+    if _allow_t0():
+        return _bt_held_vol()
     return max(0, _bt_held_vol() - _bt_locked_vol())
 
 
@@ -35,6 +42,8 @@ def _bt_held_add(vol, buy_day=None):
         return
     vol = max(0, int(vol))
     A.bt_held = _bt_held_vol() + vol
+    if _allow_t0():
+        return
     if buy_day:
         _bt_roll_t1(str(buy_day)[:8])
         A.bt_locked = _bt_locked_vol() + vol
