@@ -18,6 +18,8 @@
             <item bind="panel_stop_loss" name="卖出 硬止损" note="收盘相对成本回撤达到此比例清仓，0.08=8%" value="0.08" type="intput"/>
             <item bind="panel_time_force_bars" name="卖出 时间成本日数" note="持仓超过此日数后才启用智能时间卖出" value="30" type="intput"/>
             <item bind="panel_time_force_grace" name="卖出 豁免观察日" note="站上MA60时再观察的日数" value="5" type="intput"/>
+            <item bind="panel_scale" name="盈利后加仓" note="勾选=浮盈3%后再出现缩量回踩加第二笔；需账户有第二笔资金" value="True" type="checkBox"/>
+            <item bind="panel_scale_lots" name="加仓分笔独立" note="勾选=多仓，每笔自己止盈止损；不勾选=均价合并整仓出" value="True" type="checkBox"/>
         </variable>
     </control>
 </TCStageLayout>

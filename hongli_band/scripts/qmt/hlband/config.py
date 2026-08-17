@@ -83,6 +83,14 @@ W_BEAR_CONFIRM_DAYS = 2
 
 # （另有 weekly_bear：周线空头判定见 _eval_weekly；清仓见上）
 
+# 盈利后加仓：第一笔峰值浮盈 >= SCALE_ARM 后再出现缩量回踩，加第二笔预算
+# SCALE_LOTS=True：每笔独立成本/峰值/止盈；False：均价合并后整仓出
+# weekly_bear 仍一次出清剩余各笔；trail_stop / time_force / stop_loss 按笔
+SCALE_ENABLE = True
+SCALE_MAX = 2
+SCALE_ARM = 0.03
+SCALE_LOTS = True
+
 # 策略交易面板 bind → 模块常量。编辑器/回测无注入时用上面默认值。
 # TRAIL_TIERS、均线周期、路径、账号不在面板。
 PANEL_BINDS = (
@@ -102,6 +110,8 @@ PANEL_BINDS = (
     ("panel_stop_loss", "STOP_LOSS", "float"),
     ("panel_time_force_bars", "TIME_FORCE_BARS", "int"),
     ("panel_time_force_grace", "TIME_FORCE_GRACE_BARS", "int"),
+    ("panel_scale", "SCALE_ENABLE", "bool"),
+    ("panel_scale_lots", "SCALE_LOTS", "bool"),
 )
 
 # ---- 行情与运行 ----
@@ -151,7 +161,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.24"
+STRATEGY_VER = "v1.25"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）

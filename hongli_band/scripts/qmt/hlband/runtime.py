@@ -116,6 +116,7 @@ def _init_impl(C):
             A.hold_bars = 0
             A._hold_count_day = ""
             A.time_force_grace_until = None
+            A.lots = []
             A._confirmed_eval_day = ""
             A._fallback_done_day = ""
             A._w_bear_streak = 0
@@ -146,6 +147,8 @@ def _init_impl(C):
                 A._hold_count_day = ""
             if not hasattr(A, "time_force_grace_until"):
                 A.time_force_grace_until = None
+            if not hasattr(A, "lots") or A.lots is None:
+                A.lots = []
             if not hasattr(A, "_confirmed_eval_day"):
                 A._confirmed_eval_day = ""
             if not hasattr(A, "_fallback_done_day"):
@@ -180,6 +183,8 @@ def _init_impl(C):
             A._hold_count_day = ""
         if not hasattr(A, "time_force_grace_until"):
             A.time_force_grace_until = None
+        if not hasattr(A, "lots") or A.lots is None:
+            A.lots = []
         if not hasattr(A, "_confirmed_eval_day"):
             A._confirmed_eval_day = ""
         if not hasattr(A, "_fallback_done_day"):
@@ -215,6 +220,10 @@ def _init_impl(C):
         STOP_LOSS,
         "chase<",
         CHASE_MAX_PCT,
+        "scale=",
+        SCALE_ENABLE,
+        "scale_lots=",
+        SCALE_LOTS,
     )
     _event_log(
         "init",
@@ -223,6 +232,8 @@ def _init_impl(C):
         period=A.period,
         backtest=A.is_backtest,
         dry_run=DRY_RUN,
+        scale=SCALE_ENABLE,
+        scale_lots=SCALE_LOTS,
         budget=_trade_budget_cap(),
         log_dir=str(globals().get("LOG_DIR") or ""),
     )
