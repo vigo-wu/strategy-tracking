@@ -93,12 +93,16 @@ W_BEAR_CONFIRM_DAYS = 2
 
 # （另有 weekly_bear：周线空头判定见 _eval_weekly；清仓见上）
 
-# 盈利后加仓：第一笔峰值浮盈 >= SCALE_ARM 后再出现缩量回踩，加第二笔预算
+# 盈利后加仓：峰值浮盈 >= SCALE_ARM，且该笔已持仓 >= SCALE_ARM_BARS 日，
+# 再出现缩量回踩才加第二笔。执行日若已触发卖点则取消加仓、让路出场。
+# SCALE_W_HIST_MIN：周线 MACD 柱低于此值不加（过滤深空头里的 3% 冲高）；None 关闭
 # SCALE_LOTS=True：每笔独立成本/峰值/止盈；False：均价合并后整仓出
 # weekly_bear 仍一次出清剩余各笔；trail_stop / time_force / stop_loss 按笔
 SCALE_ENABLE = True
 SCALE_MAX = 2
 SCALE_ARM = 0.03
+SCALE_ARM_BARS = 8
+SCALE_W_HIST_MIN = -0.01
 SCALE_LOTS = True
 
 # 策略交易面板 bind → 模块常量。编辑器/回测无注入时用上面默认值。
@@ -122,6 +126,7 @@ PANEL_BINDS = (
     ("panel_time_force_grace", "TIME_FORCE_GRACE_BARS", "int"),
     ("panel_scale", "SCALE_ENABLE", "bool"),
     ("panel_scale_lots", "SCALE_LOTS", "bool"),
+    ("panel_scale_arm_bars", "SCALE_ARM_BARS", "int"),
 )
 
 # ---- 行情与运行 ----
@@ -171,7 +176,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.25"
+STRATEGY_VER = "v1.26"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
@@ -2769,37 +2774,69 @@ def _mirror_hold_from_lots():
     A.time_force_grace_until = lot.get("time_force_grace_until")
 
 
-def _scale_ready():
-    if not bool(globals().get("SCALE_ENABLE")):
-        return False
-    holding_now = _has_position() or (
-        getattr(A, "is_backtest", False) and _bt_held_vol() >= 100
-    )
-    if not holding_now:
-        return False
-    if _pos_lots() >= int(globals().get("SCALE_MAX") or 1):
-        return False
+def _scale_peak_ret():
     mx = 0.0
+    armed_bars = 0
+    arm = float(globals().get("SCALE_ARM") or 0)
+    if arm <= 0:
+        arm = 0.03
     if _lots_enabled():
         for lot in _ensure_lots():
             try:
-                mx = max(mx, float(lot.get("hold_max_ret") or 0))
+                ret = float(lot.get("hold_max_ret") or 0)
             except Exception:
-                pass
+                ret = 0.0
+            bars = int(lot.get("hold_bars") or 0)
+            if ret > mx:
+                mx = ret
+            if ret >= arm and bars > armed_bars:
+                armed_bars = bars
         if mx <= 0:
             peak = getattr(A, "hold_peak", None)
             cost = _pos_cost_price()
             if peak and cost > 0:
                 mx = (float(peak) - float(cost)) / float(cost)
-    else:
-        peak = getattr(A, "hold_peak", None)
-        cost = _pos_cost_price()
-        if peak and cost > 0:
-            mx = (float(peak) - float(cost)) / float(cost)
+            armed_bars = int(getattr(A, "hold_bars", 0) or 0)
+        return mx, armed_bars
+    peak = getattr(A, "hold_peak", None)
+    cost = _pos_cost_price()
+    if peak and cost > 0:
+        mx = (float(peak) - float(cost)) / float(cost)
+    armed_bars = int(getattr(A, "hold_bars", 0) or 0)
+    return mx, armed_bars
+
+
+def _scale_gate(w_detail=None):
+    """加仓门槛：(ok, why)。why 仅失败时有值。"""
+    if not bool(globals().get("SCALE_ENABLE")):
+        return False, "scale_off"
+    holding_now = _has_position() or (
+        getattr(A, "is_backtest", False) and _bt_held_vol() >= 100
+    )
+    if not holding_now:
+        return False, "scale_no_pos"
+    if _pos_lots() >= int(globals().get("SCALE_MAX") or 1):
+        return False, "scale_max"
     arm = float(globals().get("SCALE_ARM") or 0)
     if arm <= 0:
         arm = 0.03
-    return mx >= arm
+    mx, armed_bars = _scale_peak_ret()
+    if mx < arm:
+        return False, "scale_arm"
+    need_bars = int(globals().get("SCALE_ARM_BARS") or 0)
+    if need_bars > 0 and armed_bars < need_bars:
+        return False, "scale_bars"
+    hist_min = globals().get("SCALE_W_HIST_MIN")
+    if hist_min is not None and w_detail is not None:
+        h = w_detail.get("hist")
+        if h is not None and float(h) < float(hist_min):
+            return False, "scale_w_hist"
+    return True, ""
+
+
+def _scale_ready(w_detail=None):
+    ok, _why = _scale_gate(w_detail)
+    return ok
 
 
 def _eval_lot_sell(price, closes, lot):
@@ -3514,6 +3551,7 @@ def _handle(C):
 
     pe_entry = getattr(A, "pending_entry", None)
     pe_is_add = isinstance(pe_entry, dict) and bool(pe_entry.get("add"))
+    force_eval = False
     if (
         ((not holding) or pe_is_add)
         and isinstance(pe_entry, dict)
@@ -3527,7 +3565,25 @@ def _handle(C):
             print("%s pending_entry cancel add_no_pos" % STRATEGY_NAME)
             _event_log("pending_entry_cancel", reason="add_no_pos")
             return
-        if weekly_bear or w_bias_block or w_slope_block or vol_dry_block:
+        sell_block = bool(
+            pe_is_add
+            and (force_empty or sell_ok or stop_hit or trail_hit or time_force_hit)
+        )
+        scale_ok, scale_why = _scale_gate(w_detail) if pe_is_add else (True, "")
+        if sell_block or (pe_is_add and (not scale_ok)):
+            why = "scale_sell_block" if sell_block else scale_why
+            A.pending_entry = None
+            _save_state()
+            print("%s pending_entry cancel %s" % (STRATEGY_NAME, why))
+            _event_log(
+                "pending_entry_cancel",
+                reason=why,
+                signal_day=pe_entry.get("signal_day"),
+            )
+            # 让路卖点：不 return，本 bar 可挂 pending_exit
+            if sell_block:
+                force_eval = True
+        elif weekly_bear or w_bias_block or w_slope_block or vol_dry_block:
             A.pending_entry = None
             _save_state()
             if weekly_bear:
@@ -3545,7 +3601,7 @@ def _handle(C):
                 signal_day=pe_entry.get("signal_day"),
             )
             return
-        if not can_exec_pending:
+        elif not can_exec_pending:
             _log_pending_defer_once(
                 "entry", day, now_s, pe_entry.get("signal_day")
             )
@@ -3602,7 +3658,7 @@ def _handle(C):
             allow_new = True
         else:
             allow_new = False
-    if not allow_new:
+    if not allow_new and not force_eval:
         return
 
     if holding:
@@ -3676,7 +3732,7 @@ def _handle(C):
                 lot_ids=exit_ids or None,
                 shares=exit_shares or None,
             )
-        elif buy_sig and _scale_ready():
+        elif buy_sig and _scale_ready(w_detail):
             if isinstance(getattr(A, "pending_entry", None), dict):
                 if live_cc:
                     _mark_signal_eval_done(day, is_confirm)
@@ -3987,6 +4043,10 @@ def _init_impl(C):
         SCALE_ENABLE,
         "scale_lots=",
         SCALE_LOTS,
+        "scale_arm=",
+        SCALE_ARM,
+        "scale_arm_bars=",
+        SCALE_ARM_BARS,
     )
     _event_log(
         "init",
@@ -3997,6 +4057,9 @@ def _init_impl(C):
         dry_run=DRY_RUN,
         scale=SCALE_ENABLE,
         scale_lots=SCALE_LOTS,
+        scale_arm=SCALE_ARM,
+        scale_arm_bars=SCALE_ARM_BARS,
+        scale_w_hist_min=SCALE_W_HIST_MIN,
         budget=_trade_budget_cap(),
         log_dir=str(globals().get("LOG_DIR") or ""),
     )

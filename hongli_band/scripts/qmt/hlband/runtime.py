@@ -224,6 +224,10 @@ def _init_impl(C):
         SCALE_ENABLE,
         "scale_lots=",
         SCALE_LOTS,
+        "scale_arm=",
+        SCALE_ARM,
+        "scale_arm_bars=",
+        SCALE_ARM_BARS,
     )
     _event_log(
         "init",
@@ -234,6 +238,9 @@ def _init_impl(C):
         dry_run=DRY_RUN,
         scale=SCALE_ENABLE,
         scale_lots=SCALE_LOTS,
+        scale_arm=SCALE_ARM,
+        scale_arm_bars=SCALE_ARM_BARS,
+        scale_w_hist_min=SCALE_W_HIST_MIN,
         budget=_trade_budget_cap(),
         log_dir=str(globals().get("LOG_DIR") or ""),
     )
