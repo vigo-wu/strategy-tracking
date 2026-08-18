@@ -65,11 +65,15 @@ TRAIL_TIERS = (
     (0.06, 0.10, 0.03, 0.03),
     (0.10, None, 0.04, None),
 )
-# 卖② time_force：智能时间成本（防长期磨人）
-#   持仓 bar 数 > BARS 后：收盘破日线 MA60 → 立即强制平仓；
-#   仍站上 MA60 → 豁免一次，再观察 GRACE_BARS 日，期满仍强制平仓
-TIME_FORCE_BARS = 30
+# 卖② time_force：智能时间成本（防长期磨人，不砍还在趋势里的仓）
+#   BARS = 日线慢均线一半：满此日后才把 MA60 当出场地板，不是最长持仓
+#   收盘破日线 MA60 → 立即强制平仓
+#   仍站上 MA60 且峰值浮盈 < MIN_RET → 豁免一次，再观察 GRACE_BARS 日，期满强平（回收死钱）
+#   仍站上 MA60 且峰值 >= MIN_RET → 不按日历强平，交给 trail / 破 MA60 / 周线空
+#   MIN_RET 对齐阶梯止盈起步档；0 = 关闭让路（回到期满强平）
+TIME_FORCE_BARS = D_MA_SLOW // 2
 TIME_FORCE_GRACE_BARS = 5
+TIME_FORCE_MIN_RET = 0.03
 
 # 兜底风控（优先级高）
 # chase_skip：当日涨幅 (收-昨收)/昨收 >= 此值 → 禁开（防追高）
@@ -114,6 +118,7 @@ PANEL_BINDS = (
     ("panel_stop_loss", "STOP_LOSS", "float"),
     ("panel_time_force_bars", "TIME_FORCE_BARS", "int"),
     ("panel_time_force_grace", "TIME_FORCE_GRACE_BARS", "int"),
+    ("panel_time_force_min_ret", "TIME_FORCE_MIN_RET", "float"),
     ("panel_scale", "SCALE_ENABLE", "bool"),
     ("panel_scale_lots", "SCALE_LOTS", "bool"),
     ("panel_scale_arm_bars", "SCALE_ARM_BARS", "int"),
@@ -166,7 +171,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.26"
+STRATEGY_VER = "v1.29"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）

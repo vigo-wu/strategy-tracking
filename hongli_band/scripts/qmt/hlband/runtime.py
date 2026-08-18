@@ -116,6 +116,7 @@ def _init_impl(C):
             A.hold_bars = 0
             A._hold_count_day = ""
             A.time_force_grace_until = None
+            A.time_force_trend_skip = False
             A.lots = []
             A._confirmed_eval_day = ""
             A._fallback_done_day = ""
@@ -147,6 +148,8 @@ def _init_impl(C):
                 A._hold_count_day = ""
             if not hasattr(A, "time_force_grace_until"):
                 A.time_force_grace_until = None
+            if not hasattr(A, "time_force_trend_skip"):
+                A.time_force_trend_skip = False
             if not hasattr(A, "lots") or A.lots is None:
                 A.lots = []
             if not hasattr(A, "_confirmed_eval_day"):
@@ -183,6 +186,8 @@ def _init_impl(C):
             A._hold_count_day = ""
         if not hasattr(A, "time_force_grace_until"):
             A.time_force_grace_until = None
+        if not hasattr(A, "time_force_trend_skip"):
+            A.time_force_trend_skip = False
         if not hasattr(A, "lots") or A.lots is None:
             A.lots = []
         if not hasattr(A, "_confirmed_eval_day"):
@@ -228,6 +233,10 @@ def _init_impl(C):
         SCALE_ARM,
         "scale_arm_bars=",
         SCALE_ARM_BARS,
+        "time_force_bars=",
+        TIME_FORCE_BARS,
+        "time_force_min_ret=",
+        TIME_FORCE_MIN_RET,
     )
     _event_log(
         "init",
@@ -241,6 +250,8 @@ def _init_impl(C):
         scale_arm=SCALE_ARM,
         scale_arm_bars=SCALE_ARM_BARS,
         scale_w_hist_min=SCALE_W_HIST_MIN,
+        time_force_bars=TIME_FORCE_BARS,
+        time_force_min_ret=TIME_FORCE_MIN_RET,
         budget=_trade_budget_cap(),
         log_dir=str(globals().get("LOG_DIR") or ""),
     )

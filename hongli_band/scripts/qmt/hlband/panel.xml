@@ -16,8 +16,9 @@
             <item bind="panel_vol_dry_ratio" name="买入 无量比例" note="破MA20且量小于均量乘此值则禁开" value="0.60" type="intput"/>
             <item bind="panel_chase_pct" name="买入 追高禁开" note="当日涨幅达到此比例禁开，0.05=5%" value="0.05" type="intput"/>
             <item bind="panel_stop_loss" name="卖出 硬止损" note="收盘相对成本回撤达到此比例清仓，0.08=8%" value="0.08" type="intput"/>
-            <item bind="panel_time_force_bars" name="卖出 时间成本日数" note="持仓超过此日数后才启用智能时间卖出" value="30" type="intput"/>
-            <item bind="panel_time_force_grace" name="卖出 豁免观察日" note="站上MA60时再观察的日数" value="5" type="intput"/>
+            <item bind="panel_time_force_bars" name="卖出 时间成本日数" note="持仓超过此日数后才启用智能时间卖出（默认=日线MA60一半）" value="30" type="intput"/>
+            <item bind="panel_time_force_grace" name="卖出 豁免观察日" note="未走出止盈起步档且站上MA60时再观察的日数" value="5" type="intput"/>
+            <item bind="panel_time_force_min_ret" name="卖出 时间成本峰值门槛" note="峰值浮盈达到此比例则不按日历强平，0.03=3%；0=关闭让路" value="0.03" type="intput"/>
             <item bind="panel_scale" name="盈利后加仓" note="勾选=浮盈够且持仓满最短日后，再缩量回踩加第二笔" value="True" type="checkBox"/>
             <item bind="panel_scale_lots" name="加仓分笔独立" note="勾选=多仓，每笔自己止盈止损；不勾选=均价合并整仓出" value="True" type="checkBox"/>
             <item bind="panel_scale_arm_bars" name="加仓 最短持仓日" note="第一笔持仓满此日数才允许加仓，过滤短线冲高" value="8" type="intput"/>

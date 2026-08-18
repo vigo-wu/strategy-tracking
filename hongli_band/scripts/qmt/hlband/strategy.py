@@ -246,11 +246,19 @@ def _update_hold_peak(high_px, cost):
     if peak is None:
         base = float(cost) if cost and cost > 0 else hi
         A.hold_peak = max(base, hi)
-        return True
-    if hi > float(peak):
+        changed = True
+    elif hi > float(peak):
         A.hold_peak = hi
-        return True
-    return False
+        changed = True
+    else:
+        changed = False
+    if cost and float(cost) > 0:
+        mx = (float(A.hold_peak) - float(cost)) / float(cost)
+        prev = float(getattr(A, "hold_max_ret", 0) or 0)
+        if mx > prev:
+            A.hold_max_ret = mx
+            changed = True
+    return changed
 
 
 def _trail_tier_params(max_profit):
@@ -288,9 +296,61 @@ def _trail_stop_hit(price, cost, peak=None):
     return False
 
 
+def _time_force_min_ret():
+    try:
+        return float(globals().get("TIME_FORCE_MIN_RET") or 0)
+    except Exception:
+        return 0.0
+
+
+def _time_force_peak_ret(lot):
+    if lot is None:
+        mx = float(getattr(A, "hold_max_ret", 0) or 0)
+        peak = getattr(A, "hold_peak", None)
+        cost = _pos_cost_price()
+    else:
+        try:
+            mx = float(lot.get("hold_max_ret") or 0)
+        except Exception:
+            mx = 0.0
+        peak = lot.get("hold_peak")
+        cost = float(lot.get("price") or 0)
+    if peak and cost and float(cost) > 0:
+        mx = max(mx, (float(peak) - float(cost)) / float(cost))
+    return mx
+
+
+def _time_force_already_skip(lot):
+    if lot is None:
+        return bool(getattr(A, "time_force_trend_skip", False))
+    return bool(lot.get("time_force_trend_skip"))
+
+
+def _time_force_mark_skip(lot, peak_ret, hold_bars, m60):
+    if lot is None:
+        A.time_force_trend_skip = True
+        lid = None
+    else:
+        lot["time_force_trend_skip"] = True
+        lid = lot.get("id")
+    print(
+        "%s time_force skip trend peak=%.2f%% ma60=%.4f hold=%s lot=%s"
+        % (STRATEGY_NAME, float(peak_ret) * 100.0, m60, hold_bars, lid)
+    )
+    _event_log(
+        "time_force_skip_trend",
+        peak_ret=peak_ret,
+        ma60=m60,
+        hold_bars=hold_bars,
+        lot_id=lid,
+    )
+    _save_state()
+
+
 def _time_force_hit(price, closes, hold_bars, lot=None):
-    """智能时间成本：持仓 > TIME_FORCE_BARS 后，破日线 MA60 强制平仓；
-    仍站上 MA60 则豁免一次并再观察 TIME_FORCE_GRACE_BARS 日，期满强制平仓。"""
+    """智能时间成本：持仓 > TIME_FORCE_BARS 后，破日线 MA60 强制平仓。
+    仍站上 MA60 时：峰值已达 TIME_FORCE_MIN_RET（阶梯止盈起步档）则不按日历强平；
+    从未武装的死钱仓豁免 GRACE 日后强平。"""
     if hold_bars is None or int(hold_bars) <= int(TIME_FORCE_BARS):
         return False
     ma60_arr = _sma(closes, D_MA_SLOW)
@@ -305,6 +365,14 @@ def _time_force_hit(price, closes, hold_bars, lot=None):
 
     if px < m60:
         return True
+
+    min_ret = _time_force_min_ret()
+    peak_ret = _time_force_peak_ret(lot)
+    already = _time_force_already_skip(lot)
+    if min_ret > 0 and (already or peak_ret >= min_ret):
+        if not already:
+            _time_force_mark_skip(lot, peak_ret, hold_bars, m60)
+        return False
 
     if lot is None:
         grace_until = getattr(A, "time_force_grace_until", None)
@@ -353,6 +421,7 @@ def _lot_from_agg():
         "hold_bars": int(getattr(A, "hold_bars", 0) or 0),
         "hold_count_bar": str(getattr(A, "_hold_count_day", "") or ""),
         "time_force_grace_until": getattr(A, "time_force_grace_until", None),
+        "time_force_trend_skip": bool(getattr(A, "time_force_trend_skip", False)),
     }
 
 
@@ -366,6 +435,7 @@ def _mirror_hold_from_lots():
         A._hold_count_bar = ""
         A._hold_count_day = ""
         A.time_force_grace_until = None
+        A.time_force_trend_skip = False
         return
     lot = lots[0]
     A.hold_peak = lot.get("hold_peak")
@@ -376,6 +446,7 @@ def _mirror_hold_from_lots():
     A._hold_count_bar = tag
     A._hold_count_day = tag
     A.time_force_grace_until = lot.get("time_force_grace_until")
+    A.time_force_trend_skip = bool(lot.get("time_force_trend_skip"))
 
 
 def _scale_peak_ret():
@@ -488,6 +559,7 @@ def _clear_hold_meta():
     A.hold_bars = 0
     A._hold_count_day = ""
     A.time_force_grace_until = None
+    A.time_force_trend_skip = False
 
 
 def _bump_hold_bars(day):
@@ -682,6 +754,7 @@ def _after_signal_buy_filled(px, day, add=False):
         A.hold_bars = 0
         A._hold_count_day = str(day or "")
         A.time_force_grace_until = None
+        A.time_force_trend_skip = False
     _save_state()
 
 
@@ -938,6 +1011,7 @@ def _handle(C):
                 getattr(A, "hold_peak", None) is not None
                 or int(getattr(A, "hold_bars", 0) or 0)
                 or getattr(A, "time_force_grace_until", None) is not None
+                or bool(getattr(A, "time_force_trend_skip", False))
             ):
                 _clear_hold_meta()
         else:
@@ -956,6 +1030,7 @@ def _handle(C):
             getattr(A, "hold_peak", None) is not None
             or int(getattr(A, "hold_bars", 0) or 0)
             or getattr(A, "time_force_grace_until", None) is not None
+            or bool(getattr(A, "time_force_trend_skip", False))
         ):
             _clear_hold_meta()
     else:
@@ -985,6 +1060,7 @@ def _handle(C):
             sell_ok = True
 
         grace_before = getattr(A, "time_force_grace_until", None)
+        skip_before = bool(getattr(A, "time_force_trend_skip", False))
         if holding and (not stop_hit) and (not trail_hit) and _time_force_hit(
             price, closes_s, getattr(A, "hold_bars", 0)
         ):
@@ -993,8 +1069,10 @@ def _handle(C):
             sell_ok = True
         elif (
             holding
-            and grace_before is None
-            and getattr(A, "time_force_grace_until", None) is not None
+            and (
+                (grace_before is None and getattr(A, "time_force_grace_until", None) is not None)
+                or ((not skip_before) and bool(getattr(A, "time_force_trend_skip", False)))
+            )
         ):
             _save_state()
 
