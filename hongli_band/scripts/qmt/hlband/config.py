@@ -87,9 +87,11 @@ W_BEAR_CONFIRM_DAYS = 2
 
 # （另有 weekly_bear：周线空头判定见 _eval_weekly；清仓见上）
 
-# 盈利后加仓：峰值浮盈 >= SCALE_ARM，且该笔已持仓 >= SCALE_ARM_BARS 日，
-# 再出现缩量回踩才加第二笔。执行日若已触发卖点则取消加仓、让路出场。
-# SCALE_W_HIST_MIN：周线 MACD 柱低于此值不加（过滤深空头里的 3% 冲高）；None 关闭
+# 盈利后加仓（顺势推仓，不再用缩量回踩当第二笔买点）：
+#   门槛：峰值浮盈 >= SCALE_ARM，且该笔已持仓 >= SCALE_ARM_BARS 日
+#   触发（任一）：日线收盘确认突破前期平台，或近两周周线 MACD 金叉且柱放大
+#   执行日若已触发卖点则取消加仓、让路出场
+# SCALE_W_HIST_MIN：周线 MACD 柱低于此值不加（过滤深空头里的冲高）；None 关闭
 # SCALE_LOTS=True：每笔独立成本/峰值/止盈；False：均价合并后整仓出
 # weekly_bear 仍一次出清剩余各笔；trail_stop / time_force / stop_loss 按笔
 SCALE_ENABLE = True
@@ -98,6 +100,12 @@ SCALE_ARM = 0.03
 SCALE_ARM_BARS = 8
 SCALE_W_HIST_MIN = -0.01
 SCALE_LOTS = True
+# 日线平台：回看 N 日（不含当日）高低点；振幅 <= 此值视为平台；收盘站上高点且昨收仍在平台内
+SCALE_PLAT_LOOKBACK = 20
+SCALE_PLAT_MAX_RANGE = 0.10          # 0.10 = 平台振幅不超过 10%
+SCALE_PLAT_BREAK_BUF = 0.0           # 收盘超过平台高点的缓冲；0=收盘严格站上
+# 周线 MACD：本周或上周 DIF 上穿 DEA；上周金叉则本周红柱须比上周放大此倍数
+SCALE_W_HIST_EXPAND_RATIO = 1.2
 
 # 策略交易面板 bind → 模块常量。编辑器/回测无注入时用上面默认值。
 # TRAIL_TIERS、均线周期、路径、账号不在面板。
@@ -122,6 +130,9 @@ PANEL_BINDS = (
     ("panel_scale", "SCALE_ENABLE", "bool"),
     ("panel_scale_lots", "SCALE_LOTS", "bool"),
     ("panel_scale_arm_bars", "SCALE_ARM_BARS", "int"),
+    ("panel_scale_plat_n", "SCALE_PLAT_LOOKBACK", "int"),
+    ("panel_scale_plat_range", "SCALE_PLAT_MAX_RANGE", "float"),
+    ("panel_scale_w_expand", "SCALE_W_HIST_EXPAND_RATIO", "float"),
 )
 
 # ---- 行情与运行 ----
@@ -175,7 +186,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.31"
+STRATEGY_VER = "v1.32"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）

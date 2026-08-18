@@ -19,9 +19,12 @@
             <item bind="panel_time_force_bars" name="卖出 时间成本日数" note="持仓超过此日数后才启用智能时间卖出（默认=日线MA60一半）" value="30" type="intput"/>
             <item bind="panel_time_force_grace" name="卖出 豁免观察日" note="未走出止盈起步档且站上MA60时再观察的日数" value="5" type="intput"/>
             <item bind="panel_time_force_min_ret" name="卖出 时间成本峰值门槛" note="峰值浮盈达到此比例则不按日历强平，0.03=3%；0=关闭让路" value="0.03" type="intput"/>
-            <item bind="panel_scale" name="盈利后加仓" note="勾选=浮盈够且持仓满最短日后，再缩量回踩加第二笔" value="True" type="checkBox"/>
+            <item bind="panel_scale" name="盈利后加仓" note="勾选=浮盈够且持仓满最短日后，日线突破平台或周线MACD金叉放大才加第二笔" value="True" type="checkBox"/>
             <item bind="panel_scale_lots" name="加仓分笔独立" note="勾选=多仓，每笔自己止盈止损；不勾选=均价合并整仓出" value="True" type="checkBox"/>
             <item bind="panel_scale_arm_bars" name="加仓 最短持仓日" note="第一笔持仓满此日数才允许加仓，过滤短线冲高" value="8" type="intput"/>
+            <item bind="panel_scale_plat_n" name="加仓 平台回看日" note="日线平台不含当日的回看根数，收盘站上该窗口最高价才算突破" value="20" type="intput"/>
+            <item bind="panel_scale_plat_range" name="加仓 平台最大振幅" note="回看窗口(高-低)/低 不超过此值才算平台，0.10=10%" value="0.10" type="intput"/>
+            <item bind="panel_scale_w_expand" name="加仓 周线柱放大" note="上周金叉时本周红柱须达到上周柱绝对值的此倍数，1.2=放大20%" value="1.2" type="intput"/>
         </variable>
     </control>
 </TCStageLayout>

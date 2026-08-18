@@ -23,6 +23,12 @@ def _cross_down(a_prev, b_prev, a_now, b_now):
     return (a_prev >= b_prev) and (a_now < b_now)
 
 
+def _cross_up(a_prev, b_prev, a_now, b_now):
+    if None in (a_prev, b_prev, a_now, b_now):
+        return False
+    return (a_prev <= b_prev) and (a_now > b_now)
+
+
 def _eval_weekly(closes_w):
     """返回 (bull, bear, detail)。对照表: 多头=5周在上+零轴上红柱; 空头=破30周或零轴下死叉。"""
     detail = {
@@ -55,6 +61,10 @@ def _eval_weekly(closes_w):
     h1 = _last_valid(hist, i - 1)
     d1 = _last_valid(dif, i - 1)
     e1 = _last_valid(dea, i - 1)
+    d2 = _last_valid(dif, i - 2) if i >= 2 else None
+    e2 = _last_valid(dea, i - 2) if i >= 2 else None
+    golden_now = _cross_up(d1, e1, d0, e0)
+    golden_prev = _cross_up(d2, e2, d1, e1) if i >= 2 else False
     slope_weeks = int(globals().get("W_MA30_SLOPE_WEEKS", 2) or 2)
     slope_up_n = False
     if slope_weeks > 0 and i >= slope_weeks:
@@ -74,8 +84,12 @@ def _eval_weekly(closes_w):
             "ma30_slope_up2": slope_up_n,
             "dif": d0,
             "dea": e0,
+            "dif_prev": d1,
+            "dea_prev": e1,
             "hist": h0,
             "hist_prev": h1,
+            "macd_golden_now": golden_now,
+            "macd_golden_prev": golden_prev,
             "close": c,
         }
     )
@@ -514,6 +528,72 @@ def _scale_ready(w_detail=None):
     return ok
 
 
+def _daily_plat_break(closes, highs, lows):
+    """日线收盘确认突破前期平台：回看窗口振幅够窄，今日收盘站上窗口最高价，昨收仍在平台内。"""
+    lookback = int(globals().get("SCALE_PLAT_LOOKBACK") or 20)
+    max_range = float(globals().get("SCALE_PLAT_MAX_RANGE") or 0.10)
+    buf = float(globals().get("SCALE_PLAT_BREAK_BUF") or 0.0)
+    if lookback < 5 or max_range <= 0:
+        return False
+    if closes is None or highs is None or lows is None:
+        return False
+    n = len(closes)
+    if n < lookback + 1 or len(highs) != n or len(lows) != n:
+        return False
+    if n < 2:
+        return False
+    plat = _plat_window(highs, lows, lookback)
+    if plat is None:
+        return False
+    plat_high, plat_low = plat
+    rng = (float(plat_high) - float(plat_low)) / float(plat_low)
+    if rng > max_range:
+        return False
+    hurdle = float(plat_high) * (1.0 + buf)
+    px = float(closes[-1])
+    prev = float(closes[-2])
+    if px <= hurdle:
+        return False
+    if prev > hurdle:
+        return False
+    return True
+
+
+def _weekly_macd_golden_expand(w_detail):
+    """近两周周线 MACD 金叉，且当前红柱比上周放大。"""
+    if not w_detail:
+        return False
+    h0 = w_detail.get("hist")
+    h1 = w_detail.get("hist_prev")
+    if h0 is None or h1 is None:
+        return False
+    hist = float(h0)
+    hist_prev = float(h1)
+    if hist <= 0 or hist <= hist_prev:
+        return False
+    golden_now = bool(w_detail.get("macd_golden_now"))
+    golden_prev = bool(w_detail.get("macd_golden_prev"))
+    if not (golden_now or golden_prev):
+        return False
+    if golden_now and (not golden_prev):
+        return True
+    ratio = float(globals().get("SCALE_W_HIST_EXPAND_RATIO") or 1.0)
+    if ratio <= 1.0:
+        return True
+    base = abs(hist_prev) if abs(hist_prev) > 1e-12 else hist
+    return hist >= base * ratio
+
+
+def _eval_scale_push(closes, highs, lows, w_detail):
+    """加仓触发：日线破平台 或 周线 MACD 金叉柱放大。不含缩量回踩。"""
+    reasons = []
+    if _daily_plat_break(closes, highs, lows):
+        reasons.append("plat_break")
+    if _weekly_macd_golden_expand(w_detail):
+        reasons.append("w_macd_golden")
+    return bool(reasons), reasons
+
+
 def _eval_lot_sell(price, closes, lot):
     reasons = []
     cost = float(lot.get("price") or 0)
@@ -874,6 +954,8 @@ _SELL_LABELS = {
 }
 _BUY_LABELS = {
     "pullback_vol": "买点1-缩量回踩强支撑",
+    "plat_break": "加仓-日线突破前期平台",
+    "w_macd_golden": "加仓-周线MACD金叉柱放大",
     "chase_skip": "追高过滤跳过",
     "w_bias_skip": "周线高位乖离禁开",
     "w_slope_skip": "低位周线MA30未连升禁开",
@@ -1171,7 +1253,7 @@ def _handle(C):
         and (not isinstance(getattr(A, "pending_exit", None), dict))
     )
     if live_cc and phase == "confirm":
-        highs_s, closes_s, vols_s = highs_d, closes_d, vols_d
+        highs_s, lows_s, closes_s, vols_s = highs_d, lows_d, closes_d, vols_d
         closes_ws = closes_w
         sig_day_daily = day
         sig_day_weekly = day
@@ -1182,6 +1264,7 @@ def _handle(C):
         prev_d = True
         prev_w = False
         highs_s = _drop_forming_bar(highs_d)
+        lows_s = _drop_forming_bar(lows_d)
         closes_s = _drop_forming_bar(closes_d)
         vols_s = _drop_forming_bar(vols_d)
         closes_ws = closes_w
@@ -1192,7 +1275,7 @@ def _handle(C):
         sig_day_weekly = day
     else:
         # 回测：信号评估用完整序列
-        highs_s, closes_s, vols_s = highs_d, closes_d, vols_d
+        highs_s, lows_s, closes_s, vols_s = highs_d, lows_d, closes_d, vols_d
         closes_ws = closes_w
         sig_day_daily = day
         sig_day_weekly = day
@@ -1326,11 +1409,23 @@ def _handle(C):
         and real_buys
     )
     vol_dry_block = "vol_dry_skip" in buy_reasons
+    scale_push_ok, scale_push_reasons = _eval_scale_push(
+        closes_s, highs_s, lows_s, w_detail
+    )
+    scale_ok, scale_why = _scale_gate(w_detail)
+    scale_sig = bool(
+        scale_ok
+        and scale_push_ok
+        and (not weekly_bear)
+        and (not w_bias_block)
+        and (not w_slope_block)
+        and (not vol_dry_block)
+    )
 
     pe_now = bool(getattr(A, "pending_entry", None))
     px_now = bool(getattr(A, "pending_exit", None))
     # 信号上升沿强制打；电平持续为真时走 idle 节流（避免 confirm 窗刷屏）
-    force_bar_log = _bar_signal_rising_edge(buy_sig, sell_ok, force_empty)
+    force_bar_log = _bar_signal_rising_edge(buy_sig or scale_sig, sell_ok, force_empty)
     status_idle = (bool(holding) or pe_now or px_now) and (not force_bar_log)
     if _should_emit_bar_status(C, now, force_bar_log, status_idle):
         A.ready_logged = True
@@ -1342,7 +1437,7 @@ def _handle(C):
             hhmm,
             "n1d=%d n1w=%d close=%.4f sig_d=%s sig_w=%s phase=%s prev_d=%s prev_w=%s "
             "w_bull=%s w_bear=%s w_bn=%s/%s w_ma5=%s w_ma30=%s w_hist=%s "
-            "buy=%s buyR=%s sell=%s sellR=%s "
+            "buy=%s buyR=%s scale=%s scaleR=%s sell=%s sellR=%s "
             "hold=%s nlot=%s ret=%s pe=%s px=%s bt_held=%s avail=%s"
             % (
                 len(closes_s),
@@ -1362,6 +1457,12 @@ def _handle(C):
                 None if w_detail.get("hist") is None else round(w_detail["hist"], 4),
                 buy_sig,
                 ",".join(buy_reasons) if buy_reasons else "-",
+                scale_sig,
+                (
+                    ",".join(scale_push_reasons)
+                    if scale_push_reasons
+                    else (scale_why or "-")
+                ),
                 sell_ok or force_empty,
                 ",".join((["weekly_bear"] if force_empty else []) + sell_reasons) or "-",
                 holding,
@@ -1393,6 +1494,12 @@ def _handle(C):
             w_hist=None if w_detail.get("hist") is None else round(w_detail["hist"], 4),
             buy=buy_sig,
             buyR=",".join(buy_reasons) if buy_reasons else "-",
+            scale=scale_sig,
+            scaleR=(
+                ",".join(scale_push_reasons)
+                if scale_push_reasons
+                else (scale_why or "-")
+            ),
             sell=bool(sell_ok or force_empty),
             sellR=",".join((["weekly_bear"] if force_empty else []) + sell_reasons) or "-",
             hold=holding,
@@ -1518,7 +1625,7 @@ def _handle(C):
                 shares=exit_shares or None,
             )
             _try_exec_pending_exit(C, now, now_s, day, tag, open_px, price, holding)
-        elif buy_sig and _scale_ready(w_detail):
+        elif scale_sig:
             if isinstance(getattr(A, "pending_entry", None), dict):
                 if live_cc:
                     _mark_signal_eval_done(day, is_confirm)
@@ -1527,7 +1634,7 @@ def _handle(C):
                 "signal_day": sig_day_daily,
                 "signal_tag": tag,
                 "close": price,
-                "reasons": list(real_buys),
+                "reasons": list(scale_push_reasons),
                 "add": True,
             }
             A.pending_exit = None
@@ -1535,14 +1642,14 @@ def _handle(C):
                 _mark_signal_eval_done(day, is_confirm)
             else:
                 _save_state()
-            primary = real_buys[0] if real_buys else "entry"
+            primary = scale_push_reasons[0] if scale_push_reasons else "entry"
             print(
                 "%s pending_entry set add signal=%s label=%s all=%s day=%s close=%.4f lots=%s phase=%s"
                 % (
                     STRATEGY_NAME,
                     primary,
                     _reason_label(primary, "buy"),
-                    _format_reasons(real_buys, "buy"),
+                    _format_reasons(scale_push_reasons, "buy"),
                     sig_day_daily,
                     price,
                     _pos_lots(),
@@ -1553,7 +1660,7 @@ def _handle(C):
                 "pending_entry_set",
                 signal=primary,
                 label=_reason_label(primary, "buy"),
-                all_reasons=_format_reasons(real_buys, "buy"),
+                all_reasons=_format_reasons(scale_push_reasons, "buy"),
                 signal_day=sig_day_daily,
                 close=price,
                 phase=phase,

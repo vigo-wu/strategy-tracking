@@ -65,3 +65,25 @@ def _near_ma(price, ma, tol=None):
     if price is None or ma is None or ma <= 0:
         return False
     return abs(float(price) - float(ma)) / float(ma) <= tol
+
+
+def _plat_window(highs, lows, lookback, end_i=None):
+    """不含 end_i 的回看窗口平台高低点；(plat_high, plat_low) 或 None。"""
+    if highs is None or lows is None:
+        return None
+    n = min(len(highs), len(lows))
+    lookback = int(lookback)
+    if lookback < 2 or n < lookback + 1:
+        return None
+    i = n - 1 if end_i is None else int(end_i)
+    if i < lookback:
+        return None
+    win_h = [float(x) for x in highs[i - lookback:i]]
+    win_l = [float(x) for x in lows[i - lookback:i]]
+    if not win_h or not win_l:
+        return None
+    plat_high = max(win_h)
+    plat_low = min(win_l)
+    if plat_high <= 0 or plat_low <= 0:
+        return None
+    return plat_high, plat_low

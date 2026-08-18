@@ -204,7 +204,13 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
 
 
 def _get_ohlcv_1d(C, stock):
-    need = max(int(D_MA_SLOW), int(VOL_PULLBACK_N), int(VOL_DRY_N)) + 10
+    plat_n = int(globals().get("SCALE_PLAT_LOOKBACK") or 20)
+    need = max(
+        int(D_MA_SLOW),
+        int(VOL_PULLBACK_N),
+        int(VOL_DRY_N),
+        plat_n + 2,
+    ) + 10
     return _get_ohlcv_period(
         C, stock, getattr(A, "period", "1d"), int(OHLC_COUNT), need, "d1"
     )
