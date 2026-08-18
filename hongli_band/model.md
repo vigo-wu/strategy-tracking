@@ -1,6 +1,6 @@
 # 红利板块波段策略：周线定方向，日线找买卖点
 
-**主题目录**：`hongli_band/`｜**版本**：v1.29｜**形态**：单仓骨架 / 分笔多仓｜**运行**：国金 QMT 终端模型（见 §5）  
+**主题目录**：`hongli_band/`｜**版本**：v1.31｜**形态**：单仓骨架 / 分笔多仓｜**运行**：国金 QMT 终端模型（见 §5）  
 **参数默认值**：`hongli_band/scripts/qmt/hlband/config.py`。实盘在「模型交易 → 新建/编辑策略交易」面板覆盖（`hlband/panel.xml`）；编辑器回测无注入时用 config。阶梯止盈 `TRAIL_TIERS`、均线周期、路径仍只在 config。
 
 ---
@@ -8,8 +8,8 @@
 ## 核心逻辑
 
 红利资产慢牛爬坡、震荡抗跌。脚本做 **周线估值/斜率过滤 + 日线缩量低吸 + 动态锁利卖出**。  
-行情一律 **前复权**（`dividend_type=front_ratio`）。主图 **日线**；实盘信号在收盘确认窗评估 → **次日开盘窗**（`PENDING_EXEC_START`～`PENDING_EXEC_END`，默认 09:30–09:45）按开盘价成交；错过则保留到下一交易日开盘窗，**收盘确认窗不成交**。若收盘窗未跑到，开盘对上一根已收盘日兜底评估（`confirmed_eval_day < 上一完整交易日`）。  
-实盘报单成功后**保留**信号 pending / 止盈元数据，**仅成交回调**后清除；废单/撤单后下一开盘窗自动重试。
+行情一律 **前复权**（`dividend_type=front_ratio`）。主图 **日线**；实盘信号在收盘确认窗评估（默认 14:56 起），**尾盘成交窗**（`PENDING_EXEC_START`～`PENDING_EXEC_END`，默认 14:57:50–15:00）按当时价/收盘价**同日成交**，避开 14:57 前连续竞价被立刻成交。错过尾盘则保留到下一交易日 **开盘兜底窗**（`OPEN_EXEC_START`～`OPEN_EXEC_END`，默认 09:30–09:45）按开盘价补成交。若收盘窗未跑到，开盘对上一根已收盘日兜底评估（`confirmed_eval_day < 上一完整交易日`），同日开盘窗可成交。回测与尾盘主路径对齐：信号日按**收盘价**成交；T+1 隔夜残留按下一日开盘价。  
+实盘报单成功后**保留**信号 pending / 止盈元数据，**仅成交回调**后清除；废单/撤单后下一尾盘或开盘窗自动重试。
 
 **加仓**（`SCALE_ENABLE`）：已有仓且同时满足：任一笔峰值浮盈 `>= SCALE_ARM`（`0.03`）、该笔持仓日 `>= SCALE_ARM_BARS`（`8`）、周线 MACD 柱 `>= SCALE_W_HIST_MIN`（`-0.01`），再出现合格缩量回踩才加第二笔，最多 `SCALE_MAX=2`。执行日若已触发卖点则**取消加仓、让路出场**（避免第一笔已止盈还加第二笔）。账户要能再拿出一笔预算。**移动止盈不让路加仓信号评估**（与 15 分钟均线策略不同），但执行日卖点优先。  
 **多仓**（`SCALE_LOTS`，默认开）：记账在共用模块 `scripts/qmt_common/single/lots.py`。每笔自己的成本、峰值、持仓日数、时间成本豁免；`stop_loss` / `trail_stop` / `time_force` **按笔**出。`weekly_bear` 仍一次出清剩余各笔。第一笔可以先止盈，第二笔继续拿。  
@@ -34,7 +34,7 @@
 - 收盘靠近 `MA20` 或 `MA60`（容差 `MA_TOUCH_TOL`，当前 ±2.5%）
 - 成交量 `< MAVOL10 × VOL_PULLBACK_RATIO`（当前 `0.9`）
 
-空仓时开第一笔；已持仓且满足加仓条件（见核心逻辑）时挂 `pending_entry add=True`，次日开盘再买一笔预算。加仓仍受下方全局拦截；另有 `scale_bars` / `scale_w_hist` / `scale_sell_block`。周线空头 / 乖离 / 斜率 / 无量阴跌会取消加仓 pending。
+空仓时开第一笔；已持仓且满足加仓条件（见核心逻辑）时挂 `pending_entry add=True`，尾盘再买一笔预算（错过则次日开盘补）。加仓仍受下方全局拦截；另有 `scale_bars` / `scale_w_hist` / `scale_sell_block`。周线空头 / 乖离 / 斜率 / 无量阴跌会取消加仓 pending。
 
 ### 全局拦截（任一则当日不开 / 可取消 pending）
 
@@ -65,7 +65,7 @@
 
 优先级（挂 pending 主因）：`weekly_bear` > `stop_loss` > `trail_stop` > `time_force`。  
 `SCALE_LOTS` 开启时，除 `weekly_bear` 一次出清外，其余卖点只平触发的那几笔（日志 `lots=[id]`）。  
-买卖委托失败/T+1 skip 时**保留**对应 pending（及持仓元数据）；实盘报单成功亦保留至成交，废单后开盘窗可重试。当日新买的笔 T+1 不可卖，不清仓状态。
+买卖委托失败/T+1 skip 时**保留**对应 pending（及持仓元数据）；实盘报单成功亦保留至成交，废单后尾盘或次日开盘窗可重试。当日新买的笔 T+1 不可卖，不清仓状态。
 
 ---
 
@@ -115,8 +115,10 @@
 | `STOP_LOSS` | `0.08` | 硬止损（相对该笔成本） |
 | `CHASE_MAX_PCT` | `0.05` | 追高禁开 |
 | `LIVE_CLOSE_CONFIRM` | `True` | 收盘确认 + 开盘兜底 |
-| `PENDING_EXEC_START/END` | `093000` / `094500` | 信号 pending 仅开盘窗按开盘价成交 |
+| `SIGNAL_CONFIRM_START/END` | `145600` / `160000` | 用当日近似完整 K 确认信号；与尾盘成交窗重叠 |
+| `PENDING_EXEC_START/END` | `145750` / `150000` | 14:57:50 起按现价/收盘价同日成交（集合竞价内） |
+| `OPEN_EXEC_START/END` | `093000` / `094500` | 错过尾盘时次日开盘按开盘价补成交 |
 | `STATE_FILE` | `D:\tradingStrategy\hlband_{stock}.json` | 实盘状态；按主图标的分文件 |
 | `LOG_DIR` | `D:\tradingStrategy\logs` | 实盘结构化日志根目录 |
 
-日志确认 `HlBand v1.29 init` 且 `scale= True`、`scale_lots= True`、`scale_arm_bars= 8`、`time_force_min_ret= 0.03`（`dMA=20/60`，`DRY_RUN=` 与面板或 config 一致）后再挂实盘。策略交易下应另有 `panel applied ...` 行。验收：回测先见 `diag: ok`；买卖闭合、无孤儿仓。加仓成交附近有 `lots now n=2`；执行日已触发卖点时应看到 `pending_entry cancel scale_sell_block` 且不出现 `BUY add`。只出一笔时应看到 `SELL ... lots=[1]` 且另一笔仍持有。趋势仓满 30 日且峰值≥3%、仍站上 MA60 时应看到 `time_force skip trend`，之后由 `trail_stop` / `weekly_bear` / 破 MA60 出场；磨人仓仍应看到 `time_force grace`。
+日志确认 `HlBand v1.31 init` 且 `close_exec= 145750-150000`、`open_exec= 093000-094500`、`scale= True`、`scale_lots= True`、`scale_arm_bars= 8`、`time_force_min_ret= 0.03`（`dMA=20/60`，`DRY_RUN=` 与面板或 config 一致）后再挂实盘。策略交易下应另有 `panel applied ...` 行。验收：回测先见 `diag: ok`；买卖日志为 `@close=`（同日）或残留 `@open=`；买卖闭合、无孤儿仓。加仓成交附近有 `lots now n=2`；执行日已触发卖点时应看到 `pending_entry cancel scale_sell_block` 且不出现 `BUY add`。只出一笔时应看到 `SELL ... lots=[1]` 且另一笔仍持有。趋势仓满 30 日且峰值≥3%、仍站上 MA60 时应看到 `time_force skip trend`，之后由 `trail_stop` / `weekly_bear` / 破 MA60 出场；磨人仓仍应看到 `time_force grace`。

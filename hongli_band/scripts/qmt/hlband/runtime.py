@@ -237,6 +237,16 @@ def _init_impl(C):
         TIME_FORCE_BARS,
         "time_force_min_ret=",
         TIME_FORCE_MIN_RET,
+        "close_exec=",
+        "%s-%s" % (
+            globals().get("PENDING_EXEC_START", "145750"),
+            globals().get("PENDING_EXEC_END", "150000"),
+        ),
+        "open_exec=",
+        "%s-%s" % (
+            globals().get("OPEN_EXEC_START", "093000"),
+            globals().get("OPEN_EXEC_END", "094500"),
+        ),
     )
     _event_log(
         "init",
@@ -252,6 +262,16 @@ def _init_impl(C):
         scale_w_hist_min=SCALE_W_HIST_MIN,
         time_force_bars=TIME_FORCE_BARS,
         time_force_min_ret=TIME_FORCE_MIN_RET,
+        close_exec="%s-%s"
+        % (
+            globals().get("PENDING_EXEC_START", "145750"),
+            globals().get("PENDING_EXEC_END", "150000"),
+        ),
+        open_exec="%s-%s"
+        % (
+            globals().get("OPEN_EXEC_START", "093000"),
+            globals().get("OPEN_EXEC_END", "094500"),
+        ),
         budget=_trade_budget_cap(),
         log_dir=str(globals().get("LOG_DIR") or ""),
     )

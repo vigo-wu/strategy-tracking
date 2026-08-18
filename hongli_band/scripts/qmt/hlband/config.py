@@ -133,21 +133,25 @@ WEEKLY_OHLC_COUNT = 120
 
 # 实盘只在最新一根 bar 决策；回测逐 bar 扫
 LIVE_ONLY_LAST_BAR = True
-# 实盘：盘中(DECISION_*)只执行 pending；收盘后(SIGNAL_CONFIRM_*)用当日完整日/周 K 确认信号并挂起 → 次日开盘成交
-# 若收盘窗口未跑到，次日开盘对「上一根已收盘日」兜底评估并挂起（同日可成交）
+# 实盘：SIGNAL_CONFIRM_* 用当日近似完整日/周 K 确认信号并挂起；
+# PENDING_EXEC_* 尾盘窗按现价/收盘价成交（避免隔夜跳空）；确认可早于成交。
+# 错过尾盘则保留到下一交易日 OPEN_EXEC_* 开盘窗按开盘价成交。
+# 若收盘窗未跑到，开盘对「上一根已收盘日」兜底评估并挂起（同日开盘窗可成交）。
 # 判定：confirmed_eval_day < 上一完整交易日 且今日尚未 fallback
 # 周线：bt/confirm/开盘 exec·兜底一律含本周未收盘根；日线开盘仍去未收盘日 K
 LIVE_CLOSE_CONFIRM = True
-# 实盘决策时窗（HHmmss）：盘中处理券商 pending / 心跳；信号成交见 PENDING_EXEC_*
+# 实盘决策时窗（HHmmss）：盘中处理券商 pending / 心跳；信号成交见 PENDING_EXEC_* / OPEN_EXEC_*
 DECISION_START = "093000"
 DECISION_END = "150000"
-# 信号 pending（pending_entry/exit）仅在开盘附近成交；错过则保留到下一交易日开盘窗
-# 须覆盖「开盘兜底挂起 → 同窗内下一根成交」；收盘确认窗绝不按开盘价成交
-PENDING_EXEC_START = "093000"
-PENDING_EXEC_END = "094500"
-# 收盘确认信号时窗（须与 DECISION 衔接；含尾盘近似收盘 + 盘后）
-# 日线盘后常无新 tick，故从 14:55 起用当日 K 确认；16:00 前仍可确认
-SIGNAL_CONFIRM_START = "145500"
+# 信号 pending 主成交窗：收盘集合竞价内下单（14:57 起不可撤；14:59 起停止接受申报）
+# 14:57:50 再报，避免 14:57 前连续竞价被立刻成交
+PENDING_EXEC_START = "145750"
+PENDING_EXEC_END = "150000"
+# 隔夜残留 / 开盘兜底：错过尾盘时次日开盘窗按开盘价补成交
+OPEN_EXEC_START = "093000"
+OPEN_EXEC_END = "094500"
+# 收盘确认信号时窗（与尾盘成交窗重叠；盘后仍可确认，成交则等到次日开盘窗）
+SIGNAL_CONFIRM_START = "145600"
 SIGNAL_CONFIRM_END = "160000"
 # 实盘心跳日志间隔（秒）；持仓无事件时的状态行也按此节流
 LIVE_HEARTBEAT_SEC = 60
@@ -171,7 +175,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.29"
+STRATEGY_VER = "v1.31"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
