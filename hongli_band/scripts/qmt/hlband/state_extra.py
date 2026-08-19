@@ -28,6 +28,9 @@ def _state_extra_load(raw):
         A._w_bear_streak = 0
     A._w_bear_last_day = str(raw.get("w_bear_last_day", "") or "")
     A.round_scaled = bool(raw.get("round_scaled"))
+    A._skip_sell_eval_day = str(raw.get("skip_sell_eval_day", "") or "")
+    A._last_add_day = str(raw.get("last_add_day", "") or "")
+    A._last_add_signal = str(raw.get("last_add_signal", "") or "")
 
 
 def _state_extra_save(data):
@@ -45,3 +48,6 @@ def _state_extra_save(data):
     data["w_bear_streak"] = int(getattr(A, "_w_bear_streak", 0) or 0)
     data["w_bear_last_day"] = str(getattr(A, "_w_bear_last_day", "") or "")
     data["round_scaled"] = bool(getattr(A, "round_scaled", False))
+    data["skip_sell_eval_day"] = str(getattr(A, "_skip_sell_eval_day", "") or "")
+    data["last_add_day"] = str(getattr(A, "_last_add_day", "") or "")
+    data["last_add_signal"] = str(getattr(A, "_last_add_signal", "") or "")

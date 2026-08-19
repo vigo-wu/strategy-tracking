@@ -123,6 +123,9 @@ def _init_impl(C):
             A._fallback_done_day = ""
             A._w_bear_streak = 0
             A._w_bear_last_day = ""
+            A._skip_sell_eval_day = ""
+            A._last_add_day = ""
+            A._last_add_signal = ""
             A.bt_held = 0
             A.bt_locked = 0
             A.bt_lock_day = ""
@@ -163,6 +166,12 @@ def _init_impl(C):
                 A._w_bear_streak = 0
             if not hasattr(A, "_w_bear_last_day"):
                 A._w_bear_last_day = ""
+            if not hasattr(A, "_skip_sell_eval_day"):
+                A._skip_sell_eval_day = ""
+            if not hasattr(A, "_last_add_day"):
+                A._last_add_day = ""
+            if not hasattr(A, "_last_add_signal"):
+                A._last_add_signal = ""
             _bt_recover_position()
             print(
                 "%s backtest re-init preserve barpos=" % STRATEGY_NAME,
@@ -203,6 +212,12 @@ def _init_impl(C):
             A._w_bear_streak = 0
         if not hasattr(A, "_w_bear_last_day"):
             A._w_bear_last_day = ""
+        if not hasattr(A, "_skip_sell_eval_day"):
+            A._skip_sell_eval_day = ""
+        if not hasattr(A, "_last_add_day"):
+            A._last_add_day = ""
+        if not hasattr(A, "_last_add_signal"):
+            A._last_add_signal = ""
 
     try:
         C.set_universe([A.stock])

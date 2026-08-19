@@ -30,7 +30,9 @@ def _cross_up(a_prev, b_prev, a_now, b_now):
 
 
 def _eval_weekly(closes_w):
-    """返回 (bull, bear, detail)。对照表: 多头=5周在上+零轴上红柱; 空头=破30周或零轴下死叉。"""
+    """返回 (bull, bear, detail)。
+    多头(仅日志): MA5>MA13 且 DIF>0 且红柱 且生命线未明显走平。
+    空头: 收盘破 MA34（W_MA_LIFE）或 DIF/DEA 零轴下死叉。"""
     detail = {
         "ma5": None,
         "ma10": None,
@@ -231,7 +233,7 @@ def _eval_daily_buy(closes, volumes):
 
 
 def _weekly_bias_guard(w_detail):
-    """周线 (MA5-MA30)/MA30 >= W_BIAS_HARD → 禁开。"""
+    """周线 (MA5-MA34)/MA34 >= W_BIAS_HARD → 禁开。"""
     m5 = w_detail.get("ma5")
     m30 = w_detail.get("ma30")
     if m5 is None or m30 is None or m30 <= 0:
@@ -241,7 +243,7 @@ def _weekly_bias_guard(w_detail):
 
 
 def _weekly_low_slope_guard(w_detail):
-    """低位 (MA5-MA30)/MA30 < W_BIAS_LOW 且 MA30 未连续 2 周向上 → 禁开。"""
+    """低位 (MA5-MA34)/MA34 < W_BIAS_LOW 且生命线 MA34 未连续向上 → 禁开。"""
     m5 = w_detail.get("ma5")
     m30 = w_detail.get("ma30")
     if m5 is None or m30 is None or m30 <= 0:
@@ -902,11 +904,194 @@ def _bar_signal_rising_edge(buy_sig, sell_ok, force_empty):
     )
 
 
+def _lot_open_day(lot):
+    ot = str((lot or {}).get("opened_at") or "")
+    return ot[:8] if len(ot) >= 8 else ""
+
+
+def _pending_exit_unfilled_ids():
+    """pending_exit.lot_ids 中仍持有的笔；无 lot_ids 视为整仓出清残留。"""
+    pe = getattr(A, "pending_exit", None)
+    if not isinstance(pe, dict):
+        return []
+    lots = getattr(A, "lots", None) or []
+    raw_ids = pe.get("lot_ids")
+    idset = None
+    if raw_ids:
+        try:
+            idset = set(int(x) for x in raw_ids)
+        except Exception:
+            idset = None
+    remain = []
+    for lot in lots:
+        if not isinstance(lot, dict):
+            continue
+        try:
+            sh = int(lot.get("shares") or 0)
+            lid = int(lot.get("id") or 0)
+        except Exception:
+            continue
+        if sh < 100 or lid <= 0:
+            continue
+        if idset is None or lid in idset:
+            remain.append(lid)
+    return remain
+
+
+def _refresh_pending_exit_remain(remain_ids):
+    pe = getattr(A, "pending_exit", None)
+    if not isinstance(pe, dict):
+        return
+    remain_ids = [int(x) for x in (remain_ids or []) if x]
+    pe["lot_ids"] = list(remain_ids)
+    shares = 0
+    idset = set(remain_ids)
+    for lot in getattr(A, "lots", None) or []:
+        if not isinstance(lot, dict):
+            continue
+        try:
+            if int(lot.get("id") or 0) in idset:
+                shares += int(lot.get("shares") or 0)
+        except Exception:
+            continue
+    pe["shares"] = int(shares)
+    A.pending_exit = pe
+
+
+def _log_skip_sell_eval_day(day):
+    day = str(day or "")
+    if str(getattr(A, "_skip_sell_eval_logged", "") or "") == day:
+        return
+    A._skip_sell_eval_logged = day
+    print(
+        "%s skip sell eval after add fill day=%s last_add=%s"
+        % (STRATEGY_NAME, day, getattr(A, "_last_add_signal", "") or "-")
+    )
+    _event_log(
+        "skip_sell_eval_day",
+        day=day,
+        last_add=getattr(A, "_last_add_signal", "") or "",
+        last_add_day=getattr(A, "_last_add_day", "") or "",
+    )
+
+
+def _log_sell_lot_can_use(now, day, lot_ids, want_vol, reason):
+    """核对按笔卖出 vs 券商合计 can_use：当日新仓可能实际卖掉旧仓。"""
+    avail = None
+    try:
+        avail = _max_sell_vol(now)
+    except Exception:
+        avail = None
+    idset = None
+    if lot_ids:
+        try:
+            idset = set(int(x) for x in lot_ids)
+        except Exception:
+            idset = None
+    target = []
+    others = []
+    same_day_target = []
+    older_other = []
+    for lot in getattr(A, "lots", None) or []:
+        if not isinstance(lot, dict):
+            continue
+        try:
+            lid = int(lot.get("id") or 0)
+            sh = int(lot.get("shares") or 0)
+        except Exception:
+            continue
+        if sh < 100 or lid <= 0:
+            continue
+        open_day = _lot_open_day(lot)
+        brief = {
+            "id": lid,
+            "shares": sh,
+            "opened_at": str(lot.get("opened_at") or ""),
+            "open_day": open_day,
+            "hold_bars": lot.get("hold_bars"),
+        }
+        is_tgt = idset is None or lid in idset
+        if is_tgt:
+            target.append(brief)
+            if open_day and open_day == str(day):
+                same_day_target.append(lid)
+        else:
+            others.append(brief)
+            if open_day and open_day < str(day):
+                older_other.append(lid)
+    last_add_day = str(getattr(A, "_last_add_day", "") or "")
+    last_add = str(getattr(A, "_last_add_signal", "") or "")
+    risk = bool(same_day_target) and (avail is None or int(avail) >= 100) and (
+        bool(older_other) or bool(others)
+    )
+    print(
+        "%s SELL lot-can_use reason=%s lots=%s want=%s avail=%s "
+        "same_day_lots=%s other=%s last_add=%s@%s risk=%s"
+        % (
+            STRATEGY_NAME,
+            reason,
+            lot_ids if lot_ids is not None else "-",
+            want_vol,
+            avail,
+            same_day_target or "-",
+            [x.get("id") for x in others] or "-",
+            last_add or "-",
+            last_add_day or "-",
+            risk,
+        )
+    )
+    _event_log(
+        "sell_lot_can_use",
+        reason=reason,
+        lot_ids=lot_ids,
+        want=want_vol,
+        avail=avail,
+        target=target,
+        other=others,
+        same_day_lots=same_day_target,
+        last_add=last_add,
+        last_add_day=last_add_day,
+        risk=risk,
+    )
+    if risk:
+        print(
+            "%s WARN SELL lots=%s opened today; broker can_use may fill older lots, "
+            "not necessarily lots=%s (plat_break add same-day trail is the typical case)"
+            % (STRATEGY_NAME, same_day_target, lot_ids)
+        )
+        _event_log(
+            "sell_lot_can_use_risk",
+            lot_ids=lot_ids,
+            same_day_lots=same_day_target,
+            avail=avail,
+            last_add=last_add,
+            last_add_day=last_add_day,
+        )
+
+
 def _after_signal_buy_filled(px, day, add=False):
     """买入成交后初始化持仓元数据并清信号 pending。"""
+    pe = getattr(A, "pending_entry", None)
+    add_reasons = []
+    if isinstance(pe, dict):
+        add_reasons = [str(x) for x in (pe.get("reasons") or []) if x]
     A.pending_entry = None
     A.pending_exit = None
     A.round_scaled = True if add else False
+    if add:
+        d = str(day or "")
+        A._skip_sell_eval_day = d
+        A._last_add_day = d
+        A._last_add_signal = ",".join(add_reasons) if add_reasons else "add"
+        print(
+            "%s skip sell eval after add fill day=%s signal=%s"
+            % (STRATEGY_NAME, d, A._last_add_signal)
+        )
+        _event_log(
+            "skip_sell_eval_after_add",
+            day=d,
+            signal=A._last_add_signal,
+        )
     if _lots_enabled():
         lots = getattr(A, "lots", None) or []
         if lots and day:
@@ -939,6 +1124,24 @@ def _after_signal_sell_filled():
 
 def _finish_sell_fill():
     if _lots_enabled() and getattr(A, "lots", None):
+        remain = _pending_exit_unfilled_ids()
+        if remain:
+            _refresh_pending_exit_remain(remain)
+            acted = getattr(A, "acted", None)
+            if isinstance(acted, set):
+                acted.discard("SELL")
+            pe = getattr(A, "pending_exit", None) or {}
+            print(
+                "%s pending_exit keep after partial fill lots=%s shares=%s"
+                % (STRATEGY_NAME, remain, pe.get("shares"))
+            )
+            _event_log(
+                "pending_exit_keep_partial",
+                lot_ids=remain,
+                shares=pe.get("shares"),
+            )
+            _save_state()
+            return
         A.pending_exit = None
         acted = getattr(A, "acted", None)
         if isinstance(acted, set):
@@ -997,6 +1200,7 @@ _SELL_LABELS = {
     "time_force": "卖点2-时间成本智能平仓",
     "weekly_bear": "周线转空强制清仓",
     "stop_loss": "硬止损",
+    "skip_add_bar": "加仓成交后当日不评卖",
 }
 _BUY_LABELS = {
     "pullback_vol": "买点1-缩量回踩强支撑",
@@ -1004,7 +1208,7 @@ _BUY_LABELS = {
     "w_macd_golden": "加仓-周线MACD金叉柱放大",
     "chase_skip": "追高过滤跳过",
     "w_bias_skip": "周线高位乖离禁开",
-    "w_slope_skip": "低位周线MA30未连升禁开",
+    "w_slope_skip": "低位周线MA34未连升禁开",
     "vol_dry_skip": "无量阴跌禁开",
     "weekly_bear": "周线空头禁开",
     "scale_once": "本轮已加仓",
@@ -1067,6 +1271,7 @@ def _try_exec_pending_exit(C, now, now_s, day, tag, open_px, last_px, holding):
     )
     lot_ids = pe_exit.get("lot_ids")
     want_vol = pe_exit.get("shares")
+    _log_sell_lot_can_use(now, day, lot_ids, want_vol, reason)
     ok = _order_sell(
         C,
         reason,
@@ -1403,7 +1608,15 @@ def _handle(C):
     stop_hit = False
     trail_hit = False
     time_force_hit = False
-    if holding and _lots_enabled():
+    skip_sell_eval = str(getattr(A, "_skip_sell_eval_day", "") or "") == str(day)
+    force_empty_act = False if skip_sell_eval else bool(force_empty)
+    if skip_sell_eval and holding:
+        _log_skip_sell_eval_day(day)
+        sell_ok = False
+        sell_reasons = ["skip_add_bar"]
+        exit_ids = []
+        exit_shares = 0
+    elif holding and _lots_enabled():
         sell_ok, sell_reasons, exit_ids, exit_shares = _collect_lot_exits(
             price, closes_s, force_empty
         )
@@ -1516,7 +1729,7 @@ def _handle(C):
                     if scale_push_reasons
                     else (scale_why or "-")
                 ),
-                sell_ok or force_empty,
+                sell_ok or force_empty_act,
                 ",".join((["weekly_bear"] if force_empty else []) + sell_reasons) or "-",
                 holding,
                 _pos_lots() if holding else 0,
@@ -1553,7 +1766,7 @@ def _handle(C):
                 if scale_push_reasons
                 else (scale_why or "-")
             ),
-            sell=bool(sell_ok or force_empty),
+            sell=bool(sell_ok or force_empty_act),
             sellR=",".join((["weekly_bear"] if force_empty else []) + sell_reasons) or "-",
             hold=holding,
             nlot=_pos_lots() if holding else 0,
@@ -1608,12 +1821,12 @@ def _handle(C):
 
     if holding:
         cur_ex = getattr(A, "pending_exit", None)
-        if force_empty or sell_ok or stop_hit or trail_hit or time_force_hit:
+        if force_empty_act or sell_ok or stop_hit or trail_hit or time_force_hit:
             if isinstance(cur_ex, dict):
                 if live_cc:
                     _mark_signal_eval_done(day, is_confirm)
                 return
-            if force_empty:
+            if force_empty_act:
                 reason = "weekly_bear"
             elif stop_hit:
                 reason = "stop_loss"
@@ -1623,17 +1836,17 @@ def _handle(C):
                 reason = "time_force"
             else:
                 reason = sell_reasons[0] if sell_reasons else "SELL"
-            reasons = (["weekly_bear"] if force_empty else []) + list(sell_reasons)
+            reasons = (["weekly_bear"] if force_empty_act else []) + list(sell_reasons)
             seen = set()
             uniq = []
             for r in reasons:
-                if r not in seen:
+                if r not in seen and r != "skip_add_bar":
                     seen.add(r)
                     uniq.append(r)
             # 周线清仓用 sig_w；日线卖点用 sig_d
             exit_sig_day = (
                 sig_day_weekly
-                if (force_empty or reason == "weekly_bear")
+                if (force_empty_act or reason == "weekly_bear")
                 else sig_day_daily
             )
             A.pending_exit = {
