@@ -3669,7 +3669,6 @@ _BUY_LABELS = {
     "w_slope_skip": "低位周线MA34未连升禁开",
     "vol_dry_skip": "无量阴跌禁开",
     "weekly_bear": "周线空头禁开",
-    "skip_add_bar": "加仓成交后当日不评卖",
     "scale_once": "本轮已加仓",
 }
 
