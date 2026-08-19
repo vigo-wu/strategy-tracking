@@ -105,7 +105,7 @@
 | 配置 | 当前值 | 说明 |
 | :--- | :--- | :--- |
 | `DRY_RUN` | `False` | 真下单；联调可改 `True` 只打日志 |
-| `TRADE_BUDGET` | `25000` | 默认单笔预算；编辑器回测可被 `TRADE_BUDGET_BY_STOCK` 覆盖；策略交易以面板为准 |
+| `TRADE_BUDGET` | `50000` | 默认单笔预算；编辑器回测可被 `TRADE_BUDGET_BY_STOCK` 覆盖；策略交易以面板为准 |
 | `CASH_RATIO` | `0.8` | 实盘可用现金占用比例 |
 | `W_BIAS_HARD` | `0.08` | 周线高位乖离禁开 |
 | `W_BIAS_LOW` | `0.02` | 低位区阈值（配合斜率） |

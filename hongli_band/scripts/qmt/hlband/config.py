@@ -8,7 +8,7 @@ ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 
 # 单笔下单资金上限（元）；实际股数 = floor(预算/开盘价/100)*100
 # 未在 TRADE_BUDGET_BY_STOCK 中单独配置的标的用此默认值
-TRADE_BUDGET = 25000.0
+TRADE_BUDGET = 50000.0
 # 按标的覆盖预算（key 须与 A.stock 一致，如 513530.SH）
 TRADE_BUDGET_BY_STOCK = {}
 # 可用现金占用比例（预留下单缓冲，避免满仓打满失败）
