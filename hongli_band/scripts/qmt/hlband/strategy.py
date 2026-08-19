@@ -584,9 +584,11 @@ def _weekly_macd_golden_expand(w_detail):
     return hist >= base * ratio
 
 
-def _eval_scale_push(closes, highs, lows, w_detail):
-    """加仓触发：日线破平台 或 周线 MACD 金叉柱放大。不含缩量回踩。"""
+def _eval_scale_push(closes, highs, lows, w_detail, pullback=False):
+    """加仓触发：缩量回踩 或 日线破平台 或 周线 MACD 金叉柱放大。"""
     reasons = []
+    if pullback:
+        reasons.append("pullback_vol")
     if _daily_plat_break(closes, highs, lows):
         reasons.append("plat_break")
     if _weekly_macd_golden_expand(w_detail):
@@ -1410,7 +1412,11 @@ def _handle(C):
     )
     vol_dry_block = "vol_dry_skip" in buy_reasons
     scale_push_ok, scale_push_reasons = _eval_scale_push(
-        closes_s, highs_s, lows_s, w_detail
+        closes_s,
+        highs_s,
+        lows_s,
+        w_detail,
+        pullback=("pullback_vol" in real_buys),
     )
     scale_ok, scale_why = _scale_gate(w_detail)
     scale_sig = bool(

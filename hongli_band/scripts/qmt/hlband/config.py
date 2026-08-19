@@ -87,9 +87,10 @@ W_BEAR_CONFIRM_DAYS = 2
 
 # （另有 weekly_bear：周线空头判定见 _eval_weekly；清仓见上）
 
-# 盈利后加仓（顺势推仓，不再用缩量回踩当第二笔买点）：
+# 盈利后加仓（回踩加仓 + 破平台推仓，任一即可）：
 #   门槛：峰值浮盈 >= SCALE_ARM，且该笔已持仓 >= SCALE_ARM_BARS 日
-#   触发（任一）：日线收盘确认突破前期平台，或近两周周线 MACD 金叉且柱放大
+#   触发（任一）：缩量回踩 / 日线收盘突破前期平台 / 近两周周线 MACD 金叉且柱放大
+#   回踩加仓仍受 chase_skip；破平台/金叉不受（突破日允许较大涨幅）
 #   执行日若已触发卖点则取消加仓、让路出场
 # SCALE_W_HIST_MIN：周线 MACD 柱低于此值不加（过滤深空头里的冲高）；None 关闭
 # SCALE_LOTS=True：每笔独立成本/峰值/止盈；False：均价合并后整仓出
@@ -186,7 +187,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.32"
+STRATEGY_VER = "v1.33"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
