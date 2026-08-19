@@ -1,6 +1,6 @@
 # 红利板块波段策略：周线定方向，日线找买卖点
 
-**主题目录**：`hongli_band/`｜**版本**：v1.33｜**形态**：单仓骨架 / 分笔多仓｜**运行**：国金 QMT 终端模型（见 §5）  
+**主题目录**：`hongli_band/`｜**版本**：v1.34｜**形态**：单仓骨架 / 分笔多仓｜**运行**：国金 QMT 终端模型（见 §5）  
 **参数默认值**：`hongli_band/scripts/qmt/hlband/config.py`。实盘在「模型交易 → 新建/编辑策略交易」面板覆盖（`hlband/panel.xml`）；编辑器回测无注入时用 config。阶梯止盈 `TRAIL_TIERS`、均线周期、路径仍只在 config。
 
 ---
@@ -11,8 +11,8 @@
 行情一律 **前复权**（`dividend_type=front_ratio`）。主图 **日线**；实盘信号在收盘确认窗评估（默认 14:56 起），**尾盘成交窗**（`PENDING_EXEC_START`～`PENDING_EXEC_END`，默认 14:57:50–15:00）按当时价/收盘价**同日成交**，避开 14:57 前连续竞价被立刻成交。错过尾盘则保留到下一交易日 **开盘兜底窗**（`OPEN_EXEC_START`～`OPEN_EXEC_END`，默认 09:30–09:45）按开盘价补成交。若收盘窗未跑到，开盘对上一根已收盘日兜底评估（`confirmed_eval_day < 上一完整交易日`），同日开盘窗可成交。回测与尾盘主路径对齐：信号日按**收盘价**成交；T+1 隔夜残留按下一日开盘价。  
 实盘报单成功后**保留**信号 pending / 止盈元数据，**仅成交回调**后清除；废单/撤单后下一尾盘或开盘窗自动重试。
 
-**加仓**（`SCALE_ENABLE`）：已有仓且同时满足门槛：任一笔峰值浮盈 `>= SCALE_ARM`（`0.03`）、该笔持仓日 `>= SCALE_ARM_BARS`（`8`）、周线 MACD 柱 `>= SCALE_W_HIST_MIN`（`-0.01`）。第二笔触发为下列**任一**：① 合格缩量回踩（`pullback_vol`，回踩加仓）；② 日线收盘确认突破前期平台（`plat_break`，破平台推仓）；③ 近两周周线 MACD 黄金交叉且柱放大（`w_macd_golden`）。最多 `SCALE_MAX=2`。执行日若已触发卖点则**取消加仓、让路出场**。账户要能再拿出一笔预算。回踩加仓仍受 `chase_skip`；破平台/金叉不受（突破日允许较大涨幅）。**移动止盈不让路加仓信号评估**（与 15 分钟均线策略不同），但执行日卖点优先。  
-**多仓**（`SCALE_LOTS`，默认开）：记账在共用模块 `scripts/qmt_common/single/lots.py`。每笔自己的成本、峰值、持仓日数、时间成本豁免；`stop_loss` / `trail_stop` / `time_force` **按笔**出。`weekly_bear` 仍一次出清剩余各笔。第一笔可以先止盈，第二笔继续拿。  
+**加仓**（`SCALE_ENABLE`）：已有仓且同时满足门槛：任一笔峰值浮盈 `>= SCALE_ARM`（`0.03`）、该笔持仓日 `>= SCALE_ARM_BARS`（`8`）、周线 MACD 柱 `>= SCALE_W_HIST_MIN`（`-0.01`）。第二笔触发为下列**任一**：① 合格缩量回踩（`pullback_vol`，回踩加仓）；② 日线收盘确认突破前期平台（`plat_break`，破平台推仓）；③ 近两周周线 MACD 黄金交叉且柱放大（`w_macd_golden`）。最多 `SCALE_MAX=2` **同时持有**。`SCALE_ONCE_PER_ROUND`（默认开）：**同一轮持仓只加一次**——加仓成交后锁定，第一笔止盈后空仓前不再用另一种信号再加；整轮空仓后下一轮可再加。执行日若已触发卖点则**取消加仓、让路出场**。账户要能再拿出一笔预算。回踩加仓仍受 `chase_skip`；破平台/金叉不受（突破日允许较大涨幅）。**移动止盈不让路加仓信号评估**（与 15 分钟均线策略不同），但执行日卖点优先。  
+**多仓**（`SCALE_LOTS`，默认开）：记账在共用模块 `scripts/qmt_common/single/lots.py`。每笔自己的成本、峰值、持仓日数、时间成本豁免；`stop_loss` / `trail_stop` / `time_force` **按笔**出。`weekly_bear` 仍一次出清剩余各笔。第一笔可以先止盈，第二笔继续拿（本轮已加过则不再加第三笔）。  
 关 `SCALE_LOTS` 则均价合并、整仓出。
 
 ---
@@ -34,7 +34,7 @@
 - 收盘靠近 `MA20` 或 `MA60`（容差 `MA_TOUCH_TOL`，当前 ±2.5%）
 - 成交量 `< MAVOL10 × VOL_PULLBACK_RATIO`（当前 `0.9`）
 
-空仓时开第一笔（`pullback_vol`）。已持仓且门槛+触发都满足时挂 `pending_entry add=True`，尾盘再买一笔预算（错过则次日开盘补）。加仓仍受下方全局拦截（破平台/金叉不受 `chase_skip`）；另有 `scale_bars` / `scale_w_hist` / `scale_sell_block`。周线空头 / 乖离 / 斜率 / 无量阴跌会取消加仓 pending。
+空仓时开第一笔（`pullback_vol`）。已持仓且门槛+触发都满足、且本轮尚未加过仓时挂 `pending_entry add=True`，尾盘再买一笔预算（错过则次日开盘补）。加仓仍受下方全局拦截（破平台/金叉不受 `chase_skip`）；另有 `scale_once` / `scale_bars` / `scale_w_hist` / `scale_sell_block`。周线空头 / 乖离 / 斜率 / 无量阴跌会取消加仓 pending。
 
 ### 加仓触发（持仓中，回踩或破平台任一）
 
@@ -120,7 +120,8 @@
 | `TIME_FORCE_MIN_RET` | `0.03` | 峰值浮盈达此值则不按日历强平（对齐阶梯起步档） |
 | `SCALE_ENABLE` | `True` | 盈利后满足持仓日/周线柱，再缩量回踩或破平台或周线 MACD 金叉放大则加第二笔 |
 | `SCALE_LOTS` | `True` | 分笔独立止盈止损；关则均价合并整仓出 |
-| `SCALE_MAX` / `SCALE_ARM` | `2` / `0.03` | 最多 2 笔；峰值浮盈 3% 后才允许加仓（仅 config） |
+| `SCALE_ONCE_PER_ROUND` | `True` | 同一轮持仓只加一次；平掉第一笔后空仓前不再加（仅 config） |
+| `SCALE_MAX` / `SCALE_ARM` | `2` / `0.03` | 同时最多 2 笔；峰值浮盈 3% 后才允许加仓（仅 config） |
 | `SCALE_ARM_BARS` | `8` | 第一笔持仓满 8 日才加仓 |
 | `SCALE_W_HIST_MIN` | `-0.01` | 周线 MACD 柱低于此值不加仓（仅 config） |
 | `SCALE_PLAT_LOOKBACK` | `20` | 日线平台回看日（不含当日） |
@@ -135,4 +136,4 @@
 | `STATE_FILE` | `D:\tradingStrategy\hlband_{stock}.json` | 实盘状态；按主图标的分文件 |
 | `LOG_DIR` | `D:\tradingStrategy\logs` | 实盘结构化日志根目录 |
 
-日志确认 `HlBand v1.33 init` 且 `close_exec= 145750-150000`、`open_exec= 093000-094500`、`scale= True`、`scale_lots= True`、`scale_arm_bars= 8`、`scale_plat= 20/0.10`、`scale_w_expand= 1.2`、`time_force_min_ret= 0.03`（`dMA=20/60`，`DRY_RUN=` 与面板或 config 一致）后再挂实盘。策略交易下应另有 `panel applied ...` 行。验收：回测先见 `diag: ok`；买卖日志为 `@close=`（同日）或残留 `@open=`；买卖闭合、无孤儿仓。第一笔仍为 `pullback_vol`；加仓应为 `pullback_vol` / `plat_break` / `w_macd_golden`（状态行 `scale= True`），成交附近有 `lots now n=2`。执行日已触发卖点时应看到 `pending_entry cancel scale_sell_block` 且不出现 `BUY add`。只出一笔时应看到 `SELL ... lots=[1]` 且另一笔仍持有。趋势仓满 30 日且峰值≥3%、仍站上 MA60 时应看到 `time_force skip trend`，之后由 `trail_stop` / `weekly_bear` / 破 MA60 出场；磨人仓仍应看到 `time_force grace`。
+日志确认 `HlBand v1.34 init` 且 `close_exec= 145750-150000`、`open_exec= 093000-094500`、`scale= True`、`scale_lots= True`、`scale_once= True`、`scale_arm_bars= 8`、`scale_plat= 20/0.10`、`scale_w_expand= 1.2`、`time_force_min_ret= 0.03`（`dMA=20/60`，`DRY_RUN=` 与面板或 config 一致）后再挂实盘。策略交易下应另有 `panel applied ...` 行。验收：回测先见 `diag: ok`；买卖日志为 `@close=`（同日）或残留 `@open=`；买卖闭合、无孤儿仓。第一笔仍为 `pullback_vol`；加仓应为 `pullback_vol` / `plat_break` / `w_macd_golden`（状态行 `scale= True`），成交附近有 `lots now n=2`。本轮已加过仓后再出第一笔时，不应再出现 `BUY add`（可见 `scale_once` 或 `pending_entry cancel scale_once`）。执行日已触发卖点时应看到 `pending_entry cancel scale_sell_block` 且不出现 `BUY add`。只出一笔时应看到 `SELL ... lots=[1]` 且另一笔仍持有。趋势仓满 30 日且峰值≥3%、仍站上 MA60 时应看到 `time_force skip trend`，之后由 `trail_stop` / `weekly_bear` / 破 MA60 出场；磨人仓仍应看到 `time_force grace`。

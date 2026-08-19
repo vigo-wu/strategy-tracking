@@ -118,6 +118,7 @@ def _init_impl(C):
             A.time_force_grace_until = None
             A.time_force_trend_skip = False
             A.lots = []
+            A.round_scaled = False
             A._confirmed_eval_day = ""
             A._fallback_done_day = ""
             A._w_bear_streak = 0
@@ -152,6 +153,8 @@ def _init_impl(C):
                 A.time_force_trend_skip = False
             if not hasattr(A, "lots") or A.lots is None:
                 A.lots = []
+            if not hasattr(A, "round_scaled"):
+                A.round_scaled = False
             if not hasattr(A, "_confirmed_eval_day"):
                 A._confirmed_eval_day = ""
             if not hasattr(A, "_fallback_done_day"):
@@ -190,6 +193,8 @@ def _init_impl(C):
             A.time_force_trend_skip = False
         if not hasattr(A, "lots") or A.lots is None:
             A.lots = []
+        if not hasattr(A, "round_scaled"):
+            A.round_scaled = False
         if not hasattr(A, "_confirmed_eval_day"):
             A._confirmed_eval_day = ""
         if not hasattr(A, "_fallback_done_day"):
@@ -229,6 +234,8 @@ def _init_impl(C):
         SCALE_ENABLE,
         "scale_lots=",
         SCALE_LOTS,
+        "scale_once=",
+        SCALE_ONCE_PER_ROUND,
         "scale_arm=",
         SCALE_ARM,
         "scale_arm_bars=",
@@ -261,6 +268,7 @@ def _init_impl(C):
         dry_run=DRY_RUN,
         scale=SCALE_ENABLE,
         scale_lots=SCALE_LOTS,
+        scale_once=SCALE_ONCE_PER_ROUND,
         scale_arm=SCALE_ARM,
         scale_arm_bars=SCALE_ARM_BARS,
         scale_w_hist_min=SCALE_W_HIST_MIN,

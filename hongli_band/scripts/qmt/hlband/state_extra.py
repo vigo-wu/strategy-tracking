@@ -27,6 +27,7 @@ def _state_extra_load(raw):
     except Exception:
         A._w_bear_streak = 0
     A._w_bear_last_day = str(raw.get("w_bear_last_day", "") or "")
+    A.round_scaled = bool(raw.get("round_scaled"))
 
 
 def _state_extra_save(data):
@@ -43,3 +44,4 @@ def _state_extra_save(data):
     data["fallback_done_day"] = str(getattr(A, "_fallback_done_day", "") or "")
     data["w_bear_streak"] = int(getattr(A, "_w_bear_streak", 0) or 0)
     data["w_bear_last_day"] = str(getattr(A, "_w_bear_last_day", "") or "")
+    data["round_scaled"] = bool(getattr(A, "round_scaled", False))

@@ -463,6 +463,46 @@ def _mirror_hold_from_lots():
     A.time_force_trend_skip = bool(lot.get("time_force_trend_skip"))
 
 
+def _infer_round_scaled():
+    """旧状态无 round_scaled 时：剩余笔 id>1 或同时 >=2 笔，视为本轮已加过仓。"""
+    if _lots_enabled():
+        mx = 0
+        n = 0
+        for lot in getattr(A, "lots", None) or []:
+            if not isinstance(lot, dict):
+                continue
+            try:
+                sh = int(lot.get("shares") or 0)
+            except Exception:
+                sh = 0
+            if sh < 100:
+                continue
+            n += 1
+            try:
+                mx = max(mx, int(lot.get("id") or 0))
+            except Exception:
+                pass
+        return n >= 2 or mx > 1
+    pos = getattr(A, "position", None) or {}
+    try:
+        return int(pos.get("lots", 1) or 1) >= 2
+    except Exception:
+        return False
+
+
+def _round_scaled_now():
+    if bool(getattr(A, "round_scaled", False)):
+        return True
+    if not _infer_round_scaled():
+        return False
+    A.round_scaled = True
+    try:
+        _save_state()
+    except Exception:
+        pass
+    return True
+
+
 def _scale_peak_ret():
     mx = 0.0
     armed_bars = 0
@@ -504,6 +544,8 @@ def _scale_gate(w_detail=None):
     )
     if not holding_now:
         return False, "scale_no_pos"
+    if bool(globals().get("SCALE_ONCE_PER_ROUND", True)) and _round_scaled_now():
+        return False, "scale_once"
     if _pos_lots() >= int(globals().get("SCALE_MAX") or 1):
         return False, "scale_max"
     arm = float(globals().get("SCALE_ARM") or 0)
@@ -642,6 +684,7 @@ def _clear_hold_meta():
     A._hold_count_day = ""
     A.time_force_grace_until = None
     A.time_force_trend_skip = False
+    A.round_scaled = False
 
 
 def _bump_hold_bars(day):
@@ -863,6 +906,7 @@ def _after_signal_buy_filled(px, day, add=False):
     """买入成交后初始化持仓元数据并清信号 pending。"""
     A.pending_entry = None
     A.pending_exit = None
+    A.round_scaled = True if add else False
     if _lots_enabled():
         lots = getattr(A, "lots", None) or []
         if lots and day:
@@ -963,6 +1007,7 @@ _BUY_LABELS = {
     "w_slope_skip": "低位周线MA30未连升禁开",
     "vol_dry_skip": "无量阴跌禁开",
     "weekly_bear": "周线空头禁开",
+    "scale_once": "本轮已加仓",
 }
 
 
@@ -1327,6 +1372,7 @@ def _handle(C):
                 or int(getattr(A, "hold_bars", 0) or 0)
                 or getattr(A, "time_force_grace_until", None) is not None
                 or bool(getattr(A, "time_force_trend_skip", False))
+                or bool(getattr(A, "round_scaled", False))
             ):
                 _clear_hold_meta()
         else:
@@ -1346,6 +1392,7 @@ def _handle(C):
             or int(getattr(A, "hold_bars", 0) or 0)
             or getattr(A, "time_force_grace_until", None) is not None
             or bool(getattr(A, "time_force_trend_skip", False))
+            or bool(getattr(A, "round_scaled", False))
         ):
             _clear_hold_meta()
     else:
