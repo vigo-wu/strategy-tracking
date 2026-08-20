@@ -1398,6 +1398,7 @@ def _try_exec_pending_entry(
             reserve=snap.get("reserve"),
             lot=snap.get("lot"),
             book_mv=snap.get("book_mv"),
+            other_mv=snap.get("other_mv"),
             name_mv=snap.get("name_mv"),
             n_buy=snap.get("n_buy"),
             why=snap.get("why"),

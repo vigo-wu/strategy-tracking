@@ -1,12 +1,29 @@
 
-[2026-08-20 15:11:21][HLBAND][SH601668][日线] [trade]start simulation mode
-[2026-08-20 15:11:21][HLBAND][SH601668][日线] HlBand panel applied DRY_RUN,TRADE_BUDGET,BOOK_N,CASH_RATIO,MIN_LOT,MAX_NAME_FRAC,W_BIAS_HARD,W_BIAS_LOW,W_MA30_SLOPE_WEEKS,W_BEAR_CONFIRM_DAYS,MA_TOUCH_TOL,VOL_PULLBACK_N,VOL_PULLBACK_RATIO,VOL_DRY_N,VOL_DRY_RATIO,CHASE_MAX_PCT,STOP_LOSS,TIME_FORCE_BARS,TIME_FORCE_GRACE_BARS,TIME_FORCE_MIN_RET,SCALE_ENABLE,SCALE_LOTS,SCALE_ARM_BARS,SCALE_PLAT_LOOKBACK,SCALE_PLAT_MAX_RANGE,SCALE_W_HIST_EXPAND_RATIO
-HlBand skip download_history (live) 1d +1w
-HlBand state: empty (no file) D:\tradingStrategy\hlband_601668_SH.json
-HlBand v1.39 init 601668.SH 39953913 STOCK PERIOD= 1d BACKTEST= False DRY_RUN= False budget= 50000.0 dynamic_budget= True BOOK_N= 4 cash_ratio= 0.95 min_lot= 20000.0 max_name_frac= 0.5 equal_split= True book_freeze= 145730/093200 wMA= 5/13/34 dMA= 20/60 stop= 0.08 chase< 0.05 scale= True scale_lots= True scale_once= True scale_arm= 0.03 scale_arm_bars= 8 scale_plat= 20/0.10 scale_w_expand= 1.2 time_force_bars= 30 time_force_min_ret= 0.03 close_exec= 145750-150000 open_exec= 093000-094500
+[2026-08-20 16:31:20][HLBAND_PROD][SH513530][日线] [trade]start trading mode
+[2026-08-20 16:31:20][HLBAND_PROD][SH513530][日线] HLBAND_PROD panel applied DRY_RUN,TRADE_BUDGET,BOOK_N,CASH_RATIO,MIN_LOT,MAX_NAME_FRAC,W_BIAS_HARD,W_BIAS_LOW,W_MA30_SLOPE_WEEKS,W_BEAR_CONFIRM_DAYS,MA_TOUCH_TOL,VOL_PULLBACK_N,VOL_PULLBACK_RATIO,VOL_DRY_N,VOL_DRY_RATIO,CHASE_MAX_PCT,STOP_LOSS,TIME_FORCE_BARS,TIME_FORCE_GRACE_BARS,TIME_FORCE_MIN_RET,SCALE_ENABLE,SCALE_LOTS,SCALE_ARM_BARS,SCALE_PLAT_LOOKBACK,SCALE_PLAT_MAX_RANGE,SCALE_W_HIST_EXPAND_RATIO
+HLBAND_PROD skip download_history (live) 1d +1w
+HLBAND_PROD state loaded path= D:\tradingStrategy\hlband_513530_SH.json None pending= False
+HLBAND_PROD v1.40 init 513530.SH 39953913 STOCK PERIOD= 1d BACKTEST= False DRY_RUN= False budget= 50000.0 dynamic_budget= True BOOK_N= 4 book_stocks= 513530.SH,600350.SH,601398.SH,601939.SH cash_ratio= 0.95 min_lot= 20000.0 max_name_frac= 0.5 equal_split= True book_freeze= 145730/093200 wMA= 5/13/34 dMA= 20/60 stop= 0.08 chase< 0.05 scale= True scale_lots= True scale_once= True scale_arm= 0.03 scale_arm_bars= 8 scale_plat= 20/0.10 scale_w_expand= 1.2 time_force_bars= 30 time_force_min_ret= 0.03 close_exec= 145750-150000 open_exec= 093000-094500
+HLBAND_PROD live heartbeat 2026-08-20 16:31:20 PERIOD= 1d stock= 513530.SH E=0 N=4 k=0 k_other=0 reserve=0 lot=0 book_mv=0 other_mv=0 name_mv=0 n_buy=0 why=wait src=- reason=outside_session
 
-[2026-08-20 15:11:21][HLBAND][SH601668][日线] HlBand live heartbeat 2026-08-20 15:11:21 PERIOD= 1d stock= 601668.SH E=0 N=4 k=0 reserve=0 lot=0 book_mv=0 name_mv=0 n_buy=0 why=wait src=- reason=confirm
-HlBand diag: d1_ok source= get_market_data_ex period= 1d n= 180 end= 20260820 last= 4.43
-HlBand diag: w1_ok source= get_market_data_ex period= 1w n= 120 end= 20260820 last= 4.4
-HlBand w_bear streak=1/2 day=20260820
-HlBand 20260820 1511 n1d=180 n1w=120 close=4.4300 sig_d=20260820 sig_w=20260820 phase=confirm prev_d=False prev_w=False w_bull=False w_bear=True w_bn=1/2 w_ma5=4.57 w_ma30=4.6324 w_hist=0.0252 buy=False buyR=weekly_bear scale=False scaleR=scale_no_pos sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=- avail=-
+[2026-08-20 16:31:21][HLBAND_PROD][SH601939][日线] [trade]start trading mode
+[2026-08-20 16:31:21][HLBAND_PROD][SH601939][日线] HLBAND_PROD panel applied DRY_RUN,TRADE_BUDGET,BOOK_N,CASH_RATIO,MIN_LOT,MAX_NAME_FRAC,W_BIAS_HARD,W_BIAS_LOW,W_MA30_SLOPE_WEEKS,W_BEAR_CONFIRM_DAYS,MA_TOUCH_TOL,VOL_PULLBACK_N,VOL_PULLBACK_RATIO,VOL_DRY_N,VOL_DRY_RATIO,CHASE_MAX_PCT,STOP_LOSS,TIME_FORCE_BARS,TIME_FORCE_GRACE_BARS,TIME_FORCE_MIN_RET,SCALE_ENABLE,SCALE_LOTS,SCALE_ARM_BARS,SCALE_PLAT_LOOKBACK,SCALE_PLAT_MAX_RANGE,SCALE_W_HIST_EXPAND_RATIO
+HLBAND_PROD skip download_history (live) 1d +1w
+HLBAND_PROD state loaded path= D:\tradingStrategy\hlband_601939_SH.json None pending= False
+HLBAND_PROD v1.40 init 601939.SH 39953913 STOCK PERIOD= 1d BACKTEST= False DRY_RUN= False budget= 50000.0 dynamic_budget= True BOOK_N= 4 book_stocks= 513530.SH,600350.SH,601398.SH,601939.SH cash_ratio= 0.95 min_lot= 20000.0 max_name_frac= 0.5 equal_split= True book_freeze= 145730/093200 wMA= 5/13/34 dMA= 20/60 stop= 0.08 chase< 0.05 scale= True scale_lots= True scale_once= True scale_arm= 0.03 scale_arm_bars= 8 scale_plat= 20/0.10 scale_w_expand= 1.2 time_force_bars= 30 time_force_min_ret= 0.03 close_exec= 145750-150000 open_exec= 093000-094500
+HLBAND_PROD live heartbeat 2026-08-20 16:31:21 PERIOD= 1d stock= 601939.SH E=0 N=4 k=0 k_other=0 reserve=0 lot=0 book_mv=0 other_mv=0 name_mv=0 n_buy=0 why=wait src=- reason=outside_session
+
+[2026-08-20 16:31:21][HLBAND_PROD][SH601398][日线] [trade]start trading mode
+[2026-08-20 16:31:21][HLBAND_PROD][SH601398][日线] HLBAND_PROD panel applied DRY_RUN,TRADE_BUDGET,BOOK_N,CASH_RATIO,MIN_LOT,MAX_NAME_FRAC,W_BIAS_HARD,W_BIAS_LOW,W_MA30_SLOPE_WEEKS,W_BEAR_CONFIRM_DAYS,MA_TOUCH_TOL,VOL_PULLBACK_N,VOL_PULLBACK_RATIO,VOL_DRY_N,VOL_DRY_RATIO,CHASE_MAX_PCT,STOP_LOSS,TIME_FORCE_BARS,TIME_FORCE_GRACE_BARS,TIME_FORCE_MIN_RET,SCALE_ENABLE,SCALE_LOTS,SCALE_ARM_BARS,SCALE_PLAT_LOOKBACK,SCALE_PLAT_MAX_RANGE,SCALE_W_HIST_EXPAND_RATIO
+HLBAND_PROD skip download_history (live) 1d +1w
+HLBAND_PROD state loaded path= D:\tradingStrategy\hlband_601398_SH.json {'shares': 3300, 'price': 7.52, 'cost': 24816.0, 'opened_at': '20260810093757'} pending= False
+HLBAND_PROD v1.40 init 601398.SH 39953913 STOCK PERIOD= 1d BACKTEST= False DRY_RUN= False budget= 50000.0 dynamic_budget= True BOOK_N= 4 book_stocks= 513530.SH,600350.SH,601398.SH,601939.SH cash_ratio= 0.95 min_lot= 20000.0 max_name_frac= 0.5 equal_split= True book_freeze= 145730/093200 wMA= 5/13/34 dMA= 20/60 stop= 0.08 chase< 0.05 scale= True scale_lots= True scale_once= True scale_arm= 0.03 scale_arm_bars= 8 scale_plat= 20/0.10 scale_w_expand= 1.2 time_force_bars= 30 time_force_min_ret= 0.03 close_exec= 145750-150000 open_exec= 093000-094500
+
+[2026-08-20 16:31:22][HLBAND_PROD][SH601398][日线] HLBAND_PROD live heartbeat 2026-08-20 16:31:22 PERIOD= 1d stock= 601398.SH lots=L1:3300@7.5200 E=0 N=4 k=0 k_other=0 reserve=0 lot=0 book_mv=0 other_mv=0 name_mv=0 n_buy=0 why=wait src=- reason=outside_session
+
+[2026-08-20 16:31:22][HLBAND_PROD][SH600350][日线] [trade]start trading mode
+[2026-08-20 16:31:22][HLBAND_PROD][SH600350][日线] HLBAND_PROD panel applied DRY_RUN,TRADE_BUDGET,BOOK_N,CASH_RATIO,MIN_LOT,MAX_NAME_FRAC,W_BIAS_HARD,W_BIAS_LOW,W_MA30_SLOPE_WEEKS,W_BEAR_CONFIRM_DAYS,MA_TOUCH_TOL,VOL_PULLBACK_N,VOL_PULLBACK_RATIO,VOL_DRY_N,VOL_DRY_RATIO,CHASE_MAX_PCT,STOP_LOSS,TIME_FORCE_BARS,TIME_FORCE_GRACE_BARS,TIME_FORCE_MIN_RET,SCALE_ENABLE,SCALE_LOTS,SCALE_ARM_BARS,SCALE_PLAT_LOOKBACK,SCALE_PLAT_MAX_RANGE,SCALE_W_HIST_EXPAND_RATIO
+HLBAND_PROD skip download_history (live) 1d +1w
+HLBAND_PROD state loaded path= D:\tradingStrategy\hlband_600350_SH.json None pending= False
+HLBAND_PROD v1.40 init 600350.SH 39953913 STOCK PERIOD= 1d BACKTEST= False DRY_RUN= False budget= 50000.0 dynamic_budget= True BOOK_N= 4 book_stocks= 513530.SH,600350.SH,601398.SH,601939.SH cash_ratio= 0.95 min_lot= 20000.0 max_name_frac= 0.5 equal_split= True book_freeze= 145730/093200 wMA= 5/13/34 dMA= 20/60 stop= 0.08 chase< 0.05 scale= True scale_lots= True scale_once= True scale_arm= 0.03 scale_arm_bars= 8 scale_plat= 20/0.10 scale_w_expand= 1.2 time_force_bars= 30 time_force_min_ret= 0.03 close_exec= 145750-150000 open_exec= 093000-094500
+HLBAND_PROD live heartbeat 2026-08-20 16:31:22 PERIOD= 1d stock= 600350.SH E=0 N=4 k=0 k_other=0 reserve=0 lot=0 book_mv=0 other_mv=0 name_mv=0 n_buy=0 why=wait src=- reason=outside_session

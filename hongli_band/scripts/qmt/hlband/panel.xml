@@ -4,30 +4,13 @@
         <variable note="控件">
             <item bind="panel_dry_run" name="模拟下单" note="勾选=只打日志不下单（DRY_RUN）" value="False" type="checkBox"/>
             <item bind="panel_budget" name="回测单笔预算" note="元；仅编辑器回测或关闭动态填满时使用。实盘按跟踪池填满，不锁此值" value="50000" type="intput"/>
-            <item bind="panel_book_n" name="跟踪池只数" note="N；所有实例必须填同一个数。空仓预留 N-k 份 MIN_LOT。增减标的见 model.md" value="4" type="intput"/>
-            <item bind="panel_cash_ratio" name="可部署比例" note="相对总资产 E，0.95=最多用 95%，留 5% 现金缓冲" value="0.95" type="intput"/>
-            <item bind="panel_min_lot" name="空仓最小金额" note="元；每只空仓预留这么多，默认 20000。不足 100 股则按 100 股市值成交" value="20000" type="intput"/>
-            <item bind="panel_max_name_frac" name="单标的上限" note="占 E 的比例，0.50=一只最多半仓。更怕集中可改 0.40" value="0.50" type="intput"/>
+            <item bind="panel_cash_ratio" name="可部署比例" note="相对 E_s=总资产减去其它股票市值，0.95=策略袖子最多用 95%。四图须填相同值" value="0.95" type="intput"/>
+            <item bind="panel_min_lot" name="空仓最小金额" note="元；每只空仓预留这么多，默认 20000。不足 100 股则按 100 股市值成交。四图须填相同值" value="20000" type="intput"/>
+            <item bind="panel_max_name_frac" name="单标的上限" note="占 E_s 的比例，0.50=一只最多半个策略袖子。更怕集中可改 0.40。四图须填相同值" value="0.50" type="intput"/>
             <item bind="panel_w_bias_hard" name="周线 高位乖离禁开" note="(MA5-MA34)/MA34 达到此值禁开，0.08=8%；生命线=W_MA_LIFE=34" value="0.08" type="intput"/>
-            <item bind="panel_w_bias_low" name="周线 低位区阈值" note="乖离低于此值须生命线 MA34 向上，0.02=2%" value="0.02" type="intput"/>
-            <item bind="panel_w_slope_weeks" name="周线 低位向上周数" note="低位区要求生命线 MA34 连续向上的周数" value="2" type="intput"/>
-            <item bind="panel_w_bear_days" name="周线 空头确认日数" note="周线空头连续N个信号日才挂清仓；禁开仍当日生效" value="2" type="intput"/>
-            <item bind="panel_ma_touch_tol" name="买入 回踩容差" note="距 MA20/MA60 的比例，0.025=2.5%" value="0.025" type="intput"/>
-            <item bind="panel_vol_pb_n" name="买入 缩量窗口" note="买点比较均量的日数" value="10" type="intput"/>
-            <item bind="panel_vol_pb_ratio" name="买入 缩量比例" note="量小于均量乘此值视为缩量" value="0.9" type="intput"/>
-            <item bind="panel_vol_dry_n" name="买入 无量窗口" note="无量阴跌比较均量的日数" value="20" type="intput"/>
-            <item bind="panel_vol_dry_ratio" name="买入 无量比例" note="破MA20且量小于均量乘此值则禁开" value="0.60" type="intput"/>
             <item bind="panel_chase_pct" name="买入 追高禁开" note="当日涨幅达到此比例禁开，0.05=5%" value="0.05" type="intput"/>
             <item bind="panel_stop_loss" name="卖出 硬止损" note="收盘相对成本回撤达到此比例清仓，0.08=8%" value="0.08" type="intput"/>
-            <item bind="panel_time_force_bars" name="卖出 时间成本日数" note="持仓超过此日数后才启用智能时间卖出（默认=日线MA60一半）" value="30" type="intput"/>
-            <item bind="panel_time_force_grace" name="卖出 豁免观察日" note="未走出止盈起步档且站上MA60时再观察的日数" value="5" type="intput"/>
-            <item bind="panel_time_force_min_ret" name="卖出 时间成本峰值门槛" note="峰值浮盈达到此比例则不按日历强平，0.03=3%；0=关闭让路" value="0.03" type="intput"/>
             <item bind="panel_scale" name="盈利后加仓" note="勾选=浮盈够且持仓满最短日后，缩量回踩或日线破平台或周线MACD金叉放大则加第二笔；同一轮持仓只加一次" value="True" type="checkBox"/>
-            <item bind="panel_scale_lots" name="加仓分笔独立" note="勾选=多仓，每笔自己止盈止损；不勾选=均价合并整仓出" value="True" type="checkBox"/>
-            <item bind="panel_scale_arm_bars" name="加仓 最短持仓日" note="第一笔持仓满此日数才允许加仓，过滤短线冲高" value="8" type="intput"/>
-            <item bind="panel_scale_plat_n" name="加仓 平台回看日" note="日线平台不含当日的回看根数，收盘站上该窗口最高价才算突破" value="20" type="intput"/>
-            <item bind="panel_scale_plat_range" name="加仓 平台最大振幅" note="回看窗口(高-低)/低 不超过此值才算平台，0.10=10%" value="0.10" type="intput"/>
-            <item bind="panel_scale_w_expand" name="加仓 周线柱放大" note="上周金叉时本周红柱须达到上周柱绝对值的此倍数，1.2=放大20%" value="1.2" type="intput"/>
         </variable>
     </control>
 </TCStageLayout>

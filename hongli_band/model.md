@@ -1,7 +1,7 @@
 # 红利板块波段策略：周线定方向，日线找买卖点
 
-**主题目录**：`hongli_band/`｜**版本**：v1.39｜**形态**：单仓骨架 / 分笔多仓｜**运行**：国金 QMT 终端模型（见 §5）  
-**参数默认值**：`hongli_band/scripts/qmt/hlband/config.py`（文档以该文件为准）。实盘在「模型交易 → 新建/编辑策略交易」面板覆盖（`hlband/panel.xml`）；编辑器回测无注入时用 config。阶梯止盈 `TRAIL_TIERS`、均线周期、路径仍只在 config。
+**主题目录**：`hongli_band/`｜**版本**：v1.41｜**形态**：单仓骨架 / 分笔多仓｜**运行**：国金 QMT 终端模型（见 §5）  
+**参数默认值**：`hongli_band/scripts/qmt/hlband/config.py`（文档以该文件为准）。实盘在「模型交易 → 新建/编辑策略交易」面板只覆盖开关 / 预算袖子 / 硬风控（`hlband/panel.xml`）；编辑器回测无注入时用 config。买点窗口、时间成本、加仓细节、`SCALE_LOTS`、`BOOK_N`、阶梯止盈 `TRAIL_TIERS`、均线周期、路径仍只在 config。
 
 ---
 
@@ -63,7 +63,11 @@
 
 ## 仓位：共享账本均分 + 单标的 50% 硬顶
 
-N = 面板 `BOOK_N`（默认 4）。四图各评各的票，但**当天所有买单先写入同一份账本**，冻结后再均分可部署资金，同一集合竞价里按算好的金额下单。不要用「谁先报谁先填满 50%」。
+跟踪池以 config `BOOK_STOCKS` 为准（默认 600350 / 601398 / 601939 / 513530）。N = 名单长度。四图各评各的票，但**当天所有买单先写入同一份账本**，冻结后再均分可部署资金。不要用「谁先报谁先填满 50%」。
+
+账户可以混持其它股票。`k` / `book_mv` **只统计白名单**。策略净值：
+
+`E_s = 账户总资产 − 其它股票市值`（约等于现金 + 池内市值）。`CASH_RATIO` 与 `MAX_NAME_FRAC` 都相对 `E_s`，不是整户。本策略盈亏进现金后 `E_s` 自动变大；用现金买了其它股票则 `E_s` 变小。不留 `CASH_KEEP`。
 
 账本路径 `BOOK_FILE`（默认 `D:\tradingStrategy\hlband_book.json`），**不是**按标的分的 `STATE_FILE`。无买点也要打卡，否则分不清「没信号」还是「那张图没起来」。
 
@@ -78,19 +82,19 @@ N = 面板 `BOOK_N`（默认 4）。四图各评各的票，但**当天所有买
 
 实盘（`EQUAL_SPLIT=True`）冻结后：
 
-1. 用券商快照：`E`、现金、各股市值；账本里的整只卖出先虚拟减仓
-2. `k_after` = 现持股只数 + 本窗新开只数；`empty = max(0, BOOK_N - k_after)`；`reserve = empty × MIN_LOT`
-3. 可分池子 `pool = min(CASH_RATIO×E − book_mv − reserve, 现金)`
-4. 当天每只有买单的标的均分 `pool`；谁先碰到 `MAX_NAME_FRAC×E`（默认 50%）就把剩余再分给还没碰到的（水位法）
+1. 用券商快照：`E_s`、现金、白名单各股市值、其它股票市值；账本里的整只卖出先虚拟减仓
+2. `k_after` = 白名单现持股只数 + 本窗新开只数；`empty = max(0, N - k_after)`；`reserve = empty × MIN_LOT`
+3. 可分池子 `pool = min(CASH_RATIO×E_s − book_mv − reserve, 现金)`
+4. 当天每只有买单的标的均分 `pool`；谁先碰到 `MAX_NAME_FRAC×E_s`（默认 50%）就把剩余再分给还没碰到的（水位法）
 5. 向下到 100 股。单只已到 50% 则 `buy_cap` / `scale_cap`
 
 `SCALE_MAX` 仍为 2。回测无全账户账本，仍用 `TRADE_BUDGET`。信号仍走单仓 + `SCALE_LOTS`。
 
-日志含：`E=` `N=` `k=` `reserve=` `lot=` `book_mv=` `name_mv=` `n_buy=` `split=` `why=` `src=`（`split` 均分 / `wait` 未冻结 / `book_fail` 无本地账本；`src=broker|local`）。
+日志含：`E=` `N=` `k=` `k_other=` `reserve=` `lot=` `book_mv=` `other_mv=` `name_mv=` `n_buy=` `split=` `why=` `src=`（`split` 均分 / `wait` 未冻结 / `book_fail` 无本地账本；`src=broker|local`）。
 
-**账户不要混持本策略以外的股票**。`STATE_FILE` 仍带 `{stock}`，禁止多实例共写同一状态 JSON。
+`STATE_FILE` 仍带 `{stock}`，禁止多实例共写同一状态 JSON。
 
-20 万、`MIN_LOT=2万` 时 **N ≤ 9**。空账户、只有新开、另留没信号的空仓预留：
+20 万袖子、`MIN_LOT=2万` 时 **N ≤ 9**。空账户、只有新开、另留没信号的空仓预留：
 
 | 当天新开只数 | 预留 | 可分池子 | 每只（均分，且 ≤10 万） |
 | ---: | ---: | ---: | :--- |
@@ -103,12 +107,12 @@ N = 面板 `BOOK_N`（默认 4）。四图各评各的票，但**当天所有买
 
 ### 增减跟踪标的
 
-所有实例的 `BOOK_N` / `CASH_RATIO` / `MIN_LOT` / `MAX_NAME_FRAC` **必须一致**。不要用持股只数反推 N。不为 N 变化做再平衡。
+所有实例的 `BOOK_STOCKS` / `CASH_RATIO` / `MIN_LOT` / `MAX_NAME_FRAC` **必须一致**。N 以名单只数为准（`budget._cfg_book_n` 忽略面板/config 里的 `BOOK_N` 除非名单为空）。不要用持股只数反推 N。不为 N 变化做再平衡。
 
 | 动作 | 顺序 | 原因 |
 | :--- | :--- | :--- |
-| **增加**（4 → 5） | 先把**已跑的每一图**改成 5，再挂新图 | 空仓预留立刻多 1×`MIN_LOT`，正在填满的新单会变小；旧的大仓不主动减，等卖点 |
-| **减少**（4 → 3） | 先停并**清空**被删标的，再改剩余图的 `BOOK_N` | 未平就改 N，预留变少，其余标的会继续往上打，和残留仓叠满 |
+| **增加**（4 → 5） | 先改 `BOOK_STOCKS` 并四图 re-deploy，再挂新图 | 空仓预留立刻多 1×`MIN_LOT`；被删出名单但仍持有的票算其它股票，市值从 `E_s` 里减掉 |
+| **减少**（4 → 3） | 先停并**清空**被删标的，再从名单去掉并改 `BOOK_N` | 未平就删名单，该市值变成其它股票、`E_s` 变小 |
 
 ---
 
@@ -157,41 +161,42 @@ N = 面板 `BOOK_N`（默认 4）。四图各评各的票，但**当天所有买
 **报告**：`python hongli_band/gen_report.py` → `report/`  
 **片段**：`hongli_band/scripts/qmt/hlband/`（只改片段 / `panel.xml` 后 re-deploy，勿手改终端 GBK 或 `formulaLayout`）
 
-实盘改参：模型交易里打开本策略实例，改「基础 / 周线 / 买入 / 卖出」后确定再运行。跟踪池只数 `BOOK_N`、可部署比例、空仓最小金额、单标的上限须**所有实例填相同值**。`TRADE_BUDGET` 仅回测回落；策略交易注入了该值时**不再**读 `TRADE_BUDGET_BY_STOCK`。编辑器回测仍用 config 与按标的覆盖。
+实盘改参：模型交易里打开本策略实例，改「模拟下单 / 预算袖子 / 高位禁开 / 追高 / 硬止损 / 加仓开关」后确定再运行。可部署比例、空仓最小金额、单标的上限须**所有实例填相同值**。跟踪池只数以 `BOOK_STOCKS` 长度为准，不要在面板改 N。增减标的改 `BOOK_STOCKS` 后 re-deploy。`TRADE_BUDGET` 仅回测回落；策略交易注入了该值时**不再**读 `TRADE_BUDGET_BY_STOCK`。编辑器回测仍用 config 与按标的覆盖。
 
 | 配置 | 当前值 | 说明 |
 | :--- | :--- | :--- |
 | `DRY_RUN` | `False` | **默认真下单**；联调可改 `True` 或面板勾选「模拟下单」 |
 | `TRADE_BUDGET` | `50000` | 回测单笔回落；实盘填满不锁此值；可被 `TRADE_BUDGET_BY_STOCK` 覆盖 |
-| `BOOK_N` | `4` | 跟踪池只数；各实例必须一致；增减步骤见「增减跟踪标的」 |
+| `BOOK_STOCKS` | 四只默认名单 | 跟踪池白名单（仅 config）；k / 市值只统计这些 |
+| `BOOK_N` | `4` | 仅 config 回落；有 `BOOK_STOCKS` 时 N=名单只数（面板不上屏） |
 | `DYNAMIC_BUDGET` | `True` | 实盘动态仓位；回测仍用 `TRADE_BUDGET`（仅 config） |
 | `EQUAL_SPLIT` | `True` | 当天多只买单写入 `BOOK_FILE`，冻结后均分（仅 config） |
 | `BOOK_FILE` | `D:\tradingStrategy\hlband_book.json` | 四图共享信号账本；不是 STATE |
 | `BOOK_FREEZE_CLOSE/OPEN` | `145730` / `093200` | 打卡截止；到点或打卡满 N 即冻结 |
-| `CASH_RATIO` | `0.95` | 可部署比例（相对总资产 E）；留 5% 现金缓冲 |
+| `CASH_RATIO` | `0.95` | 可部署比例（相对 E_s=总资产−其它市值） |
 | `MIN_LOT` | `20000` | 每只空仓预留的最小进场金额（元） |
-| `MAX_NAME_FRAC` | `0.50` | 单标的市值上限占 E；更怕集中可改 `0.40` |
+| `MAX_NAME_FRAC` | `0.50` | 单标的市值上限占 E_s；更怕集中可改 `0.40` |
 | `W_MA_FAST/MID/LIFE/SLOW` | `5/13/34/55` | 周线均线；生命线=34（仅 config） |
 | `W_BIAS_HARD` | `0.08` | 周线高位乖离禁开（相对 MA34） |
-| `W_BIAS_LOW` | `0.02` | 低位区阈值（配合斜率） |
-| `W_MA30_SLOPE_WEEKS` | `2` | 低位区生命线 MA34 连续向上周数 |
-| `W_BEAR_CONFIRM_DAYS` | `2` | 周线空头清仓须连续信号日数 |
-| `MA_TOUCH_TOL` | `0.025` | 回踩均线容差 |
-| `VOL_PULLBACK_N/RATIO` | `10` / `0.9` | 买点量能 |
-| `VOL_DRY_N/RATIO` | `20` / `0.60` | 无量阴跌禁开 |
+| `W_BIAS_LOW` | `0.02` | 低位区阈值（配合斜率；仅 config） |
+| `W_MA30_SLOPE_WEEKS` | `2` | 低位区生命线 MA34 连续向上周数（仅 config） |
+| `W_BEAR_CONFIRM_DAYS` | `2` | 周线空头清仓须连续信号日数（仅 config） |
+| `MA_TOUCH_TOL` | `0.025` | 回踩均线容差（仅 config） |
+| `VOL_PULLBACK_N/RATIO` | `10` / `0.9` | 买点量能（仅 config） |
+| `VOL_DRY_N/RATIO` | `20` / `0.60` | 无量阴跌禁开（仅 config） |
 | `TRAIL_TIERS` | 见 §3 | 阶梯移动止盈（档3 回撤 4%） |
-| `TIME_FORCE_BARS` | `D_MA_SLOW//2`（30） | 时间成本起始持仓日（半段慢均线，不是最长持仓） |
-| `TIME_FORCE_GRACE_BARS` | `5` | 未武装止盈且站上 MA60 时豁免观察日 |
-| `TIME_FORCE_MIN_RET` | `0.03` | 峰值浮盈达此值则不按日历强平（对齐阶梯起步档） |
+| `TIME_FORCE_BARS` | `D_MA_SLOW//2`（30） | 时间成本起始持仓日（半段慢均线，不是最长持仓；仅 config） |
+| `TIME_FORCE_GRACE_BARS` | `5` | 未武装止盈且站上 MA60 时豁免观察日（仅 config） |
+| `TIME_FORCE_MIN_RET` | `0.03` | 峰值浮盈达此值则不按日历强平（对齐阶梯起步档；仅 config） |
 | `SCALE_ENABLE` | `True` | 盈利后满足持仓日/周线柱，再缩量回踩或破平台或周线 MACD 金叉放大则加第二笔 |
-| `SCALE_LOTS` | `True` | 分笔独立止盈止损；关则均价合并整仓出 |
+| `SCALE_LOTS` | `True` | 分笔独立止盈止损；关则均价合并整仓出（仅 config，实盘勿改） |
 | `SCALE_ONCE_PER_ROUND` | `True` | 同一轮持仓只加一次；平掉第一笔后空仓前不再加（仅 config） |
 | `SCALE_MAX` / `SCALE_ARM` | `2` / `0.03` | 同时最多 2 笔；峰值浮盈 3% 后才允许加仓（仅 config） |
-| `SCALE_ARM_BARS` | `8` | 第一笔持仓满 8 日才加仓 |
+| `SCALE_ARM_BARS` | `8` | 第一笔持仓满 8 日才加仓（仅 config） |
 | `SCALE_W_HIST_MIN` | `-0.01` | 周线 MACD 柱低于此值不加仓（仅 config） |
-| `SCALE_PLAT_LOOKBACK` | `20` | 日线平台回看日（不含当日） |
-| `SCALE_PLAT_MAX_RANGE` | `0.10` | 平台振幅上限 10%；更宽则不算平台 |
-| `SCALE_W_HIST_EXPAND_RATIO` | `1.2` | 上周金叉时本周红柱须放大至 1.2 倍 |
+| `SCALE_PLAT_LOOKBACK` | `20` | 日线平台回看日（不含当日；仅 config） |
+| `SCALE_PLAT_MAX_RANGE` | `0.10` | 平台振幅上限 10%；更宽则不算平台（仅 config） |
+| `SCALE_W_HIST_EXPAND_RATIO` | `1.2` | 上周金叉时本周红柱须放大至 1.2 倍（仅 config） |
 | `STOP_LOSS` | `0.08` | 硬止损（相对该笔成本） |
 | `CHASE_MAX_PCT` | `0.05` | 追高禁开 |
 | `LIVE_CLOSE_CONFIRM` | `True` | 收盘确认 + 开盘兜底 |
@@ -201,4 +206,4 @@ N = 面板 `BOOK_N`（默认 4）。四图各评各的票，但**当天所有买
 | `STATE_FILE` | `D:\tradingStrategy\hlband_{stock}.json` | 实盘状态；按主图标的分文件 |
 | `LOG_DIR` | `D:\tradingStrategy\logs` | 实盘结构化日志根目录 |
 
-日志确认 `HlBand v1.39 init` 且 `BOOK_N= 4`、`cash_ratio= 0.95`、`min_lot= 20000`、`max_name_frac= 0.5`、`dynamic_budget= True`、`equal_split= True`、`book_freeze= 145730/093200`、`close_exec= 145750-150000`、`open_exec= 093000-094500`、`scale= True`、`scale_lots= True`、`scale_once= True`、`scale_arm_bars= 8`、`scale_plat= 20/0.10`、`scale_w_expand= 1.2`、`time_force_min_ret= 0.03`、`wMA= 5/13/34`（`dMA=20/60`，`DRY_RUN=False` 与面板或 config 一致）后再挂实盘。策略交易下应另有 `panel applied ...` 行。四图须都能写 `BOOK_FILE`；无信号也要打卡。实盘买入应看到 `fill ... n_buy= split= why=split`（持股查询失败备用为 `src=local`）；未冻结为 `why=wait`。顶满应看到 `buy_cap` / `scale_cap`。验收：回测先见 `diag: ok`；买卖日志为 `@close=`（同日）或残留 `@open=`；买卖闭合、无孤儿仓。第一笔仍为 `pullback_vol`；加仓应为 `pullback_vol` / `plat_break` / `w_macd_golden`（状态行 `scale= True`），成交附近有 `lots now n=2` 与 `skip sell eval after add fill`。加仓当日状态行 `sellR` 应含 `skip_add_bar`，且不应新挂卖点。本轮已加过仓后再出第一笔时，不应再出现 `BUY add`（可见 `scale_once` 或 `pending_entry cancel scale_once`）。执行日已触发卖点时应看到 `pending_entry cancel scale_sell_block` 且不出现 `BUY add`。只出一笔时应看到 `SELL ... lots=[1]` 且另一笔仍持有。卖出前应有 `SELL lot-can_use`；若 `BUY add` 后同日仍出现 `SELL lots=[2]`，看 `risk=True` 的 WARN（券商成交未必是第二笔）。T+1 部分成交应看到 `pending_exit keep after partial fill`。趋势仓满 30 日且峰值≥3%、仍站上 MA60 时应看到 `time_force skip trend`，之后由 `trail_stop` / `weekly_bear` / 破 MA60 出场；磨人仓仍应看到 `time_force grace`。
+日志确认 `HlBand v1.41 init` 且 `BOOK_N= 4` 与 `book_stocks= 513530.SH,600350.SH,601398.SH,601939.SH`（逗号名单）一致、`cash_ratio= 0.95`、`min_lot= 20000`、`max_name_frac= 0.5`、`dynamic_budget= True`、`equal_split= True`、`book_freeze= 145730/093200`、`close_exec= 145750-150000`、`open_exec= 093000-094500`、`scale= True`、`scale_lots= True`、`scale_once= True`、`scale_arm_bars= 8`、`scale_plat= 20/0.10`、`scale_w_expand= 1.2`、`time_force_min_ret= 0.03`、`wMA= 5/13/34`（`dMA=20/60`，`DRY_RUN=False` 与面板或 config 一致）后再挂实盘。策略交易下应另有 `panel applied ...` 行。四图须都能写 `BOOK_FILE`；无信号也要打卡。实盘买入应看到 `fill ... k_other= other_mv= n_buy= split= why=split`（持股查询失败备用为 `src=local`）；未冻结为 `why=wait`。顶满应看到 `buy_cap` / `scale_cap`。验收：回测先见 `diag: ok`；买卖日志为 `@close=`（同日）或残留 `@open=`；买卖闭合、无孤儿仓。第一笔仍为 `pullback_vol`；加仓应为 `pullback_vol` / `plat_break` / `w_macd_golden`（状态行 `scale= True`），成交附近有 `lots now n=2` 与 `skip sell eval after add fill`。加仓当日状态行 `sellR` 应含 `skip_add_bar`，且不应新挂卖点。本轮已加过仓后再出第一笔时，不应再出现 `BUY add`（可见 `scale_once` 或 `pending_entry cancel scale_once`）。执行日已触发卖点时应看到 `pending_entry cancel scale_sell_block` 且不出现 `BUY add`。只出一笔时应看到 `SELL ... lots=[1]` 且另一笔仍持有。卖出前应有 `SELL lot-can_use`；若 `BUY add` 后同日仍出现 `SELL lots=[2]`，看 `risk=True` 的 WARN（券商成交未必是第二笔）。T+1 部分成交应看到 `pending_exit keep after partial fill`。趋势仓满 30 日且峰值≥3%、仍站上 MA60 时应看到 `time_force skip trend`，之后由 `trail_stop` / `weekly_bear` / 破 MA60 出场；磨人仓仍应看到 `time_force grace`。

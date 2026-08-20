@@ -7,8 +7,15 @@ ACCOUNT_ID = "39953913"
 ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 
 # 跟踪池仓位（实盘）。空仓不锁 1/N，只锁 MIN_LOT。当天多只买单先写入共享账本，冻结后均分可部署资金。
-# 单只硬顶 MAX_NAME_FRAC*E（默认 50%）。N 个实例必须填同一个 BOOK_N，勿用持股只数反推。
-# 约束：N * MIN_LOT <= CASH_RATIO * E（20 万、MIN_LOT=2 万时 N<=9）。账户勿混持其他股票。
+# 单只硬顶 MAX_NAME_FRAC * E_s（默认 50%）。E_s = 账户总资产 - 非白名单股票市值（约等于现金+池内市值）。
+# k / book_mv 只统计 BOOK_STOCKS；其它持股不占名额、不进 50% 分母。N 以名单长度为准。
+# 约束：N * MIN_LOT <= CASH_RATIO * E_s。增减标的改本名单后四图 re-deploy。
+BOOK_STOCKS = (
+    "600350.SH",
+    "601398.SH",
+    "601939.SH",
+    "513530.SH",
+)
 BOOK_N = 4
 DYNAMIC_BUDGET = True
 EQUAL_SPLIT = True
@@ -17,11 +24,11 @@ BOOK_FILE = r"D:\tradingStrategy\hlband_book.json"
 # 确认打卡截止：到点或打卡数>=BOOK_N 即冻结，之后按均分下单
 BOOK_FREEZE_CLOSE = "145730"
 BOOK_FREEZE_OPEN = "093200"
-# 可部署比例（相对总资产 E）；其余留作 T+1 / 废单重试
+# 可部署比例（相对 E_s = 总资产-其它股票市值）；其余留作 T+1 / 废单重试
 CASH_RATIO = 0.95
 # 每只空仓预留的最小进场金额（元）；不足 100 股则实际成交仍按 100 股市值
 MIN_LOT = 20000.0
-# 单标的市值上限占 E 的比例
+# 单标的市值上限占 E_s 的比例
 MAX_NAME_FRAC = 0.50
 # 回测无全账户账本时的单笔回落（元）；DYNAMIC_BUDGET=False 时也用此上限
 TRADE_BUDGET = 50000.0
@@ -126,34 +133,18 @@ SCALE_PLAT_BREAK_BUF = 0.0           # 收盘超过平台高点的缓冲；0=收
 SCALE_W_HIST_EXPAND_RATIO = 1.2
 
 # 策略交易面板 bind → 模块常量。编辑器/回测无注入时用上面默认值。
-# TRAIL_TIERS、均线周期、路径、账号不在面板。
+# 只上屏：开关 / 预算袖子 / 硬风控。买点窗口、时间成本、加仓细节、SCALE_LOTS、
+# BOOK_N、TRAIL_TIERS、均线周期、路径、账号仍只在 config（N 以 BOOK_STOCKS 长度为准）。
 PANEL_BINDS = (
     ("panel_dry_run", "DRY_RUN", "bool"),
     ("panel_budget", "TRADE_BUDGET", "float"),
-    ("panel_book_n", "BOOK_N", "int"),
     ("panel_cash_ratio", "CASH_RATIO", "float"),
     ("panel_min_lot", "MIN_LOT", "float"),
     ("panel_max_name_frac", "MAX_NAME_FRAC", "float"),
     ("panel_w_bias_hard", "W_BIAS_HARD", "float"),
-    ("panel_w_bias_low", "W_BIAS_LOW", "float"),
-    ("panel_w_slope_weeks", "W_MA30_SLOPE_WEEKS", "int"),
-    ("panel_w_bear_days", "W_BEAR_CONFIRM_DAYS", "int"),
-    ("panel_ma_touch_tol", "MA_TOUCH_TOL", "float"),
-    ("panel_vol_pb_n", "VOL_PULLBACK_N", "int"),
-    ("panel_vol_pb_ratio", "VOL_PULLBACK_RATIO", "float"),
-    ("panel_vol_dry_n", "VOL_DRY_N", "int"),
-    ("panel_vol_dry_ratio", "VOL_DRY_RATIO", "float"),
     ("panel_chase_pct", "CHASE_MAX_PCT", "float"),
     ("panel_stop_loss", "STOP_LOSS", "float"),
-    ("panel_time_force_bars", "TIME_FORCE_BARS", "int"),
-    ("panel_time_force_grace", "TIME_FORCE_GRACE_BARS", "int"),
-    ("panel_time_force_min_ret", "TIME_FORCE_MIN_RET", "float"),
     ("panel_scale", "SCALE_ENABLE", "bool"),
-    ("panel_scale_lots", "SCALE_LOTS", "bool"),
-    ("panel_scale_arm_bars", "SCALE_ARM_BARS", "int"),
-    ("panel_scale_plat_n", "SCALE_PLAT_LOOKBACK", "int"),
-    ("panel_scale_plat_range", "SCALE_PLAT_MAX_RANGE", "float"),
-    ("panel_scale_w_expand", "SCALE_W_HIST_EXPAND_RATIO", "float"),
 )
 
 # ---- 行情与运行 ----
@@ -207,7 +198,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.39"
+STRATEGY_VER = "v1.41"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）

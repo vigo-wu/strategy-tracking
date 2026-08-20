@@ -17,8 +17,15 @@ ACCOUNT_ID = "39953913"
 ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 
 # 跟踪池仓位（实盘）。空仓不锁 1/N，只锁 MIN_LOT。当天多只买单先写入共享账本，冻结后均分可部署资金。
-# 单只硬顶 MAX_NAME_FRAC*E（默认 50%）。N 个实例必须填同一个 BOOK_N，勿用持股只数反推。
-# 约束：N * MIN_LOT <= CASH_RATIO * E（20 万、MIN_LOT=2 万时 N<=9）。账户勿混持其他股票。
+# 单只硬顶 MAX_NAME_FRAC * E_s（默认 50%）。E_s = 账户总资产 - 非白名单股票市值（约等于现金+池内市值）。
+# k / book_mv 只统计 BOOK_STOCKS；其它持股不占名额、不进 50% 分母。N 以名单长度为准。
+# 约束：N * MIN_LOT <= CASH_RATIO * E_s。增减标的改本名单后四图 re-deploy。
+BOOK_STOCKS = (
+    "600350.SH",
+    "601398.SH",
+    "601939.SH",
+    "513530.SH",
+)
 BOOK_N = 4
 DYNAMIC_BUDGET = True
 EQUAL_SPLIT = True
@@ -27,11 +34,11 @@ BOOK_FILE = r"D:\tradingStrategy\hlband_book.json"
 # 确认打卡截止：到点或打卡数>=BOOK_N 即冻结，之后按均分下单
 BOOK_FREEZE_CLOSE = "145730"
 BOOK_FREEZE_OPEN = "093200"
-# 可部署比例（相对总资产 E）；其余留作 T+1 / 废单重试
+# 可部署比例（相对 E_s = 总资产-其它股票市值）；其余留作 T+1 / 废单重试
 CASH_RATIO = 0.95
 # 每只空仓预留的最小进场金额（元）；不足 100 股则实际成交仍按 100 股市值
 MIN_LOT = 20000.0
-# 单标的市值上限占 E 的比例
+# 单标的市值上限占 E_s 的比例
 MAX_NAME_FRAC = 0.50
 # 回测无全账户账本时的单笔回落（元）；DYNAMIC_BUDGET=False 时也用此上限
 TRADE_BUDGET = 50000.0
@@ -136,34 +143,18 @@ SCALE_PLAT_BREAK_BUF = 0.0           # 收盘超过平台高点的缓冲；0=收
 SCALE_W_HIST_EXPAND_RATIO = 1.2
 
 # 策略交易面板 bind → 模块常量。编辑器/回测无注入时用上面默认值。
-# TRAIL_TIERS、均线周期、路径、账号不在面板。
+# 只上屏：开关 / 预算袖子 / 硬风控。买点窗口、时间成本、加仓细节、SCALE_LOTS、
+# BOOK_N、TRAIL_TIERS、均线周期、路径、账号仍只在 config（N 以 BOOK_STOCKS 长度为准）。
 PANEL_BINDS = (
     ("panel_dry_run", "DRY_RUN", "bool"),
     ("panel_budget", "TRADE_BUDGET", "float"),
-    ("panel_book_n", "BOOK_N", "int"),
     ("panel_cash_ratio", "CASH_RATIO", "float"),
     ("panel_min_lot", "MIN_LOT", "float"),
     ("panel_max_name_frac", "MAX_NAME_FRAC", "float"),
     ("panel_w_bias_hard", "W_BIAS_HARD", "float"),
-    ("panel_w_bias_low", "W_BIAS_LOW", "float"),
-    ("panel_w_slope_weeks", "W_MA30_SLOPE_WEEKS", "int"),
-    ("panel_w_bear_days", "W_BEAR_CONFIRM_DAYS", "int"),
-    ("panel_ma_touch_tol", "MA_TOUCH_TOL", "float"),
-    ("panel_vol_pb_n", "VOL_PULLBACK_N", "int"),
-    ("panel_vol_pb_ratio", "VOL_PULLBACK_RATIO", "float"),
-    ("panel_vol_dry_n", "VOL_DRY_N", "int"),
-    ("panel_vol_dry_ratio", "VOL_DRY_RATIO", "float"),
     ("panel_chase_pct", "CHASE_MAX_PCT", "float"),
     ("panel_stop_loss", "STOP_LOSS", "float"),
-    ("panel_time_force_bars", "TIME_FORCE_BARS", "int"),
-    ("panel_time_force_grace", "TIME_FORCE_GRACE_BARS", "int"),
-    ("panel_time_force_min_ret", "TIME_FORCE_MIN_RET", "float"),
     ("panel_scale", "SCALE_ENABLE", "bool"),
-    ("panel_scale_lots", "SCALE_LOTS", "bool"),
-    ("panel_scale_arm_bars", "SCALE_ARM_BARS", "int"),
-    ("panel_scale_plat_n", "SCALE_PLAT_LOOKBACK", "int"),
-    ("panel_scale_plat_range", "SCALE_PLAT_MAX_RANGE", "float"),
-    ("panel_scale_w_expand", "SCALE_W_HIST_EXPAND_RATIO", "float"),
 )
 
 # ---- 行情与运行 ----
@@ -217,7 +208,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.39"
+STRATEGY_VER = "v1.41"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
@@ -2486,12 +2477,48 @@ def _equal_split_on():
     return _dynamic_budget_on() and bool(globals().get("EQUAL_SPLIT", True))
 
 
-def _cfg_book_n():
+def _norm_code(code):
+    return str(code or "").strip().upper()
+
+
+def _book_stock_set():
+    out = set()
+    raw = globals().get("BOOK_STOCKS") or ()
     try:
-        n = int(globals().get("BOOK_N") or 4)
+        seq = list(raw)
     except Exception:
-        n = 4
-    return max(1, n)
+        seq = []
+    for x in seq:
+        s = _norm_code(x)
+        if s:
+            out.add(s)
+    return out
+
+
+def _code_in_book(code):
+    ncode = _norm_code(code)
+    if not ncode:
+        return False
+    mine = _norm_code(getattr(A, "stock", ""))
+    if mine and ncode == mine:
+        return True
+    s = _book_stock_set()
+    if not s:
+        return True
+    return ncode in s
+
+
+def _cfg_book_n():
+    n_list = len(_book_stock_set())
+    try:
+        n_cfg = int(globals().get("BOOK_N") or 0)
+    except Exception:
+        n_cfg = 0
+    if n_list > 0:
+        if n_cfg and n_cfg != n_list:
+            _diag_once("book_n_mismatch", "BOOK_N=%s BOOK_STOCKS=%s" % (n_cfg, n_list))
+        return n_list
+    return max(1, n_cfg or 4)
 
 
 def _cfg_min_lot():
@@ -2540,13 +2567,35 @@ def _buy_budget_fixed(cash):
     return budget
 
 
+def _pos_row_mv(p, vol):
+    mv = 0.0
+    raw_mv = getattr(p, "m_dMarketValue", None)
+    if raw_mv is not None:
+        try:
+            mv = float(raw_mv)
+        except Exception:
+            mv = 0.0
+    if mv <= 0:
+        last = getattr(p, "m_dLastPrice", None)
+        if last is None:
+            last = getattr(p, "m_dOpenPrice", None)
+        try:
+            if last is not None and float(last) > 0:
+                mv = float(last) * float(vol)
+        except Exception:
+            mv = 0.0
+    return float(mv or 0)
+
+
 def _query_broker_book():
-    """券商持股只数与市值。失败则回落本地账本（上次成功快照 + 各图 STATE）。"""
-    stock = str(getattr(A, "stock", "") or "")
+    """白名单持股只数与市值；同时给出其它股票市值。失败则回落本地账本。"""
+    stock = _norm_code(getattr(A, "stock", ""))
     out = {
         "ok": False,
         "k": 0,
+        "k_other": 0,
         "book_mv": 0.0,
+        "other_mv": 0.0,
         "name_mv": 0.0,
         "name_vol": 0,
         "held": {},
@@ -2563,7 +2612,9 @@ def _query_broker_book():
     if positions is None:
         return _query_local_book(stock)
     k = 0
+    k_other = 0
     book_mv = 0.0
+    other_mv = 0.0
     name_mv = 0.0
     name_vol = 0
     held = {}
@@ -2574,42 +2625,32 @@ def _query_broker_book():
             vol = 0
         if vol < 100:
             continue
-        code = _pos_code(p)
-        k += 1
-        mv = 0.0
-        raw_mv = getattr(p, "m_dMarketValue", None)
-        if raw_mv is not None:
-            try:
-                mv = float(raw_mv)
-            except Exception:
-                mv = 0.0
-        if mv <= 0:
-            last = getattr(p, "m_dLastPrice", None)
-            if last is None:
-                last = getattr(p, "m_dOpenPrice", None)
-            try:
-                if last is not None and float(last) > 0:
-                    mv = float(last) * float(vol)
-            except Exception:
-                mv = 0.0
-        mv = float(mv or 0)
-        book_mv += mv
-        held[code] = mv
-        if code == stock:
-            name_mv = mv
-            name_vol = vol
+        code = _norm_code(_pos_code(p))
+        mv = _pos_row_mv(p, vol)
+        if _code_in_book(code):
+            k += 1
+            book_mv += mv
+            held[code] = mv
+            if code == _norm_code(stock):
+                name_mv = mv
+                name_vol = vol
+        else:
+            k_other += 1
+            other_mv += mv
     out["ok"] = True
     out["k"] = int(k)
+    out["k_other"] = int(k_other)
     out["book_mv"] = float(book_mv)
+    out["other_mv"] = float(other_mv)
     out["name_mv"] = float(name_mv)
     out["name_vol"] = int(name_vol)
     out["held"] = held
     out["src"] = "broker"
-    _broker_cache_save(held, k, book_mv)
+    _broker_cache_save(held, k, book_mv, other_mv, k_other)
     return out
 
 
-def _broker_cache_save(held, k, book_mv):
+def _broker_cache_save(held, k, book_mv, other_mv=0.0, k_other=0):
     data = _book_load()
     if not isinstance(data, dict):
         data = {}
@@ -2617,7 +2658,9 @@ def _broker_cache_save(held, k, book_mv):
         "ts": datetime.datetime.now().strftime("%Y%m%d %H%M%S"),
         "held": dict(held or {}),
         "k": int(k or 0),
+        "k_other": int(k_other or 0),
         "book_mv": float(book_mv or 0),
+        "other_mv": float(other_mv or 0),
     }
     _book_save(data)
 
@@ -2627,6 +2670,7 @@ def _held_from_state_raw(raw):
     if not isinstance(raw, dict):
         return "", 0.0, 0
     stock = str(raw.get("stock") or "")
+    stock = _norm_code(stock)
     pos = raw.get("position")
     vol = 0
     px = 0.0
@@ -2701,7 +2745,9 @@ def _query_local_book(stock):
     out = {
         "ok": False,
         "k": 0,
+        "k_other": 0,
         "book_mv": 0.0,
+        "other_mv": 0.0,
         "name_mv": 0.0,
         "name_vol": 0,
         "held": {},
@@ -2716,16 +2762,28 @@ def _query_local_book(stock):
                 v = float(mv or 0)
             except Exception:
                 v = 0.0
-            if v > 1e-6:
-                held[str(code)] = v
+            if v > 1e-6 and _code_in_book(code):
+                held[_norm_code(code)] = v
+    other_mv = 0.0
+    k_other = 0
+    if cache:
+        try:
+            other_mv = float(cache.get("other_mv") or 0)
+        except Exception:
+            other_mv = 0.0
+        try:
+            k_other = int(cache.get("k_other") or 0)
+        except Exception:
+            k_other = 0
     for code, mv in _state_glob_held().items():
-        held[code] = mv
+        if _code_in_book(code):
+            held[_norm_code(code)] = mv
     name_vol = 0
     if _has_position():
         sh = _pos_shares()
         px = _pos_cost_price()
         if sh >= 100 and px > 0:
-            held[str(stock)] = float(sh) * float(px)
+            held[_norm_code(stock)] = float(sh) * float(px)
             name_vol = int(sh)
     if (not held) and (cache is None):
         print(_strategy_tag(), "book local empty, skip buy")
@@ -2736,21 +2794,25 @@ def _query_local_book(stock):
     for mv in held.values():
         book_mv += float(mv or 0)
         k += 1
-    name_mv = float(held.get(stock) or 0)
+    name_mv = float(held.get(_norm_code(stock)) or 0)
     out["ok"] = True
     out["k"] = int(k)
+    out["k_other"] = int(k_other)
     out["book_mv"] = float(book_mv)
+    out["other_mv"] = float(other_mv)
     out["name_mv"] = name_mv
     out["name_vol"] = int(name_vol)
     out["held"] = held
     print(
-        "%s book fallback local k=%s book_mv=%.0f name_mv=%.0f cache=%s"
-        % (STRATEGY_NAME, k, book_mv, name_mv, bool(cache))
+        "%s book fallback local k=%s k_other=%s book_mv=%.0f other_mv=%.0f name_mv=%.0f cache=%s"
+        % (STRATEGY_NAME, k, k_other, book_mv, other_mv, name_mv, bool(cache))
     )
     _event_log(
         "book_fallback_local",
         k=k,
+        k_other=k_other,
         book_mv=book_mv,
+        other_mv=other_mv,
         name_mv=name_mv,
         names=list(held.keys()),
         has_cache=bool(cache),
@@ -2758,7 +2820,8 @@ def _query_local_book(stock):
     return out
 
 
-def _account_equity(cash, book_mv):
+def _account_equity(cash, book_mv, other_mv=0.0):
+    """E_s = 总资产 - 其它股票市值；失败则现金 + 池内市值。"""
     if getattr(A, "is_backtest", False):
         return None
     try:
@@ -2766,7 +2829,9 @@ def _account_equity(cash, book_mv):
         if accs:
             raw = getattr(accs[0], "m_dTotalAsset", None)
             if raw is not None and float(raw) > 0:
-                return float(raw)
+                es = float(raw) - float(other_mv or 0)
+                if es > 0:
+                    return es
     except Exception as e:
         print(_strategy_tag(), "equity query fail", e)
         _event_log("equity_query_fail", error=str(e))
@@ -2783,10 +2848,12 @@ def _empty_fill_snap():
         "N": _cfg_book_n(),
         "k": 0,
         "k_after": 0,
+        "k_other": 0,
         "empty": 0,
         "reserve": 0.0,
         "lot": 0.0,
         "book_mv": 0.0,
+        "other_mv": 0.0,
         "name_mv": 0.0,
         "cap": 0.0,
         "acct_room": 0.0,
@@ -2916,7 +2983,7 @@ def _book_checkin(day, window, now_s, buy=False, add=False, sell=False, sell_all
         return
     if not window:
         return
-    stock = str(getattr(A, "stock", "") or "")
+    stock = _norm_code(getattr(A, "stock", ""))
     if not stock:
         return
     data = _book_load()
@@ -2986,7 +3053,9 @@ def _book_is_frozen(now_s, data=None):
         data = {}
     names = data.get("names") if isinstance(data.get("names"), dict) else {}
     n_ok = 0
-    for rec in names.values():
+    for stock, rec in names.items():
+        if not _code_in_book(stock):
+            continue
         if isinstance(rec, dict) and rec.get("checkin"):
             n_ok += 1
     if n_ok >= _cfg_book_n():
@@ -2999,7 +3068,9 @@ def _book_buy_intents(data, now_s):
     window = str(data.get("window") or "")
     names = data.get("names") if isinstance(data.get("names"), dict) else {}
     n_ok = 0
-    for rec in names.values():
+    for stock, rec in names.items():
+        if not _code_in_book(stock):
+            continue
         if isinstance(rec, dict) and rec.get("checkin"):
             n_ok += 1
     frozen_by_n = n_ok >= _cfg_book_n()
@@ -3022,15 +3093,24 @@ def _book_buy_intents(data, now_s):
 
 
 def _allocate_equal(cash, now_s):
-    """返回 (lots_by_stock, snap_base)。查询失败 lots 为空且 why=book_fail。"""
+    """返回 (lots_by_stock, snap_base)。无券商且无本地账本时 why=book_fail。"""
     snap = _empty_fill_snap()
     broker = _query_broker_book()
     if not broker.get("ok"):
         snap["why"] = "book_fail"
         return {}, snap
-    held = dict(broker.get("held") or {})
+    held = {}
+    for code, mv in (broker.get("held") or {}).items():
+        try:
+            v = float(mv or 0)
+        except Exception:
+            v = 0.0
+        if v > 1e-6:
+            held[_norm_code(code)] = v
     data = _book_load()
     intents, sells = _book_buy_intents(data, now_s)
+    intents = [{"stock": _norm_code(it.get("stock")), "add": bool(it.get("add"))} for it in intents if _code_in_book(it.get("stock"))]
+    sells = [(_norm_code(st), sa) for st, sa in sells if _code_in_book(st)]
     cash_v = 0.0
     try:
         cash_v = float(cash) if cash is not None else 0.0
@@ -3055,19 +3135,22 @@ def _allocate_equal(cash, now_s):
     k_after = k + n_new
     empty = max(0, n - k_after)
     reserve = empty * min_lot
-    equity = _account_equity(cash, float(broker.get("book_mv") or 0))
+    other_mv = float(broker.get("other_mv") or 0)
+    equity = _account_equity(cash, float(broker.get("book_mv") or 0), other_mv)
     if sells:
         equity = cash_v + book_mv
-    stock = str(getattr(A, "stock", "") or "")
+    stock = _norm_code(getattr(A, "stock", ""))
     name_mv = float(held.get(stock) or 0)
     snap.update(
         {
             "N": n,
             "k": k,
             "k_after": k_after,
+            "k_other": int(broker.get("k_other") or 0),
             "empty": empty,
             "reserve": reserve,
             "book_mv": book_mv,
+            "other_mv": other_mv,
             "name_mv": name_mv,
             "cash": cash_v,
             "n_buy": len(intents),
@@ -3133,6 +3216,7 @@ def _fill_budget_snapshot(cash, opening=None):
         snap["why"] = "book_fail"
         return snap
     book_mv = float(book.get("book_mv") or 0)
+    other_mv = float(book.get("other_mv") or 0)
     name_mv = float(book.get("name_mv") or 0)
     name_vol = int(book.get("name_vol") or 0)
     k = int(book.get("k") or 0)
@@ -3148,7 +3232,7 @@ def _fill_budget_snapshot(cash, opening=None):
     min_lot = _cfg_min_lot()
     empty = max(0, n - k_after)
     reserve = empty * min_lot
-    equity = _account_equity(cash, book_mv)
+    equity = _account_equity(cash, book_mv, other_mv)
     try:
         cash_v = float(cash) if cash is not None else 0.0
     except Exception:
@@ -3158,9 +3242,11 @@ def _fill_budget_snapshot(cash, opening=None):
             "N": n,
             "k": k,
             "k_after": k_after,
+            "k_other": int(book.get("k_other") or 0),
             "empty": empty,
             "reserve": reserve,
             "book_mv": book_mv,
+            "other_mv": other_mv,
             "name_mv": name_mv,
             "opening": opening,
             "cash": cash_v,
@@ -3195,7 +3281,7 @@ def _fill_budget_snapshot(cash, opening=None):
 def _log_fill_budget(snap, tag=""):
     snap = snap or {}
     print(
-        "%s fill%s E=%.0f N=%s k=%s reserve=%.0f lot=%.0f book_mv=%.0f name_mv=%.0f "
+        "%s fill%s E=%.0f N=%s k=%s k_other=%s reserve=%.0f lot=%.0f book_mv=%.0f other_mv=%.0f name_mv=%.0f "
         "n_buy=%s split=%.0f why=%s src=%s"
         % (
             STRATEGY_NAME,
@@ -3203,9 +3289,11 @@ def _log_fill_budget(snap, tag=""):
             float(snap.get("E") or 0),
             snap.get("N"),
             snap.get("k"),
+            snap.get("k_other"),
             float(snap.get("reserve") or 0),
             float(snap.get("lot") or 0),
             float(snap.get("book_mv") or 0),
+            float(snap.get("other_mv") or 0),
             float(snap.get("name_mv") or 0),
             snap.get("n_buy"),
             float(snap.get("split") or 0),
@@ -3220,9 +3308,11 @@ def _log_fill_budget(snap, tag=""):
         N=snap.get("N"),
         k=snap.get("k"),
         k_after=snap.get("k_after"),
+        k_other=snap.get("k_other"),
         reserve=snap.get("reserve"),
         lot=snap.get("lot"),
         book_mv=snap.get("book_mv"),
+        other_mv=snap.get("other_mv"),
         name_mv=snap.get("name_mv"),
         empty=snap.get("empty"),
         opening=snap.get("opening"),
@@ -3285,15 +3375,17 @@ def _heartbeat_extra():
             cash = _available_cash()
             snap = _fill_budget_snapshot(cash)
             parts.append(
-                "E=%.0f N=%s k=%s reserve=%.0f lot=%.0f book_mv=%.0f name_mv=%.0f "
+                "E=%.0f N=%s k=%s k_other=%s reserve=%.0f lot=%.0f book_mv=%.0f other_mv=%.0f name_mv=%.0f "
                 "n_buy=%s why=%s src=%s"
                 % (
                     float(snap.get("E") or 0),
                     snap.get("N"),
                     snap.get("k"),
+                    snap.get("k_other"),
                     float(snap.get("reserve") or 0),
                     float(snap.get("lot") or 0),
                     float(snap.get("book_mv") or 0),
+                    float(snap.get("other_mv") or 0),
                     float(snap.get("name_mv") or 0),
                     snap.get("n_buy"),
                     snap.get("why") or "-",
@@ -4704,6 +4796,7 @@ def _try_exec_pending_entry(
             reserve=snap.get("reserve"),
             lot=snap.get("lot"),
             book_mv=snap.get("book_mv"),
+            other_mv=snap.get("other_mv"),
             name_mv=snap.get("name_mv"),
             n_buy=snap.get("n_buy"),
             why=snap.get("why"),
@@ -5605,7 +5698,9 @@ def _init_impl(C):
         "dynamic_budget=",
         DYNAMIC_BUDGET,
         "BOOK_N=",
-        BOOK_N,
+        _cfg_book_n(),
+        "book_stocks=",
+        ",".join(sorted(_book_stock_set())) or "-",
         "cash_ratio=",
         CASH_RATIO,
         "min_lot=",
@@ -5683,7 +5778,8 @@ def _init_impl(C):
         ),
         budget=_trade_budget_cap(),
         dynamic_budget=DYNAMIC_BUDGET,
-        book_n=BOOK_N,
+        book_n=_cfg_book_n(),
+        book_stocks=len(_book_stock_set()),
         cash_ratio=CASH_RATIO,
         min_lot=MIN_LOT,
         max_name_frac=MAX_NAME_FRAC,
