@@ -6,13 +6,27 @@ DRY_RUN = False
 ACCOUNT_ID = "39953913"
 ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 
-# 单笔下单资金上限（元）；实际股数 = floor(预算/开盘价/100)*100
-# 未在 TRADE_BUDGET_BY_STOCK 中单独配置的标的用此默认值
+# 跟踪池仓位（实盘）。空仓不锁 1/N，只锁 MIN_LOT。当天多只买单先写入共享账本，冻结后均分可部署资金。
+# 单只硬顶 MAX_NAME_FRAC*E（默认 50%）。N 个实例必须填同一个 BOOK_N，勿用持股只数反推。
+# 约束：N * MIN_LOT <= CASH_RATIO * E（20 万、MIN_LOT=2 万时 N<=9）。账户勿混持其他股票。
+BOOK_N = 4
+DYNAMIC_BUDGET = True
+EQUAL_SPLIT = True
+# 四图共享信号账本（不是 STATE_FILE；禁止按标的分文件）
+BOOK_FILE = r"D:\tradingStrategy\hlband_book.json"
+# 确认打卡截止：到点或打卡数>=BOOK_N 即冻结，之后按均分下单
+BOOK_FREEZE_CLOSE = "145730"
+BOOK_FREEZE_OPEN = "093200"
+# 可部署比例（相对总资产 E）；其余留作 T+1 / 废单重试
+CASH_RATIO = 0.95
+# 每只空仓预留的最小进场金额（元）；不足 100 股则实际成交仍按 100 股市值
+MIN_LOT = 20000.0
+# 单标的市值上限占 E 的比例
+MAX_NAME_FRAC = 0.50
+# 回测无全账户账本时的单笔回落（元）；DYNAMIC_BUDGET=False 时也用此上限
 TRADE_BUDGET = 50000.0
-# 按标的覆盖预算（key 须与 A.stock 一致，如 513530.SH）
+# 按标的覆盖预算（key 须与 A.stock 一致，如 513530.SH）；仅回测/关闭动态预算时生效
 TRADE_BUDGET_BY_STOCK = {}
-# 可用现金占用比例（预留下单缓冲，避免满仓打满失败）
-CASH_RATIO = 0.8
 
 # ---- 周线过滤（跨周期；主图仍是日线）----
 # 周线均线：快/中/生命线/慢线（斐波那契 5/13/34/55）
@@ -116,7 +130,10 @@ SCALE_W_HIST_EXPAND_RATIO = 1.2
 PANEL_BINDS = (
     ("panel_dry_run", "DRY_RUN", "bool"),
     ("panel_budget", "TRADE_BUDGET", "float"),
+    ("panel_book_n", "BOOK_N", "int"),
     ("panel_cash_ratio", "CASH_RATIO", "float"),
+    ("panel_min_lot", "MIN_LOT", "float"),
+    ("panel_max_name_frac", "MAX_NAME_FRAC", "float"),
     ("panel_w_bias_hard", "W_BIAS_HARD", "float"),
     ("panel_w_bias_low", "W_BIAS_LOW", "float"),
     ("panel_w_slope_weeks", "W_MA30_SLOPE_WEEKS", "int"),
@@ -190,7 +207,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.36"
+STRATEGY_VER = "v1.39"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）

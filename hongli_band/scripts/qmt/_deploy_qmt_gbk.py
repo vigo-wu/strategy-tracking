@@ -44,6 +44,7 @@ MODULE_ORDER = [
     "common:single/broker.py",
     "common:orders_pending.py",
     "common:single/orders.py",
+    "budget.py",
     "strategy.py",
     "runtime.py",
 ]

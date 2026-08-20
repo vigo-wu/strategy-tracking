@@ -3,8 +3,11 @@
     <control note="控件">
         <variable note="控件">
             <item bind="panel_dry_run" name="模拟下单" note="勾选=只打日志不下单（DRY_RUN）" value="False" type="checkBox"/>
-            <item bind="panel_budget" name="单笔预算" note="元；本实例以此为准（不再读按标的覆盖表）" value="50000" type="intput"/>
-            <item bind="panel_cash_ratio" name="现金占用比例" note="0~1，预留下单缓冲" value="0.8" type="intput"/>
+            <item bind="panel_budget" name="回测单笔预算" note="元；仅编辑器回测或关闭动态填满时使用。实盘按跟踪池填满，不锁此值" value="50000" type="intput"/>
+            <item bind="panel_book_n" name="跟踪池只数" note="N；所有实例必须填同一个数。空仓预留 N-k 份 MIN_LOT。增减标的见 model.md" value="4" type="intput"/>
+            <item bind="panel_cash_ratio" name="可部署比例" note="相对总资产 E，0.95=最多用 95%，留 5% 现金缓冲" value="0.95" type="intput"/>
+            <item bind="panel_min_lot" name="空仓最小金额" note="元；每只空仓预留这么多，默认 20000。不足 100 股则按 100 股市值成交" value="20000" type="intput"/>
+            <item bind="panel_max_name_frac" name="单标的上限" note="占 E 的比例，0.50=一只最多半仓。更怕集中可改 0.40" value="0.50" type="intput"/>
             <item bind="panel_w_bias_hard" name="周线 高位乖离禁开" note="(MA5-MA34)/MA34 达到此值禁开，0.08=8%；生命线=W_MA_LIFE=34" value="0.08" type="intput"/>
             <item bind="panel_w_bias_low" name="周线 低位区阈值" note="乖离低于此值须生命线 MA34 向上，0.02=2%" value="0.02" type="intput"/>
             <item bind="panel_w_slope_weeks" name="周线 低位向上周数" note="低位区要求生命线 MA34 连续向上的周数" value="2" type="intput"/>

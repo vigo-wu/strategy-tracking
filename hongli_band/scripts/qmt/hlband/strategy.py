@@ -537,7 +537,7 @@ def _scale_peak_ret():
     return mx, armed_bars
 
 
-def _scale_gate(w_detail=None):
+def _scale_gate(w_detail=None, price=None):
     """加仓门槛：(ok, why)。why 仅失败时有值。"""
     if not bool(globals().get("SCALE_ENABLE")):
         return False, "scale_off"
@@ -1207,6 +1207,10 @@ _BUY_LABELS = {
     "vol_dry_skip": "无量阴跌禁开",
     "weekly_bear": "周线空头禁开",
     "scale_once": "本轮已加仓",
+    "buy_cap": "账户或单标的额度已满跳过开仓",
+    "scale_cap": "账户或单标的额度已满跳过加仓",
+    "wait": "等待共享账本冻结",
+    "book_fail": "持股查询失败且无本地账本不下单",
 }
 
 
@@ -1331,7 +1335,7 @@ def _try_exec_pending_entry(
         pe_is_add
         and (force_empty or sell_ok or stop_hit or trail_hit or time_force_hit)
     )
-    scale_ok, scale_why = _scale_gate(w_detail) if pe_is_add else (True, "")
+    scale_ok, scale_why = _scale_gate(w_detail, price=last_px) if pe_is_add else (True, "")
     if sell_block or (pe_is_add and (not scale_ok)):
         why = "scale_sell_block" if sell_block else scale_why
         A.pending_entry = None
@@ -1366,10 +1370,39 @@ def _try_exec_pending_entry(
     if not _can_exec_signal_pending(pe_entry, day, now_s):
         _log_pending_defer_once("entry", day, now_s, pe_entry.get("signal_day"))
         return None
+    if _equal_split_on() and (not _book_is_frozen(now_s)):
+        _log_pending_defer_once("book", day, now_s, pe_entry.get("signal_day"))
+        return None
     px, px_kind = _signal_exec_px(pe_entry, day, now_s, open_px, last_px)
     reasons = pe_entry.get("reasons") or []
     primary = reasons[0] if reasons else "entry"
     kind = "add" if pe_is_add else "buy"
+    cap_ok, cap_why, snap = _fill_room_ok(px, opening=not pe_is_add)
+    if _dynamic_budget_on():
+        _log_fill_budget(snap, kind)
+    if cap_why in ("wait", "book_fail", "no_E"):
+        _log_pending_defer_once(cap_why or "wait", day, now_s, pe_entry.get("signal_day"))
+        return None
+    if not cap_ok:
+        A.pending_entry = None
+        _save_state()
+        why = cap_why or ("scale_cap" if pe_is_add else "buy_cap")
+        print("%s pending_entry cancel %s" % (STRATEGY_NAME, why))
+        _event_log(
+            "pending_entry_cancel",
+            reason=why,
+            signal_day=pe_entry.get("signal_day"),
+            E=snap.get("E"),
+            N=snap.get("N"),
+            k=snap.get("k"),
+            reserve=snap.get("reserve"),
+            lot=snap.get("lot"),
+            book_mv=snap.get("book_mv"),
+            name_mv=snap.get("name_mv"),
+            n_buy=snap.get("n_buy"),
+            why=snap.get("why"),
+        )
+        return "done"
     print(
         "%s %s by signal=%s label=%s all=%s signal_day=%s @%s=%.4f"
         % (
@@ -1393,7 +1426,7 @@ def _try_exec_pending_entry(
         px_kind=px_kind,
         add=pe_is_add,
     )
-    budget = _buy_budget(cash)
+    budget = float(snap.get("lot") or 0)
     ok = _order_buy(C, px, now, budget, add=pe_is_add)
     if ok:
         _on_signal_order_ok("buy", px=px, day=day, add=pe_is_add)
@@ -1673,7 +1706,7 @@ def _handle(C):
         w_detail,
         pullback=("pullback_vol" in real_buys),
     )
-    scale_ok, scale_why = _scale_gate(w_detail)
+    scale_ok, scale_why = _scale_gate(w_detail, price=price)
     scale_sig = bool(
         scale_ok
         and scale_push_ok
@@ -1682,6 +1715,17 @@ def _handle(C):
         and (not w_slope_block)
         and (not vol_dry_block)
     )
+
+    if not bt:
+        _sync_signal_book(
+            day,
+            now_s,
+            buy_sig,
+            scale_sig,
+            holding,
+            sell_ok,
+            force_empty_act,
+        )
 
     pe_now = bool(getattr(A, "pending_entry", None))
     px_now = bool(getattr(A, "pending_exit", None))
