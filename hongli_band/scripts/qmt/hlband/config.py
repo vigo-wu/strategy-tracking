@@ -168,7 +168,7 @@ OPEN_EXEC_END = "094500"
 # 收盘确认信号时窗（与尾盘成交窗重叠；盘后仍可确认，成交则等到次日开盘窗）
 SIGNAL_CONFIRM_START = "145600"
 SIGNAL_CONFIRM_END = "160000"
-# 实盘心跳日志间隔（秒）；持仓无事件时的状态行也按此节流
+# 实盘心跳/状态行间隔（秒）；空仓与持仓无新信号沿时均按此节流
 LIVE_HEARTBEAT_SEC = 60
 
 # download_history_data 最长回溯（自然日）；回测暖机用
@@ -190,7 +190,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.35"
+STRATEGY_VER = "v1.36"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）

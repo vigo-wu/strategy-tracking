@@ -855,8 +855,8 @@ def _log_pending_defer_once(kind, day, now_s, signal_day):
 def _should_emit_bar_status(C, now, force, status_idle):
     """
     状态行是否输出。
-    force（信号上升沿）立刻打；回测逐 bar 对 idle 不节流；
-    实盘仅持仓/挂起、无新沿时按 LIVE_HEARTBEAT_SEC 节流。
+    force（信号上升沿）立刻打；回测 idle 逐 bar、非 idle 每 20 根；
+    实盘无新沿时一律按 LIVE_HEARTBEAT_SEC 节流（空仓/持仓/挂起相同）。
     """
     if not getattr(A, "ready_logged", False):
         return True
@@ -869,22 +869,17 @@ def _should_emit_bar_status(C, now, force, status_idle):
             return int(getattr(C, "barpos", 0) or 0) % 20 == 0
         except Exception:
             return False
-    if status_idle:
-        sec = int(globals().get("LIVE_HEARTBEAT_SEC") or 60)
-        if sec <= 0:
-            return True
-        last = getattr(A, "_bar_status_at", None)
-        if last is not None and now is not None:
-            try:
-                if (now - last).total_seconds() < float(sec):
-                    return False
-            except Exception:
-                pass
+    sec = int(globals().get("LIVE_HEARTBEAT_SEC") or 60)
+    if sec <= 0:
         return True
-    try:
-        return int(getattr(C, "barpos", 0) or 0) % 20 == 0
-    except Exception:
-        return False
+    last = getattr(A, "_bar_status_at", None)
+    if last is not None and now is not None:
+        try:
+            if (now - last).total_seconds() < float(sec):
+                return False
+        except Exception:
+            pass
+    return True
 
 
 def _bar_signal_rising_edge(buy_sig, sell_ok, force_empty):
@@ -1690,7 +1685,7 @@ def _handle(C):
 
     pe_now = bool(getattr(A, "pending_entry", None))
     px_now = bool(getattr(A, "pending_exit", None))
-    # 信号上升沿强制打；电平持续为真时走 idle 节流（避免 confirm 窗刷屏）
+    # 信号上升沿强制打；实盘其余按 LIVE_HEARTBEAT_SEC；回测 idle 用 status_idle
     force_bar_log = _bar_signal_rising_edge(buy_sig or scale_sig, sell_ok, force_empty)
     status_idle = (bool(holding) or pe_now or px_now) and (not force_bar_log)
     if _should_emit_bar_status(C, now, force_bar_log, status_idle):
