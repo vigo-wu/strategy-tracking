@@ -187,7 +187,7 @@ OPEN_EXEC_END = "094500"
 SIGNAL_CONFIRM_START = "145600"
 SIGNAL_CONFIRM_END = "160000"
 # 实盘心跳/状态行间隔（秒）；空仓与持仓无新信号沿时均按此节流
-LIVE_HEARTBEAT_SEC = 60
+LIVE_HEARTBEAT_SEC = 300
 
 # download_history_data 最长回溯（自然日）；回测暖机用
 HIST_MAX_LOOKBACK_DAYS = 800
