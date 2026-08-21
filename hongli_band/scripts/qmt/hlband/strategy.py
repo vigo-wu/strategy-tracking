@@ -792,9 +792,9 @@ def _in_hhmmss_window(now_s, start, end, inclusive_end=False):
 
 
 def _in_close_exec_window(now_s):
-    start = _cfg_hhmmss("PENDING_EXEC_START", "145750")
-    end = _cfg_hhmmss("PENDING_EXEC_END", "150000")
-    return _in_hhmmss_window(now_s, start, end, inclusive_end=True)
+    start = _cfg_hhmmss("PENDING_EXEC_START", "145600")
+    end = _cfg_hhmmss("PENDING_EXEC_END", "145700")
+    return _in_hhmmss_window(now_s, start, end, inclusive_end=False)
 
 
 def _in_open_exec_window(now_s):
@@ -847,7 +847,7 @@ def _log_pending_defer_once(kind, day, now_s, signal_day):
         "pending_%s_defer" % kind,
         now=now_s,
         signal_day=signal_day,
-        close_exec_end=_cfg_hhmmss("PENDING_EXEC_END", "150000"),
+        close_exec_end=_cfg_hhmmss("PENDING_EXEC_END", "145700"),
         open_exec_end=_cfg_hhmmss("OPEN_EXEC_END", "094500"),
     )
 

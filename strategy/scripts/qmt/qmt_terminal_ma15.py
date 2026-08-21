@@ -1882,6 +1882,8 @@ def _process_pending(C, now):
 # 钩子实现: _pending_on_buy_fill / _pending_on_sell_fill
 # 预算: TRADE_BUDGET；可选 TRADE_BUDGET_BY_STOCK[A.stock]；可选 CASH_RATIO
 # add=True: 已有仓上加仓；SCALE_LOTS 时记独立笔，否则均价合并（默认仍一票一仓）
+# 实盘尾盘成交窗：限价 prType=11，买挂卖一、卖挂买一；不开涨跌停、不按收盘集合竞价价吃单。
+# 开盘窗仍用 14/-1 市价。回测路径不变。
 def _try_lots_buy(px, add, vol, opened_at):
     if not bool(globals().get("SCALE_LOTS")):
         return
@@ -2046,6 +2048,172 @@ def _pending_on_sell_fill(pend, now, vol, px):
     _apply_sell_fill(now, intent, last_hint, vol, mark_half=mark_half, lot_ids=lot_ids)
 
 
+def _in_live_close_exec(now):
+    """是否处于实盘尾盘成交窗（PENDING_EXEC_*）。"""
+    if getattr(A, "is_backtest", False):
+        return False
+    now_s = (now or datetime.datetime.now()).strftime("%H%M%S")
+    fn = globals().get("_in_close_exec_window")
+    if callable(fn):
+        try:
+            return bool(fn(now_s))
+        except Exception:
+            pass
+    start = str(globals().get("PENDING_EXEC_START") or "")
+    end = str(globals().get("PENDING_EXEC_END") or "")
+    if start and end:
+        return start <= now_s < end
+    return False
+
+
+def _round_order_px(stock, px):
+    px = float(px or 0)
+    if px <= 0:
+        return 0.0
+    code = str(stock or "").split(".")[0]
+    if len(code) == 6 and code[:1] in ("1", "5"):
+        return round(px + 1e-12, 3)
+    return round(px + 1e-12, 2)
+
+
+def _tick_field(obj, names):
+    if obj is None:
+        return 0.0
+    for name in names:
+        if isinstance(obj, dict):
+            raw = obj.get(name)
+        else:
+            raw = getattr(obj, name, None)
+        if raw is None or raw == "":
+            continue
+        try:
+            v = float(raw)
+        except Exception:
+            continue
+        if v > 0:
+            return v
+    return 0.0
+
+
+def _seq_first_px(val):
+    if val is None or val == "":
+        return 0.0
+    if isinstance(val, (list, tuple)):
+        if not val:
+            return 0.0
+        try:
+            return float(val[0] or 0)
+        except Exception:
+            return 0.0
+    try:
+        return float(val)
+    except Exception:
+        return 0.0
+
+
+def _get_stock_tick(C, stock):
+    ticks = None
+    if C is not None:
+        for meth in ("get_full_tick", "get_tick"):
+            fn = getattr(C, meth, None)
+            if not callable(fn):
+                continue
+            try:
+                ticks = fn([stock])
+            except Exception:
+                ticks = None
+            if ticks:
+                break
+    if ticks is None:
+        gfn = globals().get("get_full_tick")
+        if callable(gfn):
+            try:
+                ticks = gfn([stock])
+            except Exception:
+                ticks = None
+    if isinstance(ticks, dict):
+        t = ticks.get(stock)
+        if t is None:
+            t = ticks.get(str(stock).split(".")[0])
+        return t
+    return ticks
+
+
+def _level1_px(t, array_names, scalar_names):
+    if t is None:
+        return 0.0
+    for name in array_names:
+        if isinstance(t, dict):
+            raw = t.get(name)
+        else:
+            raw = getattr(t, name, None)
+        px = _seq_first_px(raw)
+        if px > 0:
+            return px
+    return _tick_field(t, scalar_names)
+
+
+def _live_opponent_px(C, side, fallback):
+    """买=卖一，卖=买一；取不到则回落 last。"""
+    t = _get_stock_tick(C, getattr(A, "stock", ""))
+    if str(side) == "buy":
+        raw = _level1_px(
+            t,
+            ("askPrice", "askPrices", "ask", "asks"),
+            ("askPrice1", "ask1", "AskPrice1", "askPr1", "m_dAskPrice"),
+        )
+        kind = "ask1"
+    else:
+        raw = _level1_px(
+            t,
+            ("bidPrice", "bidPrices", "bid", "bids"),
+            ("bidPrice1", "bid1", "BidPrice1", "bidPr1", "m_dBidPrice"),
+        )
+        kind = "bid1"
+    if raw <= 0:
+        raw = float(fallback or 0)
+        kind = "last"
+    px = _round_order_px(getattr(A, "stock", ""), raw)
+    return px, kind
+
+
+def _passorder_live(C, side, vol, last_px, msg, now):
+    """实盘报单。尾盘窗限价挂卖一/买一；其余仍市价。"""
+    vol = int(vol)
+    last_px = float(last_px or 0)
+    if _in_live_close_exec(now):
+        px, kind = _live_opponent_px(C, side, last_px)
+        if px > 0:
+            code = A.buy_code if str(side) == "buy" else A.sell_code
+            print(
+                _strategy_tag(),
+                "passorder quote-limit",
+                side,
+                kind,
+                "pr=11",
+                "px=",
+                px,
+                "last=",
+                last_px,
+                "vol=",
+                vol,
+            )
+            _event_log(
+                "passorder_quote_limit",
+                side=side,
+                kind=kind,
+                pr_type=11,
+                px=px,
+                last=last_px,
+                vol=vol,
+            )
+            passorder(code, 1101, A.acct, A.stock, 11, px, vol, _strategy_tag(), 2, msg, C)
+            return px
+    code = A.buy_code if str(side) == "buy" else A.sell_code
+    passorder(code, 1101, A.acct, A.stock, 14, -1, vol, _strategy_tag(), 1, msg, C)
+    return last_px
+
+
 def _order_buy(C, price, now, budget=None, add=False, **extra_pos):
     """提交买入. DRY 即时; 回测 passorder+即时; 实盘 pending 至成交.
     add=True 允许在已有仓上加仓；SCALE_LOTS 时每笔独立，否则均价合并。默认仍一票一仓。"""
@@ -2074,11 +2242,16 @@ def _order_buy(C, price, now, budget=None, add=False, **extra_pos):
         _event_log("buy_skip", reason="lot", price=price, budget=budget)
         return False
     cash = _available_cash()
-    if cash is not None and cash < price * vol:
-        vol = _lot(price, cash)
+    freeze_px = float(price or 0)
+    if (not getattr(A, "is_backtest", False)) and (not DRY_RUN) and _in_live_close_exec(now):
+        prot, _kind = _live_opponent_px(C, "buy", price)
+        if prot > freeze_px:
+            freeze_px = prot
+    if cash is not None and freeze_px > 0 and cash < freeze_px * vol:
+        vol = _lot(freeze_px, cash)
         if vol < 100:
             print(_strategy_tag(), "buy skip cash", cash)
-            _event_log("buy_skip", reason="cash", cash=cash, price=price)
+            _event_log("buy_skip", reason="cash", cash=cash, price=price, freeze_px=freeze_px)
             return False
 
     extra_pos = dict(extra_pos or {})
@@ -2091,7 +2264,7 @@ def _order_buy(C, price, now, budget=None, add=False, **extra_pos):
         _apply_buy_fill(vol, price, ot, **extra_pos)
         return True
     try:
-        passorder(A.buy_code, 1101, A.acct, A.stock, 14, -1, vol, _strategy_tag(), 1, msg, C)
+        _passorder_live(C, "buy", vol, price, msg, now)
     except Exception as e:
         print(_strategy_tag(), "passorder BUY fail", e)
         _event_log("passorder_fail", side="buy", error=str(e), vol=vol, price=price)
@@ -2215,7 +2388,7 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False, lot_ids=N
         _apply_sell_fill(now, reason, price, vol, mark_half=mark_half, lot_ids=lot_ids)
         return True
     try:
-        passorder(A.sell_code, 1101, A.acct, A.stock, 14, -1, vol, _strategy_tag(), 1, msg, C)
+        _passorder_live(C, "sell", vol, price, msg, now)
     except Exception as e:
         print(_strategy_tag(), "passorder SELL fail", e)
         _event_log(

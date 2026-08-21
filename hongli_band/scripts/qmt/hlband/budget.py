@@ -458,7 +458,7 @@ def _book_window_id(now_s):
     open_s = _cfg_hhmmss("OPEN_EXEC_START", "093000")
     open_e = _cfg_hhmmss("OPEN_EXEC_END", "094500")
     conf_s = _cfg_hhmmss("SIGNAL_CONFIRM_START", "145600")
-    close_e = _cfg_hhmmss("PENDING_EXEC_END", "150000")
+    close_e = _cfg_hhmmss("PENDING_EXEC_END", "145700")
     if open_s <= s < open_e:
         return "open"
     if conf_s <= s <= close_e:
@@ -469,7 +469,7 @@ def _book_window_id(now_s):
 def _book_freeze_s(window):
     if window == "open":
         return str(globals().get("BOOK_FREEZE_OPEN") or "093200")
-    return str(globals().get("BOOK_FREEZE_CLOSE") or "145730")
+    return str(globals().get("BOOK_FREEZE_CLOSE") or "145630")
 
 
 def _book_load():

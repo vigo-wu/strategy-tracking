@@ -281,8 +281,8 @@ def _init_impl(C):
         TIME_FORCE_MIN_RET,
         "close_exec=",
         "%s-%s" % (
-            globals().get("PENDING_EXEC_START", "145750"),
-            globals().get("PENDING_EXEC_END", "150000"),
+            globals().get("PENDING_EXEC_START", "145600"),
+            globals().get("PENDING_EXEC_END", "145700"),
         ),
         "open_exec=",
         "%s-%s" % (
@@ -310,8 +310,8 @@ def _init_impl(C):
         time_force_min_ret=TIME_FORCE_MIN_RET,
         close_exec="%s-%s"
         % (
-            globals().get("PENDING_EXEC_START", "145750"),
-            globals().get("PENDING_EXEC_END", "150000"),
+            globals().get("PENDING_EXEC_START", "145600"),
+            globals().get("PENDING_EXEC_END", "145700"),
         ),
         open_exec="%s-%s"
         % (

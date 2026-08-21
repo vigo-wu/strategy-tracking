@@ -21,8 +21,8 @@ DYNAMIC_BUDGET = True
 EQUAL_SPLIT = True
 # 四图共享信号账本（不是 STATE_FILE；禁止按标的分文件）
 BOOK_FILE = r"D:\tradingStrategy\hlband_book.json"
-# 确认打卡截止：到点或打卡数>=BOOK_N 即冻结，之后按均分下单
-BOOK_FREEZE_CLOSE = "145730"
+# 确认打卡截止：14:56 打卡，14:56:30 冻结，须在 14:57 集合竞价前完成均分下单
+BOOK_FREEZE_CLOSE = "145630"
 BOOK_FREEZE_OPEN = "093200"
 # 可部署比例（相对 E_s = 总资产-其它股票市值）；其余留作 T+1 / 废单重试
 CASH_RATIO = 0.95
@@ -166,10 +166,10 @@ LIVE_CLOSE_CONFIRM = True
 # 实盘决策时窗（HHmmss）：盘中处理券商 pending / 心跳；信号成交见 PENDING_EXEC_* / OPEN_EXEC_*
 DECISION_START = "093000"
 DECISION_END = "150000"
-# 信号 pending 主成交窗：收盘集合竞价内下单（14:57 起不可撤；14:59 起停止接受申报）
-# 14:57:50 再报，避免 14:57 前连续竞价被立刻成交
-PENDING_EXEC_START = "145750"
-PENDING_EXEC_END = "150000"
+# 信号 pending 主成交窗：连续竞价尾盘，14:57 起已是收盘集合竞价，不再报单。
+# 14:56:00 起限价挂卖一（买）/买一（卖）；14:57:00 前结束。错过则次日开盘窗补。
+PENDING_EXEC_START = "145600"
+PENDING_EXEC_END = "145700"
 # 隔夜残留 / 开盘兜底：错过尾盘时次日开盘窗按开盘价补成交
 OPEN_EXEC_START = "093000"
 OPEN_EXEC_END = "094500"
@@ -177,7 +177,7 @@ OPEN_EXEC_END = "094500"
 SIGNAL_CONFIRM_START = "145600"
 SIGNAL_CONFIRM_END = "160000"
 # 实盘心跳/状态行间隔（秒）；空仓与持仓无新信号沿时均按此节流
-LIVE_HEARTBEAT_SEC = 60
+LIVE_HEARTBEAT_SEC = 300
 
 # download_history_data 最长回溯（自然日）；回测暖机用
 HIST_MAX_LOOKBACK_DAYS = 800
@@ -198,7 +198,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.41"
+STRATEGY_VER = "v1.44"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）

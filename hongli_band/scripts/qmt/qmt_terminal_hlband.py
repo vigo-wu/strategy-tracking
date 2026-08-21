@@ -31,8 +31,8 @@ DYNAMIC_BUDGET = True
 EQUAL_SPLIT = True
 # 四图共享信号账本（不是 STATE_FILE；禁止按标的分文件）
 BOOK_FILE = r"D:\tradingStrategy\hlband_book.json"
-# 确认打卡截止：到点或打卡数>=BOOK_N 即冻结，之后按均分下单
-BOOK_FREEZE_CLOSE = "145730"
+# 确认打卡截止：14:56 打卡，14:56:30 冻结，须在 14:57 集合竞价前完成均分下单
+BOOK_FREEZE_CLOSE = "145630"
 BOOK_FREEZE_OPEN = "093200"
 # 可部署比例（相对 E_s = 总资产-其它股票市值）；其余留作 T+1 / 废单重试
 CASH_RATIO = 0.95
@@ -176,10 +176,10 @@ LIVE_CLOSE_CONFIRM = True
 # 实盘决策时窗（HHmmss）：盘中处理券商 pending / 心跳；信号成交见 PENDING_EXEC_* / OPEN_EXEC_*
 DECISION_START = "093000"
 DECISION_END = "150000"
-# 信号 pending 主成交窗：收盘集合竞价内下单（14:57 起不可撤；14:59 起停止接受申报）
-# 14:57:50 再报，避免 14:57 前连续竞价被立刻成交
-PENDING_EXEC_START = "145750"
-PENDING_EXEC_END = "150000"
+# 信号 pending 主成交窗：连续竞价尾盘，14:57 起已是收盘集合竞价，不再报单。
+# 14:56:00 起限价挂卖一（买）/买一（卖）；14:57:00 前结束。错过则次日开盘窗补。
+PENDING_EXEC_START = "145600"
+PENDING_EXEC_END = "145700"
 # 隔夜残留 / 开盘兜底：错过尾盘时次日开盘窗按开盘价补成交
 OPEN_EXEC_START = "093000"
 OPEN_EXEC_END = "094500"
@@ -208,7 +208,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.41"
+STRATEGY_VER = "v1.44"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
@@ -2091,6 +2091,8 @@ def _process_pending(C, now):
 # 钩子实现: _pending_on_buy_fill / _pending_on_sell_fill
 # 预算: TRADE_BUDGET；可选 TRADE_BUDGET_BY_STOCK[A.stock]；可选 CASH_RATIO
 # add=True: 已有仓上加仓；SCALE_LOTS 时记独立笔，否则均价合并（默认仍一票一仓）
+# 实盘尾盘成交窗：限价 prType=11，买挂卖一、卖挂买一；不开涨跌停、不按收盘集合竞价价吃单。
+# 开盘窗仍用 14/-1 市价。回测路径不变。
 def _try_lots_buy(px, add, vol, opened_at):
     if not bool(globals().get("SCALE_LOTS")):
         return
@@ -2255,6 +2257,172 @@ def _pending_on_sell_fill(pend, now, vol, px):
     _apply_sell_fill(now, intent, last_hint, vol, mark_half=mark_half, lot_ids=lot_ids)
 
 
+def _in_live_close_exec(now):
+    """是否处于实盘尾盘成交窗（PENDING_EXEC_*）。"""
+    if getattr(A, "is_backtest", False):
+        return False
+    now_s = (now or datetime.datetime.now()).strftime("%H%M%S")
+    fn = globals().get("_in_close_exec_window")
+    if callable(fn):
+        try:
+            return bool(fn(now_s))
+        except Exception:
+            pass
+    start = str(globals().get("PENDING_EXEC_START") or "")
+    end = str(globals().get("PENDING_EXEC_END") or "")
+    if start and end:
+        return start <= now_s < end
+    return False
+
+
+def _round_order_px(stock, px):
+    px = float(px or 0)
+    if px <= 0:
+        return 0.0
+    code = str(stock or "").split(".")[0]
+    if len(code) == 6 and code[:1] in ("1", "5"):
+        return round(px + 1e-12, 3)
+    return round(px + 1e-12, 2)
+
+
+def _tick_field(obj, names):
+    if obj is None:
+        return 0.0
+    for name in names:
+        if isinstance(obj, dict):
+            raw = obj.get(name)
+        else:
+            raw = getattr(obj, name, None)
+        if raw is None or raw == "":
+            continue
+        try:
+            v = float(raw)
+        except Exception:
+            continue
+        if v > 0:
+            return v
+    return 0.0
+
+
+def _seq_first_px(val):
+    if val is None or val == "":
+        return 0.0
+    if isinstance(val, (list, tuple)):
+        if not val:
+            return 0.0
+        try:
+            return float(val[0] or 0)
+        except Exception:
+            return 0.0
+    try:
+        return float(val)
+    except Exception:
+        return 0.0
+
+
+def _get_stock_tick(C, stock):
+    ticks = None
+    if C is not None:
+        for meth in ("get_full_tick", "get_tick"):
+            fn = getattr(C, meth, None)
+            if not callable(fn):
+                continue
+            try:
+                ticks = fn([stock])
+            except Exception:
+                ticks = None
+            if ticks:
+                break
+    if ticks is None:
+        gfn = globals().get("get_full_tick")
+        if callable(gfn):
+            try:
+                ticks = gfn([stock])
+            except Exception:
+                ticks = None
+    if isinstance(ticks, dict):
+        t = ticks.get(stock)
+        if t is None:
+            t = ticks.get(str(stock).split(".")[0])
+        return t
+    return ticks
+
+
+def _level1_px(t, array_names, scalar_names):
+    if t is None:
+        return 0.0
+    for name in array_names:
+        if isinstance(t, dict):
+            raw = t.get(name)
+        else:
+            raw = getattr(t, name, None)
+        px = _seq_first_px(raw)
+        if px > 0:
+            return px
+    return _tick_field(t, scalar_names)
+
+
+def _live_opponent_px(C, side, fallback):
+    """买=卖一，卖=买一；取不到则回落 last。"""
+    t = _get_stock_tick(C, getattr(A, "stock", ""))
+    if str(side) == "buy":
+        raw = _level1_px(
+            t,
+            ("askPrice", "askPrices", "ask", "asks"),
+            ("askPrice1", "ask1", "AskPrice1", "askPr1", "m_dAskPrice"),
+        )
+        kind = "ask1"
+    else:
+        raw = _level1_px(
+            t,
+            ("bidPrice", "bidPrices", "bid", "bids"),
+            ("bidPrice1", "bid1", "BidPrice1", "bidPr1", "m_dBidPrice"),
+        )
+        kind = "bid1"
+    if raw <= 0:
+        raw = float(fallback or 0)
+        kind = "last"
+    px = _round_order_px(getattr(A, "stock", ""), raw)
+    return px, kind
+
+
+def _passorder_live(C, side, vol, last_px, msg, now):
+    """实盘报单。尾盘窗限价挂卖一/买一；其余仍市价。"""
+    vol = int(vol)
+    last_px = float(last_px or 0)
+    if _in_live_close_exec(now):
+        px, kind = _live_opponent_px(C, side, last_px)
+        if px > 0:
+            code = A.buy_code if str(side) == "buy" else A.sell_code
+            print(
+                _strategy_tag(),
+                "passorder quote-limit",
+                side,
+                kind,
+                "pr=11",
+                "px=",
+                px,
+                "last=",
+                last_px,
+                "vol=",
+                vol,
+            )
+            _event_log(
+                "passorder_quote_limit",
+                side=side,
+                kind=kind,
+                pr_type=11,
+                px=px,
+                last=last_px,
+                vol=vol,
+            )
+            passorder(code, 1101, A.acct, A.stock, 11, px, vol, _strategy_tag(), 2, msg, C)
+            return px
+    code = A.buy_code if str(side) == "buy" else A.sell_code
+    passorder(code, 1101, A.acct, A.stock, 14, -1, vol, _strategy_tag(), 1, msg, C)
+    return last_px
+
+
 def _order_buy(C, price, now, budget=None, add=False, **extra_pos):
     """提交买入. DRY 即时; 回测 passorder+即时; 实盘 pending 至成交.
     add=True 允许在已有仓上加仓；SCALE_LOTS 时每笔独立，否则均价合并。默认仍一票一仓。"""
@@ -2283,11 +2451,16 @@ def _order_buy(C, price, now, budget=None, add=False, **extra_pos):
         _event_log("buy_skip", reason="lot", price=price, budget=budget)
         return False
     cash = _available_cash()
-    if cash is not None and cash < price * vol:
-        vol = _lot(price, cash)
+    freeze_px = float(price or 0)
+    if (not getattr(A, "is_backtest", False)) and (not DRY_RUN) and _in_live_close_exec(now):
+        prot, _kind = _live_opponent_px(C, "buy", price)
+        if prot > freeze_px:
+            freeze_px = prot
+    if cash is not None and freeze_px > 0 and cash < freeze_px * vol:
+        vol = _lot(freeze_px, cash)
         if vol < 100:
             print(_strategy_tag(), "buy skip cash", cash)
-            _event_log("buy_skip", reason="cash", cash=cash, price=price)
+            _event_log("buy_skip", reason="cash", cash=cash, price=price, freeze_px=freeze_px)
             return False
 
     extra_pos = dict(extra_pos or {})
@@ -2300,7 +2473,7 @@ def _order_buy(C, price, now, budget=None, add=False, **extra_pos):
         _apply_buy_fill(vol, price, ot, **extra_pos)
         return True
     try:
-        passorder(A.buy_code, 1101, A.acct, A.stock, 14, -1, vol, _strategy_tag(), 1, msg, C)
+        _passorder_live(C, "buy", vol, price, msg, now)
     except Exception as e:
         print(_strategy_tag(), "passorder BUY fail", e)
         _event_log("passorder_fail", side="buy", error=str(e), vol=vol, price=price)
@@ -2424,7 +2597,7 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False, lot_ids=N
         _apply_sell_fill(now, reason, price, vol, mark_half=mark_half, lot_ids=lot_ids)
         return True
     try:
-        passorder(A.sell_code, 1101, A.acct, A.stock, 14, -1, vol, _strategy_tag(), 1, msg, C)
+        _passorder_live(C, "sell", vol, price, msg, now)
     except Exception as e:
         print(_strategy_tag(), "passorder SELL fail", e)
         _event_log(
@@ -2924,7 +3097,7 @@ def _book_window_id(now_s):
     open_s = _cfg_hhmmss("OPEN_EXEC_START", "093000")
     open_e = _cfg_hhmmss("OPEN_EXEC_END", "094500")
     conf_s = _cfg_hhmmss("SIGNAL_CONFIRM_START", "145600")
-    close_e = _cfg_hhmmss("PENDING_EXEC_END", "150000")
+    close_e = _cfg_hhmmss("PENDING_EXEC_END", "145700")
     if open_s <= s < open_e:
         return "open"
     if conf_s <= s <= close_e:
@@ -2935,7 +3108,7 @@ def _book_window_id(now_s):
 def _book_freeze_s(window):
     if window == "open":
         return str(globals().get("BOOK_FREEZE_OPEN") or "093200")
-    return str(globals().get("BOOK_FREEZE_CLOSE") or "145730")
+    return str(globals().get("BOOK_FREEZE_CLOSE") or "145630")
 
 
 def _book_load():
@@ -4190,9 +4363,9 @@ def _in_hhmmss_window(now_s, start, end, inclusive_end=False):
 
 
 def _in_close_exec_window(now_s):
-    start = _cfg_hhmmss("PENDING_EXEC_START", "145750")
-    end = _cfg_hhmmss("PENDING_EXEC_END", "150000")
-    return _in_hhmmss_window(now_s, start, end, inclusive_end=True)
+    start = _cfg_hhmmss("PENDING_EXEC_START", "145600")
+    end = _cfg_hhmmss("PENDING_EXEC_END", "145700")
+    return _in_hhmmss_window(now_s, start, end, inclusive_end=False)
 
 
 def _in_open_exec_window(now_s):
@@ -4245,7 +4418,7 @@ def _log_pending_defer_once(kind, day, now_s, signal_day):
         "pending_%s_defer" % kind,
         now=now_s,
         signal_day=signal_day,
-        close_exec_end=_cfg_hhmmss("PENDING_EXEC_END", "150000"),
+        close_exec_end=_cfg_hhmmss("PENDING_EXEC_END", "145700"),
         open_exec_end=_cfg_hhmmss("OPEN_EXEC_END", "094500"),
     )
 
@@ -5739,8 +5912,8 @@ def _init_impl(C):
         TIME_FORCE_MIN_RET,
         "close_exec=",
         "%s-%s" % (
-            globals().get("PENDING_EXEC_START", "145750"),
-            globals().get("PENDING_EXEC_END", "150000"),
+            globals().get("PENDING_EXEC_START", "145600"),
+            globals().get("PENDING_EXEC_END", "145700"),
         ),
         "open_exec=",
         "%s-%s" % (
@@ -5768,8 +5941,8 @@ def _init_impl(C):
         time_force_min_ret=TIME_FORCE_MIN_RET,
         close_exec="%s-%s"
         % (
-            globals().get("PENDING_EXEC_START", "145750"),
-            globals().get("PENDING_EXEC_END", "150000"),
+            globals().get("PENDING_EXEC_START", "145600"),
+            globals().get("PENDING_EXEC_END", "145700"),
         ),
         open_exec="%s-%s"
         % (

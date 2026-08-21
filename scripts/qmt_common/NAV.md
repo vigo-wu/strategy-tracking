@@ -26,7 +26,7 @@
 | `single/bt_recover.py` | 单仓 | 回测仓恢复 |
 | `single/broker.py` | 单仓 | `_max_sell_vol` |
 | `single/lots.py` | 单仓 | 同标的多笔 `A.lots`；`SCALE_LOTS` 默认关，开则 `add` 记独立笔、`_order_sell(lot_ids=)` 按笔平 |
-| `single/orders.py` | 单仓 | `_order_buy` / `_order_sell` / fill；`add=True` 加仓（默认均价合并，一票一仓） |
+| `single/orders.py` | 单仓 | `_order_buy` / `_order_sell` / fill；`add=True` 加仓。尾盘窗限价挂卖一/买一，开盘窗仍市价 |
 
 红利 T（双浮仓）用 `broker_base` + `orders_pending`，自带 `hongli/broker.py` / `orders.py`。
 
