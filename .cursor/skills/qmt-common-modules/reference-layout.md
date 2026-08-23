@@ -150,6 +150,7 @@ TRADE_BUDGET = 50000.0          # 单仓/多仓单笔；双浮仓用 FLOAT_*_BUD
 # 同标的多仓：True 时 add 记独立笔、_order_sell(lot_ids=) 按笔平；默认 False 一票一仓
 # SCALE_LOTS = True
 # SCALE_MAX = 2
+# VOL_STEP = 100                 # 股票/ETF=100；沪市转债=10
 PERIOD = "15m"                  # 或 "follow"
 OHLC_COUNT = 480
 # 绝对路径；多实例不同主图时用 {stock}（或基名由 single/state_io 自动加 _代码_市场 后缀）

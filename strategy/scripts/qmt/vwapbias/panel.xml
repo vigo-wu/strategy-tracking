@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TCStageLayout>
+    <control note="控件">
+        <variable note="控件">
+            <item bind="panel_dry_run" name="模拟下单" note="勾选=只打日志不下单（DRY_RUN）" value="True" type="checkBox"/>
+            <item bind="panel_budget" name="单笔预算" note="元；两档各按 30% 再按 10 张取整" value="50000" type="intput"/>
+            <item bind="panel_cash_ratio" name="现金占用比例" note="0~1，预留下单缓冲" value="0.8" type="intput"/>
+            <item bind="panel_bias_l1" name="买入 L1 乖离" note="相对当日VWAP，-0.018=-1.8%" value="-0.018" type="intput"/>
+            <item bind="panel_bias_l2" name="买入 L2 乖离" note="须已持 L1；-0.025=-2.5%" value="-0.025" type="intput"/>
+            <item bind="panel_bias_fade" name="卖出 量能衰竭乖离" note="相对当日VWAP，0.008=+0.8%；持仓后1m很少到+1.5%" value="0.008" type="intput"/>
+            <item bind="panel_take_profit" name="卖出 成本止盈" note="相对分笔成本，0.010=1.0%" value="0.010" type="intput"/>
+            <item bind="panel_trail_arm" name="卖出 移动止盈启动" note="合并浮盈达到此值后盯回撤，0.012=1.2%" value="0.012" type="intput"/>
+            <item bind="panel_trail_give" name="卖出 移动止盈回撤" note="自峰值回撤此值则全平，0.005=0.5%" value="0.005" type="intput"/>
+            <item bind="panel_stop_loss" name="卖出 硬止损" note="相对合并均价回撤，0.030=3%" value="0.030" type="intput"/>
+            <item bind="panel_adv_min" name="流动性 五日均额" note="元；低于则当日不新开" value="50000000" type="intput"/>
+            <item bind="panel_spread_max" name="流动性 价差上限" note="一档价差/中间价，0.003=0.30%；仅实盘" value="0.003" type="intput"/>
+            <item bind="panel_scale_lots" name="分笔独立" note="勾选=L1/L2 分笔记账；止损仍按合并均价" value="True" type="checkBox"/>
+        </variable>
+    </control>
+</TCStageLayout>

@@ -8,140 +8,183 @@ import traceback
 import numpy as np
 
 
-# === ma15/config.py ===
-# True=只打日志不下单；回测/实盘真下单前务必确认
-DRY_RUN = False
+# === vwapbias/config.py ===
+# 分时 VWAP 乖离、日内 T+0。首测标的: 113699.SH 金25转债（沪市、10 张整数倍）。
+# 形态: 单仓骨架 + SCALE_LOTS 同标的分笔。主图必须 1 分钟，不要挂正股 603979.SH，
+# 也不要挂同发行人旧券 113615.SH。规则真源: strategy/model.md（当前 v0.9）。
+# 终端改参走 panel.xml / PANEL_BINDS；改本文件后必须跑 _deploy_qmt_gbk.py。
 
+# ===================== 开关与账户 =====================
+# True=只打日志不下单。回测/实盘真下单前在面板取消「模拟下单」，或改这里。
+DRY_RUN = True
+
+# 编辑器/回测兜底账号；实盘以对话框 account / accountType 为准，勿把账号放上面板。
 ACCOUNT_ID = "39953913"
 ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 
-# 只交易此代码（主图须为 513530.SH）
-TRADE_CODE = "513530"
-
-# ETF T+0：回测不锁当日买入；实盘可卖以券商为准
-ALLOW_T0 = True
-
+# ===================== 资金 =====================
+# 单日预算上限（元）。两档各按 LOT_W* 再按 VOL_STEP 取整。建议 5 万~20 万，
+# 不超过近 5 日日均额的 1%。价格约 194 时，10 张约 1940 元。
 TRADE_BUDGET = 50000.0
+# 按标的覆盖预算（key 须与 A.stock 一致，如 113699.SH）；空则用上面默认值。
 TRADE_BUDGET_BY_STOCK = {}
+# 可用现金占用比例，预留下单缓冲，避免打满失败。
 CASH_RATIO = 0.8
 
-# ---- 15m / 1h 均线 ----
-MA_FAST = 20
-MA_SLOW = 60
-H_MA_FAST = 20
-H_MA_SLOW = 60
-VOL_MA_N = 20
+# ===================== 转债数量与 T+0 =====================
+# 沪市转债申报 10 张（1000 元面值）整数倍。common._lot / 可卖取整读此值，不要当 100 股。
+VOL_STEP = 10
+# 可转债当日买入可卖。必须 True，否则回测会按股票 T+1 锁仓。
+ALLOW_T0 = True
 
-# 触线 / 未有效跌破（0.4%：ETF 1 跳约 0.001，0.2% 经常够不着）
-MA_TOUCH_TOL = 0.004
-MA_BREAK_TOL = 0.002
+# ===================== 标的拦截 =====================
+# 主图须与此一致，否则 univ_skip=wrong_symbol。
+EXPECT_STOCK = "113699.SH"
+# 禁止交易（挂错主图时直接 skip）。113615=金诚转债；113069=博23已摘牌。
+FORBID_STOCKS = ("113615.SH", "113069.SH")
 
-# 缩量：只比 20 均量（不再 AND 前波上涨量，否则多头里经常 vol_skip）
-VOL_PULLBACK_RATIO = 0.85
-VOL_UP_LOOKBACK = 8
-VOL_UP_RATIO = 0.70
+# ===================== 周期与取数 =====================
+# 主图周期。只在已收盘 1 分钟 K 上决策（回测用当前根，实盘用上一根）。
+PERIOD = "1m"
+# 向 ContextInfo 要的 1 分钟根数。本机 pandas/get_market_data_ex 损坏时走 ori，
+# ori 往往只给最近约 240 根，靠 barpos 窗口对齐，不必把此值当成实际可用长度。
+OHLC_COUNT = 800
+# 日线根数：ADV_MIN 近 N 日均额、昨收等。
+DAILY_OHLC_COUNT = 12
+# 实盘只在 is_last_bar() 决策，避免未收盘 K 上反复下单。回测忽略。
+LIVE_ONLY_LAST_BAR = True
 
-# 锤子：下影相对实体、实体占振幅上限
-HAMMER_LOWER_MULT = 1.5
-HAMMER_BODY_MAX = 0.50
+# ===================== 交易时段（HHMMSS 字符串） =====================
+# 回测用 K 线时间；实盘用墙钟。沪市转债连续匹配到 15:00（无深市 14:57 收盘集合）。
+DECISION_START = "093000"      # 决策窗开始
+DECISION_END = "150000"        # 决策窗结束
+OPEN_SKIP_AM_END = "093500"    # 09:30~09:35 只更新指标，不交易（开盘噪声）
+OPEN_SKIP_PM_START = "130000"  # 13:00~13:05 同样暖机
+OPEN_SKIP_PM_END = "130500"
+LUNCH_START = "113000"         # 午休，phase=lunch
+LUNCH_END = "130000"
+NO_NEW_ENTRY = "144000"        # 14:40 起只卖不买（sell_only）
+FLAT_START = "145000"          # 14:50 起 eod_flatten 强平；未平视为策略失败
 
-# 大盘 15m 放量杀跌
-INDEX_CODE = "000001.SH"
-INDEX_DUMP_RET = -0.004
-INDEX_DUMP_VOL = 1.5
+# ===================== 买入: 负乖离分档 =====================
+# BIAS = (收盘 - 当日VWAP) / VWAP，小数。-0.018 = 低于均价 1.8%。
+# 阈值按上市以来 60 分钟 + 近月 5 分钟分位校准（公开源无完整 1 分钟历史），
+# 约 10% / 3% 交易日触及 L1/L2。脚本: strategy/scripts/calibrate_113699_bias.py
+BIAS_L1 = -0.018               # 开仓档，日志 buy_l1
+BIAS_L2 = -0.025               # 须已持 L1，且止跌 + 现价>=持仓均价，日志 buy_l2
+BIAS_L3 = -0.035               # 更深一档，默认关
+ENABLE_L3 = False
+# 各档占用 TRADE_BUDGET 的比例，再按 VOL_STEP 取整。L3 关时 W3 不用。
+LOT_W1 = 0.30
+LOT_W2 = 0.30
+LOT_W3 = 0.40
 
-# 卖出
-STOP_MA_PCT = 0.008
-STOP_MA_AFTER_HHMM = "1015"  # 早盘第一根不按隔夜缺口打 MA 止损
-STOP_LOSS = 0.02
-STALL_BARS = 16              # 约 1 个交易日；6 根=1.5h 会把回踩本身当成衰竭
-STALL_BAND = 0.005
-STALL_MA_FLAT = 0.002
-STALL_ABORT_RET = 0.005      # 持仓期曾有 >=0.5% 浮盈则不再用 stall 砍
-TREND_BREAK_ABORT_RET = 0.001  # 曾有 >=0.1% 浮盈则不用 trend_break（避免砍 7/16 这类回撤后再止盈）
-TREND_BREAK_MIN_RET = -0.004   # 当前浮亏至少 0.4%，避免 4/17 那种 -0.06% 噪声
-# 硬止盈：浮盈达标且离开 MA20。默认开（v1.0 关掉会少赚）
-TAKE_PROFIT_HARD = True
-TAKE_PROFIT = 0.015          # 回吐启动阈值（收盘最高浮盈）
-TAKE_LEAVE = 0.008           # 仅 TAKE_PROFIT_HARD=True 时用
-GIVEBACK = 0.008             # 启动后相对收盘最高回吐；硬止盈打开时作辅层
-GIVEBACK_TIGHT = 0.008       # 最高浮盈达到 GIVEBACK_TIGHT_AFTER 后收紧
-GIVEBACK_TIGHT_AFTER = 0.04
+# ===================== 买入: 急跌 + 止跌形态 =====================
+# 看信号根之前的 DOWN_BARS 根已收盘 1 分钟，满足其一即 impulse_ok:
+#   至少 1 根阴；或窗口最高到末收回撤 >= IMPULSE_SUM；或末根 (开-收)/开 >= LAST_DROP。
+DOWN_BARS = 2                  # 观察窗长度（不含当前信号根）
+LAST_DROP = 0.002              # 0.2%，窗口末根阴跌
+IMPULSE_SUM = 0.005            # 0.5%，窗口回撤
+# 当前根 reversal_ok: 收红，或收盘>=上一根收盘，或下影占比 > 此值。
+# 空仓且 BIAS<=L2 时允许跳过止跌开 L1；加 L2 必须止跌，且禁止现价低于均价加仓。
+SHADOW_RATIO = 0.25
 
-# 盈利后加仓：浮盈达到 SCALE_ARM 后，下一笔回踩信号加第二笔（仍 1*TRADE_BUDGET）
-# 等加仓期间硬止盈让路（趋势仍在且未超过 SCALE_GIVEUP_BARS）；账户需能再拿出一笔预算
-# SCALE_LOTS=True：每笔独立成本/峰值/止盈（多仓）；False：均价合并后整仓出（v1.2）
-# SCALE_RESET_PEAK 仅合并模式有效；多仓不继承、不重置
-SCALE_ENABLE = True
-SCALE_MAX = 2
-SCALE_ARM = 0.015
-SCALE_GIVEUP_BARS = 80
+# ===================== 卖出（优先级见 strategy.py） =====================
+# eod_flatten > stop_loss > trail_stop > take_profit > fade_sell > vwap_reversion
+#
+# fade_sell: BIAS >= BIAS_FADE；若尚未到 BIAS_FADE+0.004，还要求量比 <= VOL_GAP。
+# 持仓后 1 分钟很少到 +1.5%，故用 5 分钟 p90 的 +0.8%。样本里常为 0 次。
+BIAS_FADE = 0.008
+VOL_GAP = 0.75
+# vwap_reversion: BIAS >= 此值且该笔已盈利则平盈利笔。0 = 回到均价即可。
+# 不再用 0~+0.2% 窄带（1 分钟容易一根跳过）。
+REVERSION_BIAS = 0.00
+# 仅作文档/备份上限；当前代码卖出不读此值。fade 量能确认的分界用 BIAS_FADE+0.004。
+REVERSION_BIAS_HI = 0.012
+# take_profit: 相对该笔成本 +1.0% 只平达标的 lot。未走到移动止盈启动带的日子靠它离场。
+TAKE_PROFIT = 0.010
+# trail_stop: 合并均价浮盈达到 ARM 后，自峰值回撤 GIVE 则全平。
+# 用来接「先冲到 +1.4% 再单边砸到止损」的路径。ARM=0 关闭。
+TRAIL_ARM = 0.012              # 1.2% 启动
+TRAIL_GIVE = 0.005             # 0.5% 回撤
+# stop_loss: 相对合并均价 -3.0% 清可卖仓，并当日 risk_skip 不再开。
+# 不要收到 2%: 有的日子先深跌再回归（如 01-29），2% 会误杀。
+STOP_LOSS = 0.030
+
+# ===================== 流动性 / 涨跌停（univ_skip） =====================
+# 近 ADV_DAYS 日均成交额低于此值（元）则当日不新开。该券近期通常 2 亿以上。
+ADV_MIN = 5e7
+ADV_DAYS = 5
+# 实盘一档价差/中间价超过此值停开。0.003 = 0.30%。回测不查盘口。
+SPREAD_MAX = 0.003
+# 转债上市后涨跌幅约 +/-20%。相对昨收绝对涨跌达到 LIMIT_NEAR 则视为接近涨跌停，不新开。
+LIMIT_PCT = 0.20
+LIMIT_NEAR = 0.18
+
+# ===================== 分笔 =====================
+# True: L1/L2 分笔记账，止盈/回归可按 lot 平；止损仍按合并均价。
+# 不要为此去接双浮仓 orders.py。SCALE_MAX=2 对应 L1+L2（L3 关闭时）。
 SCALE_LOTS = True
-SCALE_RESET_PEAK = True
+SCALE_MAX = 2
 
-# 允许开仓的 15m 结束时刻 HHmm。
-# 不含 1400/1415：次根 1415/1430 成交，T+0 来不及当日止损，隔夜缺口（v0.3 的 1430 同因）
-ENTRY_HHMM_ALLOW = (
-    "1000", "1015", "1030", "1045", "1100", "1115", "1130",
-    "1315", "1330", "1345",
-)
-# 这些结束时刻的 15m 不开新买（已挂 pending 也作废）
-ENTRY_FILL_BAN = ("1415", "1430", "1445", "1500")
-
+# ===================== 终端参数面板 =====================
+# bind 名 -> 本文件常量 -> 类型。注入发生在 runtime.init 的 _apply_panel()。
+# 禁止上屏: account、STATE_FILE、LOG_DIR、STRATEGY_VER、_ORDER_*。
 PANEL_BINDS = (
     ("panel_dry_run", "DRY_RUN", "bool"),
     ("panel_budget", "TRADE_BUDGET", "float"),
     ("panel_cash_ratio", "CASH_RATIO", "float"),
-    ("panel_allow_t0", "ALLOW_T0", "bool"),
-    ("panel_ma_touch", "MA_TOUCH_TOL", "float"),
-    ("panel_ma_break", "MA_BREAK_TOL", "float"),
-    ("panel_vol_ratio", "VOL_PULLBACK_RATIO", "float"),
-    ("panel_stop_ma", "STOP_MA_PCT", "float"),
-    ("panel_stop_loss", "STOP_LOSS", "float"),
-    ("panel_hard_tp", "TAKE_PROFIT_HARD", "bool"),
+    ("panel_bias_l1", "BIAS_L1", "float"),
+    ("panel_bias_l2", "BIAS_L2", "float"),
+    ("panel_bias_fade", "BIAS_FADE", "float"),
     ("panel_take_profit", "TAKE_PROFIT", "float"),
-    ("panel_giveback", "GIVEBACK", "float"),
-    ("panel_stall_bars", "STALL_BARS", "int"),
-    ("panel_stall_abort", "STALL_ABORT_RET", "float"),
-    ("panel_scale", "SCALE_ENABLE", "bool"),
+    ("panel_trail_arm", "TRAIL_ARM", "float"),
+    ("panel_trail_give", "TRAIL_GIVE", "float"),
+    ("panel_stop_loss", "STOP_LOSS", "float"),
+    ("panel_adv_min", "ADV_MIN", "float"),
+    ("panel_spread_max", "SPREAD_MAX", "float"),
     ("panel_scale_lots", "SCALE_LOTS", "bool"),
 )
 
-PERIOD = "15m"
-OHLC_COUNT = 400
-HOUR_OHLC_COUNT = 240
-INDEX_OHLC_COUNT = 120
-
-LIVE_ONLY_LAST_BAR = True
-DECISION_START = "093000"
-DECISION_END = "150000"
+# ===================== 日志 / 历史 / 挂单超时 =====================
+# 实盘心跳最短间隔（秒）。回测不走墙钟心跳。
 LIVE_HEARTBEAT_SEC = 60
-
+# download_history_data 最多回看日历日。上市日 2025-10-27，回测起点不要更早。
 HIST_MAX_LOOKBACK_DAYS = 400
-DOWNLOAD_HIST_LIVE = False
-DOWNLOAD_HIST_BACKTEST = True
-
-PENDING_TIMEOUT_SEC = 180
+DOWNLOAD_HIST_LIVE = False     # 实盘一般不在 init 拉长历史
+DOWNLOAD_HIST_BACKTEST = True  # 回测 init 拉 1m/1d，保证暖机
+# 委托超时（秒）。PENDING_ORPHAN: 成交回报丢失后的孤儿仓处理窗口。
+PENDING_TIMEOUT_SEC = 60
 PENDING_ORPHAN_SEC = 60
 
-STATE_FILE = r"D:\tradingStrategy\ma15_{stock}.json"
+# 状态文件必须绝对路径。{stock} 展开为 113699_SH，多实例不可共用同一 JSON。
+STATE_FILE = r"D:\tradingStrategy\vwapbias_{stock}.json"
+# 实盘事件日志目录。回测默认不写盘（LOG_IN_BACKTEST=False），看终端 log.txt。
 LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
-STRATEGY_NAME = "Ma15"
-STRATEGY_VER = "v1.4"
+# 日志前缀与版本。init 行形如: VwapBias v0.9 init ...
+STRATEGY_NAME = "VwapBias"
+STRATEGY_VER = "v0.9"
 
+# 券商委托状态码: 已成 / 已死（撤废拒等）。勿改除非柜台码表变了。
 _ORDER_FILLED = (56, 8)
 _ORDER_DEAD = (54, 57, 53, 5, 6, 9)
 
+# 终端允许的周期名；download 起点按周期覆盖（该债 2025-10-27 上市）。
 _VALID_PERIODS = (
     "1m", "3m", "5m", "15m", "30m", "1h", "1d", "1w", "1mon", "1q", "1hy", "1y",
 )
+_PERIOD_HIST_START = {
+    "1m": "20251027",
+    "1d": "20251027",
+}
 
 # === qmt_common/ctx.py ===
 # 作用: 全局运行时对象与手数工具
-# 主要符号: A, _S, _lot
-# 前置: 策略 config（可选 STRATEGY_NAME）
+# 主要符号: A, _S, _vol_step, _lot
+# 前置: 策略 config（可选 STRATEGY_NAME, VOL_STEP）
+# VOL_STEP: 下单数量步长。股票/ETF 默认 100 股；沪市转债设 10（10 张=1000 元面值）
 class _S(object):
     pass
 
@@ -149,10 +192,21 @@ class _S(object):
 A = _S()
 
 
+def _vol_step():
+    try:
+        s = int(globals().get("VOL_STEP") or 100)
+    except Exception:
+        s = 100
+    if s <= 0:
+        s = 100
+    return s
+
+
 def _lot(price, budget):
+    step = _vol_step()
     if price is None or price <= 0 or budget <= 0:
         return 0
-    return int(budget // (price * 100)) * 100
+    return int(budget // (price * step)) * step
 
 
 def _strategy_tag():
@@ -473,47 +527,24 @@ def _bar_end_str(C):
         return dt.strftime("%Y%m%d%H%M%S")
     return dt.strftime("%Y%m%d")
 
-# === ma15/state_extra.py ===
+# === vwapbias/state_extra.py ===
 def _state_extra_load(raw):
-    pe = raw.get("pending_entry")
-    A.pending_entry = pe if isinstance(pe, dict) else None
-    px = raw.get("pending_exit")
-    A.pending_exit = px if isinstance(px, dict) else None
-    peak = raw.get("hold_peak")
+    A.acted_closed = str(raw.get("acted_closed", "") or "")
+    A.risk_skip_day = str(raw.get("risk_skip_day", "") or "")
+    A.scale_out_lock = bool(raw.get("scale_out_lock", False))
+    pk = raw.get("hold_peak_ret", None)
     try:
-        A.hold_peak = float(peak) if peak is not None else None
+        A.hold_peak_ret = float(pk) if pk is not None and pk != "" else None
     except Exception:
-        A.hold_peak = None
-    cp = raw.get("hold_close_peak")
-    try:
-        A.hold_close_peak = float(cp) if cp is not None else None
-    except Exception:
-        A.hold_close_peak = None
-    try:
-        A.hold_bars = int(raw.get("hold_bars", 0) or 0)
-    except Exception:
-        A.hold_bars = 0
-    A._hold_count_bar = str(raw.get("hold_count_bar", "") or "")
-    try:
-        A.hold_max_ret = float(raw.get("hold_max_ret", 0) or 0)
-    except Exception:
-        A.hold_max_ret = 0.0
-    A._eval_bar_tag = str(raw.get("eval_bar_tag", "") or "")
-    A.stall_cool_day = str(raw.get("stall_cool_day", "") or "")
+        A.hold_peak_ret = None
 
 
 def _state_extra_save(data):
-    data["pending_entry"] = getattr(A, "pending_entry", None)
-    data["pending_exit"] = getattr(A, "pending_exit", None)
-    peak = getattr(A, "hold_peak", None)
-    data["hold_peak"] = None if peak is None else float(peak)
-    cp = getattr(A, "hold_close_peak", None)
-    data["hold_close_peak"] = None if cp is None else float(cp)
-    data["hold_bars"] = int(getattr(A, "hold_bars", 0) or 0)
-    data["hold_count_bar"] = str(getattr(A, "_hold_count_bar", "") or "")
-    data["hold_max_ret"] = float(getattr(A, "hold_max_ret", 0) or 0)
-    data["eval_bar_tag"] = str(getattr(A, "_eval_bar_tag", "") or "")
-    data["stall_cool_day"] = str(getattr(A, "stall_cool_day", "") or "")
+    data["acted_closed"] = str(getattr(A, "acted_closed", "") or "")
+    data["risk_skip_day"] = str(getattr(A, "risk_skip_day", "") or "")
+    data["scale_out_lock"] = bool(getattr(A, "scale_out_lock", False))
+    pk = getattr(A, "hold_peak_ret", None)
+    data["hold_peak_ret"] = None if pk is None else float(pk)
 
 # === qmt_common/single/state_io.py ===
 # 作用: 单仓 JSON 状态读写（回测不落盘）
@@ -591,7 +622,7 @@ def _load_state():
         )
         return
     pos = raw.get("position")
-    if isinstance(pos, dict) and int(pos.get("shares", 0) or 0) >= 100:
+    if isinstance(pos, dict) and int(pos.get("shares", 0) or 0) >= _vol_step():
         A.position = dict(pos)
         A.position["shares"] = int(pos["shares"])
         A.position["price"] = float(pos.get("price", 0) or 0)
@@ -601,7 +632,7 @@ def _load_state():
     cleaned = []
     if isinstance(lots, list):
         for lot in lots:
-            if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) >= 100:
+            if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) >= _vol_step():
                 cleaned.append(dict(lot))
     A.lots = cleaned
     A.acted_day = str(raw.get("acted_day", "") or "")
@@ -715,7 +746,7 @@ def _bt_held_set(vol):
     if not getattr(A, "is_backtest", False):
         return
     A.bt_held = max(0, int(vol))
-    if A.bt_held < 100:
+    if A.bt_held < _vol_step():
         A.bt_opened_at = ""
         A.bt_locked = 0
     else:
@@ -736,7 +767,7 @@ def _reset_day(day):
 
 def _has_position():
     pos = getattr(A, "position", None)
-    return isinstance(pos, dict) and int(pos.get("shares", 0) or 0) >= 100
+    return isinstance(pos, dict) and int(pos.get("shares", 0) or 0) >= _vol_step()
 
 
 def _pos_shares():
@@ -806,7 +837,7 @@ def _ensure_lots():
     cleaned = []
     if isinstance(lots, list):
         for lot in lots:
-            if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) >= 100:
+            if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) >= _vol_step():
                 cleaned.append(lot)
     if cleaned:
         A.lots = cleaned
@@ -853,7 +884,7 @@ def _new_lot(shares, price, opened_at=""):
 def _sync_position_from_lots():
     lots = []
     for lot in getattr(A, "lots", None) or []:
-        if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) >= 100:
+        if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) >= _vol_step():
             lots.append(lot)
     A.lots = lots
     if not lots:
@@ -879,7 +910,7 @@ def _sync_position_from_lots():
     }
     if getattr(A, "is_backtest", False):
         held = _bt_held_vol()
-        if held < 100 and total >= 100:
+        if held < _vol_step() and total >= _vol_step():
             print(_strategy_tag(), "restore bt_held from lots", total)
             A.bt_held = total
         elif held != total:
@@ -976,7 +1007,7 @@ def _lots_want_vol(lot_ids):
                 total += int(lot.get("shares") or 0)
         except Exception:
             pass
-    if total < 100:
+    if total < _vol_step():
         return None
     return int(total)
 
@@ -1020,7 +1051,7 @@ def _lots_on_buy_fill(px, add=False, vol=None, opened_at=""):
         _sync_position_from_lots()
         _mirror_hold_from_lots()
         return
-    if vol < 100:
+    if vol < _vol_step():
         if add and not (getattr(A, "lots", None) or []):
             A.lots = [_lot_from_agg()]
         _sync_position_from_lots()
@@ -1055,7 +1086,7 @@ def _lots_on_sell_fill(lot_ids, filled_vol):
         if idset is not None and lid not in idset:
             new_lots.append(lot)
             continue
-        if remain_fill < 100:
+        if remain_fill < _vol_step():
             new_lots.append(lot)
             continue
         sh = int(lot.get("shares") or 0)
@@ -1094,7 +1125,7 @@ def _bt_recover_position(now=None, last=None):
     if not getattr(A, "is_backtest", False):
         return False
     held = _bt_held_vol()
-    if held < 100:
+    if held < _vol_step():
         return False
     if _has_position():
         return False
@@ -1114,72 +1145,118 @@ def _bt_recover_position(now=None, last=None):
         fn()
     return True
 
-# === ma15/indicators.py ===
-def _sma(closes, n):
-    c = np.asarray(closes, dtype=float)
+# === vwapbias/indicators.py ===
+def _lower_shadow_ratio(o, h, l, c):
+    rng = float(h) - float(l)
+    if rng <= 1e-12:
+        return 0.0
+    return (min(float(o), float(c)) - float(l)) / rng
+
+
+def _impulse_ok(opens, closes, idx_list, n, last_drop, sum_drop=0.0):
+    """信号根之前 n 根：多数阴、或窗口回撤、或末根阴跌，满足其一即可。"""
     n = int(n)
-    if n <= 0 or len(c) < n:
+    if n <= 0 or len(idx_list) < n + 1:
+        return False
+    prior = idx_list[-(n + 1) : -1]
+    o0 = float(opens[prior[0]])
+    cl = float(closes[prior[-1]])
+    if o0 <= 0:
+        return False
+    peak = o0
+    yin = 0
+    for j in prior:
+        oj = float(opens[j])
+        cj = float(closes[j])
+        if oj > peak:
+            peak = oj
+        if cj > peak:
+            peak = cj
+        if cj < oj:
+            yin += 1
+    sum_ok = peak > 0 and (peak - cl) / peak >= float(sum_drop)
+    ol = float(opens[prior[-1]])
+    last_ok = ol > 0 and (ol - cl) / ol >= float(last_drop)
+    yin_ok = yin >= max(1, n - 1)
+    return sum_ok or last_ok or yin_ok
+
+
+def _reversal_ok(o, h, l, c, shadow_ratio, prev_close=None):
+    if float(c) > float(o):
+        return True
+    if prev_close is not None and float(c) >= float(prev_close):
+        return True
+    return _lower_shadow_ratio(o, h, l, c) > float(shadow_ratio)
+
+
+def _fade_vol_ok(volumes, i_now, i_prev, gap):
+    if i_prev is None or i_now is None:
+        return False
+    v0 = float(volumes[i_prev] or 0)
+    v1 = float(volumes[i_now] or 0)
+    if v0 <= 0:
+        return False
+    return v1 <= v0 * float(gap)
+
+
+def _cum_vwap(amounts, volumes, highs, lows, closes, idx_list):
+    """当日已收盘 1m 累加 VWAP。优先 amount，否则 typical*volume。"""
+    amt = 0.0
+    vol = 0.0
+    used_amt = 0
+    used_typ = 0
+    for j in idx_list:
+        v = float(volumes[j] or 0)
+        if v <= 0:
+            continue
+        a = 0.0
+        if amounts is not None and j < len(amounts):
+            try:
+                a = float(amounts[j] or 0)
+            except Exception:
+                a = 0.0
+        if a > 0:
+            amt += a
+            used_amt += 1
+        else:
+            typ = (float(highs[j]) + float(lows[j]) + float(closes[j])) / 3.0
+            amt += typ * v
+            used_typ += 1
+        vol += v
+    if vol <= 0 or amt <= 0:
+        return None, "none"
+    raw = amt / vol
+    typ_amt = 0.0
+    typ_vol = 0.0
+    for j in idx_list:
+        v = float(volumes[j] or 0)
+        if v <= 0:
+            continue
+        typ = (float(highs[j]) + float(lows[j]) + float(closes[j])) / 3.0
+        if typ > 0:
+            typ_amt += typ * v
+            typ_vol += v
+    src = "amount"
+    if used_amt == 0:
+        src = "typical"
+    elif used_typ > 0:
+        src = "mixed"
+    if typ_vol > 0 and typ_amt > 0:
+        typical_vwap = typ_amt / typ_vol
+        if typical_vwap > 0:
+            ratio = raw / typical_vwap
+            # 转债 volume 常为手(1手=10张), amount 为元 -> VWAP 约 10 倍现价
+            if 7.5 <= ratio <= 12.5:
+                return raw / 10.0, "amount_lot10"
+            if ratio > 2.0 or ratio < 0.5:
+                return typical_vwap, "typical"
+    return raw, src
+
+
+def _bias_of(price, vwap):
+    if vwap is None or vwap <= 0 or price is None:
         return None
-    out = np.full(len(c), np.nan, dtype=float)
-    cs = np.cumsum(c)
-    out[n - 1] = cs[n - 1] / float(n)
-    if len(c) > n:
-        out[n:] = (cs[n:] - cs[:-n]) / float(n)
-    return out
-
-
-def _last_valid(arr, i=-1):
-    if arr is None:
-        return None
-    v = arr[i]
-    if v != v:
-        return None
-    return float(v)
-
-
-def _is_hammer(o, h, l, c):
-    rng = float(h) - float(l)
-    if rng <= 0:
-        return False
-    body = abs(float(c) - float(o))
-    lower = min(float(o), float(c)) - float(l)
-    lower_mult = float(globals().get("HAMMER_LOWER_MULT") or 1.5)
-    body_max = float(globals().get("HAMMER_BODY_MAX") or 0.50)
-    if lower < lower_mult * body:
-        return False
-    if body / rng > body_max:
-        return False
-    if float(c) < float(o):
-        return False
-    return float(c) >= (float(h) + float(l)) / 2.0
-
-
-def _is_bounce(o, h, l, c):
-    """弱于锤子：收阳、有下影、收在区间上半（回踩确认，不要求 2 倍下影）。"""
-    rng = float(h) - float(l)
-    if rng <= 0:
-        return False
-    if float(c) < float(o):
-        return False
-    body = abs(float(c) - float(o))
-    lower = min(float(o), float(c)) - float(l)
-    if lower < max(body, rng * 0.20):
-        return False
-    if body / rng > 0.70:
-        return False
-    return float(c) >= (float(h) + float(l)) / 2.0
-
-
-def _is_engulf(o0, c0, o1, c1, v0, v1):
-    if float(c0) >= float(o0):
-        return False
-    if float(c1) <= float(o1):
-        return False
-    if float(c1) < float(o0):
-        return False
-    if float(o1) > float(c0):
-        return False
-    return float(v1) > float(v0)
+    return (float(price) - float(vwap)) / float(vwap)
 
 # === qmt_common/market_util.py ===
 # 作用: 行情辅助：诊断、序列解析、补历史、心跳
@@ -1308,136 +1385,892 @@ def _live_heartbeat(reason=""):
         )
     )
 
-# === ma15/market.py ===
-def _get_ohlcv_period(C, stock, period, count, need, diag_key, end=None):
-    if end is None:
-        end = _bar_end_str(C)
-    if period in ("1d", "1w", "1mon", "1q", "1hy", "1y"):
-        end = end[:8] if len(end) >= 8 else end
+# === vwapbias/market.py ===
+# 1 分钟主图优先用 ContextInfo 序列（C.close 等）。
+# 本机 QMT pandas 损坏时 get_market_data_ex 会报 _TSObject/iNaT，
+# 且 get_market_data(count=800) 会把 1m 回测拖死，故 1m 不再走那条回退。
+def _pandas_broken_msg(exc):
+    s = str(exc or "")
+    return ("__reduce_cython__" in s) or ("iNaT" in s) or ("C extension" in s)
+
+
+def _mark_pandas_broken(exc):
+    A._md_pandas_broken = True
+    _diag_once("md_pandas_broken", exc)
+
+
+def _as_float_list(obj, n=None):
+    if obj is None:
+        return None
+    vals = None
+    try:
+        if hasattr(obj, "values") and not isinstance(obj, (list, tuple, dict)):
+            vals = list(np.asarray(obj.values, dtype=float).reshape(-1))
+    except Exception:
+        vals = None
+    if vals is None:
+        try:
+            vals = list(np.asarray(obj, dtype=float).reshape(-1))
+        except Exception:
+            vals = None
+    if vals is None:
+        try:
+            if hasattr(obj, "tolist"):
+                vals = [float(x) for x in obj.tolist()]
+            else:
+                vals = [float(x) for x in list(obj)]
+        except Exception:
+            return None
+    if n is not None:
+        if n <= 0:
+            return []
+        vals = vals[: int(n)]
+    out = []
+    for fv in vals:
+        try:
+            if fv != fv:
+                out.append(0.0)
+            else:
+                out.append(float(fv))
+        except Exception:
+            out.append(0.0)
+    return out
+
+
+def _index_n(obj, n):
+    if obj is None or n <= 0:
+        return None
+    out = []
+    for i in range(int(n)):
+        v = None
+        try:
+            v = obj[i]
+        except Exception:
+            try:
+                v = obj.iloc[i]
+            except Exception:
+                return None
+        try:
+            fv = float(v)
+            if fv != fv:
+                fv = 0.0
+            out.append(fv)
+        except Exception:
+            out.append(0.0)
+    return out
+
+
+def _ctx_field(C, names, n=None):
+    if isinstance(names, str):
+        names = (names,)
+    try:
+        bp_n = int(getattr(C, "barpos", 0) or 0) + 1
+    except Exception:
+        bp_n = 1
+    if n is None:
+        n = bp_n
+    for name in names:
+        obj = getattr(C, name, None)
+        if obj is None:
+            continue
+        if callable(obj):
+            got = None
+            for args in ((), (n,), (bp_n,), (int(n - 1),)):
+                try:
+                    got = obj(*args)
+                    break
+                except Exception:
+                    continue
+            if got is None:
+                continue
+            obj = got
+        vals = _as_float_list(obj, n)
+        if vals and not (len(vals) == 1 and n > 1):
+            return vals
+        vals = _index_n(obj, n)
+        if vals and not (len(vals) == 1 and n > 1):
+            return vals
+        try:
+            fv = float(obj)
+            if n <= 1:
+                return [fv]
+        except Exception:
+            pass
+    return None
+
+
+def _diag_ctx_once(C):
+    hits = []
+    try:
+        for n in dir(C):
+            ln = str(n).lower()
+            if (
+                ("close" in ln)
+                or ("history" in ln)
+                or ("market" in ln)
+                or (n in ("open", "high", "low", "volume", "amount", "barpos", "period"))
+            ):
+                hits.append(str(n))
+            if len(hits) >= 30:
+                break
+    except Exception as e:
+        hits.append("dir_fail")
+        hits.append(str(e)[:80])
+    close = getattr(C, "close", None)
+    _diag_once(
+        "chart_probe",
+        "barpos=",
+        getattr(C, "barpos", None),
+        "period=",
+        getattr(C, "period", None),
+        "close_type=",
+        type(close),
+        "hits=",
+        ",".join(hits),
+    )
+
+
+def _from_hist_dict(raw, stock, field):
+    if raw is None:
+        return None
+    vals = _series_from_ex(raw, stock, field)
+    if vals:
+        return vals
+    if not isinstance(raw, dict):
+        return _as_float_list(raw)
+    keys = [stock, field]
+    if "." in str(stock):
+        code, mkt = str(stock).split(".", 1)
+        keys.extend([code, str(mkt) + str(code), str(code) + "." + str(mkt)])
+    for k in keys:
+        if k in raw:
+            vals = _as_float_list(raw[k])
+            if vals:
+                return vals
+    if len(raw) == 1:
+        return _as_float_list(list(raw.values())[0])
+    return None
+
+
+def _call_history(C, count, period, field):
+    fn = getattr(C, "get_history_data", None)
+    if not callable(fn):
+        fn = globals().get("get_history_data")
+    if not callable(fn):
+        return None
+    count = max(1, int(count))
+    period = str(period or "1m")
+    last = None
+    names = (field,)
+    if field == "open":
+        names = ("open", "Open", "openPrice", "openprice")
+    elif field == "high":
+        names = ("high", "High", "highPrice", "highprice")
+    elif field == "low":
+        names = ("low", "Low", "lowPrice", "lowprice")
+    elif field == "volume":
+        names = ("volume", "vol", "Volume")
+    elif field == "amount":
+        names = ("amount", "Amount", "money", "turnover")
+    for fname in names:
+        for args in (
+            (count, period, fname, ""),
+            (count, period, fname, "none"),
+            (count, period, fname),
+            (count, period, fname, "front_ratio"),
+        ):
+            try:
+                raw = fn(*args)
+            except TypeError as e:
+                last = e
+                continue
+            except Exception as e:
+                last = e
+                break
+            vals = _from_hist_dict(raw, str(getattr(A, "stock", "") or ""), fname)
+            if vals:
+                return vals
+    if last is not None:
+        _diag_once("hist_fail", field, period, last)
+    return None
+
+
+def _history_ohlcv_1m(C, bp):
+    """get_history_data 返回 list，不经过 pandas。模型交易无 C.close 时用。"""
+    n = max(1, int(bp) + 1)
+    count = min(n, 240)
+    periods = []
+    for p in (getattr(A, "period", None), getattr(C, "period", None), "1m", "1min"):
+        s = str(p or "").strip()
+        if s and s not in periods:
+            periods.append(s)
+    closes = None
+    used = None
+    for period in periods:
+        for ctry in (count, max(int(count), 8)):
+            closes = _call_history(C, ctry, period, "close")
+            if closes:
+                used = period
+                count = int(ctry)
+                break
+        if closes:
+            break
+    if not closes:
+        return None
+    if len(closes) > n:
+        closes = closes[-n:]
+    k = len(closes)
+    opens = _call_history(C, count, used, "open")
+    highs = _call_history(C, count, used, "high")
+    lows = _call_history(C, count, used, "low")
+    volumes = _call_history(C, count, used, "volume") or [0.0] * k
+    amounts = _call_history(C, count, used, "amount") or [0.0] * k
+    if not opens:
+        _diag_once("hist_open_missing", "period=", used)
+        opens = list(closes)
+    if not highs:
+        _diag_once("hist_high_missing", "period=", used)
+        highs = list(closes)
+    if not lows:
+        _diag_once("hist_low_missing", "period=", used)
+        lows = list(closes)
+    if len(opens) > k:
+        opens = opens[-k:]
+    if len(highs) > k:
+        highs = highs[-k:]
+    if len(lows) > k:
+        lows = lows[-k:]
+    if len(volumes) > k:
+        volumes = volumes[-k:]
+    if len(amounts) > k:
+        amounts = amounts[-k:]
+    if len(opens) < k:
+        opens = list(closes)
+    if len(highs) < k:
+        highs = list(closes)
+    if len(lows) < k:
+        lows = list(closes)
+    if len(volumes) < k:
+        volumes = [0.0] * k
+    if len(amounts) < k:
+        amounts = [0.0] * k
+    eq = 0
+    for i in range(k):
+        try:
+            if abs(float(opens[i]) - float(closes[i])) < 1e-8:
+                eq += 1
+        except Exception:
+            pass
+    _diag_once("ohlc_cmp", "open_eq_close=", eq, "/", k, "src=hist")
+    times = []
+    miss = 0
+    look = k
+    idx0 = max(0, int(bp) + 1 - k)
+    for j in range(k):
+        ts = _timetag_str(C, idx0 + j)
+        if not ts:
+            miss += 1
+        times.append(ts)
+    if miss > look // 2:
+        times = _synth_1m_times(look, _bar_datetime(C))
+        _diag_once("m1_time_synth", "n=", look, "src=hist")
+    if len(times) != look:
+        return None
+    _diag_once("hist_ok", "period=", used, "n=", k)
+    return opens, highs, lows, closes, volumes, amounts, times
+
+
+def _times_for_window(C, bp, n):
+    """最近 n 根对应主图下标 [bp-n+1, bp]，不要用 0..n-1（那是上市日）。"""
+    n = max(1, int(n))
+    bp = int(bp)
+    idx0 = max(0, bp + 1 - n)
+    times = []
+    miss = 0
+    for j in range(n):
+        ts = _timetag_str(C, idx0 + j)
+        if not ts:
+            miss += 1
+        times.append(ts)
+    if miss > n // 2:
+        times = _synth_1m_times(n, _bar_datetime(C))
+        _diag_once("m1_time_synth", "n=", n, "bp=", bp)
+    return times
+
+
+def _align_ohlcv_times(C, bp, opens, highs, lows, closes, volumes, amounts, times):
+    """ori/history 只返回最近若干根时，时间戳必须对齐当前 barpos，而不是图表从头。"""
+    if not closes:
+        return None
+    look = min(len(closes), 240)
+    if not opens or len(opens) < look:
+        opens = list(closes)
+    if not highs or len(highs) < look:
+        highs = list(closes)
+    if not lows or len(lows) < look:
+        lows = list(closes)
+    if not volumes or len(volumes) < look:
+        volumes = [0.0] * look
+    if not amounts or len(amounts) < look:
+        amounts = [0.0] * look
+    opens = opens[-look:]
+    highs = highs[-look:]
+    lows = lows[-look:]
+    closes = closes[-look:]
+    volumes = volumes[-look:]
+    amounts = amounts[-look:]
+    times_use = None
+    if times and len(times) >= look:
+        times_use = [_norm_bar_time(x) for x in times[-look:]]
+        if not any(times_use):
+            times_use = None
+    bar_day = ""
+    try:
+        bar_day = _bar_datetime(C).strftime("%Y%m%d")
+    except Exception:
+        bar_day = ""
+    last = (times_use[-1] if times_use else "") or ""
+    if (not times_use) or (bar_day and last[:8] != bar_day):
+        times_use = _times_for_window(C, bp, look)
+        last = (times_use[-1] if times_use else "") or ""
+        if bar_day and last[:8] != bar_day:
+            times_use = _synth_1m_times(look, _bar_datetime(C))
+            _diag_once("m1_time_synth", "n=", look, "bp=", bp, "force_day=", bar_day)
+    if (not times_use) or len(times_use) != look:
+        return None
+    return opens, highs, lows, closes, volumes, amounts, times_use
+
+
+def _ori_fetch_md(C, bp, count):
+    fn = getattr(C, "get_market_data_ex_ori", None)
+    if not callable(fn):
+        return None
+    stock = str(getattr(A, "stock", "") or "")
+    end = _bar_datetime(C).strftime("%Y%m%d%H%M%S")
+    fields = ["open", "high", "low", "close", "volume", "amount"]
+    try:
+        return fn(
+            fields,
+            [stock],
+            period="1m",
+            end_time=end,
+            count=int(count),
+            subscribe=False,
+        )
+    except TypeError:
+        try:
+            return fn(fields, [stock], "1m", "", end, int(count), "none")
+        except Exception as e:
+            _diag_once("ori_fail", e)
+            return None
+    except Exception as e:
+        _diag_once("ori_fail", e)
+        return None
+
+
+def _pack_from_ori_md(C, bp, md):
+    stock = str(getattr(A, "stock", "") or "")
+    close = _series_from_ex(md, stock, "close") or _from_hist_dict(md, stock, "close")
+    if not close:
+        return None
+    open_ = _series_from_ex(md, stock, "open") or _from_hist_dict(md, stock, "open")
+    high = _series_from_ex(md, stock, "high") or _from_hist_dict(md, stock, "high")
+    low = _series_from_ex(md, stock, "low") or _from_hist_dict(md, stock, "low")
+    volume = _series_from_ex(md, stock, "volume") or _from_hist_dict(md, stock, "volume")
+    amount = _series_from_ex(md, stock, "amount") or _from_hist_dict(md, stock, "amount")
+    times = _times_from_ex(md, stock)
+    return _align_ohlcv_times(C, bp, open_, high, low, close, volume, amount, times)
+
+
+def _concat_1m_pack(prev, extra, max_n=240):
+    if prev is None:
+        return extra
+    if extra is None:
+        return prev
+    out = []
+    for a, b in zip(prev, extra):
+        merged = list(a) + list(b)
+        if len(merged) > max_n:
+            merged = merged[-max_n:]
+        out.append(merged)
+    return tuple(out)
+
+
+def _ori_ohlcv_1m(C, bp):
+    """get_market_data_ex_ori 走 numpy，避开 pandas DataFrame。"""
+    bp = int(bp)
+    prev_bp = int(getattr(A, "_ori_tail_bp", -9))
+    prev = getattr(A, "_ori_tail_pack", None)
+    if prev is not None and prev_bp >= 0 and bp == prev_bp + 1:
+        md_one = _ori_fetch_md(C, bp, 1)
+        one = _pack_from_ori_md(C, bp, md_one) if md_one is not None else None
+        if one is not None:
+            if prev[6] and one[6] and prev[6][-1] == one[6][-1]:
+                pack = prev
+            else:
+                pack = _concat_1m_pack(prev, one, 240)
+            A._ori_tail_bp = bp
+            A._ori_tail_pack = pack
+            return pack
+    n = max(1, bp + 1)
+    count = min(n, 240)
+    md = _ori_fetch_md(C, bp, count)
+    if md is None:
+        return None
+    pack = _pack_from_ori_md(C, bp, md)
+    if pack is None:
+        return None
+    A._ori_tail_bp = bp
+    A._ori_tail_pack = pack
+    _diag_once(
+        "ori_ok",
+        "n=",
+        len(pack[3]),
+        "end=",
+        _bar_datetime(C).strftime("%Y%m%d%H%M%S"),
+        "t0=",
+        pack[6][0] if pack[6] else "",
+        "t1=",
+        pack[6][-1] if pack[6] else "",
+    )
+    return pack
+
+
+def _timetag_str(C, i):
+    try:
+        tag = C.get_bar_timetag(i)
+        if "timetag_to_datetime" in globals():
+            s = timetag_to_datetime(tag, "%Y%m%d%H%M%S")
+            return str(s)
+        if tag > 10**12:
+            return datetime.datetime.fromtimestamp(tag / 1000.0).strftime("%Y%m%d%H%M%S")
+        return datetime.datetime.fromtimestamp(tag).strftime("%Y%m%d%H%M%S")
+    except Exception:
+        return ""
+
+
+def _chart_ohlcv_1m(C):
+    """主图 1 分钟 OHLCV，切到当前 barpos（含）。"""
+    try:
+        bp = int(getattr(C, "barpos", 0) or 0)
+    except Exception:
+        bp = 0
+    if bp < 0:
+        return None
+    if int(getattr(A, "_chart_bp", -2)) == bp:
+        cached = getattr(A, "_chart_pack", None)
+        if cached is not None:
+            return cached
+    nwant = bp + 1
+    pack = None
+    closes = None
+    if nwant <= 400:
+        closes = _ctx_field(C, ("close", "get_close", "get_close_price"), nwant)
+    if closes:
+        n = min(len(closes), nwant)
+        if n > 0:
+            opens = _ctx_field(C, ("open", "get_open"), nwant)
+            highs = _ctx_field(C, ("high", "get_high"), nwant)
+            lows = _ctx_field(C, ("low", "get_low"), nwant)
+            volumes = _ctx_field(C, ("volume", "vol", "get_volume"), nwant)
+            amounts = _ctx_field(C, ("amount", "money", "turnover", "get_amount"), nwant)
+            if not opens or len(opens) < n:
+                opens = list(closes)
+            if not highs or len(highs) < n:
+                highs = list(closes)
+            if not lows or len(lows) < n:
+                lows = list(closes)
+            if not volumes or len(volumes) < n:
+                volumes = [0.0] * n
+            if not amounts or len(amounts) < n:
+                amounts = [0.0] * n
+            opens = opens[:n]
+            highs = highs[:n]
+            lows = lows[:n]
+            closes = closes[:n]
+            volumes = volumes[:n]
+            amounts = amounts[:n]
+            look = min(n, 300)
+            start = n - look
+            times = []
+            miss = 0
+            for i in range(start, n):
+                ts = _timetag_str(C, i)
+                if not ts:
+                    miss += 1
+                times.append(ts)
+            if miss > look // 2:
+                times = _synth_1m_times(look, _bar_datetime(C))
+                _diag_once("m1_time_synth", "n=", look)
+            if len(times) == look:
+                pack = (
+                    opens[start:],
+                    highs[start:],
+                    lows[start:],
+                    closes[start:],
+                    volumes[start:],
+                    amounts[start:],
+                    times,
+                )
+                A._ohlcv_src = "chart"
+    if pack is None:
+        _diag_ctx_once(C)
+        pack = _ori_ohlcv_1m(C, bp)
+        if pack is not None:
+            A._ohlcv_src = "ori"
+    if pack is None:
+        pack = _history_ohlcv_1m(C, bp)
+        if pack is not None:
+            A._ohlcv_src = "history"
+    A._chart_bp = bp
+    A._chart_pack = pack
+    return pack
+
+
+def _norm_bar_time(x):
+    """行情时间 -> yyyymmddHHMMSS。"""
+    if x is None:
+        return ""
+    try:
+        if hasattr(x, "strftime"):
+            return x.strftime("%Y%m%d%H%M%S")
+    except Exception:
+        pass
+    try:
+        if isinstance(x, (int, float)) or (hasattr(x, "item") and not isinstance(x, str)):
+            iv = int(x)
+            if iv > 10**12:
+                return datetime.datetime.fromtimestamp(iv / 1000.0).strftime("%Y%m%d%H%M%S")
+            s = str(iv)
+            if len(s) >= 14:
+                return s[:14]
+            if len(s) == 12:
+                return s + "00"
+            if len(s) == 8:
+                return s + "000000"
+    except Exception:
+        pass
+    s = str(x).strip()
+    digits = []
+    for ch in s:
+        if ch.isdigit():
+            digits.append(ch)
+        elif digits and ch in "- T:./":
+            continue
+        elif digits:
+            break
+    d = "".join(digits)
+    if len(d) >= 14:
+        return d[:14]
+    if len(d) >= 8:
+        return (d + "000000")[:14]
+    return ""
+
+
+def _times_from_ex(md, stock):
+    if md is None:
+        return None
+    df = None
+    if isinstance(md, dict) and stock in md:
+        df = md[stock]
+    elif isinstance(md, dict):
+        for v in md.values():
+            df = v
+            break
+    if df is None:
+        return None
+    raw = None
+    if isinstance(df, dict):
+        for col in ("stime", "time", "datetime", "date"):
+            if col in df:
+                try:
+                    raw = list(df[col])
+                    break
+                except Exception:
+                    raw = None
+    if (not raw) and hasattr(df, "dtype") and getattr(df.dtype, "names", None):
+        names = df.dtype.names
+        for col in ("stime", "time", "datetime", "date"):
+            if col in names:
+                try:
+                    raw = list(df[col])
+                    break
+                except Exception:
+                    raw = None
+    if (not raw) and hasattr(df, "index"):
+        try:
+            raw = list(df.index)
+        except Exception:
+            raw = None
+    if (not raw) and hasattr(df, "columns"):
+        cols = getattr(df, "columns", [])
+        for col in ("time", "stime", "datetime", "date"):
+            try:
+                if col in cols:
+                    raw = list(df[col])
+                    break
+            except Exception:
+                continue
+    if not raw:
+        return None
+    out = [_norm_bar_time(x) for x in raw]
+    if not any(out):
+        return None
+    return out
+
+
+def _synth_1m_times(n, end_dt):
+    times = []
+    t = end_dt.replace(second=0, microsecond=0)
+    guard = 0
+    while len(times) < n and guard < n * 20 + 50:
+        guard += 1
+        hhmm = t.strftime("%H%M")
+        if ("0930" <= hhmm <= "1130") or ("1300" <= hhmm <= "1500"):
+            times.append(t.strftime("%Y%m%d%H%M%S"))
+        t -= datetime.timedelta(minutes=1)
+    times.reverse()
+    return times
+
+
+def _fetch_md(C, stock, period, fields, end, count, diag_key):
+    """日线等跨周期取数。1m 不要走这里。pandas 损坏后本会话不再重试。"""
+    if getattr(A, "_md_pandas_broken", False):
+        return None, None
     md = None
     source = None
-    open_ = high = low = close = volume = None
-    fields = ["open", "high", "low", "close", "volume"]
-
+    flist = list(fields)
     try:
         md = C.get_market_data_ex(
-            fields=fields,
-            stock_code=[stock],
+            flist,
+            [stock],
             period=period,
             end_time=end,
-            count=count,
+            count=int(count),
             dividend_type="front_ratio",
-            fill_data=True,
             subscribe=False,
         )
         source = "get_market_data_ex"
     except TypeError:
         try:
             md = C.get_market_data_ex(
-                fields,
+                flist,
                 [stock],
                 period=period,
                 start_time="",
                 end_time=end,
-                count=count,
+                count=int(count),
                 dividend_type="front_ratio",
             )
             source = "get_market_data_ex/pos"
         except Exception as e:
-            _diag_once(diag_key + "_ex_fail", e)
+            if _pandas_broken_msg(e):
+                _mark_pandas_broken(e)
+            else:
+                _diag_once(diag_key + "_ex_fail", e)
             md = None
     except Exception as e:
-        _diag_once(diag_key + "_ex_fail", e)
+        if _pandas_broken_msg(e):
+            _mark_pandas_broken(e)
+        else:
+            _diag_once(diag_key + "_ex_fail", e)
         md = None
+    return md, source
 
-    if md is not None:
-        open_ = _series_from_ex(md, stock, "open")
-        high = _series_from_ex(md, stock, "high")
-        low = _series_from_ex(md, stock, "low")
-        close = _series_from_ex(md, stock, "close")
-        volume = _series_from_ex(md, stock, "volume")
 
-    if not close or len(close) < need:
-        try:
-            md2 = C.get_market_data(
-                fields,
-                stock_code=[stock],
-                period=period,
-                end_time=end,
-                count=count,
-                dividend_type="front_ratio",
+def _get_ohlcv_1m(C, stock):
+    """已对齐的 1 分钟 OHLCV + amount + 时间戳。"""
+    end = _bar_datetime(C).strftime("%Y%m%d%H%M%S")
+    pack = _chart_ohlcv_1m(C)
+    if pack is not None:
+        open_, high, low, close, volume, amount, times = pack
+        n = len(close)
+        need = int(globals().get("DOWN_BARS") or 3) + 2
+        if n >= need:
+            _diag_once(
+                "ok",
+                "source=",
+                str(getattr(A, "_ohlcv_src", "chart") or "chart"),
+                "period=1m n=",
+                n,
+                "end=",
+                end,
+                "t0=",
+                times[0] if times else "",
+                "t1=",
+                times[-1] if times else "",
+                "last=",
+                round(float(close[-1]), 4),
+                "stock=",
+                stock,
             )
-            source = "get_market_data"
-            open_ = _series_from_ex(md2, stock, "open")
-            high = _series_from_ex(md2, stock, "high")
-            low = _series_from_ex(md2, stock, "low")
-            close = _series_from_ex(md2, stock, "close")
-            volume = _series_from_ex(md2, stock, "volume")
-        except Exception as e:
-            _diag_once(diag_key + "_gmd_fail", e)
-
-    if not close or len(close) < need:
-        _diag_once(
-            diag_key + "_empty",
-            "period=",
-            period,
-            "end=",
-            end,
-            "n=",
-            0 if not close else len(close),
-        )
+            return pack
+        _diag_once("chart_short", "n=", n, "need=", need)
         return None
+    _diag_once("chart_miss", "end=", end, "stock=", stock)
+    return None
 
-    n = len(close)
-    if not open_ or len(open_) != n:
-        open_ = list(close)
-    if not high or len(high) != n:
-        high = list(close)
-    if not low or len(low) != n:
-        low = list(close)
-    if not volume or len(volume) != n:
-        volume = [0.0] * n
 
-    if np.std(np.asarray(close[-min(20, len(close)) :], dtype=float)) < 1e-8:
-        _diag_once(diag_key + "_flat", "n=", len(close), "source=", source)
+def _today_indices(times, day):
+    out = []
+    for i, ts in enumerate(times or []):
+        if not ts or len(ts) < 12:
+            continue
+        if ts[:8] != day:
+            continue
+        hhmm = ts[8:12]
+        if ("0930" <= hhmm <= "1130") or ("1300" <= hhmm <= "1500"):
+            out.append(i)
+    return out
+
+
+def _get_daily_adv(C, stock, today):
+    """近 ADV_DAYS 个已收盘日的日均成交额。"""
+    cache_day = str(getattr(A, "_adv_cache_day", "") or "")
+    if cache_day == today:
+        return getattr(A, "_adv_cache_val", None)
+    val = None
+    if getattr(A, "is_backtest", False) or getattr(A, "_md_pandas_broken", False):
+        A._adv_cache_day = today
+        A._adv_cache_val = None
         return None
-
-    _diag_once(
-        diag_key + "_ok",
-        "source=",
-        source,
-        "period=",
-        period,
-        "n=",
-        len(close),
-        "end=",
-        end,
-        "last=",
-        round(float(close[-1]), 4),
-    )
-    return open_, high, low, close, volume
-
-
-def _get_ohlcv_15m(C, stock, end=None):
-    need = max(int(MA_SLOW), int(VOL_MA_N), int(VOL_UP_LOOKBACK)) + 10
-    return _get_ohlcv_period(
-        C, stock, getattr(A, "period", "15m"), int(OHLC_COUNT), need, "m15", end=end
-    )
-
-
-def _get_ohlcv_1h(C, stock, end=None):
-    need = int(H_MA_SLOW) + 10
-    return _get_ohlcv_period(
-        C, stock, "1h", int(HOUR_OHLC_COUNT), need, "h1", end=end
-    )
+    end = today
+    count = int(globals().get("DAILY_OHLC_COUNT") or 12)
+    md, _src = _fetch_md(C, stock, "1d", ["amount", "close"], end, count, "d1")
+    amounts = _series_from_ex(md, stock, "amount") if md is not None else None
+    times = _times_from_ex(md, stock) if md is not None else None
+    if amounts:
+        days = int(globals().get("ADV_DAYS") or 5)
+        picked = []
+        n = len(amounts)
+        for i in range(n):
+            d = ""
+            if times and i < len(times) and times[i]:
+                d = times[i][:8]
+            a = float(amounts[i] or 0)
+            if a <= 0:
+                continue
+            if d and d >= today:
+                continue
+            picked.append(a)
+        if picked:
+            use = picked[-days:]
+            if use:
+                val = sum(use) / float(len(use))
+    A._adv_cache_day = today
+    A._adv_cache_val = val
+    return val
 
 
-def _get_ohlcv_index_15m(C, end=None):
-    code = str(globals().get("INDEX_CODE") or "000001.SH")
-    need = int(VOL_MA_N) + 5
-    return _get_ohlcv_period(
-        C, code, "15m", int(INDEX_OHLC_COUNT), need, "idx15", end=end
-    )
+def _prev_close_from_times(closes, times, today):
+    if not closes or not times:
+        return None
+    n = min(len(closes), len(times))
+    for i in range(n - 1, -1, -1):
+        ts = times[i] or ""
+        if len(ts) < 8:
+            continue
+        if ts[:8] >= today:
+            continue
+        px = float(closes[i] or 0)
+        if px > 0:
+            return px
+    return None
+
+
+def _get_prev_close(C, stock, today):
+    cache_day = str(getattr(A, "_preclose_day", "") or "")
+    if cache_day == today and getattr(A, "_preclose_val", None) is not None:
+        return A._preclose_val
+    found = None
+    pack = _chart_ohlcv_1m(C)
+    if pack is not None:
+        _o, _h, _l, closes, _v, _a, times = pack
+        found = _prev_close_from_times(closes, times, today)
+    if found is None and (not getattr(A, "is_backtest", False)) and (not getattr(A, "_md_pandas_broken", False)):
+        end = today
+        md, _src = _fetch_md(C, stock, "1d", ["close"], end, 8, "d1c")
+        closes = _series_from_ex(md, stock, "close") if md is not None else None
+        times = _times_from_ex(md, stock) if md is not None else None
+        if closes:
+            n = len(closes)
+            for i in range(n - 1, -1, -1):
+                d = ""
+                if times and i < len(times) and times[i]:
+                    d = times[i][:8]
+                if d and d >= today:
+                    continue
+                px = float(closes[i] or 0)
+                if px > 0:
+                    found = px
+                    break
+            if found is None and n >= 2 and float(closes[-2] or 0) > 0:
+                found = float(closes[-2])
+    A._preclose_day = today
+    A._preclose_val = found
+    return found
+
+
+def _parse_tick(raw, stock):
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        if stock in raw and isinstance(raw[stock], dict):
+            return raw[stock]
+        if "lastPrice" in raw or "lastClose" in raw or "bid" in raw:
+            return raw
+        keys = list(raw.keys())
+        if len(keys) == 1 and isinstance(raw[keys[0]], dict):
+            return raw[keys[0]]
+    return None
+
+
+def _get_tick(C, stock):
+    fn = getattr(C, "get_full_tick", None)
+    if not callable(fn):
+        fn = globals().get("get_full_tick")
+    if not callable(fn):
+        return None
+    try:
+        raw = fn([stock])
+    except Exception as e:
+        _diag_once("tick_fail", e)
+        return None
+    return _parse_tick(raw, stock)
+
+
+def _tick_num(tick, *names):
+    if not tick:
+        return None
+    for name in names:
+        if name not in tick:
+            continue
+        try:
+            v = float(tick.get(name) or 0)
+        except Exception:
+            continue
+        if v > 0:
+            return v
+    return None
+
+
+def _tick_vwap(tick):
+    amt = _tick_num(tick, "amount")
+    vol = _tick_num(tick, "volume")
+    if amt is None or vol is None or vol <= 0:
+        return None
+    return amt / vol
+
+
+def _tick_spread(tick):
+    bid = _tick_num(tick, "bid", "bidPrice", "bid1", "bidPrice1")
+    ask = _tick_num(tick, "ask", "askPrice", "ask1", "askPrice1")
+    if bid is None or ask is None or ask <= bid:
+        return None
+    mid = (bid + ask) / 2.0
+    if mid <= 0:
+        return None
+    return (ask - bid) / mid
 
 # === qmt_common/mode.py ===
 # 作用: 回测/实盘模式、暖机切换、K 线时间
@@ -1607,7 +2440,7 @@ def _can_use_vol(stock):
 def _dry_t1_sellable(want, now):
     """DRY_RUN 可卖: 默认禁止同日历日卖出当日买入仓; ALLOW_T0 则放行。"""
     want = int(want)
-    if want < 100:
+    if want < _vol_step():
         return 0
     if not _has_position():
         return 0
@@ -1627,7 +2460,7 @@ def _max_sell_vol(now=None):
             _bt_roll_t1(now.strftime("%Y%m%d"))
         want = max(want, _bt_held_vol())
         return max(0, min(want, _bt_available_vol()))
-    if want < 100:
+    if want < _vol_step():
         return 0
     if DRY_RUN:
         return _dry_t1_sellable(want, now or datetime.datetime.now())
@@ -1820,12 +2653,13 @@ def _process_pending(C, now):
 
     filled = globals().get("_ORDER_FILLED") or (56, 8)
     dead = globals().get("_ORDER_DEAD") or (54, 57, 53, 5, 6, 9)
-    done_fill = traded >= target and target >= 100
+    step = _vol_step()
+    done_fill = traded >= target and target >= step
     status_filled = status in filled
     status_dead = status in dead
 
-    if done_fill or (status_filled and traded >= 100):
-        use_vol = traded if traded >= 100 else deal_vol
+    if done_fill or (status_filled and traded >= step):
+        use_vol = traded if traded >= step else deal_vol
         if side == "buy":
             _pending_on_buy_fill(pend, use_vol, px)
         else:
@@ -1834,7 +2668,7 @@ def _process_pending(C, now):
         return False
 
     if status_dead:
-        if traded >= 100:
+        if traded >= _vol_step():
             if side == "buy":
                 _pending_on_buy_fill(pend, traded, px)
             else:
@@ -1918,7 +2752,7 @@ def _buy_budget(cash):
 def _apply_buy_fill(vol, price, opened_at, **extra):
     vol = int(vol)
     price = float(price) if price and price > 0 else 0.0
-    if vol < 100:
+    if vol < _vol_step():
         return
     add = bool(extra.pop("add", False))
     ot = str(opened_at or "").strip()
@@ -1989,7 +2823,7 @@ def _apply_sell_fill(now, reason, last_hint, filled_vol, mark_half=False, lot_id
     if getattr(A, "is_backtest", False):
         want = max(want, _bt_held_vol())
     filled_vol = int(filled_vol)
-    if filled_vol < 100:
+    if filled_vol < _vol_step():
         return
     partial_lots = False
     if bool(globals().get("SCALE_LOTS")) and lot_ids:
@@ -1997,7 +2831,7 @@ def _apply_sell_fill(now, reason, last_hint, filled_vol, mark_half=False, lot_id
         if callable(fn):
             partial_lots = bool(fn(lot_ids))
     if (not partial_lots) and (
-        filled_vol >= max(100, int(want * 0.95)) or filled_vol >= want
+        filled_vol >= max(_vol_step(), int(want * 0.95)) or filled_vol >= want
     ):
         _clear_after_sell(now, reason, last=last_hint)
         if mark_half:
@@ -2020,7 +2854,7 @@ def _apply_sell_fill(now, reason, last_hint, filled_vol, mark_half=False, lot_id
         lots_fn(lot_ids, filled_vol)
     elif A.position:
         A.position["shares"] = remain
-    if remain < 100 or not _has_position():
+    if remain < _vol_step() or not _has_position():
         _clear_after_sell(now, str(reason) + "/partial", last=last_hint)
     else:
         if mark_half:
@@ -2054,7 +2888,7 @@ def _order_buy(C, price, now, budget=None, add=False, **extra_pos):
         _event_log("buy_skip", reason="pending_active")
         return False
     holding_now = _has_position() or (
-        getattr(A, "is_backtest", False) and _bt_held_vol() >= 100
+        getattr(A, "is_backtest", False) and _bt_held_vol() >= _vol_step()
     )
     if holding_now and not add:
         print(_strategy_tag(), "buy skip: already holding")
@@ -2069,14 +2903,14 @@ def _order_buy(C, price, now, budget=None, add=False, **extra_pos):
         cash = _available_cash()
         budget = _buy_budget(cash)
     vol = _lot(price, budget)
-    if vol < 100:
+    if vol < _vol_step():
         print(_strategy_tag(), "buy skip lot", "price=", price, "budget=", budget)
         _event_log("buy_skip", reason="lot", price=price, budget=budget)
         return False
     cash = _available_cash()
     if cash is not None and cash < price * vol:
         vol = _lot(price, cash)
-        if vol < 100:
+        if vol < _vol_step():
             print(_strategy_tag(), "buy skip cash", cash)
             _event_log("buy_skip", reason="cash", cash=cash, price=price)
             return False
@@ -2124,7 +2958,7 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False, lot_ids=N
         print(_strategy_tag(), "sell skip: pending active")
         _event_log("sell_skip", reason="pending_active", sell_reason=reason)
         return False
-    if not _has_position() and not (getattr(A, "is_backtest", False) and _bt_held_vol() >= 100):
+    if not _has_position() and not (getattr(A, "is_backtest", False) and _bt_held_vol() >= _vol_step()):
         return False
     if lot_ids:
         fn = globals().get("_exit_is_partial")
@@ -2140,12 +2974,12 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False, lot_ids=N
     want = int(want_vol) if want_vol is not None else _pos_shares()
     if getattr(A, "is_backtest", False):
         want = max(want, _bt_held_vol()) if want_vol is None else want
-    if want < 100:
+    if want < _vol_step():
         return False
 
     avail = _max_sell_vol(now)
-    vol = int(min(want, avail) // 100) * 100
-    if vol < 100:
+    vol = int(min(want, avail) // _vol_step()) * _vol_step()
+    if vol < _vol_step():
         if getattr(A, "is_backtest", False):
             print(
                 _strategy_tag(),
@@ -2255,11 +3089,13 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False, lot_ids=N
     )
     return True
 
-# === ma15/strategy.py ===
-def _bar_hhmm(dt):
-    if dt is None:
-        return "0000"
-    return dt.strftime("%H%M")
+# === vwapbias/strategy.py ===
+def _t6(x):
+    s = str(x or "").strip().replace(":", "")
+    digits = "".join(ch for ch in s if ch.isdigit())
+    if not digits:
+        return "000000"
+    return digits.zfill(6)[-6:]
 
 
 def _bar_hhmmss(dt):
@@ -2268,567 +3104,145 @@ def _bar_hhmmss(dt):
     return dt.strftime("%H%M%S")
 
 
-def _bar_tag(dt):
-    if dt is None:
-        return ""
-    return dt.strftime("%Y%m%d%H%M%S")
+def _session_phase(t6):
+    t = _t6(t6)
+    start = _t6(globals().get("DECISION_START") or "093000")
+    end = _t6(globals().get("DECISION_END") or "150000")
+    lunch_a = _t6(globals().get("LUNCH_START") or "113000")
+    lunch_b = _t6(globals().get("LUNCH_END") or "130000")
+    warm_am = _t6(globals().get("OPEN_SKIP_AM_END") or "093500")
+    warm_pm_a = _t6(globals().get("OPEN_SKIP_PM_START") or "130000")
+    warm_pm_b = _t6(globals().get("OPEN_SKIP_PM_END") or "130500")
+    no_new = _t6(globals().get("NO_NEW_ENTRY") or "144000")
+    flat = _t6(globals().get("FLAT_START") or "145000")
+    if t < start or t > end:
+        return "closed"
+    if lunch_a <= t < lunch_b:
+        return "lunch"
+    if (start <= t < warm_am) or (warm_pm_a <= t < warm_pm_b):
+        return "warmup"
+    if flat <= t <= end:
+        return "flatten"
+    if no_new <= t < flat:
+        return "sell_only"
+    return "trade"
 
 
-def _stock_allowed():
-    code = str(globals().get("TRADE_CODE") or "").strip()
-    if not code:
-        return True
-    stock = str(getattr(A, "stock", "") or "")
-    return stock.startswith(code)
+def _max_lots():
+    mx = int(globals().get("SCALE_MAX") or 2)
+    if bool(globals().get("ENABLE_L3")):
+        return max(mx, 3)
+    return max(1, min(mx, 2))
 
 
-def _in_entry_window(hhmm):
-    allow = globals().get("ENTRY_HHMM_ALLOW") or ()
-    return str(hhmm) in set([str(x) for x in allow])
+def _lot_budget(weight):
+    cap = _trade_budget_cap()
+    return float(cap) * float(weight)
 
 
-def _entry_fill_banned(hhmm):
-    ban = globals().get("ENTRY_FILL_BAN") or ()
-    return str(hhmm) in set([str(x) for x in ban])
-
-
-def _prev_15m_dt(dt):
-    if dt is None:
-        return None
-    h = int(dt.hour)
-    m = int(dt.minute)
-    if h == 13 and m == 15:
-        return dt.replace(hour=11, minute=30, second=0, microsecond=0)
-    if h == 9 and m == 45:
-        prev = dt - datetime.timedelta(days=1)
-        return prev.replace(hour=15, minute=0, second=0, microsecond=0)
-    return dt - datetime.timedelta(minutes=15)
-
-
-def _drop_live_forming(C, now, bar_dt):
-    if getattr(A, "is_backtest", False):
-        return False
-    try:
-        if hasattr(C, "is_last_bar") and (not C.is_last_bar()):
-            return False
-    except Exception:
-        pass
-    if now is None or bar_dt is None:
-        return True
-    return now < bar_dt
-
-
-def _slice_ohlcv(opens, highs, lows, closes, vols):
-    if closes is None or len(closes) < 2:
-        return None
-    return opens[:-1], highs[:-1], lows[:-1], closes[:-1], vols[:-1]
-
-
-def _h1_ok(closes_h):
-    ma_f = _sma(closes_h, H_MA_FAST)
-    ma_s = _sma(closes_h, H_MA_SLOW)
-    if ma_f is None or ma_s is None:
-        return False, {}
-    i = len(closes_h) - 1
-    if i < 1:
-        return False, {}
-    f0 = _last_valid(ma_f, i)
-    s0 = _last_valid(ma_s, i)
-    f1 = _last_valid(ma_f, i - 1)
-    detail = {"h_ma20": f0, "h_ma60": s0}
-    if None in (f0, s0, f1):
-        return False, detail
-    ok = (f0 > s0) and (f0 >= f1)
-    return ok, detail
-
-
-def _trend_ok(closes):
-    ma_f = _sma(closes, MA_FAST)
-    ma_s = _sma(closes, MA_SLOW)
-    if ma_f is None or ma_s is None:
-        return False, None, None, {}
-    i = len(closes) - 1
-    if i < 1:
-        return False, None, None, {}
-    f0 = _last_valid(ma_f, i)
-    s0 = _last_valid(ma_s, i)
-    s1 = _last_valid(ma_s, i - 1)
-    c0 = float(closes[i])
-    detail = {"ma20": f0, "ma60": s0}
-    if None in (f0, s0, s1):
-        return False, ma_f, ma_s, detail
-    ok = (f0 > s0) and (s0 >= s1) and (c0 > s0)
-    return ok, ma_f, ma_s, detail
-
-
-def _index_dump(opens, closes, vols):
-    if not closes or len(closes) < int(VOL_MA_N):
-        return True, "index_na_skip", {}
-    i = len(closes) - 1
-    o0 = float(opens[i])
-    c0 = float(closes[i])
-    v0 = float(vols[i])
-    vm = _sma(vols, VOL_MA_N)
-    vma = _last_valid(vm, i) if vm is not None else None
-    detail = {"idx_ret": None if o0 <= 0 else (c0 - o0) / o0, "idx_vol": v0, "idx_mavol": vma}
-    if o0 <= 0 or vma is None or vma <= 0:
-        return True, "index_na_skip", detail
-    ret = (c0 - o0) / o0
-    dump = (ret <= float(INDEX_DUMP_RET)) and (v0 >= vma * float(INDEX_DUMP_VOL))
-    if dump:
-        return True, "index_dump_skip", detail
-    return False, "", detail
-
-
-def _vol_ok(closes, vols):
-    i = len(closes) - 1
-    v0 = float(vols[i])
-    vm = _sma(vols, VOL_MA_N)
-    vma = _last_valid(vm, i) if vm is not None else None
-    if vma is None or vma <= 0:
-        return False, {}
-    if v0 >= vma * float(VOL_PULLBACK_RATIO):
-        return False, {"mavol": vma, "vol": v0}
-    return True, {"mavol": vma, "vol": v0}
-
-
-def _eval_buy(opens, highs, lows, closes, vols, hhmm, h1_ok, idx_block, idx_why):
-    reasons = []
-    trend, ma20_arr, _ma60_arr, t_detail = _trend_ok(closes)
-    detail = dict(t_detail)
-    detail["trend_ok"] = trend
-    if idx_block:
-        return False, [idx_why or "index_na_skip"], detail
-    if not h1_ok:
-        return False, ["h1_skip"], detail
-    if not trend:
-        return False, ["trend_skip"], detail
-    if not _in_entry_window(hhmm):
-        return False, ["time_skip"], detail
-    vok, v_detail = _vol_ok(closes, vols)
-    detail.update(v_detail)
-    if not vok:
-        return False, ["vol_skip"], detail
-    i = len(closes) - 1
-    if i < 1:
-        return False, ["short"], detail
-    ma20 = _last_valid(ma20_arr, i)
-    if ma20 is None or ma20 <= 0:
-        return False, ["ma_na"], detail
-    low = float(lows[i])
-    close = float(closes[i])
-    if low > ma20 * (1.0 + float(MA_TOUCH_TOL)):
-        return False, ["touch_skip"], detail
-    if close < ma20 * (1.0 - float(MA_BREAK_TOL)):
-        return False, ["break_skip"], detail
-    hammer = _is_hammer(opens[i], highs[i], lows[i], closes[i])
-    bounce = _is_bounce(opens[i], highs[i], lows[i], closes[i])
-    engulf = _is_engulf(
-        opens[i - 1], closes[i - 1], opens[i], closes[i], vols[i - 1], vols[i]
-    )
-    if hammer:
-        reasons.append("hammer")
-    elif bounce:
-        reasons.append("bounce")
-    if engulf:
-        reasons.append("engulf")
-    if not reasons:
-        return False, ["pattern_skip"], detail
-    return True, reasons, detail
-
-
-def _stall_hit(closes, ma20_arr, hold_bars, hold_max_ret):
-    abort = float(globals().get("STALL_ABORT_RET") or 0)
-    try:
-        mx = float(hold_max_ret) if hold_max_ret is not None else 0.0
-    except Exception:
-        mx = 0.0
-    if abort > 0 and mx >= abort:
-        return False
-    need = int(STALL_BARS)
-    if hold_bars is None or int(hold_bars) < need:
-        return False
-    i = len(closes) - 1
-    if i < need:
-        return False
-    ma_now = _last_valid(ma20_arr, i)
-    ma_old = _last_valid(ma20_arr, i - need)
-    if ma_now is None or ma_old is None or ma_now <= 0:
-        return False
-    band = float(STALL_BAND)
-    for k in range(need):
-        px = float(closes[i - k])
-        ma = _last_valid(ma20_arr, i - k)
-        if ma is None or ma <= 0:
-            return False
-        if abs(px - ma) / ma > band:
-            return False
-    flat = abs(ma_now - ma_old) / ma_now <= float(STALL_MA_FLAT)
-    return flat
-
-
-def _eval_sell(price, cost, close_peak, closes, ma20_arr, hold_bars, hhmm, hold_max_ret, trend_ok):
-    reasons = []
-    ma20 = _last_valid(ma20_arr, -1) if ma20_arr is not None else None
-    stop_after = str(globals().get("STOP_MA_AFTER_HHMM") or "1015")
-    if (
-        ma20 is not None
-        and ma20 > 0
-        and str(hhmm) >= stop_after
-        and price < ma20 * (1.0 - float(STOP_MA_PCT))
-    ):
-        reasons.append("stop_ma")
-        return True, reasons
-    if cost > 0 and price <= cost * (1.0 - float(STOP_LOSS)):
-        reasons.append("stop_loss")
-        return True, reasons
-    try:
-        mx = float(hold_max_ret) if hold_max_ret is not None else 0.0
-    except Exception:
-        mx = 0.0
-    abort_tb = float(globals().get("TREND_BREAK_ABORT_RET") or 0.001)
-    min_red = float(globals().get("TREND_BREAK_MIN_RET") or -0.004)
-    cur_ret = (price - cost) / cost if cost > 0 else 0.0
-    if (
-        (not trend_ok)
-        and cost > 0
-        and cur_ret <= min_red
-        and mx < abort_tb
-        and str(hhmm) >= stop_after
-    ):
-        reasons.append("trend_break")
-        return True, reasons
-    if cost > 0:
-        ret = (price - cost) / cost
-        hard_tp = bool(globals().get("TAKE_PROFIT_HARD"))
-        leave_ok = (ma20 is not None and ma20 > 0 and price >= ma20 * (1.0 + float(TAKE_LEAVE)))
-        if hard_tp and ret >= float(TAKE_PROFIT) and leave_ok:
-            wait_scale = False
-            if bool(globals().get("SCALE_ENABLE")) and trend_ok:
-                max_lots = int(globals().get("SCALE_MAX") or 1)
-                giveup = int(globals().get("SCALE_GIVEUP_BARS") or 0)
-                try:
-                    n_lots = max(1, int(_pos_lots() or 1))
-                except Exception:
-                    n_lots = 1
-                arm = float(globals().get("SCALE_ARM") or TAKE_PROFIT)
-                bars = int(hold_bars or 0)
-                if n_lots < max_lots and mx >= arm and (giveup <= 0 or bars < giveup):
-                    wait_scale = True
-            if not wait_scale:
-                reasons.append("take_profit")
-                return True, reasons
-    if close_peak is not None and cost > 0:
-        pk = float(close_peak)
-        peak_ret = (pk - float(cost)) / float(cost) if pk > 0 else 0.0
-        arm = float(TAKE_PROFIT)
-        if peak_ret >= arm and pk > 0:
-            gb = float(GIVEBACK)
-            tight_after = float(globals().get("GIVEBACK_TIGHT_AFTER") or 0)
-            tight = float(globals().get("GIVEBACK_TIGHT") or 0)
-            if tight_after > 0 and tight > 0 and peak_ret >= tight_after:
-                gb = tight
-            if (pk - price) / pk >= gb:
-                reasons.append("giveback")
-                return True, reasons
-    if _stall_hit(closes, ma20_arr, hold_bars, hold_max_ret):
-        reasons.append("stall")
-        return True, reasons
-    return False, reasons
-
-
-def _clear_hold_meta():
-    A.hold_peak = None
-    A.hold_close_peak = None
-    A.hold_max_ret = 0.0
-    A.hold_bars = 0
-    A._hold_count_bar = ""
-
-
-def _bump_hold_bars(bar_tag):
-    if getattr(A, "_hold_count_bar", "") == bar_tag:
+def _reset_acted_bar(tag):
+    if str(getattr(A, "acted_closed", "") or "") == str(tag):
         return
-    A.hold_bars = int(getattr(A, "hold_bars", 0) or 0) + 1
-    A._hold_count_bar = bar_tag
+    A.acted_closed = str(tag)
+    A.acted = set()
 
 
-def _update_peaks(high_px, close_px, cost):
-    hi = float(high_px)
-    cl = float(close_px)
-    changed = False
-    peak = getattr(A, "hold_peak", None)
-    if peak is None:
-        base = float(cost) if cost and cost > 0 else hi
-        A.hold_peak = max(base, hi)
-        changed = True
-    elif hi > float(peak):
-        A.hold_peak = hi
-        changed = True
-    cp = getattr(A, "hold_close_peak", None)
-    if cp is None:
-        A.hold_close_peak = cl
-        changed = True
-    elif cl > float(cp):
-        A.hold_close_peak = cl
-        changed = True
-    if cost and float(cost) > 0:
-        r_cl = (cl - float(cost)) / float(cost)
-        r_hi = (hi - float(cost)) / float(cost)
-        mx = max(r_cl, r_hi)
-        prev = getattr(A, "hold_max_ret", None)
-        try:
-            prev_f = float(prev) if prev is not None else None
-        except Exception:
-            prev_f = None
-        if prev_f is None or mx > prev_f:
-            A.hold_max_ret = mx
-            changed = True
-    return changed
-
-
-def _scale_ready():
-    if not bool(globals().get("SCALE_ENABLE")):
-        return False
-    holding_now = _has_position() or (
-        getattr(A, "is_backtest", False) and _bt_held_vol() >= 100
-    )
-    if not holding_now:
-        return False
-    if _pos_lots() >= int(globals().get("SCALE_MAX") or 1):
-        return False
-    mx = 0.0
-    if _scale_lots():
-        for lot in _ensure_lots():
-            try:
-                mx = max(mx, float(lot.get("hold_max_ret") or 0))
-            except Exception:
-                pass
-    else:
-        try:
-            mx = float(getattr(A, "hold_max_ret", 0) or 0)
-        except Exception:
-            mx = 0.0
-    arm = float(globals().get("SCALE_ARM") or 0)
-    if arm <= 0:
-        arm = float(TAKE_PROFIT)
-    return mx >= arm
-
-
-def _collect_lot_exits(price, closes, ma20_arr, hhmm, trend_ok):
-    lots = _ensure_lots()
+def _profit_lot_ids(price):
+    ids = []
+    lots = _ensure_lots() if _lots_enabled() else []
     if not lots:
-        return False, [], [], 0
-    exits = []
+        return ids
+    px = float(price)
     for lot in lots:
-        ok, reasons = _eval_sell(
-            price,
-            float(lot.get("price") or 0),
-            lot.get("hold_close_peak"),
-            closes,
-            ma20_arr,
-            lot.get("hold_bars", 0),
-            hhmm,
-            lot.get("hold_max_ret", 0),
-            bool(trend_ok),
-        )
-        if ok:
-            exits.append((lot, reasons))
-    if not exits:
-        return False, [], [], 0
-    if any((item[1] and item[1][0] == "stop_ma") for item in exits):
-        lot_ids = [int(l.get("id") or 0) for l in lots]
-        shares = sum(int(l.get("shares") or 0) for l in lots)
-        return True, ["stop_ma"], lot_ids, shares
-    lot_ids = [int(item[0].get("id") or 0) for item in exits]
-    shares = sum(int(item[0].get("shares") or 0) for item in exits)
-    reasons = []
-    for _lot, rs in exits:
-        for r in rs:
-            if r not in reasons:
-                reasons.append(r)
-    return True, reasons, lot_ids, shares
+        try:
+            cost = float(lot.get("price") or 0)
+            lid = int(lot.get("id") or 0)
+        except Exception:
+            continue
+        if lid and cost > 0 and px >= cost:
+            ids.append(lid)
+    return ids
 
 
-def _pending_ready(pend, day, exec_tag):
-    if not isinstance(pend, dict):
-        return False
-    sig_tag = str(pend.get("signal_tag", "") or "")
-    if sig_tag and exec_tag:
-        return sig_tag < exec_tag
-    sig_day = str(pend.get("signal_day", "") or "")
-    return bool(sig_day) and sig_day < day
+def _tp_lot_ids(price, tp):
+    ids = []
+    tp = float(tp or 0)
+    if tp <= 0:
+        return ids
+    lots = _ensure_lots() if _lots_enabled() else []
+    if not lots:
+        return ids
+    px = float(price)
+    for lot in lots:
+        try:
+            cost = float(lot.get("price") or 0)
+            lid = int(lot.get("id") or 0)
+        except Exception:
+            continue
+        if lid and cost > 0 and (px - cost) / cost >= tp:
+            ids.append(lid)
+    return ids
 
 
-def _reset_peaks_after_scale(px):
-    """加仓后回吐从新高起算，不把第一笔收盘最高带到更低均价上。"""
-    if not bool(globals().get("SCALE_RESET_PEAK", True)):
-        return
-    try:
-        pxf = float(px) if px else 0.0
-    except Exception:
-        pxf = 0.0
-    if pxf <= 0:
-        return
-    A.hold_peak = pxf
-    A.hold_close_peak = pxf
-    cost = _pos_cost_price()
-    try:
-        cost_f = float(cost) if cost else 0.0
-    except Exception:
-        cost_f = 0.0
-    prev = float(getattr(A, "hold_max_ret", 0) or 0)
-    if cost_f > 0:
-        A.hold_max_ret = max(prev, (pxf - cost_f) / cost_f)
-    print(
-        "%s scale peak reset px=%.4f avg=%.4f max_ret=%.2f%%"
-        % (STRATEGY_NAME, pxf, cost_f, float(A.hold_max_ret) * 100.0)
+def _univ_skip_reason(stock, day, px, tick, C):
+    expect = str(globals().get("EXPECT_STOCK") or "").strip().upper()
+    if expect and str(stock).upper() != expect:
+        return "wrong_symbol"
+    for bad in (globals().get("FORBID_STOCKS") or ()):
+        if str(stock).upper() == str(bad).upper():
+            return "forbid_stock"
+    adv_min = float(globals().get("ADV_MIN") or 0)
+    if adv_min > 0:
+        adv = _get_daily_adv(C, stock, day)
+        if adv is None:
+            if not getattr(A, "is_backtest", False):
+                return "adv_unknown"
+        elif adv < adv_min:
+            return "adv"
+    spread_max = float(globals().get("SPREAD_MAX") or 0)
+    if (not getattr(A, "is_backtest", False)) and spread_max > 0:
+        sp = _tick_spread(tick)
+        if sp is not None and sp > spread_max:
+            return "spread"
+    near = float(globals().get("LIMIT_NEAR") or 0)
+    if near > 0 and px and px > 0:
+        pre = _tick_num(tick, "lastClose")
+        if pre is None:
+            pre = _get_prev_close(C, stock, day)
+        if pre and pre > 0:
+            ret = abs(float(px) / float(pre) - 1.0)
+            if ret >= near:
+                return "limit"
+    return None
+
+
+def _try_sell(C, reason, price, now, lot_ids=None):
+    ok = _order_sell(C, reason, price, now, lot_ids=lot_ids)
+    if ok:
+        print(_strategy_tag(), reason, "px=", round(float(price), 4))
+        _event_log("sell_signal", sell_reason=reason, price=price, lot_ids=lot_ids)
+    return ok
+
+
+def _try_buy(C, tag, price, now, weight, add):
+    budget = _lot_budget(weight)
+    ok = _order_buy(C, price, now, budget=budget, add=add)
+    if ok:
+        A.hold_peak_ret = None
+        print(_strategy_tag(), tag, "px=", round(float(price), 4), "budget=", round(budget, 2))
+        _event_log("buy_signal", tag=tag, price=price, budget=budget, add=add)
+    return ok
+
+
+def _mark_after_sell():
+    A.hold_peak_ret = None
+    holding = _has_position() or (
+        getattr(A, "is_backtest", False) and _bt_held_vol() >= _vol_step()
     )
-    _event_log("scale_peak_reset", px=pxf, avg=cost_f, max_ret=A.hold_max_ret)
-
-
-def _after_signal_buy_filled(px, day, add=False):
-    A.pending_entry = None
-    A.pending_exit = None
-    if _lots_enabled():
-        _save_state()
-        return
-    if add:
-        _reset_peaks_after_scale(px)
-        _save_state()
-        return
-    try:
-        A.hold_peak = float(px) if px else None
-    except Exception:
-        A.hold_peak = None
-    A.hold_close_peak = A.hold_peak
-    A.hold_max_ret = 0.0
-    A.hold_bars = 0
-    A._hold_count_bar = ""
-    _save_state()
-
-
-def _after_signal_sell_filled():
-    A.pending_exit = None
-    A.pending_entry = None
-    A.lots = []
-    _clear_hold_meta()
-    acted = getattr(A, "acted", None)
-    if isinstance(acted, set):
-        acted.discard("BUY")
-        acted.discard("SELL")
-    _save_state()
-
-
-def _finish_sell_fill():
-    if _lots_enabled() and getattr(A, "lots", None):
-        A.pending_exit = None
-        acted = getattr(A, "acted", None)
-        if isinstance(acted, set):
-            acted.discard("SELL")
-        _save_state()
-        return
-    _after_signal_sell_filled()
-
-
-def _pending_on_buy_fill(pend, vol, px):
-    extra = pend.get("extra_pos") if isinstance(pend.get("extra_pos"), dict) else {}
-    _apply_buy_fill(vol, px, pend.get("opened_at") or pend.get("submitted_at"), **extra)
-    ot = str(pend.get("opened_at") or pend.get("submitted_at") or "")
-    day = ot[:8] if len(ot) >= 8 else datetime.datetime.now().strftime("%Y%m%d")
-    _after_signal_buy_filled(px, day, add=bool(extra.get("add")))
-
-
-def _pending_on_sell_fill(pend, now, vol, px):
-    intent = str(pend.get("intent", "") or "")
-    last_hint = pend.get("last_hint")
-    if last_hint is None:
-        last_hint = px
-    mark_half = bool(pend.get("mark_half"))
-    lot_ids = pend.get("lot_ids")
-    if not lot_ids:
-        pe = getattr(A, "pending_exit", None)
-        if isinstance(pe, dict):
-            lot_ids = pe.get("lot_ids")
-    _apply_sell_fill(now, intent, last_hint, vol, mark_half=mark_half, lot_ids=lot_ids)
-    _finish_sell_fill()
-
-
-def _on_signal_order_ok(side, px=None, day=None, add=False):
-    live_waiting = (not getattr(A, "is_backtest", False)) and (
-        not DRY_RUN
-    ) and isinstance(getattr(A, "pending", None), dict)
-    if live_waiting:
-        print("%s %s submitted keep signal pending until fill" % (STRATEGY_NAME, side))
-        _event_log("signal_pending_keep_until_fill", side=side)
-        _save_state()
-        return
-    if side == "buy":
-        _after_signal_buy_filled(px, day, add=add)
-        return
-    _finish_sell_fill()
-
-
-_SELL_LABELS = {
-    "stop_ma": "MA20硬止损",
-    "stop_loss": "成本止损",
-    "trend_break": "15m趋势破坏",
-    "stall": "贴线动能衰竭",
-    "take_profit": "浮盈止盈",
-    "giveback": "收盘最高回吐",
-}
-_BUY_LABELS = {
-    "hammer": "长脚十字/假阴护盘",
-    "bounce": "回踩收阳",
-    "engulf": "放量反包",
-    "time_skip": "时段过滤",
-    "vol_skip": "缩量未达标",
-    "h1_skip": "小时趋势未向上",
-    "trend_skip": "15m非多头排列",
-    "index_dump_skip": "大盘放量杀跌",
-    "index_na_skip": "指数数据缺失",
-    "touch_skip": "未触及MA20",
-    "break_skip": "收盘有效跌破MA20",
-    "pattern_skip": "无锤子/回踩阳/反包",
-    "entry_expire": "买入pending隔日作废",
-    "entry_late_skip": "尾盘不买",
-}
-
-
-def _reason_label(code, kind="sell"):
-    code = str(code or "")
-    table = _SELL_LABELS if kind == "sell" else _BUY_LABELS
-    return table.get(code, code)
-
-
-def _format_reasons(codes, kind="sell"):
-    codes = [str(x) for x in (codes or []) if x]
-    if not codes:
-        return "-"
-    return ",".join(["%s(%s)" % (c, _reason_label(c, kind)) for c in codes])
-
-
-def _mark_eval(tag):
-    A._eval_bar_tag = str(tag or "")
-    _save_state()
-
-
-def _should_log_bar(C, now, force):
-    if force:
-        return True
-    if getattr(A, "is_backtest", False):
-        try:
-            return int(getattr(C, "barpos", 0) or 0) % 16 == 0
-        except Exception:
-            return True
-    sec = int(globals().get("LIVE_HEARTBEAT_SEC") or 60)
-    last = getattr(A, "_bar_status_at", None)
-    if last is not None and now is not None and sec > 0:
-        try:
-            if (now - last).total_seconds() < float(sec):
-                return False
-        except Exception:
-            pass
-    return True
+    if holding:
+        A.scale_out_lock = True
+    else:
+        A.scale_out_lock = False
 
 
 def _handle(C):
@@ -2837,18 +3251,13 @@ def _handle(C):
     now = bar_dt if bt else datetime.datetime.now()
     now_s = _bar_hhmmss(now)
     day = now.strftime("%Y%m%d")
-    tag = _bar_tag(bar_dt)
-
-    if not _stock_allowed():
-        _diag_once("stock_skip", "want=", TRADE_CODE, "got=", getattr(A, "stock", ""))
-        return
 
     if not bt:
         if getattr(A, "pending", None):
             if _process_pending(C, now):
                 _live_heartbeat("pending")
                 return
-        if now_s < DECISION_START or now_s > DECISION_END:
+        if now_s < _t6(DECISION_START) or now_s > _t6(DECISION_END):
             _live_heartbeat("outside_session")
             return
         if LIVE_ONLY_LAST_BAR:
@@ -2864,436 +3273,334 @@ def _handle(C):
 
     _reset_day(day)
 
+    if bt:
+        nprog = int(getattr(A, "_bt_prog", 0) or 0) + 1
+        A._bt_prog = nprog
+        if nprog <= 5 or nprog % 120 == 0:
+            print(
+                _strategy_tag(),
+                "progress n=",
+                nprog,
+                "barpos=",
+                getattr(C, "barpos", None),
+                "day=",
+                day,
+                "now=",
+                now.strftime("%Y%m%d%H%M%S"),
+            )
+
     cash = _available_cash()
     if cash is None:
         _live_heartbeat("no_cash_or_login")
         return
 
-    ohlcv = _get_ohlcv_15m(C, A.stock)
-    if ohlcv is None:
-        _live_heartbeat("ohlcv_15m_none")
+    pack = _get_ohlcv_1m(C, A.stock)
+    if pack is None:
+        _live_heartbeat("ohlcv_1m_none")
         return
-    opens, highs, lows, closes, vols = ohlcv
-    exec_open = float(opens[-1])
-    exec_tag = tag
-    drop = _drop_live_forming(C, now, bar_dt)
-    if drop:
-        sliced = _slice_ohlcv(opens, highs, lows, closes, vols)
-        if sliced is None:
-            _live_heartbeat("ohlcv_forming_short")
-            return
-        opens, highs, lows, closes, vols = sliced
-        complete_dt = _prev_15m_dt(bar_dt)
-    else:
-        complete_dt = bar_dt
-    complete_tag = _bar_tag(complete_dt)
-    sig_hhmm = _bar_hhmm(complete_dt)
-    sig_day = complete_dt.strftime("%Y%m%d") if complete_dt else day
-    end_sig = complete_dt.strftime("%Y%m%d%H%M%S") if complete_dt else None
-
-    if len(closes) < max(int(MA_SLOW), 80):
-        _diag_once("m15_short", "n=", len(closes))
-        return
-
-    ohlcv_h = _get_ohlcv_1h(C, A.stock, end=end_sig)
-    if ohlcv_h is None:
-        _live_heartbeat("ohlcv_1h_none")
-        return
-    _oh, _hh, _lh, closes_h, _vh = ohlcv_h
-    if drop and closes_h is not None and len(closes_h) >= 2:
-        closes_h = list(closes_h[:-1])
-    if closes_h is None or len(closes_h) < int(H_MA_SLOW) + 2:
-        _diag_once("h1_short", "n=", 0 if not closes_h else len(closes_h))
-        return
-
-    idx = _get_ohlcv_index_15m(C, end=end_sig)
-    idx_block = False
-    idx_why = ""
-    idx_detail = {}
-    if idx is None:
-        idx_block = True
-        idx_why = "index_na_skip"
-    else:
-        io, _ih, _il, ic, iv = idx
-        if drop and ic is not None and len(ic) >= 2:
-            io, ic, iv = io[:-1], ic[:-1], iv[:-1]
-        idx_block, idx_why, idx_detail = _index_dump(io, ic, iv)
-
-    price = float(closes[-1])
-    high_px = float(highs[-1])
-    if bt:
-        _bt_recover_position(now=now, last=price)
-
-    h1_ok, h_detail = _h1_ok(closes_h)
-    buy_ok, buy_reasons, b_detail = _eval_buy(
-        opens, highs, lows, closes, vols, sig_hhmm, h1_ok, idx_block, idx_why
-    )
-    ma20_arr = _sma(closes, MA_FAST)
-
-    holding = _has_position() or (bt and _bt_held_vol() >= 100)
-    cost = _pos_cost_price()
-    exit_ids = []
-    exit_shares = 0
-    if _scale_lots():
-        if not holding:
-            if getattr(A, "lots", None):
-                A.lots = []
-            if (
-                getattr(A, "hold_peak", None) is not None
-                or getattr(A, "hold_close_peak", None) is not None
-                or int(getattr(A, "hold_bars", 0) or 0)
-                or float(getattr(A, "hold_max_ret", 0) or 0)
-            ):
-                _clear_hold_meta()
-        else:
-            _ensure_lots()
-            changed = False
-            for lot in A.lots:
-                if _bump_lot_bars(lot, complete_tag):
-                    changed = True
-                if _update_lot_peaks(lot, high_px, price):
-                    changed = True
-            _mirror_hold_from_lots()
-            if changed:
-                _save_state()
-    elif not holding:
-        if (
-            getattr(A, "hold_peak", None) is not None
-            or getattr(A, "hold_close_peak", None) is not None
-            or int(getattr(A, "hold_bars", 0) or 0)
-            or float(getattr(A, "hold_max_ret", 0) or 0)
-        ):
-            _clear_hold_meta()
-    else:
-        _bump_hold_bars(complete_tag)
-        if _update_peaks(high_px, price, cost):
-            _save_state()
-
-    sell_ok, sell_reasons = False, []
-    if holding:
-        if _scale_lots():
-            sell_ok, sell_reasons, exit_ids, exit_shares = _collect_lot_exits(
-                price, closes, ma20_arr, sig_hhmm, bool(b_detail.get("trend_ok"))
-            )
-        else:
-            sell_ok, sell_reasons = _eval_sell(
-                price,
-                cost,
-                getattr(A, "hold_close_peak", None),
-                closes,
-                ma20_arr,
-                getattr(A, "hold_bars", 0),
-                sig_hhmm,
-                getattr(A, "hold_max_ret", 0),
-                bool(b_detail.get("trend_ok")),
-            )
-
-    skip_codes = (
-        "time_skip",
-        "vol_skip",
-        "h1_skip",
-        "trend_skip",
-        "index_dump_skip",
-        "index_na_skip",
-        "touch_skip",
-        "break_skip",
-        "pattern_skip",
-        "ma_na",
-        "short",
-    )
-    real_buys = [r for r in buy_reasons if r not in skip_codes]
-    buy_sig = bool(real_buys)
-
-    pe_now = bool(getattr(A, "pending_entry", None))
-    px_now = bool(getattr(A, "pending_exit", None))
-    ret_pct = None
-    if holding and cost > 0:
-        ret_pct = (price - cost) / cost
-    if _should_log_bar(C, now, bool(buy_sig or sell_ok)):
-        if not bt:
-            A._bar_status_at = now
-        print(
-            "%s" % STRATEGY_NAME,
+    opens, highs, lows, closes, volumes, amounts, times = pack
+    today_idx = _today_indices(times, day)
+    if not today_idx:
+        _diag_once(
+            "no_today_1m",
+            "day=",
             day,
-            sig_hhmm,
-            "n15=%d n1h=%d close=%.4f drop=%s "
-            "h1=%s buy=%s buyR=%s sell=%s sellR=%s hold=%s nlot=%s ret=%s pe=%s px=%s"
-            % (
-                len(closes),
-                len(closes_h),
-                price,
-                drop,
-                h1_ok,
-                buy_sig,
-                ",".join(buy_reasons) if buy_reasons else "-",
-                sell_ok,
-                ",".join(sell_reasons) if sell_reasons else "-",
-                holding,
-                _pos_lots() if holding else 0,
-                None if ret_pct is None else ("%.2f%%" % (ret_pct * 100.0)),
-                pe_now,
-                px_now,
-            ),
+            "n=",
+            len(times or []),
+            "t0=",
+            times[0] if times else "",
+            "t1=",
+            times[-1] if times else "",
+            "barpos=",
+            getattr(C, "barpos", None),
         )
-        _bar_log(
-            day=day,
-            hhmm=sig_hhmm,
-            n15=len(closes),
-            n1h=len(closes_h),
-            close=round(price, 6),
-            drop=drop,
-            h1=h1_ok,
-            buy=buy_sig,
-            buyR=",".join(buy_reasons) if buy_reasons else "-",
-            sell=sell_ok,
-            sellR=",".join(sell_reasons) if sell_reasons else "-",
-            hold=holding,
-            nlot=_pos_lots() if holding else 0,
-            ret=None if ret_pct is None else round(ret_pct * 100.0, 4),
-            pe=pe_now,
-            px=px_now,
-            idx=idx_why or "-",
-            ma20=None if b_detail.get("ma20") is None else round(b_detail["ma20"], 4),
-            h_ma20=None if h_detail.get("h_ma20") is None else round(h_detail["h_ma20"], 4),
-        )
-
-    pe_entry = getattr(A, "pending_entry", None)
-    if isinstance(pe_entry, dict):
-        sig_d = str(pe_entry.get("signal_day", "") or "")
-        if sig_d and sig_d < day:
-            A.pending_entry = None
-            _save_state()
-            print("%s pending_entry cancel entry_expire signal_day=%s" % (STRATEGY_NAME, sig_d))
-            _event_log("pending_entry_cancel", reason="entry_expire", signal_day=sig_d)
-            pe_entry = None
-
-    pe_exit = getattr(A, "pending_exit", None)
-    if holding and isinstance(pe_exit, dict) and _pending_ready(pe_exit, day, exec_tag):
-        reason = str(pe_exit.get("reason", "SELL") or "SELL")
-        reasons = pe_exit.get("reasons") or [reason]
-        lot_ids = pe_exit.get("lot_ids")
-        want_vol = pe_exit.get("shares")
-        print(
-            "%s SELL by signal=%s label=%s all=%s lots=%s shares=%s signal_day=%s signal_tag=%s @open=%.4f"
-            % (
-                STRATEGY_NAME,
-                reason,
-                _reason_label(reason, "sell"),
-                _format_reasons(reasons, "sell"),
-                lot_ids or "-",
-                want_vol if want_vol is not None else _pos_shares(),
-                pe_exit.get("signal_day"),
-                pe_exit.get("signal_tag"),
-                exec_open,
-            )
-        )
-        _event_log(
-            "sell_by_signal",
-            signal=reason,
-            signal_tag=pe_exit.get("signal_tag"),
-            open=exec_open,
-            lot_ids=lot_ids,
-            shares=want_vol,
-        )
-        ok = _order_sell(
-            C,
-            reason,
-            exec_open,
-            now,
-            want_vol=None if want_vol is None else int(want_vol),
-            lot_ids=lot_ids,
-        )
-        if ok:
-            _on_signal_order_ok("sell")
-        else:
-            print("%s pending_exit keep after sell fail/skip signal=%s" % (STRATEGY_NAME, reason))
-            _event_log("pending_exit_keep_after_fail", sell_reason=reason)
-        return
-
-    pe_entry = getattr(A, "pending_entry", None)
-    exec_hhmm = _bar_hhmm(bar_dt)
-    pe_is_add = isinstance(pe_entry, dict) and bool(pe_entry.get("add"))
-    if (
-        ((not holding) or pe_is_add)
-        and isinstance(pe_entry, dict)
-        and _pending_ready(pe_entry, day, exec_tag)
-        and _entry_fill_banned(exec_hhmm)
-    ):
-        A.pending_entry = None
-        _save_state()
-        print(
-            "%s pending_entry cancel entry_late_skip hhmm=%s signal_day=%s"
-            % (STRATEGY_NAME, exec_hhmm, pe_entry.get("signal_day"))
-        )
-        _event_log(
-            "pending_entry_cancel",
-            reason="entry_late_skip",
-            hhmm=exec_hhmm,
-            signal_day=pe_entry.get("signal_day"),
-        )
-        return
-
-    pe_entry = getattr(A, "pending_entry", None)
-    pe_is_add = isinstance(pe_entry, dict) and bool(pe_entry.get("add"))
-    if (
-        ((not holding) or pe_is_add)
-        and isinstance(pe_entry, dict)
-        and _pending_ready(pe_entry, day, exec_tag)
-    ):
-        if pe_is_add and not holding:
-            A.pending_entry = None
-            _save_state()
-            print("%s pending_entry cancel add_no_pos" % STRATEGY_NAME)
-            _event_log("pending_entry_cancel", reason="add_no_pos")
-            return
-        reasons = pe_entry.get("reasons") or []
-        primary = reasons[0] if reasons else "entry"
-        kind = "add" if pe_is_add else "buy"
-        print(
-            "%s %s by signal=%s label=%s all=%s signal_day=%s signal_tag=%s @open=%.4f"
-            % (
-                STRATEGY_NAME,
-                "BUY add" if pe_is_add else "BUY",
-                primary,
-                _reason_label(primary, "buy"),
-                _format_reasons(reasons, "buy"),
-                pe_entry.get("signal_day"),
-                pe_entry.get("signal_tag"),
-                exec_open,
-            )
-        )
-        _event_log(
-            "buy_by_signal" if not pe_is_add else "buy_add_by_signal",
-            signal=primary,
-            signal_tag=pe_entry.get("signal_tag"),
-            open=exec_open,
-            add=pe_is_add,
-        )
-        budget = _buy_budget(cash)
-        ok = _order_buy(C, exec_open, now, budget, add=pe_is_add)
-        if ok:
-            _on_signal_order_ok("buy", px=exec_open, day=day, add=pe_is_add)
-        else:
+        nprog = int(getattr(A, "_bt_prog", 0) or 0)
+        if (not bt) or nprog <= 5:
             print(
-                "%s pending_entry keep after %s fail/skip signal=%s"
-                % (STRATEGY_NAME, kind, primary)
+                _strategy_tag(),
+                "no_today_1m",
+                "day=",
+                day,
+                "t0=",
+                times[0] if times else "",
+                "t1=",
+                times[-1] if times else "",
             )
-            _event_log("pending_entry_keep_after_fail", signal=primary, add=pe_is_add)
         return
 
-    if str(getattr(A, "_eval_bar_tag", "") or "") == complete_tag:
-        return
-
-    if holding:
-        if sell_ok:
-            if isinstance(getattr(A, "pending_exit", None), dict):
-                _mark_eval(complete_tag)
-                return
-            reason = sell_reasons[0] if sell_reasons else "SELL"
-            A.pending_exit = {
-                "reason": reason,
-                "signal_day": sig_day,
-                "signal_tag": complete_tag,
-                "close": price,
-                "reasons": list(sell_reasons),
-            }
-            if _scale_lots() and exit_ids:
-                A.pending_exit["lot_ids"] = list(exit_ids)
-                A.pending_exit["shares"] = int(exit_shares)
-            A.pending_entry = None
-            _mark_eval(complete_tag)
-            print(
-                "%s pending_exit set signal=%s label=%s all=%s lots=%s shares=%s tag=%s close=%.4f"
-                % (
-                    STRATEGY_NAME,
-                    reason,
-                    _reason_label(reason, "sell"),
-                    _format_reasons(sell_reasons, "sell"),
-                    exit_ids or "-",
-                    exit_shares or _pos_shares(),
-                    complete_tag,
-                    price,
-                )
-            )
-            _event_log(
-                "pending_exit_set",
-                signal=reason,
-                signal_tag=complete_tag,
-                close=price,
-                lot_ids=exit_ids or None,
-                shares=exit_shares or None,
-            )
-        elif buy_sig and _scale_ready():
-            if isinstance(getattr(A, "pending_entry", None), dict):
-                _mark_eval(complete_tag)
-                return
-            A.pending_entry = {
-                "signal_day": sig_day,
-                "signal_tag": complete_tag,
-                "close": price,
-                "reasons": list(real_buys),
-                "add": True,
-            }
-            A.pending_exit = None
-            _mark_eval(complete_tag)
-            primary = real_buys[0] if real_buys else "entry"
-            print(
-                "%s pending_entry set add signal=%s label=%s all=%s tag=%s close=%.4f lots=%s"
-                % (
-                    STRATEGY_NAME,
-                    primary,
-                    _reason_label(primary, "buy"),
-                    _format_reasons(real_buys, "buy"),
-                    complete_tag,
-                    price,
-                    _pos_lots(),
-                )
-            )
-            _event_log(
-                "pending_entry_set",
-                signal=primary,
-                signal_tag=complete_tag,
-                close=price,
-                add=True,
-            )
-        else:
-            _mark_eval(complete_tag)
-        return
-
-    if buy_sig:
-        if isinstance(getattr(A, "pending_entry", None), dict):
-            _mark_eval(complete_tag)
-            return
-        A.pending_entry = {
-            "signal_day": sig_day,
-            "signal_tag": complete_tag,
-            "close": price,
-            "reasons": list(real_buys),
-        }
-        A.pending_exit = None
-        _mark_eval(complete_tag)
-        primary = real_buys[0] if real_buys else "entry"
-        print(
-            "%s pending_entry set signal=%s label=%s all=%s tag=%s close=%.4f"
-            % (
-                STRATEGY_NAME,
-                primary,
-                _reason_label(primary, "buy"),
-                _format_reasons(real_buys, "buy"),
-                complete_tag,
-                price,
-            )
-        )
-        _event_log(
-            "pending_entry_set",
-            signal=primary,
-            signal_tag=complete_tag,
-            close=price,
-        )
+    if bt:
+        closed_i = today_idx[-1]
     else:
-        _mark_eval(complete_tag)
+        if len(today_idx) < 2:
+            _live_heartbeat("no_closed_1m")
+            return
+        closed_i = today_idx[-2]
 
-# === ma15/runtime.py ===
+    closed_tag = times[closed_i] if closed_i < len(times) else now.strftime("%Y%m%d%H%M%S")
+    if str(getattr(A, "acted_closed", "") or "") == str(closed_tag):
+        if not bt:
+            _live_heartbeat("acted_bar")
+        return
+    _reset_acted_bar(closed_tag)
+
+    sig_s = closed_tag[8:14] if len(closed_tag) >= 14 else now_s
+    session_s = now_s if not bt else sig_s
+    phase = _session_phase(session_s)
+
+    day_closed = [j for j in today_idx if j <= closed_i]
+    vwap, vwap_src = _cum_vwap(amounts, volumes, highs, lows, closes, day_closed)
+    px = float(closes[closed_i])
+    bias = _bias_of(px, vwap)
+
+    tick = None if bt else _get_tick(C, A.stock)
+    live_px = _tick_num(tick, "lastPrice") if tick else None
+    if live_px is None:
+        live_px = px
+    stop_px = live_px if not bt else px
+    tick_vw = _tick_vwap(tick) if tick else None
+
+    holding = _has_position() or (bt and _bt_held_vol() >= _vol_step())
+    if holding and (not _has_position()):
+        _bt_recover_position(now=now, last=px)
+
+    if vwap is None or bias is None:
+        print(_strategy_tag(), "vwap not ready", "src=", vwap_src, "bar=", closed_tag)
+        _event_log("vwap_skip", vwap_src=vwap_src, bar=closed_tag)
+        A.acted_closed = closed_tag
+        _save_state()
+        return
+
+    if not getattr(A, "ready_logged", False):
+        A.ready_logged = True
+        print(
+            _strategy_tag(),
+            "ready",
+            A.stock,
+            "VOL_STEP=",
+            _vol_step(),
+            "ALLOW_T0=",
+            ALLOW_T0,
+            "SCALE_LOTS=",
+            SCALE_LOTS,
+        )
+
+    noisy = (
+        bt
+        or holding
+        or (abs(float(bias)) >= abs(float(BIAS_L1)))
+        or phase in ("flatten", "sell_only", "warmup")
+        or str(getattr(A, "_printed_day", "") or "") != day
+    )
+    if noisy:
+        A._printed_day = day
+        print(
+            _strategy_tag(),
+            "bar",
+            closed_tag,
+            "phase=",
+            phase,
+            "close=",
+            round(px, 4),
+            "vwap=",
+            round(float(vwap), 4),
+            "vwap_src=",
+            vwap_src,
+            "bias=",
+            round(float(bias) * 100.0, 3),
+            "tick_vwap=",
+            None if tick_vw is None else round(float(tick_vw), 4),
+            "lots=",
+            _pos_lots(),
+            "held=",
+            _pos_shares(),
+        )
+    _bar_log(
+        bar=closed_tag,
+        phase=phase,
+        close=px,
+        vwap=vwap,
+        vwap_src=vwap_src,
+        bias=bias,
+        lots=_pos_lots(),
+        held=_pos_shares(),
+    )
+
+    if phase in ("closed", "lunch", "warmup"):
+        A.acted_closed = closed_tag
+        _save_state()
+        if phase == "warmup" and not bt:
+            _live_heartbeat("open_skip")
+        return
+
+    did = False
+    if holding:
+        cost = _pos_cost_price()
+        if phase == "flatten":
+            did = _try_sell(C, "eod_flatten", stop_px, now)
+            if did:
+                _mark_after_sell()
+        elif cost > 0 and (stop_px - cost) / cost <= -float(STOP_LOSS):
+            did = _try_sell(C, "stop_loss", stop_px, now)
+            if did:
+                A.risk_skip_day = day
+                _mark_after_sell()
+                _save_state()
+        elif phase in ("trade", "sell_only"):
+            ret_now = (float(stop_px) - cost) / cost if cost > 0 else 0.0
+            peak = getattr(A, "hold_peak_ret", None)
+            try:
+                peak = float(peak) if peak is not None else None
+            except Exception:
+                peak = None
+            if peak is None or ret_now > peak:
+                A.hold_peak_ret = ret_now
+                peak = ret_now
+            arm = float(globals().get("TRAIL_ARM") or 0)
+            give = float(globals().get("TRAIL_GIVE") or 0)
+            if (not did) and arm > 0 and give > 0 and peak >= arm and ret_now <= (peak - give):
+                did = _try_sell(C, "trail_stop", stop_px, now)
+                if did:
+                    _mark_after_sell()
+            tp = float(globals().get("TAKE_PROFIT") or 0)
+            if (not did) and tp > 0:
+                if _lots_enabled():
+                    lids = _tp_lot_ids(px, tp)
+                    if lids:
+                        did = _try_sell(C, "take_profit", px, now, lot_ids=lids)
+                        if did:
+                            _mark_after_sell()
+                elif cost > 0 and (px - cost) / cost >= tp:
+                    did = _try_sell(C, "take_profit", px, now)
+                    if did:
+                        _mark_after_sell()
+            fade_ok = bias >= float(BIAS_FADE) and len(day_closed) >= 2
+            if fade_ok and bias < float(BIAS_FADE) + 0.004:
+                fade_ok = _fade_vol_ok(
+                    volumes, day_closed[-1], day_closed[-2], float(VOL_GAP)
+                )
+            if (not did) and fade_ok:
+                did = _try_sell(C, "fade_sell", px, now)
+                if did:
+                    _mark_after_sell()
+            if (not did) and bias >= float(REVERSION_BIAS):
+                if _lots_enabled():
+                    lids = _profit_lot_ids(px)
+                    if lids:
+                        did = _try_sell(C, "vwap_reversion", px, now, lot_ids=lids)
+                        if did:
+                            _mark_after_sell()
+                else:
+                    if cost <= 0 or px >= cost:
+                        did = _try_sell(C, "vwap_reversion", px, now)
+                        if did:
+                            _mark_after_sell()
+
+    holding = _has_position() or (bt and _bt_held_vol() >= _vol_step())
+    if not holding:
+        A.scale_out_lock = False
+        A.hold_peak_ret = None
+    can_buy = phase == "trade"
+    if can_buy and str(getattr(A, "risk_skip_day", "") or "") == day:
+        can_buy = False
+        _diag_once("risk_skip_" + day, day)
+        _event_log("buy_skip", reason="risk_skip", day=day)
+    if can_buy and bool(getattr(A, "scale_out_lock", False)) and holding:
+        can_buy = False
+        _diag_once("scale_out_" + day, day)
+        _event_log("buy_skip", reason="scale_out_lock", day=day)
+    if can_buy and "SELL" in getattr(A, "acted", set()):
+        can_buy = False
+    if can_buy and getattr(A, "pending", None):
+        can_buy = False
+
+    if can_buy:
+        live_check_px = live_px
+        why = _univ_skip_reason(A.stock, day, live_check_px, tick, C)
+        if why:
+            _diag_once("univ_" + str(why) + "_" + day, why)
+            _event_log("univ_skip", reason=why, price=live_check_px)
+        else:
+            nlot = _pos_lots() if holding else 0
+            mx = _max_lots()
+            if nlot >= mx:
+                _event_log("buy_skip", reason="lot_skip", n=nlot, max_lots=mx)
+            else:
+                bias_l1 = float(BIAS_L1)
+                bias_l2 = float(BIAS_L2)
+                bias_l3 = float(BIAS_L3)
+                impulse = _impulse_ok(
+                    opens,
+                    closes,
+                    day_closed,
+                    int(DOWN_BARS),
+                    float(LAST_DROP),
+                    float(IMPULSE_SUM),
+                )
+                prev_c = None
+                if len(day_closed) >= 2:
+                    prev_c = closes[day_closed[-2]]
+                reversal = _reversal_ok(
+                    opens[closed_i],
+                    highs[closed_i],
+                    lows[closed_i],
+                    closes[closed_i],
+                    float(SHADOW_RATIO),
+                    prev_c,
+                )
+                deep_open = nlot == 0 and bias <= float(BIAS_L2)
+                if (not impulse) or ((not reversal) and (not deep_open)):
+                    _diag_once(
+                        "skip_sig_" + day,
+                        "impulse=",
+                        impulse,
+                        "reversal=",
+                        reversal,
+                        "bias=",
+                        round(float(bias) * 100.0, 3),
+                    )
+                    if bias <= float(BIAS_L1):
+                        _diag_once(
+                            "skip_l1_" + day,
+                            "impulse=",
+                            impulse,
+                            "reversal=",
+                            reversal,
+                            "deep=",
+                            deep_open,
+                            "bias=",
+                            round(float(bias) * 100.0, 3),
+                        )
+                else:
+                    want_l3 = (
+                        bool(ENABLE_L3)
+                        and nlot >= 2
+                        and bias <= bias_l3
+                    )
+                    want_l2 = nlot >= 1 and bias <= bias_l2
+                    if want_l2:
+                        c0 = _pos_cost_price()
+                        if c0 > 0 and px < c0:
+                            want_l2 = False
+                            _diag_once("l2_uw_" + day, round(float(px), 4), round(float(c0), 4))
+                            _event_log(
+                                "buy_skip",
+                                reason="l2_underwater",
+                                price=px,
+                                cost=c0,
+                                day=day,
+                            )
+                    want_l1 = nlot == 0 and bias <= bias_l1
+                    if want_l3:
+                        did = _try_buy(C, "buy_l3", px, now, float(LOT_W3), True)
+                    elif want_l2:
+                        did = _try_buy(C, "buy_l2", px, now, float(LOT_W2), True)
+                    elif want_l1:
+                        did = _try_buy(C, "buy_l1", px, now, float(LOT_W1), False)
+
+    A.acted_closed = closed_tag
+    _save_state()
+
+# === vwapbias/runtime.py ===
 def _as_bool(val):
     if isinstance(val, bool):
         return val
@@ -3302,11 +3609,11 @@ def _as_bool(val):
 
 
 def _apply_panel():
-    """策略交易注入 bind → 写回 config 全局。须由 init() 直接调用。"""
+    """策略交易注入 bind -> 写回 config 全局。须由 init() 直接调用。"""
     g = globals()
     names = dict(g)
     try:
-        fr = __import__("sys")._getframe(1)
+        fr = sys._getframe(1)
         for _ in range(3):
             if fr is None:
                 break
@@ -3355,9 +3662,63 @@ def init(C):
             pass
 
 
+def _reset_runtime_fields():
+    A.position = None
+    A.acted_day = ""
+    A.acted = set()
+    A.pending = None
+    A.lots = []
+    A.acted_closed = ""
+    A.risk_skip_day = ""
+    A.bt_held = 0
+    A.bt_locked = 0
+    A.bt_lock_day = ""
+    A.bt_opened_at = ""
+    A.ready_logged = False
+    A._adv_cache_day = ""
+    A._adv_cache_val = None
+    A._preclose_day = ""
+    A._preclose_val = None
+    A._md_pandas_broken = False
+    A._chart_bp = -2
+    A._chart_pack = None
+    A._ori_tail_bp = -9
+    A._ori_tail_pack = None
+    A._bt_prog = 0
+
+
+def _ensure_runtime_fields():
+    if not hasattr(A, "acted") or A.acted is None:
+        A.acted = set()
+    if not hasattr(A, "pending"):
+        A.pending = None
+    if not hasattr(A, "lots") or A.lots is None:
+        A.lots = []
+    if not hasattr(A, "acted_closed"):
+        A.acted_closed = ""
+    if not hasattr(A, "risk_skip_day"):
+        A.risk_skip_day = ""
+    if not hasattr(A, "bt_held"):
+        A.bt_held = _pos_shares()
+    if not hasattr(A, "ready_logged"):
+        A.ready_logged = False
+    if not hasattr(A, "_md_pandas_broken"):
+        A._md_pandas_broken = False
+    if not hasattr(A, "_chart_bp"):
+        A._chart_bp = -2
+    if not hasattr(A, "_chart_pack"):
+        A._chart_pack = None
+    if not hasattr(A, "_ori_tail_bp"):
+        A._ori_tail_bp = -9
+    if not hasattr(A, "_ori_tail_pack"):
+        A._ori_tail_pack = None
+    if not hasattr(A, "_bt_prog"):
+        A._bt_prog = 0
+
+
 def _init_impl(C):
     A.stock = C.stockcode + "." + C.market
-    A.period = _resolve_period(C, default="15m")
+    A.period = _resolve_period(C, default="1m")
     if "account" in globals() and account:
         A.acct = str(account)
     elif hasattr(C, "accountid") and C.accountid:
@@ -3383,16 +3744,14 @@ def _init_impl(C):
     A._diag = set()
 
     do_dl = DOWNLOAD_HIST_BACKTEST if A.is_backtest else DOWNLOAD_HIST_LIVE
-    idx = str(globals().get("INDEX_CODE") or "000001.SH")
     if do_dl:
         try:
-            _download_hist(A.stock, A.period)
-            _download_hist(A.stock, "1h")
-            _download_hist(idx, "15m")
+            _download_hist(A.stock, "1m")
+            _download_hist(A.stock, "1d")
         except Exception as e:
             print("%s download_hist abort-safe" % STRATEGY_NAME, e)
     else:
-        print("%s skip download_history (live)" % STRATEGY_NAME, A.period, "+1h +index")
+        print("%s skip download_history (live)" % STRATEGY_NAME, "1m+1d")
 
     if A.is_backtest:
         barpos = 0
@@ -3402,54 +3761,11 @@ def _init_impl(C):
             barpos = 0
         fresh = (not getattr(A, "_bt_alive", False)) or (barpos <= 0)
         if fresh:
-            A.position = None
-            A.acted_day = ""
-            A.acted = set()
-            A.pending = None
-            A.pending_entry = None
-            A.pending_exit = None
-            A.hold_peak = None
-            A.hold_close_peak = None
-            A.hold_max_ret = 0.0
-            A.hold_bars = 0
-            A._hold_count_bar = ""
-            A._eval_bar_tag = ""
-            A.stall_cool_day = ""
-            A.lots = []
-            A.bt_held = 0
-            A.bt_locked = 0
-            A.bt_lock_day = ""
-            A.bt_opened_at = ""
+            _reset_runtime_fields()
             A._bt_alive = True
-            A.ready_logged = False
             print("%s backtest session start barpos=" % STRATEGY_NAME, barpos)
         else:
-            if not hasattr(A, "bt_held"):
-                A.bt_held = _pos_shares()
-            if not hasattr(A, "acted") or A.acted is None:
-                A.acted = set()
-            if not hasattr(A, "pending"):
-                A.pending = None
-            if not hasattr(A, "pending_entry"):
-                A.pending_entry = None
-            if not hasattr(A, "pending_exit"):
-                A.pending_exit = None
-            if not hasattr(A, "hold_peak"):
-                A.hold_peak = None
-            if not hasattr(A, "hold_close_peak"):
-                A.hold_close_peak = None
-            if not hasattr(A, "hold_max_ret"):
-                A.hold_max_ret = 0.0
-            if not hasattr(A, "hold_bars"):
-                A.hold_bars = 0
-            if not hasattr(A, "_hold_count_bar"):
-                A._hold_count_bar = ""
-            if not hasattr(A, "_eval_bar_tag"):
-                A._eval_bar_tag = ""
-            if not hasattr(A, "stall_cool_day"):
-                A.stall_cool_day = ""
-            if not hasattr(A, "lots") or A.lots is None:
-                A.lots = []
+            _ensure_runtime_fields()
             _bt_recover_position()
             print(
                 "%s backtest re-init preserve barpos=" % STRATEGY_NAME,
@@ -3461,34 +3777,16 @@ def _init_impl(C):
             )
     else:
         _load_state()
+        _ensure_runtime_fields()
         A.ready_logged = False
-        if not hasattr(A, "pending"):
-            A.pending = None
-        if not hasattr(A, "pending_entry"):
-            A.pending_entry = None
-        if not hasattr(A, "pending_exit"):
-            A.pending_exit = None
-        if not hasattr(A, "hold_peak"):
-            A.hold_peak = None
-        if not hasattr(A, "hold_close_peak"):
-            A.hold_close_peak = None
-        if not hasattr(A, "hold_max_ret"):
-            A.hold_max_ret = 0.0
-        if not hasattr(A, "hold_bars"):
-            A.hold_bars = 0
-        if not hasattr(A, "_hold_count_bar"):
-            A._hold_count_bar = ""
-        if not hasattr(A, "_eval_bar_tag"):
-            A._eval_bar_tag = ""
-        if not hasattr(A, "stall_cool_day"):
-            A.stall_cool_day = ""
-        if not hasattr(A, "lots") or A.lots is None:
-            A.lots = []
 
     try:
         C.set_universe([A.stock])
     except Exception as e:
         print("%s set_universe fail" % STRATEGY_NAME, e)
+
+    if str(A.period) != "1m":
+        print(_strategy_tag(), "warn chart period=", A.period, "signals still use 1m")
 
     print(
         "%s %s init" % (STRATEGY_NAME, STRATEGY_VER),
@@ -3501,28 +3799,36 @@ def _init_impl(C):
         A.is_backtest,
         "DRY_RUN=",
         DRY_RUN,
-        "ALLOW_T0=",
-        ALLOW_T0,
         "budget=",
         _trade_budget_cap(),
-        "dMA=",
-        "%d/%d" % (MA_FAST, MA_SLOW),
-        "hMA=",
-        "%d/%d" % (H_MA_FAST, H_MA_SLOW),
-        "stop_ma=",
-        STOP_MA_PCT,
-        "hard_tp=",
-        TAKE_PROFIT_HARD,
-        "take=",
-        TAKE_PROFIT,
-        "giveback=",
-        GIVEBACK,
-        "scale=",
-        SCALE_ENABLE,
-        "scale_lots=",
+        "VOL_STEP=",
+        VOL_STEP,
+        "ALLOW_T0=",
+        ALLOW_T0,
+        "SCALE_LOTS=",
         SCALE_LOTS,
-        "scale_reset_peak=",
-        SCALE_RESET_PEAK,
+        "BIAS_L1=",
+        BIAS_L1,
+        "BIAS_L2=",
+        BIAS_L2,
+        "BIAS_FADE=",
+        BIAS_FADE,
+        "TAKE_PROFIT=",
+        TAKE_PROFIT,
+        "TRAIL_ARM=",
+        TRAIL_ARM,
+        "TRAIL_GIVE=",
+        TRAIL_GIVE,
+        "LAST_DROP=",
+        LAST_DROP,
+        "IMPULSE_SUM=",
+        IMPULSE_SUM,
+        "DOWN_BARS=",
+        DOWN_BARS,
+        "STOP=",
+        STOP_LOSS,
+        "expect=",
+        EXPECT_STOCK,
     )
     _event_log(
         "init",
@@ -3531,10 +3837,18 @@ def _init_impl(C):
         period=A.period,
         backtest=A.is_backtest,
         dry_run=DRY_RUN,
-        allow_t0=ALLOW_T0,
-        scale=SCALE_ENABLE,
-        scale_lots=SCALE_LOTS,
         budget=_trade_budget_cap(),
+        vol_step=VOL_STEP,
+        allow_t0=ALLOW_T0,
+        scale_lots=SCALE_LOTS,
+        bias_l1=BIAS_L1,
+        bias_l2=BIAS_L2,
+        bias_fade=BIAS_FADE,
+        take_profit=TAKE_PROFIT,
+        trail_arm=TRAIL_ARM,
+        trail_give=TRAIL_GIVE,
+        stop_loss=STOP_LOSS,
+        expect=EXPECT_STOCK,
         log_dir=str(globals().get("LOG_DIR") or ""),
     )
 

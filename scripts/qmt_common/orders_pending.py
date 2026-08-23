@@ -184,12 +184,13 @@ def _process_pending(C, now):
 
     filled = globals().get("_ORDER_FILLED") or (56, 8)
     dead = globals().get("_ORDER_DEAD") or (54, 57, 53, 5, 6, 9)
-    done_fill = traded >= target and target >= 100
+    step = _vol_step()
+    done_fill = traded >= target and target >= step
     status_filled = status in filled
     status_dead = status in dead
 
-    if done_fill or (status_filled and traded >= 100):
-        use_vol = traded if traded >= 100 else deal_vol
+    if done_fill or (status_filled and traded >= step):
+        use_vol = traded if traded >= step else deal_vol
         if side == "buy":
             _pending_on_buy_fill(pend, use_vol, px)
         else:
@@ -198,7 +199,7 @@ def _process_pending(C, now):
         return False
 
     if status_dead:
-        if traded >= 100:
+        if traded >= _vol_step():
             if side == "buy":
                 _pending_on_buy_fill(pend, traded, px)
             else:

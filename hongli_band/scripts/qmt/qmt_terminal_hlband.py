@@ -213,8 +213,9 @@ _VALID_PERIODS = (
 
 # === qmt_common/ctx.py ===
 # 作用: 全局运行时对象与手数工具
-# 主要符号: A, _S, _lot
-# 前置: 策略 config（可选 STRATEGY_NAME）
+# 主要符号: A, _S, _vol_step, _lot
+# 前置: 策略 config（可选 STRATEGY_NAME, VOL_STEP）
+# VOL_STEP: 下单数量步长。股票/ETF 默认 100 股；沪市转债设 10（10 张=1000 元面值）
 class _S(object):
     pass
 
@@ -222,10 +223,21 @@ class _S(object):
 A = _S()
 
 
+def _vol_step():
+    try:
+        s = int(globals().get("VOL_STEP") or 100)
+    except Exception:
+        s = 100
+    if s <= 0:
+        s = 100
+    return s
+
+
 def _lot(price, budget):
+    step = _vol_step()
     if price is None or price <= 0 or budget <= 0:
         return 0
-    return int(budget // (price * 100)) * 100
+    return int(budget // (price * step)) * step
 
 
 def _strategy_tag():
@@ -676,7 +688,7 @@ def _load_state():
         )
         return
     pos = raw.get("position")
-    if isinstance(pos, dict) and int(pos.get("shares", 0) or 0) >= 100:
+    if isinstance(pos, dict) and int(pos.get("shares", 0) or 0) >= _vol_step():
         A.position = dict(pos)
         A.position["shares"] = int(pos["shares"])
         A.position["price"] = float(pos.get("price", 0) or 0)
@@ -686,7 +698,7 @@ def _load_state():
     cleaned = []
     if isinstance(lots, list):
         for lot in lots:
-            if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) >= 100:
+            if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) >= _vol_step():
                 cleaned.append(dict(lot))
     A.lots = cleaned
     A.acted_day = str(raw.get("acted_day", "") or "")
@@ -800,7 +812,7 @@ def _bt_held_set(vol):
     if not getattr(A, "is_backtest", False):
         return
     A.bt_held = max(0, int(vol))
-    if A.bt_held < 100:
+    if A.bt_held < _vol_step():
         A.bt_opened_at = ""
         A.bt_locked = 0
     else:
@@ -821,7 +833,7 @@ def _reset_day(day):
 
 def _has_position():
     pos = getattr(A, "position", None)
-    return isinstance(pos, dict) and int(pos.get("shares", 0) or 0) >= 100
+    return isinstance(pos, dict) and int(pos.get("shares", 0) or 0) >= _vol_step()
 
 
 def _pos_shares():
@@ -891,7 +903,7 @@ def _ensure_lots():
     cleaned = []
     if isinstance(lots, list):
         for lot in lots:
-            if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) >= 100:
+            if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) >= _vol_step():
                 cleaned.append(lot)
     if cleaned:
         A.lots = cleaned
@@ -938,7 +950,7 @@ def _new_lot(shares, price, opened_at=""):
 def _sync_position_from_lots():
     lots = []
     for lot in getattr(A, "lots", None) or []:
-        if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) >= 100:
+        if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) >= _vol_step():
             lots.append(lot)
     A.lots = lots
     if not lots:
@@ -964,7 +976,7 @@ def _sync_position_from_lots():
     }
     if getattr(A, "is_backtest", False):
         held = _bt_held_vol()
-        if held < 100 and total >= 100:
+        if held < _vol_step() and total >= _vol_step():
             print(_strategy_tag(), "restore bt_held from lots", total)
             A.bt_held = total
         elif held != total:
@@ -1061,7 +1073,7 @@ def _lots_want_vol(lot_ids):
                 total += int(lot.get("shares") or 0)
         except Exception:
             pass
-    if total < 100:
+    if total < _vol_step():
         return None
     return int(total)
 
@@ -1105,7 +1117,7 @@ def _lots_on_buy_fill(px, add=False, vol=None, opened_at=""):
         _sync_position_from_lots()
         _mirror_hold_from_lots()
         return
-    if vol < 100:
+    if vol < _vol_step():
         if add and not (getattr(A, "lots", None) or []):
             A.lots = [_lot_from_agg()]
         _sync_position_from_lots()
@@ -1140,7 +1152,7 @@ def _lots_on_sell_fill(lot_ids, filled_vol):
         if idset is not None and lid not in idset:
             new_lots.append(lot)
             continue
-        if remain_fill < 100:
+        if remain_fill < _vol_step():
             new_lots.append(lot)
             continue
         sh = int(lot.get("shares") or 0)
@@ -1179,7 +1191,7 @@ def _bt_recover_position(now=None, last=None):
     if not getattr(A, "is_backtest", False):
         return False
     held = _bt_held_vol()
-    if held < 100:
+    if held < _vol_step():
         return False
     if _has_position():
         return False
@@ -1808,7 +1820,7 @@ def _can_use_vol(stock):
 def _dry_t1_sellable(want, now):
     """DRY_RUN 可卖: 默认禁止同日历日卖出当日买入仓; ALLOW_T0 则放行。"""
     want = int(want)
-    if want < 100:
+    if want < _vol_step():
         return 0
     if not _has_position():
         return 0
@@ -1828,7 +1840,7 @@ def _max_sell_vol(now=None):
             _bt_roll_t1(now.strftime("%Y%m%d"))
         want = max(want, _bt_held_vol())
         return max(0, min(want, _bt_available_vol()))
-    if want < 100:
+    if want < _vol_step():
         return 0
     if DRY_RUN:
         return _dry_t1_sellable(want, now or datetime.datetime.now())
@@ -2021,12 +2033,13 @@ def _process_pending(C, now):
 
     filled = globals().get("_ORDER_FILLED") or (56, 8)
     dead = globals().get("_ORDER_DEAD") or (54, 57, 53, 5, 6, 9)
-    done_fill = traded >= target and target >= 100
+    step = _vol_step()
+    done_fill = traded >= target and target >= step
     status_filled = status in filled
     status_dead = status in dead
 
-    if done_fill or (status_filled and traded >= 100):
-        use_vol = traded if traded >= 100 else deal_vol
+    if done_fill or (status_filled and traded >= step):
+        use_vol = traded if traded >= step else deal_vol
         if side == "buy":
             _pending_on_buy_fill(pend, use_vol, px)
         else:
@@ -2035,7 +2048,7 @@ def _process_pending(C, now):
         return False
 
     if status_dead:
-        if traded >= 100:
+        if traded >= _vol_step():
             if side == "buy":
                 _pending_on_buy_fill(pend, traded, px)
             else:
@@ -2119,7 +2132,7 @@ def _buy_budget(cash):
 def _apply_buy_fill(vol, price, opened_at, **extra):
     vol = int(vol)
     price = float(price) if price and price > 0 else 0.0
-    if vol < 100:
+    if vol < _vol_step():
         return
     add = bool(extra.pop("add", False))
     ot = str(opened_at or "").strip()
@@ -2190,7 +2203,7 @@ def _apply_sell_fill(now, reason, last_hint, filled_vol, mark_half=False, lot_id
     if getattr(A, "is_backtest", False):
         want = max(want, _bt_held_vol())
     filled_vol = int(filled_vol)
-    if filled_vol < 100:
+    if filled_vol < _vol_step():
         return
     partial_lots = False
     if bool(globals().get("SCALE_LOTS")) and lot_ids:
@@ -2198,7 +2211,7 @@ def _apply_sell_fill(now, reason, last_hint, filled_vol, mark_half=False, lot_id
         if callable(fn):
             partial_lots = bool(fn(lot_ids))
     if (not partial_lots) and (
-        filled_vol >= max(100, int(want * 0.95)) or filled_vol >= want
+        filled_vol >= max(_vol_step(), int(want * 0.95)) or filled_vol >= want
     ):
         _clear_after_sell(now, reason, last=last_hint)
         if mark_half:
@@ -2221,7 +2234,7 @@ def _apply_sell_fill(now, reason, last_hint, filled_vol, mark_half=False, lot_id
         lots_fn(lot_ids, filled_vol)
     elif A.position:
         A.position["shares"] = remain
-    if remain < 100 or not _has_position():
+    if remain < _vol_step() or not _has_position():
         _clear_after_sell(now, str(reason) + "/partial", last=last_hint)
     else:
         if mark_half:
@@ -2255,7 +2268,7 @@ def _order_buy(C, price, now, budget=None, add=False, **extra_pos):
         _event_log("buy_skip", reason="pending_active")
         return False
     holding_now = _has_position() or (
-        getattr(A, "is_backtest", False) and _bt_held_vol() >= 100
+        getattr(A, "is_backtest", False) and _bt_held_vol() >= _vol_step()
     )
     if holding_now and not add:
         print(_strategy_tag(), "buy skip: already holding")
@@ -2270,14 +2283,14 @@ def _order_buy(C, price, now, budget=None, add=False, **extra_pos):
         cash = _available_cash()
         budget = _buy_budget(cash)
     vol = _lot(price, budget)
-    if vol < 100:
+    if vol < _vol_step():
         print(_strategy_tag(), "buy skip lot", "price=", price, "budget=", budget)
         _event_log("buy_skip", reason="lot", price=price, budget=budget)
         return False
     cash = _available_cash()
     if cash is not None and cash < price * vol:
         vol = _lot(price, cash)
-        if vol < 100:
+        if vol < _vol_step():
             print(_strategy_tag(), "buy skip cash", cash)
             _event_log("buy_skip", reason="cash", cash=cash, price=price)
             return False
@@ -2325,7 +2338,7 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False, lot_ids=N
         print(_strategy_tag(), "sell skip: pending active")
         _event_log("sell_skip", reason="pending_active", sell_reason=reason)
         return False
-    if not _has_position() and not (getattr(A, "is_backtest", False) and _bt_held_vol() >= 100):
+    if not _has_position() and not (getattr(A, "is_backtest", False) and _bt_held_vol() >= _vol_step()):
         return False
     if lot_ids:
         fn = globals().get("_exit_is_partial")
@@ -2341,12 +2354,12 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False, lot_ids=N
     want = int(want_vol) if want_vol is not None else _pos_shares()
     if getattr(A, "is_backtest", False):
         want = max(want, _bt_held_vol()) if want_vol is None else want
-    if want < 100:
+    if want < _vol_step():
         return False
 
     avail = _max_sell_vol(now)
-    vol = int(min(want, avail) // 100) * 100
-    if vol < 100:
+    vol = int(min(want, avail) // _vol_step()) * _vol_step()
+    if vol < _vol_step():
         if getattr(A, "is_backtest", False):
             print(
                 _strategy_tag(),

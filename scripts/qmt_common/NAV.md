@@ -12,7 +12,7 @@
 
 | 文件 | 层级 | 作用 |
 | :--- | :--- | :--- |
-| `ctx.py` | 核心 | 全局 `A`、`_lot`、`_strategy_tag`；落盘钩子空实现 |
+| `ctx.py` | 核心 | 全局 `A`、`_vol_step` / `_lot`、`_strategy_tag`；落盘钩子空实现。`VOL_STEP` 默认 100，转债可设 10 |
 | `live_log.py` | P0 | 实盘落盘：`_event_log` / `_bar_log` / `_heartbeat_persist` / `_live_state_snapshot` |
 | `time_util.py` | 核心 | `_parse_opened_at`、日历日差 |
 | `period.py` | 核心 | 周期解析、OHLC 根数、`end_time` |
@@ -75,3 +75,5 @@ python 均线双周期策略/scripts/qmt/_deploy_qmt_gbk.py
 ```
 
 同标的多仓（不是双浮仓）：单仓模板已含 `single/lots.py`。config `SCALE_LOTS=True` 后，`A.position` 仍是合计，`A.lots` 为各笔；策略只评信号并传 `lot_ids`，不要在策略里再写 fill/T+1。未设该开关时行为与一票一仓相同。
+
+下单数量步长：`VOL_STEP`（默认 100 股）。沪市转债在策略 config 设 `VOL_STEP=10`。

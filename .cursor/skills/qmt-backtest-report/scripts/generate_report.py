@@ -68,9 +68,13 @@ def slice_session(text: str, tag: str, ver: str | None) -> tuple[str, str]:
         needle = f"{tag} {ver} init"
         idx = text.rfind(needle)
         if idx < 0:
-            idx = text.rfind(f"{tag} v")
+            idx = -1
+            for m in re.finditer(rf"{re.escape(tag)}\s+v[\d.]+\s+init", text):
+                idx = m.start()
     else:
-        idx = text.rfind(f"{tag} v")
+        idx = -1
+        for m in re.finditer(rf"{re.escape(tag)}\s+v[\d.]+\s+init", text):
+            idx = m.start()
         if idx < 0:
             idx = text.rfind(f"{tag} ")
     if idx < 0:
@@ -83,8 +87,7 @@ def slice_session(text: str, tag: str, ver: str | None) -> tuple[str, str]:
 def parse_meta(seg: str, tag: str) -> dict:
     m = re.search(
         rf"{re.escape(tag)}\s+(v[\d.]+)\s+init\s+(\S+)\s+(\S+)\s+(\S+)\s+"
-        r"PERIOD=\s*(\S+)\s+BACKTEST=\s*(\S+)\s+DRY_RUN=\s*(\S+)\s+"
-        r"(?:ALLOW_T0=\s*\S+\s+)?budget=\s*([0-9.]+)"
+            r"PERIOD=\s*(\S+)\s+BACKTEST=\s*(\S+)\s+DRY_RUN=\s*(\S+).*?budget=\s*([0-9.]+)"
         r"(?:\s+wMA=\s*(\S+)\s+dMA=\s*(\S+)\s+bias5>=\s*([0-9.]+)\s+"
         r"stop=\s*([0-9.]+)\s+chase<\s*([0-9.]+))?",
         seg,
@@ -331,7 +334,7 @@ def parse_terminal_rounds(path: Path) -> list[dict]:
         sell_p = float(r["price"])
         remain_sh = int(r["shares"])
         taken: list[dict] = []
-        while remain_sh >= 100 and pending_buys:
+        while remain_sh > 0 and pending_buys:
             b = pending_buys[0]
             bsh = int(b["shares"])
             if bsh <= remain_sh:
@@ -513,7 +516,7 @@ def apply_terminal_pnl(log_trades: list[dict], rounds: list[dict]) -> tuple[list
 
 
 def parse_diag(seg: str, tag: str) -> dict:
-    dates = re.findall(rf"{re.escape(tag)}\s+(20\d{{6}})\s+", seg)
+    dates = re.findall(rf"{re.escape(tag)}\s+(?:bar\s+)?(20\d{{6}})", seg)
     last = re.findall(
         rf"{re.escape(tag)}\s+(20\d{{6}}).*hold=(\w+)\s+ret=(\S+)\s+pe=(\w+)\s+px=(\w+)\s+bt_held=(\d+)",
         seg,

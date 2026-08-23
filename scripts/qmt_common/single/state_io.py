@@ -74,7 +74,7 @@ def _load_state():
         )
         return
     pos = raw.get("position")
-    if isinstance(pos, dict) and int(pos.get("shares", 0) or 0) >= 100:
+    if isinstance(pos, dict) and int(pos.get("shares", 0) or 0) >= _vol_step():
         A.position = dict(pos)
         A.position["shares"] = int(pos["shares"])
         A.position["price"] = float(pos.get("price", 0) or 0)
@@ -84,7 +84,7 @@ def _load_state():
     cleaned = []
     if isinstance(lots, list):
         for lot in lots:
-            if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) >= 100:
+            if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) >= _vol_step():
                 cleaned.append(dict(lot))
     A.lots = cleaned
     A.acted_day = str(raw.get("acted_day", "") or "")

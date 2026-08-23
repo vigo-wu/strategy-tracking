@@ -40,7 +40,7 @@ def _buy_budget(cash):
 def _apply_buy_fill(vol, price, opened_at, **extra):
     vol = int(vol)
     price = float(price) if price and price > 0 else 0.0
-    if vol < 100:
+    if vol < _vol_step():
         return
     add = bool(extra.pop("add", False))
     ot = str(opened_at or "").strip()
@@ -111,7 +111,7 @@ def _apply_sell_fill(now, reason, last_hint, filled_vol, mark_half=False, lot_id
     if getattr(A, "is_backtest", False):
         want = max(want, _bt_held_vol())
     filled_vol = int(filled_vol)
-    if filled_vol < 100:
+    if filled_vol < _vol_step():
         return
     partial_lots = False
     if bool(globals().get("SCALE_LOTS")) and lot_ids:
@@ -119,7 +119,7 @@ def _apply_sell_fill(now, reason, last_hint, filled_vol, mark_half=False, lot_id
         if callable(fn):
             partial_lots = bool(fn(lot_ids))
     if (not partial_lots) and (
-        filled_vol >= max(100, int(want * 0.95)) or filled_vol >= want
+        filled_vol >= max(_vol_step(), int(want * 0.95)) or filled_vol >= want
     ):
         _clear_after_sell(now, reason, last=last_hint)
         if mark_half:
@@ -142,7 +142,7 @@ def _apply_sell_fill(now, reason, last_hint, filled_vol, mark_half=False, lot_id
         lots_fn(lot_ids, filled_vol)
     elif A.position:
         A.position["shares"] = remain
-    if remain < 100 or not _has_position():
+    if remain < _vol_step() or not _has_position():
         _clear_after_sell(now, str(reason) + "/partial", last=last_hint)
     else:
         if mark_half:
@@ -176,7 +176,7 @@ def _order_buy(C, price, now, budget=None, add=False, **extra_pos):
         _event_log("buy_skip", reason="pending_active")
         return False
     holding_now = _has_position() or (
-        getattr(A, "is_backtest", False) and _bt_held_vol() >= 100
+        getattr(A, "is_backtest", False) and _bt_held_vol() >= _vol_step()
     )
     if holding_now and not add:
         print(_strategy_tag(), "buy skip: already holding")
@@ -191,14 +191,14 @@ def _order_buy(C, price, now, budget=None, add=False, **extra_pos):
         cash = _available_cash()
         budget = _buy_budget(cash)
     vol = _lot(price, budget)
-    if vol < 100:
+    if vol < _vol_step():
         print(_strategy_tag(), "buy skip lot", "price=", price, "budget=", budget)
         _event_log("buy_skip", reason="lot", price=price, budget=budget)
         return False
     cash = _available_cash()
     if cash is not None and cash < price * vol:
         vol = _lot(price, cash)
-        if vol < 100:
+        if vol < _vol_step():
             print(_strategy_tag(), "buy skip cash", cash)
             _event_log("buy_skip", reason="cash", cash=cash, price=price)
             return False
@@ -246,7 +246,7 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False, lot_ids=N
         print(_strategy_tag(), "sell skip: pending active")
         _event_log("sell_skip", reason="pending_active", sell_reason=reason)
         return False
-    if not _has_position() and not (getattr(A, "is_backtest", False) and _bt_held_vol() >= 100):
+    if not _has_position() and not (getattr(A, "is_backtest", False) and _bt_held_vol() >= _vol_step()):
         return False
     if lot_ids:
         fn = globals().get("_exit_is_partial")
@@ -262,12 +262,12 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False, lot_ids=N
     want = int(want_vol) if want_vol is not None else _pos_shares()
     if getattr(A, "is_backtest", False):
         want = max(want, _bt_held_vol()) if want_vol is None else want
-    if want < 100:
+    if want < _vol_step():
         return False
 
     avail = _max_sell_vol(now)
-    vol = int(min(want, avail) // 100) * 100
-    if vol < 100:
+    vol = int(min(want, avail) // _vol_step()) * _vol_step()
+    if vol < _vol_step():
         if getattr(A, "is_backtest", False):
             print(
                 _strategy_tag(),

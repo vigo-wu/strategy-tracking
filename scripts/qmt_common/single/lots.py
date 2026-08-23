@@ -40,7 +40,7 @@ def _ensure_lots():
     cleaned = []
     if isinstance(lots, list):
         for lot in lots:
-            if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) >= 100:
+            if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) >= _vol_step():
                 cleaned.append(lot)
     if cleaned:
         A.lots = cleaned
@@ -87,7 +87,7 @@ def _new_lot(shares, price, opened_at=""):
 def _sync_position_from_lots():
     lots = []
     for lot in getattr(A, "lots", None) or []:
-        if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) >= 100:
+        if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) >= _vol_step():
             lots.append(lot)
     A.lots = lots
     if not lots:
@@ -113,7 +113,7 @@ def _sync_position_from_lots():
     }
     if getattr(A, "is_backtest", False):
         held = _bt_held_vol()
-        if held < 100 and total >= 100:
+        if held < _vol_step() and total >= _vol_step():
             print(_strategy_tag(), "restore bt_held from lots", total)
             A.bt_held = total
         elif held != total:
@@ -210,7 +210,7 @@ def _lots_want_vol(lot_ids):
                 total += int(lot.get("shares") or 0)
         except Exception:
             pass
-    if total < 100:
+    if total < _vol_step():
         return None
     return int(total)
 
@@ -254,7 +254,7 @@ def _lots_on_buy_fill(px, add=False, vol=None, opened_at=""):
         _sync_position_from_lots()
         _mirror_hold_from_lots()
         return
-    if vol < 100:
+    if vol < _vol_step():
         if add and not (getattr(A, "lots", None) or []):
             A.lots = [_lot_from_agg()]
         _sync_position_from_lots()
@@ -289,7 +289,7 @@ def _lots_on_sell_fill(lot_ids, filled_vol):
         if idset is not None and lid not in idset:
             new_lots.append(lot)
             continue
-        if remain_fill < 100:
+        if remain_fill < _vol_step():
             new_lots.append(lot)
             continue
         sh = int(lot.get("shares") or 0)
