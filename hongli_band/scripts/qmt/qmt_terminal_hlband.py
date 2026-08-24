@@ -46,10 +46,13 @@ TRADE_BUDGET = 50000.0
 TRADE_BUDGET_BY_STOCK = {}
 
 # ---- 周线过滤（跨周期；主图仍是日线）----
-# 周线均线（EMA）：快/中/生命线/慢线（斐波那契 5/13/34/55）
-#   EMA5 vs EMA13 + MACD → 多头判定（仅日志；开仓不强制 weekly_bull）
-#   EMA34 → 生命线（收盘跌破即周线空，强制清仓）；乖离/斜率过滤也用它
-#   EMA55 → 数据暖机长度参考（market 取数 need）
+# 价格均线类型：EMA 或 SMA（大小写不敏感）。只作用于周/日价格均线；
+# 成交量均量始终 SMA；MACD 仍用 EMA。非法值回落 EMA。
+MA_TYPE = "EMA"
+# 周线均线：快/中/生命线/慢线（斐波那契 5/13/34/55）；算法见 MA_TYPE
+#   MA5 vs MA13 + MACD → 多头判定（仅日志；开仓不强制 weekly_bull）
+#   MA34 → 生命线（收盘跌破即周线空，强制清仓）；乖离/斜率过滤也用它
+#   MA55 → 数据暖机长度参考（market 取数 need）
 W_MA_FAST = 5
 W_MA_MID = 13
 W_MA_LIFE = 34
@@ -58,8 +61,8 @@ W_MA_SLOW = 55
 MACD_FAST = 12
 MACD_SLOW = 26
 MACD_SIGNAL = 9
-# 高位禁开：周线乖离 (EMA5-EMA34)/EMA34 >= 此值 → 不做新开（追高风险）
-# 例 0.08 = EMA5 相对生命线 EMA34 高 8% 以上禁开
+# 高位禁开：周线乖离 (MA5-MA34)/MA34 >= 此值 → 不做新开（追高风险）
+# 例 0.08 = MA5 相对生命线 MA34 高 8% 以上禁开
 W_BIAS_HARD = 0.08
 # 低位斜率过滤：乖离 < 此值视为「低位区」；此时若 MA34 未连续向上则禁开
 # 例 0.02 = 乖离不足 2% 时要求生命线已拐头向上
@@ -69,18 +72,18 @@ W_BIAS_LOW = 0.02
 W_MA30_SLOPE_WEEKS = 2
 
 # ---- 日线买卖 ----
-# 日线均线（EMA）：EMA20→回踩/站上/无量阴跌；EMA60→回踩支撑 + 时间成本线
+# 日线均线（算法见 MA_TYPE）：MA20→回踩/站上/无量阴跌；MA60→回踩支撑 + 时间成本线
 D_MA_MID = 20
 D_MA_SLOW = 60
 
 # 买点 pullback_vol：缩量回踩强支撑
-#   价格贴近 EMA20 或 EMA60（|价-均线|/均线 <= 容差）且当日量 < N 日均量 * 比例
+#   价格贴近 MA20 或 MA60（|价-均线|/均线 <= 容差）且当日量 < N 日均量 * 比例
 MA_TOUCH_TOL = 0.025          # 0.025 = 距均线 ±2.5% 内算「回踩到位」
-VOL_PULLBACK_N = 10           # 缩量比较的均量窗口（日，SMA）
+VOL_PULLBACK_N = 10           # 缩量比较的均量窗口（日，始终 SMA）
 VOL_PULLBACK_RATIO = 0.9      # 量 < 均量*0.9 视为缩量
 
 # 全局禁开 vol_dry_skip（无量阴跌不言底）：
-#   收盘跌破 EMA20 且量 < N 日均量 * 比例 → 当天任何买点失效
+#   收盘跌破 MA20 且量 < N 日均量 * 比例 → 当天任何买点失效
 VOL_DRY_N = 20
 VOL_DRY_RATIO = 0.60          # 量 < 20 日均量的 60% 视为无量阴跌
 
@@ -98,10 +101,10 @@ TRAIL_TIERS = (
     (0.10, None, 0.04, None),
 )
 # 卖② time_force：智能时间成本（防长期磨人，不砍还在趋势里的仓）
-#   BARS = 日线慢均线一半：满此日后才把 EMA60 当出场地板，不是最长持仓
-#   收盘破日线 EMA60 → 立即强制平仓
-#   仍站上 EMA60 且峰值浮盈 < MIN_RET → 豁免一次，再观察 GRACE_BARS 日，期满强平（回收死钱）
-#   仍站上 EMA60 且峰值 >= MIN_RET → 不按日历强平，交给 trail / 破 EMA60 / 周线空
+#   BARS = 日线慢均线一半：满此日后才把 MA60 当出场地板，不是最长持仓
+#   收盘破日线 MA60 → 立即强制平仓
+#   仍站上 MA60 且峰值浮盈 < MIN_RET → 豁免一次，再观察 GRACE_BARS 日，期满强平（回收死钱）
+#   仍站上 MA60 且峰值 >= MIN_RET → 不按日历强平，交给 trail / 破 MA60 / 周线空
 #   MIN_RET 对齐阶梯止盈起步档；0 = 关闭让路（回到期满强平）
 TIME_FORCE_BARS = D_MA_SLOW // 2
 TIME_FORCE_GRACE_BARS = 5
@@ -144,7 +147,7 @@ SCALE_W_HIST_EXPAND_RATIO = 1.2
 
 # 策略交易面板 bind → 模块常量。编辑器/回测无注入时用上面默认值。
 # 只上屏：开关 / 预算袖子 / 硬风控。买点窗口、时间成本、加仓细节、SCALE_LOTS、
-# BOOK_N、TRAIL_TIERS、均线周期、路径、账号仍只在 config（N 以 BOOK_STOCKS 长度为准）。
+# BOOK_N、TRAIL_TIERS、均线周期、MA_TYPE、路径、账号仍只在 config（N 以 BOOK_STOCKS 长度为准）。
 PANEL_BINDS = (
     ("panel_dry_run", "DRY_RUN", "bool"),
     ("panel_budget", "TRADE_BUDGET", "float"),
@@ -208,7 +211,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.45"
+STRATEGY_VER = "v1.46"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
@@ -1209,7 +1212,7 @@ def _bt_recover_position(now=None, last=None):
 
 # === hlband/indicators.py ===
 def _sma(closes, n):
-    """简单均线；成交量均量用此函数。价格均线走 _ema。"""
+    """简单均线；成交量均量固定走此函数。"""
     c = np.asarray(closes, dtype=float)
     n = int(n)
     if n <= 0 or len(c) < n:
@@ -1233,6 +1236,24 @@ def _ema(closes, n):
     for i in range(n, len(c)):
         out[i] = alpha * c[i] + (1.0 - alpha) * out[i - 1]
     return out
+
+
+def _ma_kind():
+    """价格均线类型：EMA 或 SMA。非法值回落 EMA。"""
+    raw = globals().get("MA_TYPE", "EMA")
+    kind = str(raw or "EMA").strip().upper()
+    if kind in ("SMA", "EMA"):
+        return kind
+    if not globals().get("_MA_TYPE_BAD"):
+        globals()["_MA_TYPE_BAD"] = True
+        print("%s MA_TYPE=%s invalid, fallback EMA" % (STRATEGY_NAME, raw))
+    return "EMA"
+
+
+def _price_ma(closes, n):
+    if _ma_kind() == "SMA":
+        return _sma(closes, n)
+    return _ema(closes, n)
 
 
 def _calc_macd(closes, fast=None, slow=None, signal=None):
@@ -3603,8 +3624,8 @@ def _cross_up(a_prev, b_prev, a_now, b_now):
 
 def _eval_weekly(closes_w):
     """返回 (bull, bear, detail)。
-    多头(仅日志): EMA5>EMA13 且 DIF>0 且红柱 且生命线未明显走平。
-    空头: 收盘破 EMA34（W_MA_LIFE）或 DIF/DEA 零轴下死叉。"""
+    多头(仅日志): MA5>MA13 且 DIF>0 且红柱 且生命线未明显走平。
+    空头: 收盘破 MA34（W_MA_LIFE）或 DIF/DEA 零轴下死叉。"""
     detail = {
         "ma5": None,
         "ma10": None,
@@ -3614,9 +3635,9 @@ def _eval_weekly(closes_w):
         "hist": None,
         "close": None,
     }
-    ma5 = _ema(closes_w, W_MA_FAST)
-    ma10 = _ema(closes_w, W_MA_MID)
-    ma30 = _ema(closes_w, W_MA_LIFE)
+    ma5 = _price_ma(closes_w, W_MA_FAST)
+    ma10 = _price_ma(closes_w, W_MA_MID)
+    ma30 = _price_ma(closes_w, W_MA_LIFE)
     macd = _calc_macd(closes_w)
     if ma5 is None or ma10 is None or ma30 is None or macd is None:
         return False, False, detail
@@ -3756,10 +3777,10 @@ def _update_w_bear_streak(weekly_bear, sig_day, track):
 
 
 def _eval_daily_buy(closes, volumes):
-    """买点：缩量回踩 EMA20/EMA60。"""
+    """买点：缩量回踩 MA20/MA60。"""
     reasons = []
-    ma20 = _ema(closes, D_MA_MID)
-    ma60 = _ema(closes, D_MA_SLOW)
+    ma20 = _price_ma(closes, D_MA_MID)
+    ma60 = _price_ma(closes, D_MA_SLOW)
     vol10 = _sma(volumes, VOL_PULLBACK_N)
     vol20 = _sma(volumes, VOL_DRY_N)
     if ma20 is None or ma60 is None or vol10 is None or vol20 is None:
@@ -3784,7 +3805,7 @@ def _eval_daily_buy(closes, volumes):
     if prev > 0 and (price - prev) / prev >= float(CHASE_MAX_PCT):
         return False, ["chase_skip"], detail
 
-    # 无量阴跌不言底：跌破 EMA20 且量 < 20 日均量 * VOL_DRY_RATIO → 全局禁开
+    # 无量阴跌不言底：跌破 MA20 且量 < 20 日均量 * VOL_DRY_RATIO → 全局禁开
     dry_below = (
         m20 is not None
         and price < m20
@@ -3795,7 +3816,7 @@ def _eval_daily_buy(closes, volumes):
     if dry_below:
         return False, ["vol_dry_skip"], detail
 
-    # 缩量回踩 EMA20/EMA60 + 量 < 10 日均量 * 0.9
+    # 缩量回踩 MA20/MA60 + 量 < 10 日均量 * 0.9
     near = _near_ma(price, m20) or _near_ma(price, m60)
     shrink = v10 is not None and v10 > 0 and vol < v10 * float(VOL_PULLBACK_RATIO)
     if near and shrink:
@@ -3805,7 +3826,7 @@ def _eval_daily_buy(closes, volumes):
 
 
 def _weekly_bias_guard(w_detail):
-    """周线 (EMA5-EMA34)/EMA34 >= W_BIAS_HARD → 禁开。"""
+    """周线 (MA5-MA34)/MA34 >= W_BIAS_HARD → 禁开。"""
     m5 = w_detail.get("ma5")
     m30 = w_detail.get("ma30")
     if m5 is None or m30 is None or m30 <= 0:
@@ -3815,7 +3836,7 @@ def _weekly_bias_guard(w_detail):
 
 
 def _weekly_low_slope_guard(w_detail):
-    """低位 (EMA5-EMA34)/EMA34 < W_BIAS_LOW 且生命线 EMA34 未连续向上 → 禁开。"""
+    """低位 (MA5-MA34)/MA34 < W_BIAS_LOW 且生命线 MA34 未连续向上 → 禁开。"""
     m5 = w_detail.get("ma5")
     m30 = w_detail.get("ma30")
     if m5 is None or m30 is None or m30 <= 0:
@@ -3936,12 +3957,12 @@ def _time_force_mark_skip(lot, peak_ret, hold_bars, m60):
 
 
 def _time_force_hit(price, closes, hold_bars, lot=None):
-    """智能时间成本：持仓 > TIME_FORCE_BARS 后，破日线 EMA60 强制平仓。
-    仍站上 EMA60 时：峰值已达 TIME_FORCE_MIN_RET（阶梯止盈起步档）则不按日历强平；
+    """智能时间成本：持仓 > TIME_FORCE_BARS 后，破日线 MA60 强制平仓。
+    仍站上 MA60 时：峰值已达 TIME_FORCE_MIN_RET（阶梯止盈起步档）则不按日历强平；
     从未武装的死钱仓豁免 GRACE 日后强平。"""
     if hold_bars is None or int(hold_bars) <= int(TIME_FORCE_BARS):
         return False
-    ma60_arr = _ema(closes, D_MA_SLOW)
+    ma60_arr = _price_ma(closes, D_MA_SLOW)
     if ma60_arr is None:
         return False
     i = len(closes) - 1
@@ -5889,6 +5910,8 @@ def _init_impl(C):
         "%d/%d/%d" % (W_MA_FAST, W_MA_MID, W_MA_LIFE),
         "dMA=",
         "%d/%d" % (D_MA_MID, D_MA_SLOW),
+        "ma_type=",
+        _ma_kind(),
         "stop=",
         STOP_LOSS,
         "chase<",
@@ -5958,6 +5981,7 @@ def _init_impl(C):
         min_lot=MIN_LOT,
         max_name_frac=MAX_NAME_FRAC,
         equal_split=EQUAL_SPLIT,
+        ma_type=_ma_kind(),
         log_dir=str(globals().get("LOG_DIR") or ""),
     )
 

@@ -257,6 +257,8 @@ def _init_impl(C):
         "%d/%d/%d" % (W_MA_FAST, W_MA_MID, W_MA_LIFE),
         "dMA=",
         "%d/%d" % (D_MA_MID, D_MA_SLOW),
+        "ma_type=",
+        _ma_kind(),
         "stop=",
         STOP_LOSS,
         "chase<",
@@ -326,6 +328,7 @@ def _init_impl(C):
         min_lot=MIN_LOT,
         max_name_frac=MAX_NAME_FRAC,
         equal_split=EQUAL_SPLIT,
+        ma_type=_ma_kind(),
         log_dir=str(globals().get("LOG_DIR") or ""),
     )
 

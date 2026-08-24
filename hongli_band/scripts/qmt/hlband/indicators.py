@@ -1,6 +1,6 @@
 # === hlband/indicators.py ===
 def _sma(closes, n):
-    """简单均线；成交量均量用此函数。价格均线走 _ema。"""
+    """简单均线；成交量均量固定走此函数。"""
     c = np.asarray(closes, dtype=float)
     n = int(n)
     if n <= 0 or len(c) < n:
@@ -24,6 +24,24 @@ def _ema(closes, n):
     for i in range(n, len(c)):
         out[i] = alpha * c[i] + (1.0 - alpha) * out[i - 1]
     return out
+
+
+def _ma_kind():
+    """价格均线类型：EMA 或 SMA。非法值回落 EMA。"""
+    raw = globals().get("MA_TYPE", "EMA")
+    kind = str(raw or "EMA").strip().upper()
+    if kind in ("SMA", "EMA"):
+        return kind
+    if not globals().get("_MA_TYPE_BAD"):
+        globals()["_MA_TYPE_BAD"] = True
+        print("%s MA_TYPE=%s invalid, fallback EMA" % (STRATEGY_NAME, raw))
+    return "EMA"
+
+
+def _price_ma(closes, n):
+    if _ma_kind() == "SMA":
+        return _sma(closes, n)
+    return _ema(closes, n)
 
 
 def _calc_macd(closes, fast=None, slow=None, signal=None):
