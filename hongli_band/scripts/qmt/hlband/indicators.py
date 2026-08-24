@@ -1,5 +1,6 @@
 # === hlband/indicators.py ===
 def _sma(closes, n):
+    """简单均线；成交量均量用此函数。价格均线走 _ema。"""
     c = np.asarray(closes, dtype=float)
     n = int(n)
     if n <= 0 or len(c) < n:
