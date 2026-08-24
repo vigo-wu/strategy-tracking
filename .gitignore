@@ -15,3 +15,6 @@ Desktop.ini
 # ONR backtest output / MiniQMT dumps
 onr_strategy/backtest/_out/
 onr_strategy/data/
+
+# QMT kline dump CSV
+tools/csv/
