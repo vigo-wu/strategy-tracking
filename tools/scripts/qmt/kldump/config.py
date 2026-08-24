@@ -3,7 +3,7 @@
 # QMT 模型无 __file__，OUT_DIR 必须是绝对路径
 
 STRATEGY_NAME = "KlineDump"
-STRATEGY_VER = "v1.0"
+STRATEGY_VER = "v1.2"
 
 # 跟随主图；填 1d/15m 等则覆盖 C.period
 PERIOD = "follow"
@@ -11,7 +11,9 @@ PERIOD = "follow"
 # 导出根目录（绝对路径）
 OUT_DIR = r"D:\vigo\strategy-tracking\tools\csv"
 
-# 拉取根数；与 HIST_START 一起决定导出区间（不依赖回测走多少根 K）
+# True=导出区间跟主图回测起止（C.start / C.end）
+FOLLOW_CHART_RANGE = True
+# 读不到主图区间时的回落（实盘或 C.start 为空）
 BAR_COUNT = 5000
 HIST_START = "20220101"
 HIST_MAX_LOOKBACK_DAYS = 0

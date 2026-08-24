@@ -11,4 +11,18 @@ def init(C):
 
 
 def handlebar(C):
-    return
+    try:
+        _dump_track_bars(C)
+    except Exception as e:
+        print("%s handlebar error" % STRATEGY_NAME, e)
+        try:
+            traceback.print_exc()
+        except Exception:
+            pass
+
+
+def stop(C):
+    try:
+        _dump_on_stop(C)
+    except Exception as e:
+        print("%s stop error" % STRATEGY_NAME, e)

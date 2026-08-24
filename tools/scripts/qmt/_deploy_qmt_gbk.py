@@ -39,7 +39,7 @@ def main() -> None:
     deploy_gbk(text, TARGETS, compile_name="qmt_terminal_kldump.py")
     print("OK: 打开国金 QMT -> 模型交易 -> 新建策略交易 -> KlineDump / 行情导出")
     print("主图=要导出的标的 | 周期=要导出的K线周期 | 勿勾独立/简易运行")
-    print("回测区间可很短；条数由 BAR_COUNT / HIST_START 决定")
+    print("导出区间跟随主图回测起止（C.start/C.end）；读不到时才用 HIST_START/BAR_COUNT")
     print("编辑 kldump/*.py 后重新本脚本部署，终端再编译")
 
 

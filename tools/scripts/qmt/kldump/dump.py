@@ -3,14 +3,190 @@
 import csv
 
 
-def _apply_hist_start():
-    hs = str(globals().get("HIST_START") or "").strip()
+def _digits_only(s):
+    out = []
+    for ch in str(s or ""):
+        if ch.isdigit():
+            out.append(ch)
+    return "".join(out)
+
+
+def _year_ok(s):
+    d = _digits_only(s)
+    if len(d) < 8:
+        return False
+    try:
+        y = int(d[:4])
+    except Exception:
+        return False
+    return 1990 <= y <= 2100
+
+
+def _apply_hist_start(start=""):
+    hs = _digits_only(start)[:8]
+    if not hs:
+        hs = str(globals().get("HIST_START") or "").strip()
     if not hs:
         return
     mapping = {}
     for p in (globals().get("_VALID_PERIODS") or ()):
         mapping[p] = hs
     globals()["_PERIOD_HIST_START"] = mapping
+
+
+def _coerce_qmt_time(val):
+    """C.start / C.end / timetag -> yyyymmdd 或 yyyymmddHHMMSS。"""
+    t = _coerce_qmt_time_raw(val)
+    if t and _year_ok(t):
+        return t
+    return ""
+
+
+def _coerce_qmt_time_raw(val):
+    if val is None or val == "" or val is False:
+        return ""
+    try:
+        if hasattr(val, "strftime"):
+            hour = int(getattr(val, "hour", 0) or 0)
+            minute = int(getattr(val, "minute", 0) or 0)
+            second = int(getattr(val, "second", 0) or 0)
+            if hour == 0 and minute == 0 and second == 0:
+                return val.strftime("%Y%m%d")
+            return val.strftime("%Y%m%d%H%M%S")
+    except Exception:
+        pass
+    n = None
+    try:
+        if isinstance(val, bool):
+            return ""
+        if isinstance(val, (int, float)):
+            n = int(val)
+        else:
+            s = str(val).strip()
+            if (not s) or s in ("0", "-1", "None"):
+                return ""
+            d = _digits_only(s)
+            if d:
+                n = int(d)
+    except Exception:
+        n = None
+    if n is None or n <= 0:
+        return ""
+    d = str(n)
+    if len(d) == 8 and (d.startswith("19") or d.startswith("20")):
+        return d
+    if len(d) >= 14 and (d.startswith("19") or d.startswith("20")):
+        return d[:14]
+    if 10 ** 12 <= n < 10 ** 14 and not (d.startswith("19") or d.startswith("20")):
+        try:
+            return datetime.datetime.fromtimestamp(n / 1000.0).strftime("%Y%m%d%H%M%S")
+        except Exception:
+            pass
+    if 10 ** 9 <= n < 10 ** 12:
+        try:
+            return datetime.datetime.fromtimestamp(float(n)).strftime("%Y%m%d%H%M%S")
+        except Exception:
+            pass
+    if len(d) >= 8 and (d.startswith("19") or d.startswith("20")):
+        return d[:8]
+    return ""
+
+
+def _fmt_query_time(s, period, is_end):
+    d = _digits_only(s)
+    if not d:
+        return ""
+    if _is_intraday(period):
+        if len(d) >= 14:
+            return d[:14]
+        if is_end:
+            return d[:8] + "150000"
+        return d[:8] + "000000"
+    return d[:8]
+
+
+def _cmp_key(s, n, is_end=False):
+    d = _digits_only(s)
+    if not d:
+        return ""
+    if is_end and len(d) <= 8:
+        d = d[:8] + "235959"
+    elif len(d) < n:
+        d = d + ("0" * (n - len(d)))
+    return d[:n]
+
+
+def _row_in_range(tstr, start, end, period):
+    n = 12 if _is_intraday(period) else 8
+    k = _cmp_key(tstr, n)
+    if not k:
+        return True
+    s = _cmp_key(start, n)
+    e = _cmp_key(end, n, True)
+    if s and k < s:
+        return False
+    if e and k > e:
+        return False
+    return True
+
+
+def _bar_time_str(C, barpos=None):
+    try:
+        if barpos is None:
+            barpos = int(getattr(C, "barpos", 0) or 0)
+        tag = C.get_bar_timetag(barpos)
+        t = _coerce_qmt_time(tag)
+        if t:
+            return t
+        if "timetag_to_datetime" in globals():
+            s = timetag_to_datetime(tag, "%Y%m%d%H%M%S")
+            t = _digits_only(s)
+            if t and _year_ok(t):
+                return t
+    except Exception:
+        pass
+    return ""
+
+
+def _first_attr(obj, names):
+    for name in names:
+        try:
+            if hasattr(obj, name):
+                val = getattr(obj, name)
+                t = _coerce_qmt_time(val)
+                if t:
+                    return t, name, val
+        except Exception:
+            continue
+    return "", "", None
+
+
+def _resolve_dump_range(C):
+    """优先主图回测区间 C.start / C.end；init 里不要用 bar0（timetag 常为 0）。"""
+    follow = bool(globals().get("FOLLOW_CHART_RANGE", True))
+    start, start_src, start_raw = ("", "", None)
+    end, end_src, end_raw = ("", "", None)
+    if follow:
+        start, start_src, start_raw = _first_attr(
+            C, ("start", "start_time", "startdate", "startDate")
+        )
+        end, end_src, end_raw = _first_attr(
+            C, ("end", "end_time", "enddate", "endDate")
+        )
+    print(
+        _strategy_tag(),
+        "C.start=",
+        getattr(C, "start", None),
+        "C.end=",
+        getattr(C, "end", None),
+        "->",
+        start,
+        end,
+        "src=",
+        start_src,
+        end_src,
+    )
+    return start, end, start_src, end_src
 
 
 def _resolve_period_dump(C):
@@ -173,10 +349,23 @@ def _col_keep(md, stock, field):
     return out
 
 
-def _fetch_md(C, stock, period, count):
+def _fetch_md(C, stock, period):
     fields = ["open", "high", "low", "close", "volume", "amount"]
-    start = str(globals().get("HIST_START") or "")
-    end = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+    start_raw = str(getattr(A, "dump_start", "") or "")
+    end_raw = str(getattr(A, "dump_end", "") or "")
+    start = _fmt_query_time(start_raw, period, False)
+    end = _fmt_query_time(end_raw, period, True)
+    has_range = bool(start and end)
+    if has_range:
+        count = -1
+    else:
+        count = int(globals().get("BAR_COUNT") or 5000)
+        if not start:
+            start = _fmt_query_time(str(globals().get("HIST_START") or ""), period, False)
+        if not end:
+            end = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+            if not _is_intraday(period):
+                end = end[:8]
     div = str(globals().get("DIVIDEND_TYPE") or "front_ratio")
     md = None
     source = None
@@ -226,7 +415,7 @@ def _fetch_md(C, stock, period, count):
         except Exception as e:
             _diag_once("gmd_fail_" + str(period), e)
             md = None
-    return md, source
+    return md, source, start, end
 
 
 def _align_cols(times, open_, high, low, close, volume, amount):
@@ -271,8 +460,7 @@ def _write_csv(path, rows):
 
 
 def _dump_period(C, stock, period):
-    count = int(globals().get("BAR_COUNT") or 5000)
-    md, source = _fetch_md(C, stock, period, count)
+    md, source, q_start, q_end = _fetch_md(C, stock, period)
     if md is None:
         print(_strategy_tag(), "dump empty period=", period, "source=", source)
         return None
@@ -288,10 +476,16 @@ def _dump_period(C, stock, period):
         print(_strategy_tag(), "dump empty period=", period, "source=", source)
         return None
     times, open_, high, low, close, volume, amount = aligned
+    clip_start = str(getattr(A, "dump_start", "") or q_start or "")
+    clip_end = str(getattr(A, "dump_end", "") or q_end or "")
     n = len(close)
     rows = []
     i = 0
     while i < n:
+        if clip_start or clip_end:
+            if not _row_in_range(times[i], clip_start, clip_end, period):
+                i += 1
+                continue
         rows.append(
             [
                 stock,
@@ -306,12 +500,22 @@ def _dump_period(C, stock, period):
             ]
         )
         i += 1
-    first_day = _compact_day(times[0]) if times else ""
-    last_day = _compact_day(times[-1]) if times else ""
+    if not rows:
+        print(
+            _strategy_tag(),
+            "dump empty after clip period=",
+            period,
+            "query=",
+            q_start,
+            q_end,
+        )
+        return None
+    first_day = _compact_day(rows[0][2])
+    last_day = _compact_day(rows[-1][2])
     if not first_day:
-        first_day = str(globals().get("HIST_START") or "start")
+        first_day = _digits_only(clip_start)[:8] or "start"
     if not last_day:
-        last_day = datetime.datetime.now().strftime("%Y%m%d")
+        last_day = _digits_only(clip_end)[:8] or datetime.datetime.now().strftime("%Y%m%d")
     fname = "%s_%s_%s_%s.csv" % (_stock_tag(stock), period, first_day, last_day)
     out_dir = str(globals().get("OUT_DIR") or "")
     path = os.path.join(out_dir, fname)
@@ -319,9 +523,12 @@ def _dump_period(C, stock, period):
     print(
         _strategy_tag(),
         "dumped n=",
-        n,
+        len(rows),
         "period=",
         period,
+        "range=",
+        q_start,
+        q_end,
         "source=",
         source,
         "path=",
@@ -330,24 +537,7 @@ def _dump_period(C, stock, period):
     return path
 
 
-def _dump_init(C):
-    A.stock = C.stockcode + "." + C.market
-    A.period = _resolve_period_dump(C)
-    A._diag = set()
-    A.is_backtest = bool(getattr(C, "do_back_test", False))
-    _apply_hist_start()
-    print(
-        "%s %s init" % (STRATEGY_NAME, STRATEGY_VER),
-        A.stock,
-        "PERIOD=",
-        A.period,
-        "BACKTEST=",
-        A.is_backtest,
-        "BAR_COUNT=",
-        int(globals().get("BAR_COUNT") or 0),
-        "OUT_DIR=",
-        globals().get("OUT_DIR") or "",
-    )
+def _dump_periods(C):
     periods = [A.period]
     for p in (globals().get("EXTRA_PERIODS") or ()):
         n = _norm_period(p)
@@ -361,3 +551,147 @@ def _dump_init(C):
             except Exception as e:
                 print(_strategy_tag(), "download_hist abort-safe", period, e)
         _dump_period(C, A.stock, period)
+    A._dumped = True
+
+
+def _dump_init(C):
+    A.stock = C.stockcode + "." + C.market
+    A.period = _resolve_period_dump(C)
+    A._diag = set()
+    A.is_backtest = bool(getattr(C, "do_back_test", False))
+    A._dumped = False
+    A.need_last_bar = False
+    start, end, start_src, end_src = _resolve_dump_range(C)
+    A.dump_start = start
+    A.dump_end = end
+    _apply_hist_start(start)
+    print(
+        "%s %s init" % (STRATEGY_NAME, STRATEGY_VER),
+        A.stock,
+        "PERIOD=",
+        A.period,
+        "BACKTEST=",
+        A.is_backtest,
+        "range=",
+        start,
+        end,
+        "OUT_DIR=",
+        globals().get("OUT_DIR") or "",
+    )
+    if start and end:
+        _dump_periods(C)
+        return
+    # 回测：C.start/C.end 常为空；用主图正在走的第一根/最后一根 K
+    A.need_last_bar = True
+    A.dump_start = start or ""
+    A.dump_end = end or ""
+    print(_strategy_tag(), "wait chart bars for range")
+
+
+def _find_chart_end(C):
+    """从当前 barpos 向后倍增搜索主图最后一根有效 K。"""
+    try:
+        bp = int(getattr(C, "barpos", 0) or 0)
+    except Exception:
+        bp = 0
+    last_t = _bar_time_str(C, bp)
+    last_i = bp
+    if not last_t:
+        return "", bp
+    step = 1
+    guard = 0
+    while step < 5000000 and guard < 32:
+        guard += 1
+        nxt = last_i + step
+        t = _bar_time_str(C, nxt)
+        if not t:
+            break
+        last_t = t
+        last_i = nxt
+        step *= 2
+    lo = last_i
+    hi = last_i + step
+    while lo + 1 < hi and guard < 80:
+        guard += 1
+        mid = int((lo + hi) / 2)
+        t = _bar_time_str(C, mid)
+        if t:
+            lo = mid
+            last_t = t
+        else:
+            hi = mid
+    return last_t, lo
+
+
+def _is_chart_last_bar(C):
+    try:
+        if hasattr(C, "is_last_bar") and C.is_last_bar():
+            return True
+    except Exception:
+        pass
+    try:
+        bp = int(getattr(C, "barpos", 0) or 0)
+        t0 = C.get_bar_timetag(bp)
+        t1 = C.get_bar_timetag(bp + 1)
+        n0 = int(t0) if t0 is not None else 0
+        n1 = int(t1) if t1 is not None else 0
+        if n0 > 0 and n1 <= 0:
+            return True
+        if n0 > 0 and n1 > 0 and n1 <= n0:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _dump_track_bars(C):
+    if getattr(A, "_dumped", False):
+        return
+    if not getattr(A, "need_last_bar", False):
+        return
+    t = _bar_time_str(C)
+    if t and (not getattr(A, "dump_start", "")):
+        A.dump_start = t
+        _apply_hist_start(t)
+        end_t, end_i = _find_chart_end(C)
+        print(
+            _strategy_tag(),
+            "first bar start=",
+            t,
+            "barpos=",
+            getattr(C, "barpos", None),
+            "search_end=",
+            end_t,
+            "end_barpos=",
+            end_i,
+        )
+        if end_t and end_i > int(getattr(C, "barpos", 0) or 0):
+            A.dump_end = end_t
+            _dump_periods(C)
+            return
+        print(_strategy_tag(), "chart end search stayed on current bar, wait last")
+    if t:
+        A.dump_end = t
+    if not _is_chart_last_bar(C):
+        return
+    if not getattr(A, "dump_start", ""):
+        A.dump_start = t or str(globals().get("HIST_START") or "")
+    if not getattr(A, "dump_end", ""):
+        A.dump_end = t or datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+    print(_strategy_tag(), "last bar start=", A.dump_start, "end=", A.dump_end)
+    _dump_periods(C)
+
+
+def _dump_on_stop(C):
+    if getattr(A, "_dumped", False):
+        return
+    t = _bar_time_str(C)
+    if t and (not getattr(A, "dump_start", "")):
+        A.dump_start = t
+    if t:
+        A.dump_end = t
+    if not getattr(A, "dump_start", "") or not getattr(A, "dump_end", ""):
+        print(_strategy_tag(), "stop skip, range incomplete", A.dump_start, A.dump_end)
+        return
+    print(_strategy_tag(), "stop dump start=", A.dump_start, "end=", A.dump_end)
+    _dump_periods(C)
