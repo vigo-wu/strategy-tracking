@@ -20,6 +20,11 @@ def _state_extra_load(raw):
     except Exception:
         A.time_force_grace_until = None
     A.time_force_trend_skip = bool(raw.get("time_force_trend_skip"))
+    try:
+        pa = raw.get("p_atr")
+        A.p_atr = float(pa) if pa is not None else None
+    except Exception:
+        A.p_atr = None
     A._confirmed_eval_day = str(raw.get("confirmed_eval_day", "") or "")
     A._fallback_done_day = str(raw.get("fallback_done_day", "") or "")
     try:
@@ -43,6 +48,11 @@ def _state_extra_save(data):
     gu = getattr(A, "time_force_grace_until", None)
     data["time_force_grace_until"] = None if gu is None else int(gu)
     data["time_force_trend_skip"] = bool(getattr(A, "time_force_trend_skip", False))
+    pa = getattr(A, "p_atr", None)
+    try:
+        data["p_atr"] = None if pa is None else float(pa)
+    except Exception:
+        data["p_atr"] = None
     data["confirmed_eval_day"] = str(getattr(A, "_confirmed_eval_day", "") or "")
     data["fallback_done_day"] = str(getattr(A, "_fallback_done_day", "") or "")
     data["w_bear_streak"] = int(getattr(A, "_w_bear_streak", 0) or 0)

@@ -117,6 +117,7 @@ def _init_impl(C):
             A._hold_count_day = ""
             A.time_force_grace_until = None
             A.time_force_trend_skip = False
+            A.p_atr = None
             A.lots = []
             A.round_scaled = False
             A._confirmed_eval_day = ""
@@ -154,6 +155,8 @@ def _init_impl(C):
                 A.time_force_grace_until = None
             if not hasattr(A, "time_force_trend_skip"):
                 A.time_force_trend_skip = False
+            if not hasattr(A, "p_atr"):
+                A.p_atr = None
             if not hasattr(A, "lots") or A.lots is None:
                 A.lots = []
             if not hasattr(A, "round_scaled"):
@@ -200,6 +203,8 @@ def _init_impl(C):
             A.time_force_grace_until = None
         if not hasattr(A, "time_force_trend_skip"):
             A.time_force_trend_skip = False
+        if not hasattr(A, "p_atr"):
+            A.p_atr = None
         if not hasattr(A, "lots") or A.lots is None:
             A.lots = []
         if not hasattr(A, "round_scaled"):
@@ -279,6 +284,11 @@ def _init_impl(C):
         TIME_FORCE_BARS,
         "time_force_min_ret=",
         TIME_FORCE_MIN_RET,
+        "trail_atr=",
+        "%d/%.3f/%.3f" % (ATR_N, ATR_P_FLOOR, ATR_P_CAP),
+        "trail_k=",
+        "%.1f/%.1f/%.1f/%.1f"
+        % (TRAIL_T1_ARM, TRAIL_T1_GIVEBACK, TRAIL_T2_ARM, TRAIL_T3_ARM),
         "close_exec=",
         "%s-%s" % (
             globals().get("PENDING_EXEC_START", "145600"),
@@ -308,6 +318,13 @@ def _init_impl(C):
         scale_w_hist_expand=SCALE_W_HIST_EXPAND_RATIO,
         time_force_bars=TIME_FORCE_BARS,
         time_force_min_ret=TIME_FORCE_MIN_RET,
+        atr_n=ATR_N,
+        atr_p_floor=ATR_P_FLOOR,
+        atr_p_cap=ATR_P_CAP,
+        trail_t1_arm=TRAIL_T1_ARM,
+        trail_t1_giveback=TRAIL_T1_GIVEBACK,
+        trail_t2_arm=TRAIL_T2_ARM,
+        trail_t3_arm=TRAIL_T3_ARM,
         close_exec="%s-%s"
         % (
             globals().get("PENDING_EXEC_START", "145600"),

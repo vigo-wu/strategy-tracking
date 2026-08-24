@@ -67,6 +67,73 @@ def _near_ma(price, ma, tol=None):
     return abs(float(price) - float(ma)) / float(ma) <= tol
 
 
+def _true_range(highs, lows, closes):
+    """真实波幅；序列从末根对齐。"""
+    h = np.asarray(highs, dtype=float)
+    l = np.asarray(lows, dtype=float)
+    c = np.asarray(closes, dtype=float)
+    n = min(len(h), len(l), len(c))
+    if n < 2:
+        return None
+    h = h[-n:]
+    l = l[-n:]
+    c = c[-n:]
+    tr = np.empty(n, dtype=float)
+    tr[0] = h[0] - l[0]
+    prev = c[:-1]
+    hl = h[1:] - l[1:]
+    hc = np.abs(h[1:] - prev)
+    lc = np.abs(l[1:] - prev)
+    tr[1:] = np.maximum(hl, np.maximum(hc, lc))
+    return tr
+
+
+def _atr(highs, lows, closes, n=None):
+    """ATR_n = 近 n 根 TR 的简单均值（与「平均真实波幅」一致）。"""
+    n = int(n if n is not None else globals().get("ATR_N", 20) or 20)
+    tr = _true_range(highs, lows, closes)
+    if tr is None:
+        return None
+    return _sma(tr, n)
+
+
+def _clamp_p_atr(raw):
+    if raw is None:
+        return None
+    try:
+        p = float(raw)
+    except Exception:
+        return None
+    if p <= 0:
+        return None
+    try:
+        floor = float(globals().get("ATR_P_FLOOR") or 0.015)
+    except Exception:
+        floor = 0.015
+    try:
+        cap = float(globals().get("ATR_P_CAP") or 0.045)
+    except Exception:
+        cap = 0.045
+    if cap < floor:
+        cap = floor
+    return max(floor, min(p, cap))
+
+
+def _p_atr_ratio(highs, lows, closes, n=None):
+    """P_atr = ATR_n / 最新收盘，再夹到 [ATR_P_FLOOR, ATR_P_CAP]。"""
+    atr_arr = _atr(highs, lows, closes, n)
+    if atr_arr is None or closes is None:
+        return None
+    atr = _last_valid(atr_arr, -1)
+    c = np.asarray(closes, dtype=float)
+    if atr is None or len(c) < 1:
+        return None
+    close = float(c[-1])
+    if close <= 0:
+        return None
+    return _clamp_p_atr(float(atr) / close)
+
+
 def _plat_window(highs, lows, lookback, end_i=None):
     """不含 end_i 的回看窗口平台高低点；(plat_high, plat_low) 或 None。"""
     if highs is None or lows is None:

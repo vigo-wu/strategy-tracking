@@ -74,25 +74,35 @@ VOL_PULLBACK_RATIO = 0.9      # 量 < 均量*0.9 视为缩量
 VOL_DRY_N = 20
 VOL_DRY_RATIO = 0.60          # 量 < 20 日均量的 60% 视为无量阴跌
 
-# 卖① trail_stop：阶梯式移动止盈
-#   按历史最高浮盈 (peak-cost)/cost 选档；触发条件：
-#     自峰值回撤 > giveback，或（若设了 profit_floor）当前浮盈 < 底线
-#   元组：(peak_lo, peak_hi, giveback, profit_floor)
+# 卖① trail_stop：动态 ATR 阶梯移动止盈
+#   P_atr = clip(ATR_n / close, ATR_P_FLOOR, ATR_P_CAP)；买入成交后按笔锁死
+#   档位 = 乘数 x 该笔 P_atr（不再用固定 3%/6%/10%）
+#   元组：(peak_lo, peak_hi, giveback, profit_floor)，均为 P_atr 乘数
 #     peak_hi=None 无上限；profit_floor=None 不设硬底线
-#   档1 起步保护 [3%,6%)：回撤>1.5%（同旧版，防破本）
-#   档2 落袋为安 [6%,10%)：回撤>3% 或 利润跌破 3%
-#   档3 放鹰吃肉 >=10%：回撤>4%（利润垫扛日线洗盘）
+#   档1 起步保护 [1.0, 2.5)：回撤 >= 0.5 x P_atr
+#   档2 落袋为安 [2.5, 4.5)：回撤 >= 1.0 x P_atr 或 利润跌破 1.0 x P_atr
+#   档3 放鹰吃肉 >= 4.5：回撤 >= 2.0 x P_atr
+ATR_N = 20
+ATR_P_FLOOR = 0.015          # 1.5%；过窄则按此挂止盈，防滑点误杀
+ATR_P_CAP = 0.045            # 4.5%；过宽则封顶，防利润回吐殆尽
+TRAIL_T1_ARM = 1.0
+TRAIL_T1_GIVEBACK = 0.5
+TRAIL_T2_ARM = 2.5
+TRAIL_T2_GIVEBACK = 1.0
+TRAIL_T2_FLOOR = 1.0
+TRAIL_T3_ARM = 4.5
+TRAIL_T3_GIVEBACK = 2.0
 TRAIL_TIERS = (
-    (0.03, 0.06, 0.015, None),
-    (0.06, 0.10, 0.03, 0.03),
-    (0.10, None, 0.04, None),
+    (TRAIL_T1_ARM, TRAIL_T2_ARM, TRAIL_T1_GIVEBACK, None),
+    (TRAIL_T2_ARM, TRAIL_T3_ARM, TRAIL_T2_GIVEBACK, TRAIL_T2_FLOOR),
+    (TRAIL_T3_ARM, None, TRAIL_T3_GIVEBACK, None),
 )
 # 卖② time_force：智能时间成本（防长期磨人，不砍还在趋势里的仓）
 #   BARS = 日线慢均线一半：满此日后才把 MA60 当出场地板，不是最长持仓
 #   收盘破日线 MA60 → 立即强制平仓
-#   仍站上 MA60 且峰值浮盈 < MIN_RET → 豁免一次，再观察 GRACE_BARS 日，期满强平（回收死钱）
-#   仍站上 MA60 且峰值 >= MIN_RET → 不按日历强平，交给 trail / 破 MA60 / 周线空
-#   MIN_RET 对齐阶梯止盈起步档；0 = 关闭让路（回到期满强平）
+#   仍站上 MA60 且峰值浮盈 < TRAIL_T1_ARM x P_atr → 豁免一次，再观察 GRACE_BARS 日，期满强平
+#   仍站上 MA60 且峰值 >= 门槛 → 不按日历强平，交给 trail / 破 MA60 / 周线空
+#   无 P_atr 的旧仓回落 TIME_FORCE_MIN_RET；0 = 关闭让路（回到期满强平）
 TIME_FORCE_BARS = D_MA_SLOW // 2
 TIME_FORCE_GRACE_BARS = 5
 TIME_FORCE_MIN_RET = 0.03
@@ -134,7 +144,7 @@ SCALE_W_HIST_EXPAND_RATIO = 1.2
 
 # 策略交易面板 bind → 模块常量。编辑器/回测无注入时用上面默认值。
 # 只上屏：开关 / 预算袖子 / 硬风控。买点窗口、时间成本、加仓细节、SCALE_LOTS、
-# BOOK_N、TRAIL_TIERS、均线周期、路径、账号仍只在 config（N 以 BOOK_STOCKS 长度为准）。
+# BOOK_N、ATR 止盈乘数、均线周期、路径、账号仍只在 config（N 以 BOOK_STOCKS 长度为准）。
 PANEL_BINDS = (
     ("panel_dry_run", "DRY_RUN", "bool"),
     ("panel_budget", "TRADE_BUDGET", "float"),
@@ -198,7 +208,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.44"
+STRATEGY_VER = "v1.45"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）

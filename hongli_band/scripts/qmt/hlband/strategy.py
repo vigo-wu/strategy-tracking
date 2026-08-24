@@ -277,42 +277,183 @@ def _update_hold_peak(high_px, cost):
     return changed
 
 
-def _trail_tier_params(max_profit):
-    """按峰值浮盈选档，返回 (giveback, profit_floor)；未达起步档则 (None, None)。"""
+def _lot_p_atr(lot):
+    if lot is None:
+        return _clamp_p_atr(getattr(A, "p_atr", None))
+    return _clamp_p_atr(lot.get("p_atr") if isinstance(lot, dict) else None)
+
+
+def _resolve_p_atr(lot=None):
+    """该笔锁定的 P_atr；缺失则用当日计算值，再回落地板。"""
+    p = _lot_p_atr(lot)
+    if p is not None:
+        return p
+    p = _clamp_p_atr(getattr(A, "_p_atr_now", None))
+    if p is not None:
+        return p
+    try:
+        return float(globals().get("ATR_P_FLOOR") or 0.015)
+    except Exception:
+        return 0.015
+
+
+def _ensure_lot_p_atr(lot, p_now=None):
+    """已有则只做夹取；缺失则锁入 p_now。返回 (p_atr, changed)。"""
+    p_now = _clamp_p_atr(p_now)
+    if lot is None:
+        cur = _clamp_p_atr(getattr(A, "p_atr", None))
+        if cur is not None:
+            if getattr(A, "p_atr", None) != cur:
+                A.p_atr = cur
+                return cur, True
+            return cur, False
+        if p_now is None:
+            return None, False
+        A.p_atr = p_now
+        return p_now, True
+    if not isinstance(lot, dict):
+        return None, False
+    cur = _clamp_p_atr(lot.get("p_atr"))
+    if cur is not None:
+        try:
+            raw = lot.get("p_atr")
+            raw_f = float(raw) if raw is not None else None
+        except Exception:
+            raw_f = None
+        if raw_f != cur:
+            lot["p_atr"] = cur
+            return cur, True
+        return cur, False
+    if p_now is None:
+        return None, False
+    lot["p_atr"] = p_now
+    return p_now, True
+
+
+def _lock_p_atr_on_fill(lot, p_now, lid=None):
+    p, _chg = _ensure_lot_p_atr(lot, p_now)
+    if p is None:
+        return None
+    print(
+        "%s p_atr lock lot=%s p_atr=%.2f%%"
+        % (STRATEGY_NAME, lid, float(p) * 100.0)
+    )
+    _event_log("p_atr_lock", lot_id=lid, p_atr=p)
+    return p
+
+
+def _p_atr_status_brief():
+    if _lots_enabled():
+        parts = []
+        for lot in getattr(A, "lots", None) or []:
+            if not isinstance(lot, dict):
+                continue
+            p = _lot_p_atr(lot)
+            if p is None:
+                continue
+            parts.append("L%s:%.2f%%" % (lot.get("id"), p * 100.0))
+        if parts:
+            return ",".join(parts)
+    p = _lot_p_atr(None)
+    if p is None:
+        p = getattr(A, "_p_atr_now", None)
+    if p is None:
+        return "-"
+    return "%.2f%%" % (float(p) * 100.0)
+
+
+def _trail_hit_brief(lot_ids=None):
+    meta = getattr(A, "_trail_hit_meta", None) or {}
+    if not isinstance(meta, dict) or not meta:
+        return "-"
+    ids = list(lot_ids) if lot_ids else list(meta.keys())
+    parts = []
+    for lid in ids:
+        try:
+            key = int(lid)
+        except Exception:
+            key = lid
+        d = meta.get(key)
+        if not d:
+            continue
+        parts.append(
+            "L%s:p=%.2f%% gb=%.2f%% lim=%.2f%%"
+            % (
+                lid,
+                float(d.get("p_atr") or 0) * 100.0,
+                float(d.get("giveback") or 0) * 100.0,
+                float(d.get("giveback_lim") or 0) * 100.0,
+            )
+        )
+    return ",".join(parts) if parts else "-"
+
+
+def _trail_tier_params(max_profit, p_atr):
+    """按峰值浮盈 / P_atr 选档，返回绝对 giveback、profit_floor。"""
     mp = float(max_profit)
+    p = float(p_atr)
+    if p <= 0:
+        return None, None
     for lo, hi, giveback, floor in TRAIL_TIERS:
-        if mp < float(lo):
+        if mp < float(lo) * p:
             continue
-        if hi is not None and mp >= float(hi):
+        if hi is not None and mp >= float(hi) * p:
             continue
-        fl = None if floor is None else float(floor)
-        return float(giveback), fl
+        fl = None if floor is None else float(floor) * p
+        return float(giveback) * p, fl
     return None, None
 
 
-def _trail_stop_hit(price, cost, peak=None):
-    """阶梯移动止盈：峰值浮盈落档后，回撤超容忍 或 跌破利润底线。"""
+def _trail_stop_hit(price, cost, peak=None, p_atr=None, lot=None, detail=None):
+    """阶梯移动止盈：峰值浮盈落档后，回撤达容忍 或 跌破利润底线。"""
     if cost is None or cost <= 0:
         return False
     if peak is None:
-        peak = getattr(A, "hold_peak", None)
+        if lot is not None:
+            peak = lot.get("hold_peak")
+        else:
+            peak = getattr(A, "hold_peak", None)
     if peak is None or peak <= 0:
         return False
+    if p_atr is None:
+        p_atr = _resolve_p_atr(lot)
+    if p_atr is None or float(p_atr) <= 0:
+        return False
     max_profit = (float(peak) - float(cost)) / float(cost)
-    giveback_lim, profit_floor = _trail_tier_params(max_profit)
+    giveback_lim, profit_floor = _trail_tier_params(max_profit, p_atr)
+    if detail is not None:
+        detail.update(
+            {
+                "p_atr": float(p_atr),
+                "max_profit": max_profit,
+                "giveback_lim": giveback_lim,
+                "profit_floor": profit_floor,
+            }
+        )
     if giveback_lim is None:
         return False
     giveback = (float(peak) - float(price)) / float(peak)
-    if giveback > giveback_lim:
+    cur_profit = (float(price) - float(cost)) / float(cost)
+    if detail is not None:
+        detail["giveback"] = giveback
+        detail["cur_profit"] = cur_profit
+    if giveback >= giveback_lim:
         return True
-    if profit_floor is not None:
-        cur_profit = (float(price) - float(cost)) / float(cost)
-        if cur_profit < profit_floor:
-            return True
+    if profit_floor is not None and cur_profit < profit_floor:
+        return True
     return False
 
 
-def _time_force_min_ret():
+def _time_force_min_ret(lot=None):
+    p = _lot_p_atr(lot)
+    if p is None:
+        p = _clamp_p_atr(getattr(A, "_p_atr_now", None))
+    if p is not None:
+        try:
+            arm = float(globals().get("TRAIL_T1_ARM") or 1.0)
+        except Exception:
+            arm = 1.0
+        return arm * float(p)
     try:
         return float(globals().get("TIME_FORCE_MIN_RET") or 0)
     except Exception:
@@ -342,20 +483,33 @@ def _time_force_already_skip(lot):
     return bool(lot.get("time_force_trend_skip"))
 
 
-def _time_force_mark_skip(lot, peak_ret, hold_bars, m60):
+def _time_force_mark_skip(lot, peak_ret, hold_bars, m60, min_ret=None):
     if lot is None:
         A.time_force_trend_skip = True
         lid = None
     else:
         lot["time_force_trend_skip"] = True
         lid = lot.get("id")
+    if min_ret is None:
+        min_ret = _time_force_min_ret(lot)
+    p_atr = _resolve_p_atr(lot)
     print(
-        "%s time_force skip trend peak=%.2f%% ma60=%.4f hold=%s lot=%s"
-        % (STRATEGY_NAME, float(peak_ret) * 100.0, m60, hold_bars, lid)
+        "%s time_force skip trend peak=%.2f%% min=%.2f%% p_atr=%.2f%% ma60=%.4f hold=%s lot=%s"
+        % (
+            STRATEGY_NAME,
+            float(peak_ret) * 100.0,
+            float(min_ret) * 100.0,
+            float(p_atr or 0) * 100.0,
+            m60,
+            hold_bars,
+            lid,
+        )
     )
     _event_log(
         "time_force_skip_trend",
         peak_ret=peak_ret,
+        min_ret=min_ret,
+        p_atr=p_atr,
         ma60=m60,
         hold_bars=hold_bars,
         lot_id=lid,
@@ -365,7 +519,7 @@ def _time_force_mark_skip(lot, peak_ret, hold_bars, m60):
 
 def _time_force_hit(price, closes, hold_bars, lot=None):
     """智能时间成本：持仓 > TIME_FORCE_BARS 后，破日线 MA60 强制平仓。
-    仍站上 MA60 时：峰值已达 TIME_FORCE_MIN_RET（阶梯止盈起步档）则不按日历强平；
+    仍站上 MA60 时：峰值已达 1.0 x P_atr（阶梯起步档）则不按日历强平；
     从未武装的死钱仓豁免 GRACE 日后强平。"""
     if hold_bars is None or int(hold_bars) <= int(TIME_FORCE_BARS):
         return False
@@ -382,12 +536,12 @@ def _time_force_hit(price, closes, hold_bars, lot=None):
     if px < m60:
         return True
 
-    min_ret = _time_force_min_ret()
+    min_ret = _time_force_min_ret(lot)
     peak_ret = _time_force_peak_ret(lot)
     already = _time_force_already_skip(lot)
     if min_ret > 0 and (already or peak_ret >= min_ret):
         if not already:
-            _time_force_mark_skip(lot, peak_ret, hold_bars, m60)
+            _time_force_mark_skip(lot, peak_ret, hold_bars, m60, min_ret=min_ret)
         return False
 
     if lot is None:
@@ -401,14 +555,24 @@ def _time_force_hit(price, closes, hold_bars, lot=None):
         else:
             lot["time_force_grace_until"] = until
         print(
-            "%s time_force grace ma60=%.4f hold=%s until_bars=%s lot=%s"
-            % (STRATEGY_NAME, m60, hold_bars, until, None if lot is None else lot.get("id"))
+            "%s time_force grace ma60=%.4f hold=%s until_bars=%s min=%.2f%% p_atr=%.2f%% lot=%s"
+            % (
+                STRATEGY_NAME,
+                m60,
+                hold_bars,
+                until,
+                float(min_ret) * 100.0,
+                float(_resolve_p_atr(lot) or 0) * 100.0,
+                None if lot is None else lot.get("id"),
+            )
         )
         _event_log(
             "time_force_grace",
             ma60=m60,
             hold_bars=hold_bars,
             until_bars=until,
+            min_ret=min_ret,
+            p_atr=_resolve_p_atr(lot),
             lot_id=None if lot is None else lot.get("id"),
         )
         _save_state()
@@ -438,6 +602,7 @@ def _lot_from_agg():
         "hold_count_bar": str(getattr(A, "_hold_count_day", "") or ""),
         "time_force_grace_until": getattr(A, "time_force_grace_until", None),
         "time_force_trend_skip": bool(getattr(A, "time_force_trend_skip", False)),
+        "p_atr": getattr(A, "p_atr", None),
     }
 
 
@@ -452,6 +617,7 @@ def _mirror_hold_from_lots():
         A._hold_count_day = ""
         A.time_force_grace_until = None
         A.time_force_trend_skip = False
+        A.p_atr = None
         return
     lot = lots[0]
     A.hold_peak = lot.get("hold_peak")
@@ -463,6 +629,7 @@ def _mirror_hold_from_lots():
     A._hold_count_day = tag
     A.time_force_grace_until = lot.get("time_force_grace_until")
     A.time_force_trend_skip = bool(lot.get("time_force_trend_skip"))
+    A.p_atr = lot.get("p_atr")
 
 
 def _infer_round_scaled():
@@ -646,8 +813,25 @@ def _eval_lot_sell(price, closes, lot):
     if cost > 0 and price <= cost * (1.0 - float(STOP_LOSS)):
         reasons.append("stop_loss")
         return True, reasons
-    if _trail_stop_hit(price, cost, peak=lot.get("hold_peak")):
+    td = {}
+    if _trail_stop_hit(
+        price,
+        cost,
+        peak=lot.get("hold_peak"),
+        p_atr=_resolve_p_atr(lot),
+        lot=lot,
+        detail=td,
+    ):
         reasons.append("trail_stop")
+        meta = getattr(A, "_trail_hit_meta", None)
+        if not isinstance(meta, dict):
+            meta = {}
+        try:
+            lid = int(lot.get("id") or 0)
+        except Exception:
+            lid = 0
+        meta[lid] = td
+        A._trail_hit_meta = meta
         return True, reasons
     if _time_force_hit(price, closes, lot.get("hold_bars", 0), lot=lot):
         reasons.append("time_force")
@@ -687,6 +871,8 @@ def _clear_hold_meta():
     A.time_force_grace_until = None
     A.time_force_trend_skip = False
     A.round_scaled = False
+    A.p_atr = None
+    A._trail_hit_meta = None
 
 
 def _bump_hold_bars(day):
@@ -1087,12 +1273,15 @@ def _after_signal_buy_filled(px, day, add=False):
             day=d,
             signal=A._last_add_signal,
         )
+    p_now = getattr(A, "_p_atr_now", None)
     if _lots_enabled():
         lots = getattr(A, "lots", None) or []
-        if lots and day:
-            lots[-1]["hold_count_bar"] = str(day)
-            if not add:
-                lots[-1]["hold_bars"] = 0
+        if lots:
+            if day:
+                lots[-1]["hold_count_bar"] = str(day)
+                if not add:
+                    lots[-1]["hold_bars"] = 0
+            _lock_p_atr_on_fill(lots[-1], p_now, lid=lots[-1].get("id"))
         _mirror_hold_from_lots()
         _save_state()
         return
@@ -1105,6 +1294,8 @@ def _after_signal_buy_filled(px, day, add=False):
         A._hold_count_day = str(day or "")
         A.time_force_grace_until = None
         A.time_force_trend_skip = False
+    if (not add) or getattr(A, "p_atr", None) is None:
+        _lock_p_atr_on_fill(None, p_now, lid=None)
     _save_state()
 
 
@@ -1563,6 +1754,8 @@ def _handle(C):
 
     price = float(closes_s[-1])
     high_px = float(highs_s[-1])
+    A._p_atr_now = _p_atr_ratio(highs_s, lows_s, closes_s)
+    A._trail_hit_meta = None
     if bt:
         _bt_recover_position(now=now, last=float(closes_d[-1]))
 
@@ -1607,16 +1800,32 @@ def _handle(C):
                 or getattr(A, "time_force_grace_until", None) is not None
                 or bool(getattr(A, "time_force_trend_skip", False))
                 or bool(getattr(A, "round_scaled", False))
+                or getattr(A, "p_atr", None) is not None
             ):
                 _clear_hold_meta()
         else:
             _ensure_lots()
             changed = False
+            p_now = getattr(A, "_p_atr_now", None)
             for lot in A.lots:
                 if _bump_lot_bars(lot, day):
                     changed = True
                 if _update_lot_peaks(lot, high_px, price):
                     changed = True
+                had = lot.get("p_atr") if isinstance(lot, dict) else None
+                _p, pchg = _ensure_lot_p_atr(lot, p_now)
+                if pchg:
+                    changed = True
+                    if had is None and _p is not None:
+                        print(
+                            "%s p_atr backfill lot=%s p_atr=%.2f%%"
+                            % (STRATEGY_NAME, lot.get("id"), float(_p) * 100.0)
+                        )
+                        _event_log(
+                            "p_atr_backfill",
+                            lot_id=lot.get("id"),
+                            p_atr=_p,
+                        )
             _mirror_hold_from_lots()
             if changed:
                 _save_state()
@@ -1627,11 +1836,20 @@ def _handle(C):
             or getattr(A, "time_force_grace_until", None) is not None
             or bool(getattr(A, "time_force_trend_skip", False))
             or bool(getattr(A, "round_scaled", False))
+            or getattr(A, "p_atr", None) is not None
         ):
             _clear_hold_meta()
     else:
         _bump_hold_bars(day)
-        if _update_hold_peak(high_px, cost):
+        peak_chg = _update_hold_peak(high_px, cost)
+        _p, pchg = _ensure_lot_p_atr(None, getattr(A, "_p_atr_now", None))
+        if pchg and _p is not None and getattr(A, "p_atr", None) == _p:
+            print(
+                "%s p_atr backfill lot=- p_atr=%.2f%%"
+                % (STRATEGY_NAME, float(_p) * 100.0)
+            )
+            _event_log("p_atr_backfill", lot_id=None, p_atr=_p)
+        if peak_chg or pchg:
             _save_state()
 
     stop_hit = False
@@ -1658,10 +1876,13 @@ def _handle(C):
             sell_reasons = list(sell_reasons) + ["stop_loss"]
             sell_ok = True
 
-        if holding and (not stop_hit) and _trail_stop_hit(price, cost):
-            trail_hit = True
-            sell_reasons = list(sell_reasons) + ["trail_stop"]
-            sell_ok = True
+        if holding and (not stop_hit):
+            td = {}
+            if _trail_stop_hit(price, cost, lot=None, detail=td):
+                trail_hit = True
+                sell_reasons = list(sell_reasons) + ["trail_stop"]
+                sell_ok = True
+                A._trail_hit_meta = {0: td}
 
         grace_before = getattr(A, "time_force_grace_until", None)
         skip_before = bool(getattr(A, "time_force_trend_skip", False))
@@ -1744,7 +1965,7 @@ def _handle(C):
             "n1d=%d n1w=%d close=%.4f sig_d=%s sig_w=%s phase=%s prev_d=%s prev_w=%s "
             "w_bull=%s w_bear=%s w_bn=%s/%s w_ma5=%s w_ma30=%s w_hist=%s "
             "buy=%s buyR=%s scale=%s scaleR=%s sell=%s sellR=%s "
-            "hold=%s nlot=%s ret=%s pe=%s px=%s bt_held=%s avail=%s"
+            "hold=%s nlot=%s ret=%s patr=%s pe=%s px=%s bt_held=%s avail=%s"
             % (
                 len(closes_s),
                 len(closes_ws),
@@ -1774,6 +1995,7 @@ def _handle(C):
                 holding,
                 _pos_lots() if holding else 0,
                 None if ret_pct is None else ("%.2f%%" % (ret_pct * 100.0)),
+                _p_atr_status_brief(),
                 pe_now,
                 px_now,
                 _bt_held_vol() if bt else "-",
@@ -1811,6 +2033,7 @@ def _handle(C):
             hold=holding,
             nlot=_pos_lots() if holding else 0,
             ret=None if ret_pct is None else round(ret_pct * 100.0, 4),
+            patr=_p_atr_status_brief(),
             pe=pe_now,
             px=px_now,
         )
@@ -1906,7 +2129,7 @@ def _handle(C):
             else:
                 _save_state()
             print(
-                "%s pending_exit set signal=%s label=%s all=%s lots=%s shares=%s day=%s close=%.4f phase=%s"
+                "%s pending_exit set signal=%s label=%s all=%s lots=%s shares=%s day=%s close=%.4f phase=%s patr=%s trail=%s"
                 % (
                     STRATEGY_NAME,
                     reason,
@@ -1917,6 +2140,8 @@ def _handle(C):
                     exit_sig_day,
                     price,
                     phase,
+                    _p_atr_status_brief(),
+                    _trail_hit_brief(exit_ids),
                 )
             )
             _event_log(
@@ -1929,6 +2154,8 @@ def _handle(C):
                 phase=phase,
                 lot_ids=exit_ids or None,
                 shares=exit_shares or None,
+                p_atr=_p_atr_status_brief(),
+                trail=_trail_hit_brief(exit_ids),
             )
             _try_exec_pending_exit(C, now, now_s, day, tag, open_px, price, holding)
         elif scale_sig:
