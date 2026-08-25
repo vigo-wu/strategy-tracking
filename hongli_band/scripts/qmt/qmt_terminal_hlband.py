@@ -20,13 +20,16 @@ ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 # 单只硬顶 MAX_NAME_FRAC * E_s（默认 50%）。E_s = 账户总资产 - 非白名单股票市值（约等于现金+池内市值）。
 # k / book_mv 只统计 BOOK_STOCKS；其它持股不占名额、不进 50% 分母。N = 字典长度。
 # 约束：N * MIN_LOT <= CASH_RATIO * E_s。增减标的改本表后四图 re-deploy。
-# 形态：code → 配置字典。首期字段 ma_type（EMA|SMA）；后续可同级扩展 w_ma_life 等。
+# 形态：code → 配置字典。可写 ma_type / ma_lock。
+#   MA_STICK_ADAPT=True（默认）：按近半年「趋势粘性」自动选 EMA/SMA；
+#     ma_lock=True 时强制用 ma_type，不跑自适应。
+#   MA_STICK_ADAPT=False：行为同旧版，BOOK_STOCKS[code].ma_type 优先，否则 MA_TYPE。
 # 简写兼容：value 写成 "SMA" 视为 {"ma_type": "SMA"}；旧纯字符串 tuple 仍认作白名单。
 BOOK_STOCKS = {
-    "600350.SH": {"ma_type": "EMA"},
-    "601398.SH": {"ma_type": "SMA"},
-    "601939.SH": {"ma_type": "EMA"},
-    "513530.SH": {"ma_type": "SMA"},
+    "600350.SH": {},
+    "601398.SH": {},
+    "601939.SH": {},
+    "513530.SH": {},
 }
 BOOK_N = 4
 DYNAMIC_BUDGET = True
@@ -48,10 +51,18 @@ TRADE_BUDGET = 50000.0
 TRADE_BUDGET_BY_STOCK = {}
 
 # ---- 周线过滤（跨周期；主图仍是日线）----
-# 价格均线缺省：EMA 或 SMA（大小写不敏感）。BOOK_STOCKS[code].ma_type 优先；
-# 缺省/非法回落本常量。只作用于周/日价格均线；成交量均量始终 SMA；MACD 仍用 EMA。
+# 价格均线缺省：EMA 或 SMA（大小写不敏感）。解析顺序见 _ma_kind：
+#   粘性自适应（默认开）→ ma_lock 强制 → BOOK_STOCKS.ma_type → 本常量。
+# 只作用于周/日价格均线；成交量均量始终 SMA；MACD 仍用 EMA。
 MA_TYPE = "EMA"
-# 周线均线：快/中/生命线/慢线（斐波那契 5/13/34/55）；算法见标的 ma_type / MA_TYPE
+# 方案二「趋势粘性」：近半年收盘相对基准均线（固定 SMA）的偏离标准差。
+#   std 小 = 高粘性/贴线爬坡 → EMA；std 大 = 低粘性/深砸脉冲 → SMA。
+#   持仓中不切换线型，避免 time_force / 回踩基准中途跳变。
+MA_STICK_ADAPT = True
+STICK_LOOKBACK = 120          # 约半年交易日
+STICK_MA_N = 20               # 偏离基准均线周期（始终 SMA，避免与待选线型循环依赖）
+STICK_STD_THR = 0.025         # 偏离标准差阈值；<= 此值用 EMA，> 用 SMA（可按日志 stick_std 调）
+# 周线均线：快/中/生命线/慢线（斐波那契 5/13/34/55）；算法见 _ma_kind
 #   MA5 vs MA13 + MACD → 多头判定（仅日志；开仓不强制 weekly_bull）
 #   MA34 → 生命线（收盘跌破即周线空，强制清仓）；乖离/斜率过滤也用它
 #   MA55 → 数据暖机长度参考（market 取数 need）
@@ -149,7 +160,7 @@ SCALE_W_HIST_EXPAND_RATIO = 1.2
 
 # 策略交易面板 bind → 模块常量。编辑器/回测无注入时用上面默认值。
 # 只上屏：开关 / 预算袖子 / 硬风控。买点窗口、时间成本、加仓细节、SCALE_LOTS、
-# BOOK_N、TRAIL_TIERS、均线周期、BOOK_STOCKS 子配置、MA_TYPE、路径、账号仍只在 config（N 以 BOOK_STOCKS 长度为准）。
+# BOOK_N、TRAIL_TIERS、均线周期、粘性自适应、BOOK_STOCKS、MA_TYPE、路径、账号仍只在 config（N 以 BOOK_STOCKS 长度为准）。
 PANEL_BINDS = (
     ("panel_dry_run", "DRY_RUN", "bool"),
     ("panel_budget", "TRADE_BUDGET", "float"),
@@ -213,7 +224,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.47"
+STRATEGY_VER = "v1.48"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
@@ -592,6 +603,15 @@ def _state_extra_load(raw):
     A._skip_sell_eval_day = str(raw.get("skip_sell_eval_day", "") or "")
     A._last_add_day = str(raw.get("last_add_day", "") or "")
     A._last_add_signal = str(raw.get("last_add_signal", "") or "")
+    mk = str(raw.get("ma_kind", "") or "").strip().upper()
+    A.ma_kind = mk if mk in ("SMA", "EMA") else ""
+    try:
+        ss = raw.get("stick_std")
+        A.stick_std = None if ss is None else float(ss)
+    except Exception:
+        A.stick_std = None
+    A.stick_day = str(raw.get("stick_day", "") or "")
+    A.stick_src = str(raw.get("stick_src", "") or "")
 
 
 def _state_extra_save(data):
@@ -612,6 +632,15 @@ def _state_extra_save(data):
     data["skip_sell_eval_day"] = str(getattr(A, "_skip_sell_eval_day", "") or "")
     data["last_add_day"] = str(getattr(A, "_last_add_day", "") or "")
     data["last_add_signal"] = str(getattr(A, "_last_add_signal", "") or "")
+    mk = str(getattr(A, "ma_kind", "") or "").strip().upper()
+    data["ma_kind"] = mk if mk in ("SMA", "EMA") else ""
+    ss = getattr(A, "stick_std", None)
+    try:
+        data["stick_std"] = None if ss is None else float(ss)
+    except Exception:
+        data["stick_std"] = None
+    data["stick_day"] = str(getattr(A, "stick_day", "") or "")
+    data["stick_src"] = str(getattr(A, "stick_src", "") or "")
 
 # === qmt_common/single/state_io.py ===
 # 作用: 单仓 JSON 状态读写（回测不落盘）
@@ -1240,33 +1269,194 @@ def _ema(closes, n):
     return out
 
 
-def _ma_kind():
-    """价格均线类型：优先 BOOK_STOCKS[A.stock].ma_type，否则 MA_TYPE；非法回落 EMA。"""
-    raw = None
-    stock = str(getattr(A, "stock", "") or "").strip().upper()
+def _book_entry_for(stock=None):
+    """BOOK_STOCKS 中当前标的的配置 dict；无则 None。"""
+    stock = str(stock or getattr(A, "stock", "") or "").strip().upper()
     book = globals().get("BOOK_STOCKS")
-    if stock and isinstance(book, dict):
+    if not stock or not isinstance(book, dict):
+        return None
+    if stock in book:
+        entry = book.get(stock)
+    else:
         entry = None
-        if stock in book:
-            entry = book.get(stock)
-        else:
-            for k, v in book.items():
-                if str(k or "").strip().upper() == stock:
-                    entry = v
-                    break
-        if isinstance(entry, dict):
-            raw = entry.get("ma_type")
-        elif isinstance(entry, (str, bytes)):
-            raw = entry
+        for k, v in book.items():
+            if str(k or "").strip().upper() == stock:
+                entry = v
+                break
+    if isinstance(entry, dict):
+        return entry
+    if isinstance(entry, (str, bytes)):
+        return {"ma_type": entry}
+    return None
+
+
+def _norm_ma_kind(raw, fallback="EMA"):
+    kind = str(raw or "").strip().upper()
+    if kind in ("SMA", "EMA"):
+        return kind
+    return str(fallback or "EMA").strip().upper() or "EMA"
+
+
+def _stick_std(closes, lookback=None, ma_n=None):
+    """近 lookback 日收盘相对 SMA(ma_n) 的偏离标准差；样本不足返回 None。"""
+    lookback = int(lookback if lookback is not None else globals().get("STICK_LOOKBACK", 120) or 120)
+    ma_n = int(ma_n if ma_n is not None else globals().get("STICK_MA_N", 20) or 20)
+    if lookback < 20 or ma_n < 2:
+        return None
+    c = np.asarray(closes, dtype=float)
+    if len(c) < ma_n + lookback:
+        return None
+    ma = _sma(c, ma_n)
+    if ma is None:
+        return None
+    tail_c = c[-lookback:]
+    tail_m = ma[-lookback:]
+    dev = []
+    for i in range(lookback):
+        m = float(tail_m[i])
+        if m != m or m <= 0:
+            continue
+        v = float(tail_c[i])
+        if v != v:
+            continue
+        dev.append((v - m) / m)
+    if len(dev) < max(20, lookback // 2):
+        return None
+    return float(np.std(np.asarray(dev, dtype=float), ddof=0))
+
+
+def _ma_kind_from_stick(stick_std):
+    """高粘性(std小)→EMA；低粘性(std大)→SMA。"""
+    thr = float(globals().get("STICK_STD_THR", 0.025) or 0.025)
+    if stick_std is None:
+        return None
+    return "EMA" if float(stick_std) <= thr else "SMA"
+
+
+def _ma_lock_kind():
+    """BOOK_STOCKS 强制锁线：ma_lock=True 且 ma_type 合法时返回线型，否则 None。"""
+    entry = _book_entry_for()
+    if not isinstance(entry, dict):
+        return None
+    if not bool(entry.get("ma_lock")):
+        return None
+    raw = entry.get("ma_type")
+    kind = _norm_ma_kind(raw, "")
+    if kind in ("SMA", "EMA"):
+        return kind
+    return None
+
+
+def _ma_kind_static():
+    """关自适应时：BOOK_STOCKS.ma_type → MA_TYPE；非法回落 EMA。"""
+    entry = _book_entry_for()
+    raw = None
+    if isinstance(entry, dict):
+        raw = entry.get("ma_type")
     if raw is None or str(raw or "").strip() == "":
         raw = globals().get("MA_TYPE", "EMA")
-    kind = str(raw or "EMA").strip().upper()
+    kind = _norm_ma_kind(raw, "EMA")
     if kind in ("SMA", "EMA"):
         return kind
     if not globals().get("_MA_TYPE_BAD"):
         globals()["_MA_TYPE_BAD"] = True
         print("%s ma_type=%s invalid, fallback EMA" % (STRATEGY_NAME, raw))
     return "EMA"
+
+
+def _holding_now():
+    try:
+        if callable(globals().get("_has_position")) and _has_position():
+            return True
+    except Exception:
+        pass
+    lots = getattr(A, "lots", None) or []
+    if lots:
+        return True
+    try:
+        if callable(globals().get("_bt_held_vol")) and int(_bt_held_vol() or 0) >= 100:
+            return True
+    except Exception:
+        pass
+    try:
+        vol = float(getattr(A, "volume", 0) or 0)
+        if vol > 0:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _refresh_ma_kind(closes, day=""):
+    """按趋势粘性刷新 A.ma_kind。持仓中保持上次线型；失败回落静态配置。
+    返回 (kind, stick_std, source)：source=lock|stick|hold|static|fallback。
+    """
+    locked = _ma_lock_kind()
+    if locked:
+        A.ma_kind = locked
+        A.stick_std = getattr(A, "stick_std", None)
+        A.stick_src = "lock"
+        return locked, getattr(A, "stick_std", None), "lock"
+
+    adapt = bool(globals().get("MA_STICK_ADAPT", True))
+    if not adapt:
+        kind = _ma_kind_static()
+        A.ma_kind = kind
+        A.stick_std = None
+        A.stick_src = "static"
+        return kind, None, "static"
+
+    prev = str(getattr(A, "ma_kind", "") or "").strip().upper()
+    if prev not in ("SMA", "EMA"):
+        prev = ""
+
+    if _holding_now() and prev:
+        A.stick_src = "hold"
+        return prev, getattr(A, "stick_std", None), "hold"
+
+    stick = _stick_std(closes)
+    A.stick_std = stick
+    kind = _ma_kind_from_stick(stick)
+    if kind is None:
+        kind = prev or _ma_kind_static()
+        A.ma_kind = kind
+        A.stick_src = "fallback"
+        return kind, stick, "fallback"
+
+    A.ma_kind = kind
+    A.stick_day = day
+    A.stick_src = "stick"
+    if prev and kind != prev:
+        print(
+            "%s stick ma_type %s -> %s stick_std=%.4f thr=%.4f"
+            % (
+                STRATEGY_NAME,
+                prev,
+                kind,
+                float(stick),
+                float(globals().get("STICK_STD_THR", 0.025) or 0.025),
+            )
+        )
+    return kind, stick, "stick"
+
+
+def _ma_kind():
+    """当前价格均线类型。优先 A.ma_kind（粘性刷新后），否则静态配置。"""
+    cur = str(getattr(A, "ma_kind", "") or "").strip().upper()
+    if cur in ("SMA", "EMA"):
+        return cur
+    locked = _ma_lock_kind()
+    if locked:
+        A.ma_kind = locked
+        return locked
+    if bool(globals().get("MA_STICK_ADAPT", True)):
+        # 尚未 refresh 时先用静态，等 _handle 用日线收盘刷新
+        kind = _ma_kind_static()
+        A.ma_kind = kind
+        return kind
+    kind = _ma_kind_static()
+    A.ma_kind = kind
+    return kind
 
 
 def _price_ma(closes, n):
@@ -5217,6 +5407,8 @@ def _handle(C):
     if bt:
         _bt_recover_position(now=now, last=float(closes_d[-1]))
 
+    _refresh_ma_kind(closes_s, day=sig_day_daily)
+
     weekly_bull, weekly_bear, w_detail = _eval_weekly(closes_ws)
     # 清仓二次确认只在 bt / confirm / 开盘兜底累计；盘中 exec 不改 streak
     track_bear = (not live_cc) or (phase == "confirm") or bool(need_fallback)
@@ -5395,7 +5587,8 @@ def _handle(C):
             "n1d=%d n1w=%d close=%.4f sig_d=%s sig_w=%s phase=%s prev_d=%s prev_w=%s "
             "w_bull=%s w_bear=%s w_bn=%s/%s w_ma5=%s w_ma30=%s w_hist=%s "
             "buy=%s buyR=%s scale=%s scaleR=%s sell=%s sellR=%s "
-            "hold=%s nlot=%s ret=%s pe=%s px=%s bt_held=%s avail=%s"
+            "hold=%s nlot=%s ret=%s pe=%s px=%s bt_held=%s avail=%s "
+            "ma=%s stick=%s src=%s"
             % (
                 len(closes_s),
                 len(closes_ws),
@@ -5429,6 +5622,13 @@ def _handle(C):
                 px_now,
                 _bt_held_vol() if bt else "-",
                 _bt_available_vol() if bt else "-",
+                _ma_kind(),
+                (
+                    "-"
+                    if getattr(A, "stick_std", None) is None
+                    else ("%.4f" % float(A.stick_std))
+                ),
+                str(getattr(A, "stick_src", "") or "-"),
             ),
         )
         _bar_log(
@@ -5464,6 +5664,13 @@ def _handle(C):
             ret=None if ret_pct is None else round(ret_pct * 100.0, 4),
             pe=pe_now,
             px=px_now,
+            ma=_ma_kind(),
+            stick_std=(
+                None
+                if getattr(A, "stick_std", None) is None
+                else round(float(A.stick_std), 6)
+            ),
+            stick_src=str(getattr(A, "stick_src", "") or ""),
         )
 
     # ---- 先执行挂起的卖/买（尾盘按收盘价；隔夜残留开盘按开盘价）----
@@ -5929,6 +6136,14 @@ def _init_impl(C):
             A._last_add_day = ""
         if not hasattr(A, "_last_add_signal"):
             A._last_add_signal = ""
+        if not hasattr(A, "ma_kind"):
+            A.ma_kind = ""
+        if not hasattr(A, "stick_std"):
+            A.stick_std = None
+        if not hasattr(A, "stick_day"):
+            A.stick_day = ""
+        if not hasattr(A, "stick_src"):
+            A.stick_src = ""
 
     try:
         C.set_universe([A.stock])
@@ -5970,6 +6185,10 @@ def _init_impl(C):
         "%d/%d" % (D_MA_MID, D_MA_SLOW),
         "ma_type=",
         _ma_kind(),
+        "stick_adapt=",
+        bool(globals().get("MA_STICK_ADAPT", True)),
+        "stick_thr=",
+        float(globals().get("STICK_STD_THR", 0.025) or 0.025),
         "stop=",
         STOP_LOSS,
         "chase<",
@@ -6040,6 +6259,8 @@ def _init_impl(C):
         max_name_frac=MAX_NAME_FRAC,
         equal_split=EQUAL_SPLIT,
         ma_type=_ma_kind(),
+        stick_adapt=bool(globals().get("MA_STICK_ADAPT", True)),
+        stick_thr=float(globals().get("STICK_STD_THR", 0.025) or 0.025),
         log_dir=str(globals().get("LOG_DIR") or ""),
     )
 

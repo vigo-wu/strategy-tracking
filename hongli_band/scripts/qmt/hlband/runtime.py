@@ -218,6 +218,14 @@ def _init_impl(C):
             A._last_add_day = ""
         if not hasattr(A, "_last_add_signal"):
             A._last_add_signal = ""
+        if not hasattr(A, "ma_kind"):
+            A.ma_kind = ""
+        if not hasattr(A, "stick_std"):
+            A.stick_std = None
+        if not hasattr(A, "stick_day"):
+            A.stick_day = ""
+        if not hasattr(A, "stick_src"):
+            A.stick_src = ""
 
     try:
         C.set_universe([A.stock])
@@ -259,6 +267,10 @@ def _init_impl(C):
         "%d/%d" % (D_MA_MID, D_MA_SLOW),
         "ma_type=",
         _ma_kind(),
+        "stick_adapt=",
+        bool(globals().get("MA_STICK_ADAPT", True)),
+        "stick_thr=",
+        float(globals().get("STICK_STD_THR", 0.025) or 0.025),
         "stop=",
         STOP_LOSS,
         "chase<",
@@ -329,6 +341,8 @@ def _init_impl(C):
         max_name_frac=MAX_NAME_FRAC,
         equal_split=EQUAL_SPLIT,
         ma_type=_ma_kind(),
+        stick_adapt=bool(globals().get("MA_STICK_ADAPT", True)),
+        stick_thr=float(globals().get("STICK_STD_THR", 0.025) or 0.025),
         log_dir=str(globals().get("LOG_DIR") or ""),
     )
 

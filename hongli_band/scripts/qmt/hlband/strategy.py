@@ -1566,6 +1566,8 @@ def _handle(C):
     if bt:
         _bt_recover_position(now=now, last=float(closes_d[-1]))
 
+    _refresh_ma_kind(closes_s, day=sig_day_daily)
+
     weekly_bull, weekly_bear, w_detail = _eval_weekly(closes_ws)
     # 清仓二次确认只在 bt / confirm / 开盘兜底累计；盘中 exec 不改 streak
     track_bear = (not live_cc) or (phase == "confirm") or bool(need_fallback)
@@ -1744,7 +1746,8 @@ def _handle(C):
             "n1d=%d n1w=%d close=%.4f sig_d=%s sig_w=%s phase=%s prev_d=%s prev_w=%s "
             "w_bull=%s w_bear=%s w_bn=%s/%s w_ma5=%s w_ma30=%s w_hist=%s "
             "buy=%s buyR=%s scale=%s scaleR=%s sell=%s sellR=%s "
-            "hold=%s nlot=%s ret=%s pe=%s px=%s bt_held=%s avail=%s"
+            "hold=%s nlot=%s ret=%s pe=%s px=%s bt_held=%s avail=%s "
+            "ma=%s stick=%s src=%s"
             % (
                 len(closes_s),
                 len(closes_ws),
@@ -1778,6 +1781,13 @@ def _handle(C):
                 px_now,
                 _bt_held_vol() if bt else "-",
                 _bt_available_vol() if bt else "-",
+                _ma_kind(),
+                (
+                    "-"
+                    if getattr(A, "stick_std", None) is None
+                    else ("%.4f" % float(A.stick_std))
+                ),
+                str(getattr(A, "stick_src", "") or "-"),
             ),
         )
         _bar_log(
@@ -1813,6 +1823,13 @@ def _handle(C):
             ret=None if ret_pct is None else round(ret_pct * 100.0, 4),
             pe=pe_now,
             px=px_now,
+            ma=_ma_kind(),
+            stick_std=(
+                None
+                if getattr(A, "stick_std", None) is None
+                else round(float(A.stick_std), 6)
+            ),
+            stick_src=str(getattr(A, "stick_src", "") or ""),
         )
 
     # ---- 先执行挂起的卖/买（尾盘按收盘价；隔夜残留开盘按开盘价）----

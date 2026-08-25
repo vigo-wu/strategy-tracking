@@ -10,13 +10,16 @@ ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 # 单只硬顶 MAX_NAME_FRAC * E_s（默认 50%）。E_s = 账户总资产 - 非白名单股票市值（约等于现金+池内市值）。
 # k / book_mv 只统计 BOOK_STOCKS；其它持股不占名额、不进 50% 分母。N = 字典长度。
 # 约束：N * MIN_LOT <= CASH_RATIO * E_s。增减标的改本表后四图 re-deploy。
-# 形态：code → 配置字典。首期字段 ma_type（EMA|SMA）；后续可同级扩展 w_ma_life 等。
+# 形态：code → 配置字典。可写 ma_type / ma_lock。
+#   MA_STICK_ADAPT=True（默认）：按近半年「趋势粘性」自动选 EMA/SMA；
+#     ma_lock=True 时强制用 ma_type，不跑自适应。
+#   MA_STICK_ADAPT=False：行为同旧版，BOOK_STOCKS[code].ma_type 优先，否则 MA_TYPE。
 # 简写兼容：value 写成 "SMA" 视为 {"ma_type": "SMA"}；旧纯字符串 tuple 仍认作白名单。
 BOOK_STOCKS = {
-    "600350.SH": {"ma_type": "EMA"},
-    "601398.SH": {"ma_type": "SMA"},
-    "601939.SH": {"ma_type": "EMA"},
-    "513530.SH": {"ma_type": "SMA"},
+    "600350.SH": {},
+    "601398.SH": {},
+    "601939.SH": {},
+    "513530.SH": {},
 }
 BOOK_N = 4
 DYNAMIC_BUDGET = True
@@ -38,10 +41,18 @@ TRADE_BUDGET = 50000.0
 TRADE_BUDGET_BY_STOCK = {}
 
 # ---- 周线过滤（跨周期；主图仍是日线）----
-# 价格均线缺省：EMA 或 SMA（大小写不敏感）。BOOK_STOCKS[code].ma_type 优先；
-# 缺省/非法回落本常量。只作用于周/日价格均线；成交量均量始终 SMA；MACD 仍用 EMA。
+# 价格均线缺省：EMA 或 SMA（大小写不敏感）。解析顺序见 _ma_kind：
+#   粘性自适应（默认开）→ ma_lock 强制 → BOOK_STOCKS.ma_type → 本常量。
+# 只作用于周/日价格均线；成交量均量始终 SMA；MACD 仍用 EMA。
 MA_TYPE = "EMA"
-# 周线均线：快/中/生命线/慢线（斐波那契 5/13/34/55）；算法见标的 ma_type / MA_TYPE
+# 方案二「趋势粘性」：近半年收盘相对基准均线（固定 SMA）的偏离标准差。
+#   std 小 = 高粘性/贴线爬坡 → EMA；std 大 = 低粘性/深砸脉冲 → SMA。
+#   持仓中不切换线型，避免 time_force / 回踩基准中途跳变。
+MA_STICK_ADAPT = True
+STICK_LOOKBACK = 120          # 约半年交易日
+STICK_MA_N = 20               # 偏离基准均线周期（始终 SMA，避免与待选线型循环依赖）
+STICK_STD_THR = 0.025         # 偏离标准差阈值；<= 此值用 EMA，> 用 SMA（可按日志 stick_std 调）
+# 周线均线：快/中/生命线/慢线（斐波那契 5/13/34/55）；算法见 _ma_kind
 #   MA5 vs MA13 + MACD → 多头判定（仅日志；开仓不强制 weekly_bull）
 #   MA34 → 生命线（收盘跌破即周线空，强制清仓）；乖离/斜率过滤也用它
 #   MA55 → 数据暖机长度参考（market 取数 need）
@@ -139,7 +150,7 @@ SCALE_W_HIST_EXPAND_RATIO = 1.2
 
 # 策略交易面板 bind → 模块常量。编辑器/回测无注入时用上面默认值。
 # 只上屏：开关 / 预算袖子 / 硬风控。买点窗口、时间成本、加仓细节、SCALE_LOTS、
-# BOOK_N、TRAIL_TIERS、均线周期、BOOK_STOCKS 子配置、MA_TYPE、路径、账号仍只在 config（N 以 BOOK_STOCKS 长度为准）。
+# BOOK_N、TRAIL_TIERS、均线周期、粘性自适应、BOOK_STOCKS、MA_TYPE、路径、账号仍只在 config（N 以 BOOK_STOCKS 长度为准）。
 PANEL_BINDS = (
     ("panel_dry_run", "DRY_RUN", "bool"),
     ("panel_budget", "TRADE_BUDGET", "float"),
@@ -203,7 +214,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.47"
+STRATEGY_VER = "v1.48"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）

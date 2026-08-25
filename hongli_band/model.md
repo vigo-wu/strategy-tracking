@@ -1,7 +1,7 @@
 # 红利板块波段策略：周线定方向，日线找买卖点
 
-**主题目录**：`hongli_band/`｜**版本**：v1.47｜**形态**：单仓骨架 / 分笔多仓｜**运行**：国金 QMT 终端模型（见 §5）  
-**参数默认值**：`hongli_band/scripts/qmt/hlband/config.py`（文档以该文件为准）。实盘在「模型交易 → 新建/编辑策略交易」面板只覆盖开关 / 预算袖子 / 硬风控（`hlband/panel.xml`）；编辑器回测无注入时用 config。买点窗口、时间成本、加仓细节、`SCALE_LOTS`、`BOOK_N`、阶梯止盈 `TRAIL_TIERS`、均线周期、`BOOK_STOCKS` 子配置 / `MA_TYPE`、路径仍只在 config。
+**主题目录**：`hongli_band/`｜**版本**：v1.48｜**形态**：单仓骨架 / 分笔多仓｜**运行**：国金 QMT 终端模型（见 §5）  
+**参数默认值**：`hongli_band/scripts/qmt/hlband/config.py`（文档以该文件为准）。实盘在「模型交易 → 新建/编辑策略交易」面板只覆盖开关 / 预算袖子 / 硬风控（`hlband/panel.xml`）；编辑器回测无注入时用 config。买点窗口、时间成本、加仓细节、`SCALE_LOTS`、`BOOK_N`、阶梯止盈 `TRAIL_TIERS`、均线周期、粘性自适应（`MA_STICK_ADAPT`）、`BOOK_STOCKS`、路径仍只在 config。
 
 ---
 
@@ -20,7 +20,18 @@
 
 ## 一、周线过滤
 
-周线均线为斐波那契 **MA5 / MA13 / MA34（生命线 `W_MA_LIFE`）/ MA55（取数暖机）**。价格均线算法优先取 `BOOK_STOCKS[code].ma_type`，缺省回落全局 `MA_TYPE`（`EMA` 或 `SMA`，默认 EMA）；成交量均量始终 SMA。文档与日志里的 `w_ma30` 字段实际是生命线 MA34。
+周线均线为斐波那契 **MA5 / MA13 / MA34（生命线 `W_MA_LIFE`）/ MA55（取数暖机）**。价格均线算法由 `_ma_kind()` 解析（默认开 **趋势粘性自适应**，见下）；成交量均量始终 SMA。文档与日志里的 `w_ma30` 字段实际是生命线 MA34。
+
+### 均线类型：趋势粘性自适应（方案二）
+
+默认 `MA_STICK_ADAPT=True`。每个信号评估日用近 `STICK_LOOKBACK`（120）根日收盘，相对固定 **SMA(`STICK_MA_N`=20)** 的偏离序列算标准差 `stick_std`：
+
+| `stick_std` | 股性画像 | 选用 |
+| :--- | :--- | :--- |
+| `<= STICK_STD_THR`（默认 0.025） | 高粘性 / 贴线爬坡 | **EMA**（灵敏回踩加仓） |
+| `> STICK_STD_THR` | 低粘性 / 深砸脉冲 | **SMA**（迟钝箱体下沿） |
+
+基准均线固定 SMA，避免与待选线型循环依赖。**持仓中不切换**线型（`src=hold`），防止 time_force / 回踩基准中途跳变。样本不足回落 `BOOK_STOCKS.ma_type` / `MA_TYPE`。强制锁线：`BOOK_STOCKS[code] = {"ma_type": "SMA", "ma_lock": True}`。关自适应：`MA_STICK_ADAPT=False` 后行为同旧版按标的/全局配置。状态行可见 `ma=` `stick=` `src=stick|hold|lock|static|fallback`。
 
 1. `(MA5_W - MA34_W) / MA34_W >= W_BIAS_HARD`（当前 `0.08`）→ 禁开（`w_bias_skip`）。
 2. **低位斜率**：当周线乖离 `< W_BIAS_LOW`（当前 `0.02`）时，要求 **MA34 连续 `W_MA30_SLOPE_WEEKS` 周向上**（当前 `2`；常量名历史兼容，比较对象是生命线），否则禁开（`w_slope_skip`）；执行日也会取消 pending。
@@ -34,7 +45,7 @@
 
 ### 买点 缩量回踩强支撑（`pullback_vol`）
 
-- 收盘靠近 `MA20` 或 `MA60`（容差 `MA_TOUCH_TOL`，当前 ±2.5%；算法见标的 `ma_type` / `MA_TYPE`）
+- 收盘靠近 `MA20` 或 `MA60`（容差 `MA_TOUCH_TOL`，当前 ±2.5%；算法见粘性自适应 / `_ma_kind`）
 - 成交量 `< MAVOL10 × VOL_PULLBACK_RATIO`（当前 `0.9`）
 
 空仓时开第一笔（`pullback_vol`）。已持仓且门槛+触发都满足、且本轮尚未加过仓时挂 `pending_entry add=True`，尾盘按**当天买单均分**后的金额成交（错过则次日开盘补）。加仓仍受下方全局拦截（破平台/金叉不受 `chase_skip`）；另有 `scale_once` / `scale_bars` / `scale_w_hist` / `scale_sell_block` / `scale_cap`。周线空头 / 乖离 / 斜率 / 无量阴跌会取消加仓 pending。
@@ -63,7 +74,7 @@
 
 ## 仓位：共享账本均分 + 单标的 50% 硬顶
 
-跟踪池以 config `BOOK_STOCKS` 为准（默认 600350 / 601398 / 601939 / 513530，形态为 `code → {ma_type: ...}` 可扩展字典）。N = 字典长度。四图各评各的票，但**当天所有买单先写入同一份账本**，冻结后再均分可部署资金。不要用「谁先报谁先填满 50%」。
+跟踪池以 config `BOOK_STOCKS` 为准（默认 600350 / 601398 / 601939 / 513530，形态为 `code → {}` 可扩展；可选 `ma_type`/`ma_lock`）。N = 字典长度。四图各评各的票，但**当天所有买单先写入同一份账本**，冻结后再均分可部署资金。不要用「谁先报谁先填满 50%」。
 
 账户可以混持其它股票。`k` / `book_mv` **只统计白名单**。策略净值：
 
@@ -167,7 +178,7 @@
 | :--- | :--- | :--- |
 | `DRY_RUN` | `False` | **默认真下单**；联调可改 `True` 或面板勾选「模拟下单」 |
 | `TRADE_BUDGET` | `50000` | 回测单笔回落；实盘填满不锁此值；可被 `TRADE_BUDGET_BY_STOCK` 覆盖 |
-| `BOOK_STOCKS` | 四只默认 `{code: {ma_type}}` | 跟踪池 + 按标的配置（仅 config）；N=字典长度；首期读 `ma_type`，后续可同级扩键 |
+| `BOOK_STOCKS` | 四只默认 `{}` | 跟踪池；可选 `ma_type`/`ma_lock` 强制锁线；N=字典长度（仅 config） |
 | `BOOK_N` | `4` | 仅 config 回落；有 `BOOK_STOCKS` 时 N=名单只数（面板不上屏） |
 | `DYNAMIC_BUDGET` | `True` | 实盘动态仓位；回测仍用 `TRADE_BUDGET`（仅 config） |
 | `EQUAL_SPLIT` | `True` | 当天多只买单写入 `BOOK_FILE`，冻结后均分（仅 config） |
@@ -176,7 +187,10 @@
 | `CASH_RATIO` | `0.95` | 可部署比例（相对 E_s=总资产−其它市值） |
 | `MIN_LOT` | `20000` | 每只空仓预留的最小进场金额（元） |
 | `MAX_NAME_FRAC` | `0.50` | 单标的市值上限占 E_s；更怕集中可改 `0.40` |
-| `MA_TYPE` | `"EMA"` | 价格均线缺省：`EMA`/`SMA`；`BOOK_STOCKS[code].ma_type` 优先（仅 config；量均始终 SMA，MACD 仍 EMA） |
+| `MA_STICK_ADAPT` | `True` | 趋势粘性自动选 EMA/SMA（仅 config） |
+| `STICK_LOOKBACK` / `STICK_MA_N` | `120` / `20` | 粘性窗口与基准 SMA 周期（仅 config） |
+| `STICK_STD_THR` | `0.025` | 偏离标准差阈值：≤EMA，>SMA（仅 config；看日志 `stick=` 调） |
+| `MA_TYPE` | `"EMA"` | 自适应失败/关自适应时的缺省；`ma_lock` 时用 `BOOK_STOCKS.ma_type`（仅 config；量均始终 SMA，MACD 仍 EMA） |
 | `W_MA_FAST/MID/LIFE/SLOW` | `5/13/34/55` | 周线周期；生命线=34（仅 config） |
 | `W_BIAS_HARD` | `0.08` | 周线高位乖离禁开（相对 MA34） |
 | `W_BIAS_LOW` | `0.02` | 低位区阈值（配合斜率；仅 config） |
@@ -207,4 +221,4 @@
 | `STATE_FILE` | `D:\tradingStrategy\hlband_{stock}.json` | 实盘状态；按主图标的分文件 |
 | `LOG_DIR` | `D:\tradingStrategy\logs` | 实盘结构化日志根目录 |
 
-日志确认 `HlBand v1.47 init` 且 `BOOK_N= 4` 与 `book_stocks= 513530.SH,600350.SH,601398.SH,601939.SH`（逗号名单）一致、`cash_ratio= 0.95`、`min_lot= 20000`、`max_name_frac= 0.5`、`dynamic_budget= True`、`equal_split= True`、`book_freeze= 145630/093200`、`close_exec= 145600-145700`、`open_exec= 093000-094500`、`scale= True`、`scale_lots= True`、`scale_once= True`、`scale_arm_bars= 8`、`scale_plat= 20/0.10`、`scale_w_expand= 1.2`、`time_force_min_ret= 0.03`、`wMA= 5/13/34`（`dMA=20/60`，`ma_type=` 为当前主图解析结果，`DRY_RUN=False` 与面板或 config 一致）后再挂实盘。策略交易下应另有 `panel applied ...` 行。四图须都能写 `BOOK_FILE`；无信号也要打卡。实盘买入应看到 `fill ... k_other= other_mv= n_buy= split= why=split`（持股查询失败备用为 `src=local`）；未冻结为 `why=wait`。顶满应看到 `buy_cap` / `scale_cap`。验收：回测先见 `diag: ok`；买卖日志为 `@close=`（同日）或残留 `@open=`；买卖闭合、无孤儿仓。第一笔仍为 `pullback_vol`；加仓应为 `pullback_vol` / `plat_break` / `w_macd_golden`（状态行 `scale= True`），成交附近有 `lots now n=2` 与 `skip sell eval after add fill`。加仓当日状态行 `sellR` 应含 `skip_add_bar`，且不应新挂卖点。本轮已加过仓后再出第一笔时，不应再出现 `BUY add`（可见 `scale_once` 或 `pending_entry cancel scale_once`）。执行日已触发卖点时应看到 `pending_entry cancel scale_sell_block` 且不出现 `BUY add`。只出一笔时应看到 `SELL ... lots=[1]` 且另一笔仍持有。卖出前应有 `SELL lot-can_use`；若 `BUY add` 后同日仍出现 `SELL lots=[2]`，看 `risk=True` 的 WARN（券商成交未必是第二笔）。T+1 部分成交应看到 `pending_exit keep after partial fill`。趋势仓满 30 日且峰值≥3%、仍站上 EMA60 时应看到 `time_force skip trend`，之后由 `trail_stop` / `weekly_bear` / 破 EMA60 出场；磨人仓仍应看到 `time_force grace`。
+日志确认 `HlBand v1.48 init` 且 `BOOK_N= 4` 与 `book_stocks=` 名单一致、`stick_adapt= True`、`stick_thr= 0.025`、`ma_type=` 为解析结果（首根评估后状态行 `ma=`/`stick=`/`src=stick`）、`cash_ratio=` `min_lot=` `max_name_frac=` `dynamic_budget=` `equal_split=` `book_freeze=` `close_exec=` `open_exec=` `scale=` 等与 config/面板一致后再挂实盘。策略交易下应另有 `panel applied ...` 行。四图须都能写 `BOOK_FILE`；无信号也要打卡。实盘买入应看到 `fill ... k_other= other_mv= n_buy= split= why=split`（持股查询失败备用为 `src=local`）；未冻结为 `why=wait`。顶满应看到 `buy_cap` / `scale_cap`。验收：回测先见 `diag: ok`；买卖日志为 `@close=`（同日）或残留 `@open=`；买卖闭合、无孤儿仓。第一笔仍为 `pullback_vol`；加仓应为 `pullback_vol` / `plat_break` / `w_macd_golden`（状态行 `scale= True`），成交附近有 `lots now n=2` 与 `skip sell eval after add fill`。加仓当日状态行 `sellR` 应含 `skip_add_bar`，且不应新挂卖点。本轮已加过仓后再出第一笔时，不应再出现 `BUY add`（可见 `scale_once` 或 `pending_entry cancel scale_once`）。执行日已触发卖点时应看到 `pending_entry cancel scale_sell_block` 且不出现 `BUY add`。只出一笔时应看到 `SELL ... lots=[1]` 且另一笔仍持有。卖出前应有 `SELL lot-can_use`；若 `BUY add` 后同日仍出现 `SELL lots=[2]`，看 `risk=True` 的 WARN（券商成交未必是第二笔）。T+1 部分成交应看到 `pending_exit keep after partial fill`。趋势仓满 30 日且峰值≥3%、仍站上 MA60 时应看到 `time_force skip trend`，之后由 `trail_stop` / `weekly_bear` / 破 MA60 出场；磨人仓仍应看到 `time_force grace`。线型切换仅空仓日出现 `stick ma_type X -> Y`；持仓中 `src=hold` 不换线。

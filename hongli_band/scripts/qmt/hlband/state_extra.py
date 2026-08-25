@@ -31,6 +31,15 @@ def _state_extra_load(raw):
     A._skip_sell_eval_day = str(raw.get("skip_sell_eval_day", "") or "")
     A._last_add_day = str(raw.get("last_add_day", "") or "")
     A._last_add_signal = str(raw.get("last_add_signal", "") or "")
+    mk = str(raw.get("ma_kind", "") or "").strip().upper()
+    A.ma_kind = mk if mk in ("SMA", "EMA") else ""
+    try:
+        ss = raw.get("stick_std")
+        A.stick_std = None if ss is None else float(ss)
+    except Exception:
+        A.stick_std = None
+    A.stick_day = str(raw.get("stick_day", "") or "")
+    A.stick_src = str(raw.get("stick_src", "") or "")
 
 
 def _state_extra_save(data):
@@ -51,3 +60,12 @@ def _state_extra_save(data):
     data["skip_sell_eval_day"] = str(getattr(A, "_skip_sell_eval_day", "") or "")
     data["last_add_day"] = str(getattr(A, "_last_add_day", "") or "")
     data["last_add_signal"] = str(getattr(A, "_last_add_signal", "") or "")
+    mk = str(getattr(A, "ma_kind", "") or "").strip().upper()
+    data["ma_kind"] = mk if mk in ("SMA", "EMA") else ""
+    ss = getattr(A, "stick_std", None)
+    try:
+        data["stick_std"] = None if ss is None else float(ss)
+    except Exception:
+        data["stick_std"] = None
+    data["stick_day"] = str(getattr(A, "stick_day", "") or "")
+    data["stick_src"] = str(getattr(A, "stick_src", "") or "")
