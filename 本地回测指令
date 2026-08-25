@@ -1,0 +1,1 @@
+python hongli_band/scripts/local_bt/run.py --csv tools/csv/600350_SH_1d_20230103_20260825.csv --start 20230101 --end 20260801 --out hongli_band/report

@@ -9,7 +9,7 @@ STRATEGY_VER = "v1.2"
 PERIOD = "follow"
 
 # 导出根目录（绝对路径）
-OUT_DIR = r"D:\vigo\strategy-tracking\tools\csv"
+OUT_DIR = r"D:\persion\strategy-tracking\tools\csv"
 
 # True=导出区间跟主图回测起止（C.start / C.end）
 FOLLOW_CHART_RANGE = True

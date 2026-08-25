@@ -1,0 +1,582 @@
+local_bt 600350.SH csv= tools/csv/600350_SH_1d_20230103_20260825.csv walk= 20230103 20260731 n= 866 hist_n= 883
+HlBand downloaded history via download_history_data 1d from 20240616
+HlBand downloaded history via download_history_data 1w from 20240616
+HlBand backtest session start barpos= 0
+HlBand v1.47 init 600350.SH 39953913 STOCK PERIOD= 1d BACKTEST= True DRY_RUN= False budget= 50000.0 dynamic_budget= True BOOK_N= 4 book_stocks= 513530.SH,600350.SH,601398.SH,601939.SH cash_ratio= 0.9 min_lot= 20000.0 max_name_frac= 0.5 equal_split= True book_freeze= 145630/093200 wMA= 5/13/34 dMA= 20/60 ma_type= EMA stop= 0.08 chase< 0.05 scale= True scale_lots= True scale_once= True scale_arm= 0.03 scale_arm_bars= 8 scale_plat= 20/0.10 scale_w_expand= 1.2 time_force_bars= 30 time_force_min_ret= 0.03 close_exec= 145600-145700 open_exec= 093000-094500
+HlBand diag: d1_empty period= 1d end= 20230103 n= 1
+HlBand diag: d1_ok source= get_market_data_ex period= 1d n= 70 end= 20230418 last= 5.4569
+HlBand diag: w1_empty period= 1w end= 20230418 n= 15
+HlBand diag: w1_ok source= get_market_data_ex period= 1w n= 60 end= 20240311 last= 7.3219
+HlBand 20240311 1500 n1d=180 n1w=60 close=7.3219 sig_d=20240311 sig_w=20240311 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=7.1957 w_ma30=6.3316 w_hist=0.0943 buy=False buyR=w_bias_skip scale=False scaleR=scale_no_pos sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20240401 1500 n1d=180 n1w=63 close=7.2075 sig_d=20240401 sig_w=20240401 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=7.2403 w_ma30=6.4758 w_hist=0.0463 buy=False buyR=w_bias_skip scale=False scaleR=scale_no_pos sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20240506 1500 n1d=180 n1w=68 close=7.7091 sig_d=20240506 sig_w=20240506 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=7.7392 w_ma30=6.8301 w_hist=0.0399 buy=False buyR=w_bias_skip scale=False scaleR=scale_no_pos sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20240603 1500 n1d=180 n1w=72 close=7.7355 sig_d=20240603 sig_w=20240603 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=7.7336 w_ma30=7.0175 w_hist=-0.0232 buy=False buyR=w_bias_skip scale=False scaleR=scale_no_pos sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20240702 1500 n1d=180 n1w=76 close=8.2896 sig_d=20240702 sig_w=20240702 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.057 w_ma30=7.242 w_hist=-0.0001 buy=False buyR=w_bias_skip scale=False scaleR=scale_no_pos sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20240730 1500 n1d=180 n1w=80 close=8.1327 sig_d=20240730 sig_w=20240730 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.0745 w_ma30=7.4149 w_hist=-0.0319 buy=False buyR=w_bias_skip,pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20240827 1500 n1d=180 n1w=84 close=8.9265 sig_d=20240827 sig_w=20240827 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=8.6208 w_ma30=7.6729 w_hist=0.0423 buy=False buyR=w_bias_skip scale=False scaleR=w_macd_golden sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20240926 1500 n1d=180 n1w=88 close=8.2342 sig_d=20240926 sig_w=20240926 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.3114 w_ma30=7.7903 w_hist=-0.0558 buy=False buyR=- scale=False scaleR=scale_no_pos sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
+HlBand w_bear streak=1/2 day=20241009
+HlBand w_bear streak reset day=20241010 (was 1)
+HlBand 20241014 1500 n1d=180 n1w=91 close=8.1142 sig_d=20241014 sig_w=20241014 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.1694 w_ma30=7.8439 w_hist=-0.0881 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
+HlBand pending_entry set signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) day=20241014 close=8.1142 phase=bt
+HlBand BUY by signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) signal_day=20241014 @close=8.1142
+HlBand BUY BUY 600350.SH x6100 20260825231900 @ 8.114199415641737
+HlBand lots now n=1 [{'id': 1, 'shares': 6100, 'price': 8.114199415641737, 'opened_at': '20241014150000', 'hold_peak': 8.114199415641737, 'hold_close_peak': 8.114199415641737, 'hold_max_ret': 0.0, 'hold_bars': 0, 'hold_count_bar': ''}]
+HlBand BUY filled {'shares': 6100, 'price': 8.114199415641737, 'cost': 49496.62, 'opened_at': '20241014150000', 'lots': 1}
+HlBand bt T+1 unlock day= 20241015 was_locked= 6100
+HlBand 20241015 1500 n1d=180 n1w=91 close=7.9480 sig_d=20241015 sig_w=20241015 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.1141 w_ma30=7.8344 w_hist=-0.0988 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-2.05% pe=False px=False bt_held=6100 avail=6100
+HlBand 20241016 1500 n1d=180 n1w=91 close=8.1419 sig_d=20241016 sig_w=20241016 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.1787 w_ma30=7.8455 w_hist=-0.0864 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=0.34% pe=False px=False bt_held=6100 avail=6100
+HlBand 20241017 1500 n1d=180 n1w=91 close=7.9665 sig_d=20241017 sig_w=20241017 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.1202 w_ma30=7.8355 w_hist=-0.0976 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-1.82% pe=False px=False bt_held=6100 avail=6100
+HlBand 20241018 1500 n1d=180 n1w=91 close=8.0127 sig_d=20241018 sig_w=20241018 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.1356 w_ma30=7.8381 w_hist=-0.0946 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=-1.25% pe=False px=False bt_held=6100 avail=6100
+HlBand 20241021 1500 n1d=180 n1w=92 close=8.1788 sig_d=20241021 sig_w=20241021 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.15 w_ma30=7.8576 w_hist=-0.0886 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=0.80% pe=False px=False bt_held=6100 avail=6100
+HlBand 20241022 1500 n1d=180 n1w=92 close=8.4096 sig_d=20241022 sig_w=20241022 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.2269 w_ma30=7.8708 w_hist=-0.0739 buy=False buyR=- scale=False scaleR=scale_bars sell=False sellR=- hold=True nlot=1 ret=3.64% pe=False px=False bt_held=6100 avail=6100
+HlBand 20241023 1500 n1d=180 n1w=92 close=8.3173 sig_d=20241023 sig_w=20241023 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.1962 w_ma30=7.8655 w_hist=-0.0797 buy=False buyR=- scale=False scaleR=scale_bars sell=True sellR=trail_stop hold=True nlot=1 ret=2.50% pe=False px=False bt_held=6100 avail=6100
+HlBand pending_exit set signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[1] shares=6100 day=20241023 close=8.3173 phase=bt
+HlBand SELL by signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[1] shares=6100 signal_day=20241023 @close=8.3173
+HlBand SELL lot-can_use reason=trail_stop lots=[1] want=6100 avail=6100 same_day_lots=- other=- last_add=-@- risk=False
+HlBand SELL trail_stop 600350.SH x6100 20260825231901 @ 8.317285180310813
+HlBand SELL done trail_stop last= 8.317285180310813 cleared {'shares': 6100, 'price': 8.114199415641737, 'cost': 49496.62, 'opened_at': '20241014150000', 'lots': 1}
+HlBand 20241024 1500 n1d=180 n1w=92 close=8.2065 sig_d=20241024 sig_w=20241024 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.1592 w_ma30=7.8592 w_hist=-0.0868 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
+HlBand pending_entry set signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) day=20241024 close=8.2065 phase=bt
+HlBand BUY by signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) signal_day=20241024 @close=8.2065
+HlBand BUY BUY 600350.SH x6000 20260825231901 @ 8.206511126854954
+HlBand lots now n=1 [{'id': 1, 'shares': 6000, 'price': 8.206511126854954, 'opened_at': '20241024150000', 'hold_peak': 8.206511126854954, 'hold_close_peak': 8.206511126854954, 'hold_max_ret': 0.0, 'hold_bars': 0, 'hold_count_bar': ''}]
+HlBand BUY filled {'shares': 6000, 'price': 8.206511126854954, 'cost': 49239.07, 'opened_at': '20241024150000', 'lots': 1}
+HlBand bt T+1 unlock day= 20241025 was_locked= 6000
+HlBand 20241025 1500 n1d=180 n1w=92 close=8.1234 sig_d=20241025 sig_w=20241025 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.1315 w_ma30=7.8544 w_hist=-0.0921 buy=False buyR=vol_dry_skip scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-1.01% pe=False px=False bt_held=6000 avail=6000
+HlBand 20241028 1500 n1d=180 n1w=93 close=8.0588 sig_d=20241028 sig_w=20241028 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.1073 w_ma30=7.8661 w_hist=-0.0923 buy=False buyR=vol_dry_skip scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-1.80% pe=False px=False bt_held=6000 avail=6000
+HlBand 20241029 1500 n1d=180 n1w=93 close=8.0496 sig_d=20241029 sig_w=20241029 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.1042 w_ma30=7.8656 w_hist=-0.0929 buy=False buyR=vol_dry_skip scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-1.91% pe=False px=False bt_held=6000 avail=6000
+HlBand 20241030 1500 n1d=180 n1w=93 close=8.0404 sig_d=20241030 sig_w=20241030 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.1011 w_ma30=7.8651 w_hist=-0.0935 buy=False buyR=vol_dry_skip scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-2.02% pe=False px=False bt_held=6000 avail=6000
+HlBand 20241031 1500 n1d=180 n1w=93 close=7.9296 sig_d=20241031 sig_w=20241031 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.0642 w_ma30=7.8587 w_hist=-0.1005 buy=False buyR=vol_dry_skip scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-3.37% pe=False px=False bt_held=6000 avail=6000
+HlBand 20241101 1500 n1d=180 n1w=93 close=8.2434 sig_d=20241101 sig_w=20241101 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.1688 w_ma30=7.8767 w_hist=-0.0805 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=0.45% pe=False px=False bt_held=6000 avail=6000
+HlBand 20241104 1500 n1d=180 n1w=94 close=8.3819 sig_d=20241104 sig_w=20241104 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.2399 w_ma30=7.9055 w_hist=-0.0624 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=2.14% pe=False px=False bt_held=6000 avail=6000
+HlBand 20241105 1500 n1d=180 n1w=94 close=8.3173 sig_d=20241105 sig_w=20241105 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.2183 w_ma30=7.9018 w_hist=-0.0666 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=1.35% pe=False px=False bt_held=6000 avail=6000
+HlBand 20241106 1500 n1d=180 n1w=94 close=8.2988 sig_d=20241106 sig_w=20241106 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.2122 w_ma30=7.9008 w_hist=-0.0677 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=1.12% pe=False px=False bt_held=6000 avail=6000
+HlBand 20241107 1500 n1d=180 n1w=94 close=8.3819 sig_d=20241107 sig_w=20241107 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.2399 w_ma30=7.9055 w_hist=-0.0624 buy=False buyR=- scale=False scaleR=scale_w_hist sell=False sellR=- hold=True nlot=1 ret=2.14% pe=False px=False bt_held=6000 avail=6000
+HlBand 20241108 1500 n1d=180 n1w=94 close=8.3911 sig_d=20241108 sig_w=20241108 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.2429 w_ma30=7.9061 w_hist=-0.0619 buy=False buyR=- scale=False scaleR=scale_w_hist sell=False sellR=- hold=True nlot=1 ret=2.25% pe=False px=False bt_held=6000 avail=6000
+HlBand 20241111 1500 n1d=180 n1w=95 close=8.2896 sig_d=20241111 sig_w=20241111 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.2585 w_ma30=7.928 w_hist=-0.0555 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=True sellR=trail_stop hold=True nlot=1 ret=1.01% pe=False px=False bt_held=6000 avail=6000
+HlBand pending_exit set signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[1] shares=6000 day=20241111 close=8.2896 phase=bt
+HlBand SELL by signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[1] shares=6000 signal_day=20241111 @close=8.2896
+HlBand SELL lot-can_use reason=trail_stop lots=[1] want=6000 avail=6000 same_day_lots=- other=- last_add=-@- risk=False
+HlBand SELL trail_stop 600350.SH x6000 20260825231901 @ 8.28959166694685
+HlBand SELL done trail_stop last= 8.28959166694685 cleared {'shares': 6000, 'price': 8.206511126854954, 'cost': 49239.07, 'opened_at': '20241024150000', 'lots': 1}
+HlBand 20241113 1500 n1d=180 n1w=95 close=8.1696 sig_d=20241113 sig_w=20241113 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.2185 w_ma30=7.9211 w_hist=-0.0632 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
+HlBand pending_entry set signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) day=20241113 close=8.1696 phase=bt
+HlBand BUY by signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) signal_day=20241113 @close=8.1696
+HlBand BUY BUY 600350.SH x6100 20260825231901 @ 8.169586442369667
+HlBand lots now n=1 [{'id': 1, 'shares': 6100, 'price': 8.169586442369667, 'opened_at': '20241113150000', 'hold_peak': 8.169586442369667, 'hold_close_peak': 8.169586442369667, 'hold_max_ret': 0.0, 'hold_bars': 0, 'hold_count_bar': ''}]
+HlBand BUY filled {'shares': 6100, 'price': 8.169586442369667, 'cost': 49834.48, 'opened_at': '20241113150000', 'lots': 1}
+HlBand bt T+1 unlock day= 20241114 was_locked= 6100
+HlBand 20241114 1500 n1d=180 n1w=95 close=8.2065 sig_d=20241114 sig_w=20241114 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.2308 w_ma30=7.9232 w_hist=-0.0608 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=0.45% pe=False px=False bt_held=6100 avail=6100
+HlBand 20241115 1500 n1d=180 n1w=95 close=8.5388 sig_d=20241115 sig_w=20241115 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.3416 w_ma30=7.9422 w_hist=-0.0396 buy=False buyR=- scale=False scaleR=plat_break sell=False sellR=- hold=True nlot=1 ret=4.52% pe=False px=False bt_held=6100 avail=6100
+HlBand 20241118 1500 n1d=180 n1w=96 close=8.5296 sig_d=20241118 sig_w=20241118 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.4042 w_ma30=7.9758 w_hist=-0.0262 buy=False buyR=- scale=False scaleR=scale_bars sell=False sellR=- hold=True nlot=1 ret=4.41% pe=False px=False bt_held=6100 avail=6100
+HlBand 20241119 1500 n1d=180 n1w=96 close=8.5665 sig_d=20241119 sig_w=20241119 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.4166 w_ma30=7.9779 w_hist=-0.0239 buy=False buyR=- scale=False scaleR=scale_bars sell=False sellR=- hold=True nlot=1 ret=4.86% pe=False px=False bt_held=6100 avail=6100
+HlBand 20241120 1500 n1d=180 n1w=96 close=8.6496 sig_d=20241120 sig_w=20241120 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.4442 w_ma30=7.9826 w_hist=-0.0186 buy=False buyR=- scale=False scaleR=scale_bars sell=False sellR=- hold=True nlot=1 ret=5.88% pe=False px=False bt_held=6100 avail=6100
+HlBand 20241121 1500 n1d=180 n1w=96 close=8.6958 sig_d=20241121 sig_w=20241121 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.4596 w_ma30=7.9853 w_hist=-0.0156 buy=False buyR=- scale=False scaleR=scale_bars sell=False sellR=- hold=True nlot=1 ret=6.44% pe=False px=False bt_held=6100 avail=6100
+HlBand 20241122 1500 n1d=180 n1w=96 close=8.5019 sig_d=20241122 sig_w=20241122 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.395 w_ma30=7.9742 w_hist=-0.028 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=True sellR=trail_stop hold=True nlot=1 ret=4.07% pe=False px=False bt_held=6100 avail=6100
+HlBand pending_exit set signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[1] shares=6100 day=20241122 close=8.5019 phase=bt
+HlBand SELL by signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[1] shares=6100 signal_day=20241122 @close=8.5019
+HlBand SELL lot-can_use reason=trail_stop lots=[1] want=6100 avail=6100 same_day_lots=- other=- last_add=-@- risk=False
+HlBand SELL trail_stop 600350.SH x6100 20260825231901 @ 8.501908602737247
+HlBand SELL done trail_stop last= 8.501908602737247 cleared {'shares': 6100, 'price': 8.169586442369667, 'cost': 49834.48, 'opened_at': '20241113150000', 'lots': 1}
+HlBand pending_entry set signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) day=20241125 close=8.4188 phase=bt
+HlBand BUY by signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) signal_day=20241125 @close=8.4188
+HlBand BUY BUY 600350.SH x5900 20260825231901 @ 8.418828062645352
+HlBand lots now n=1 [{'id': 1, 'shares': 5900, 'price': 8.418828062645352, 'opened_at': '20241125150000', 'hold_peak': 8.418828062645352, 'hold_close_peak': 8.418828062645352, 'hold_max_ret': 0.0, 'hold_bars': 0, 'hold_count_bar': ''}]
+HlBand BUY filled {'shares': 5900, 'price': 8.418828062645352, 'cost': 49671.09, 'opened_at': '20241125150000', 'lots': 1}
+HlBand bt T+1 unlock day= 20241126 was_locked= 5900
+HlBand 20241126 1500 n1d=180 n1w=97 close=8.4281 sig_d=20241126 sig_w=20241126 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.406 w_ma30=8.0001 w_hist=-0.0259 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=0.11% pe=False px=False bt_held=5900 avail=5900
+HlBand 20241127 1500 n1d=180 n1w=97 close=8.5111 sig_d=20241127 sig_w=20241127 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.4337 w_ma30=8.0049 w_hist=-0.0206 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=1.10% pe=False px=False bt_held=5900 avail=5900
+HlBand 20241128 1500 n1d=180 n1w=97 close=8.5388 sig_d=20241128 sig_w=20241128 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.443 w_ma30=8.0065 w_hist=-0.0189 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=1.43% pe=False px=False bt_held=5900 avail=5900
+HlBand 20241129 1500 n1d=180 n1w=97 close=8.5019 sig_d=20241129 sig_w=20241129 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.4306 w_ma30=8.0044 w_hist=-0.0212 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=0.99% pe=False px=False bt_held=5900 avail=5900
+HlBand 20241202 1500 n1d=180 n1w=98 close=8.3357 sig_d=20241202 sig_w=20241202 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.399 w_ma30=8.0233 w_hist=-0.0284 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-0.99% pe=False px=False bt_held=5900 avail=5900
+HlBand 20241203 1500 n1d=180 n1w=98 close=8.4558 sig_d=20241203 sig_w=20241203 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.439 w_ma30=8.0301 w_hist=-0.0207 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=0.44% pe=False px=False bt_held=5900 avail=5900
+HlBand 20241204 1500 n1d=180 n1w=98 close=8.6773 sig_d=20241204 sig_w=20241204 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.5129 w_ma30=8.0428 w_hist=-0.0066 buy=False buyR=- scale=False scaleR=scale_bars sell=False sellR=- hold=True nlot=1 ret=3.07% pe=False px=False bt_held=5900 avail=5900
+HlBand 20241205 1500 n1d=180 n1w=98 close=8.7604 sig_d=20241205 sig_w=20241205 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.5406 w_ma30=8.0476 w_hist=-0.0013 buy=False buyR=- scale=False scaleR=- sell=False sellR=- hold=True nlot=1 ret=4.06% pe=False px=False bt_held=5900 avail=5900
+HlBand 20241206 1500 n1d=180 n1w=98 close=8.9173 sig_d=20241206 sig_w=20241206 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=8.5929 w_ma30=8.0565 w_hist=0.0087 buy=False buyR=- scale=True scaleR=plat_break,w_macd_golden sell=False sellR=- hold=True nlot=1 ret=5.92% pe=False px=False bt_held=5900 avail=5900
+HlBand pending_entry set add signal=plat_break label=加仓-日线突破前期平台 all=plat_break(加仓-日线突破前期平台),w_macd_golden(加仓-周线MACD金叉柱放大) day=20241206 close=8.9173 lots=1 phase=bt
+HlBand BUY add by signal=plat_break label=加仓-日线突破前期平台 all=plat_break(加仓-日线突破前期平台),w_macd_golden(加仓-周线MACD金叉柱放大) signal_day=20241206 @close=8.9173
+HlBand ADD BUY 600350.SH x5600 20260825231901 @ 8.917311303196723
+HlBand lots now n=2 [{'id': 1, 'shares': 5900, 'price': 8.418828062645352, 'opened_at': '20241125150000', 'hold_peak': 8.97269832992465, 'hold_close_peak': 8.917311303196723, 'hold_max_ret': 0.06578947368421047, 'hold_bars': 9, 'hold_count_bar': '20241206'}, {'id': 2, 'shares': 5600, 'price': 8.917311303196723, 'opened_at': '20241206150000', 'hold_peak': 8.917311303196723, 'hold_close_peak': 8.917311303196723, 'hold_max_ret': 0.0, 'hold_bars': 0, 'hold_count_bar': ''}]
+HlBand BUY add filled {'add_shares': 5600, 'price': 8.917311303196723, 'lots': 2, 'total': 11500, 'avg': 8.661567727609498}
+HlBand skip sell eval after add fill day=20241206 signal=plat_break,w_macd_golden
+HlBand bt T+1 unlock day= 20241209 was_locked= 5600
+HlBand 20241209 1500 n1d=180 n1w=99 close=9.0650 sig_d=20241209 sig_w=20241209 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=8.7502 w_ma30=8.1141 w_hist=0.0345 buy=False buyR=- scale=False scaleR=w_macd_golden sell=False sellR=- hold=True nlot=2 ret=4.66% pe=False px=False bt_held=11500 avail=11500
+HlBand 20241210 1500 n1d=180 n1w=99 close=9.0373 sig_d=20241210 sig_w=20241210 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=8.741 w_ma30=8.1126 w_hist=0.0328 buy=False buyR=- scale=False scaleR=w_macd_golden sell=False sellR=- hold=True nlot=2 ret=4.34% pe=False px=False bt_held=11500 avail=11500
+HlBand 20241211 1500 n1d=180 n1w=99 close=8.7327 sig_d=20241211 sig_w=20241211 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=8.6395 w_ma30=8.0952 w_hist=0.0133 buy=False buyR=- scale=False scaleR=w_macd_golden sell=True sellR=trail_stop hold=True nlot=2 ret=0.82% pe=False px=False bt_held=11500 avail=11500
+HlBand pending_exit set signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[1] shares=5900 day=20241211 close=8.7327 phase=bt
+HlBand SELL by signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[1] shares=5900 signal_day=20241211 @close=8.7327
+HlBand SELL lot-can_use reason=trail_stop lots=[1] want=5900 avail=11500 same_day_lots=- other=[2] last_add=plat_break,w_macd_golden@20241206 risk=False
+HlBand SELL trail_stop 600350.SH x5900 20260825231901 @ 8.732687880770287
+HlBand partial sell fill 5900 remain~ 5600
+HlBand lots now n=1 [{'id': 2, 'shares': 5600, 'price': 8.917311303196723, 'opened_at': '20241206150000', 'hold_peak': 9.175784094593729, 'hold_close_peak': 9.06501004113787, 'hold_max_ret': 0.028985507246376756, 'hold_bars': 3, 'hold_count_bar': '20241211'}]
+HlBand 20241212 1500 n1d=180 n1w=99 close=8.6865 sig_d=20241212 sig_w=20241212 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=8.6241 w_ma30=8.0925 w_hist=0.0104 buy=False buyR=- scale=False scaleR=scale_once sell=False sellR=- hold=True nlot=1 ret=-2.59% pe=False px=False bt_held=5600 avail=5600
+HlBand 20241213 1500 n1d=180 n1w=99 close=8.6865 sig_d=20241213 sig_w=20241213 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=8.6241 w_ma30=8.0925 w_hist=0.0104 buy=False buyR=- scale=False scaleR=scale_once sell=False sellR=- hold=True nlot=1 ret=-2.59% pe=False px=False bt_held=5600 avail=5600
+HlBand 20241216 1500 n1d=180 n1w=100 close=9.1481 sig_d=20241216 sig_w=20241216 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=8.7988 w_ma30=8.1528 w_hist=0.0383 buy=False buyR=chase_skip scale=False scaleR=scale_once sell=False sellR=- hold=True nlot=1 ret=2.59% pe=False px=False bt_held=5600 avail=5600
+HlBand 20241217 1500 n1d=180 n1w=100 close=9.0927 sig_d=20241217 sig_w=20241217 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=8.7803 w_ma30=8.1497 w_hist=0.0348 buy=False buyR=- scale=False scaleR=scale_once sell=True sellR=trail_stop hold=True nlot=1 ret=1.97% pe=False px=False bt_held=5600 avail=5600
+HlBand pending_exit set signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[2] shares=5600 day=20241217 close=9.0927 phase=bt
+HlBand SELL by signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[2] shares=5600 signal_day=20241217 @close=9.0927
+HlBand SELL lot-can_use reason=trail_stop lots=[2] want=5600 avail=5600 same_day_lots=- other=- last_add=plat_break,w_macd_golden@20241206 risk=False
+HlBand SELL trail_stop 600350.SH x5600 20260825231901 @ 9.092703554501833
+HlBand SELL done trail_stop last= 9.092703554501833 cleared {'shares': 5600, 'price': 8.917311303196723, 'cost': 49936.94, 'opened_at': '20241206150000', 'lots': 1}
+HlBand 20241226 1500 n1d=180 n1w=101 close=9.1389 sig_d=20241226 sig_w=20241226 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=8.9019 w_ma30=8.2067 w_hist=0.0495 buy=False buyR=w_bias_skip,pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20250121 1500 n1d=180 n1w=105 close=8.8804 sig_d=20250121 sig_w=20250121 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=8.9675 w_ma30=8.3848 w_hist=0.009 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
+HlBand pending_entry set signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) day=20250121 close=8.8804 phase=bt
+HlBand BUY by signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) signal_day=20250121 @close=8.8804
+HlBand BUY BUY 600350.SH x5600 20260825231901 @ 8.880386618711436
+HlBand lots now n=1 [{'id': 1, 'shares': 5600, 'price': 8.880386618711436, 'opened_at': '20250121150000', 'hold_peak': 8.880386618711436, 'hold_close_peak': 8.880386618711436, 'hold_max_ret': 0.0, 'hold_bars': 0, 'hold_count_bar': ''}]
+HlBand BUY filled {'shares': 5600, 'price': 8.880386618711436, 'cost': 49730.17, 'opened_at': '20250121150000', 'lots': 1}
+HlBand bt T+1 unlock day= 20250122 was_locked= 5600
+HlBand 20250122 1500 n1d=180 n1w=105 close=8.8988 sig_d=20250122 sig_w=20250122 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=8.9737 w_ma30=8.3859 w_hist=0.0102 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=0.21% pe=False px=False bt_held=5600 avail=5600
+HlBand 20250123 1500 n1d=180 n1w=105 close=9.1758 sig_d=20250123 sig_w=20250123 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.066 w_ma30=8.4017 w_hist=0.0279 buy=False buyR=- scale=False scaleR=scale_bars sell=False sellR=- hold=True nlot=1 ret=3.33% pe=False px=False bt_held=5600 avail=5600
+HlBand 20250124 1500 n1d=180 n1w=105 close=9.0742 sig_d=20250124 sig_w=20250124 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.0321 w_ma30=8.3959 w_hist=0.0214 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=True sellR=trail_stop hold=True nlot=1 ret=2.18% pe=False px=False bt_held=5600 avail=5600
+HlBand pending_exit set signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[1] shares=5600 day=20250124 close=9.0742 phase=bt
+HlBand SELL by signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[1] shares=5600 signal_day=20250124 @close=9.0742
+HlBand SELL lot-can_use reason=trail_stop lots=[1] want=5600 avail=5600 same_day_lots=- other=- last_add=plat_break,w_macd_golden@20241206 risk=False
+HlBand SELL trail_stop 600350.SH x5600 20260825231901 @ 9.07424121225919
+HlBand SELL done trail_stop last= 9.07424121225919 cleared {'shares': 5600, 'price': 8.880386618711436, 'cost': 49730.17, 'opened_at': '20250121150000', 'lots': 1}
+HlBand 20250212 1500 n1d=180 n1w=108 close=8.9081 sig_d=20250212 sig_w=20250212 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.0009 w_ma30=8.4984 w_hist=-0.0182 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
+HlBand pending_entry set signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) day=20250212 close=8.9081 phase=bt
+HlBand BUY by signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) signal_day=20250212 @close=8.9081
+HlBand BUY BUY 600350.SH x5600 20260825231901 @ 8.908080132075401
+HlBand lots now n=1 [{'id': 1, 'shares': 5600, 'price': 8.908080132075401, 'opened_at': '20250212150000', 'hold_peak': 8.908080132075401, 'hold_close_peak': 8.908080132075401, 'hold_max_ret': 0.0, 'hold_bars': 0, 'hold_count_bar': ''}]
+HlBand BUY filled {'shares': 5600, 'price': 8.908080132075401, 'cost': 49885.25, 'opened_at': '20250212150000', 'lots': 1}
+HlBand bt T+1 unlock day= 20250213 was_locked= 5600
+HlBand 20250213 1500 n1d=180 n1w=108 close=8.8527 sig_d=20250213 sig_w=20250213 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.9824 w_ma30=8.4953 w_hist=-0.0217 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-0.62% pe=False px=False bt_held=5600 avail=5600
+HlBand 20250214 1500 n1d=180 n1w=108 close=8.9265 sig_d=20250214 sig_w=20250214 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.0071 w_ma30=8.4995 w_hist=-0.017 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=0.21% pe=False px=False bt_held=5600 avail=5600
+HlBand 20250217 1500 n1d=180 n1w=109 close=9.2958 sig_d=20250217 sig_w=20250217 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.1033 w_ma30=8.545 w_hist=-0.0061 buy=False buyR=- scale=False scaleR=scale_bars sell=False sellR=- hold=True nlot=1 ret=4.35% pe=False px=False bt_held=5600 avail=5600
+HlBand 20250218 1500 n1d=180 n1w=109 close=9.5912 sig_d=20250218 sig_w=20250218 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.2018 w_ma30=8.5619 w_hist=0.0128 buy=False buyR=- scale=False scaleR=plat_break,w_macd_golden sell=False sellR=- hold=True nlot=1 ret=7.67% pe=False px=False bt_held=5600 avail=5600
+HlBand 20250219 1500 n1d=180 n1w=109 close=9.6835 sig_d=20250219 sig_w=20250219 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.2325 w_ma30=8.5671 w_hist=0.0187 buy=False buyR=- scale=False scaleR=w_macd_golden sell=False sellR=- hold=True nlot=1 ret=8.70% pe=False px=False bt_held=5600 avail=5600
+HlBand 20250220 1500 n1d=180 n1w=109 close=9.4804 sig_d=20250220 sig_w=20250220 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.1648 w_ma30=8.5555 w_hist=0.0057 buy=False buyR=- scale=False scaleR=w_macd_golden sell=False sellR=- hold=True nlot=1 ret=6.42% pe=False px=False bt_held=5600 avail=5600
+HlBand 20250221 1500 n1d=180 n1w=109 close=9.3973 sig_d=20250221 sig_w=20250221 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.1372 w_ma30=8.5508 w_hist=0.0004 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol,w_macd_golden sell=True sellR=trail_stop hold=True nlot=1 ret=5.49% pe=False px=False bt_held=5600 avail=5600
+HlBand pending_exit set signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[1] shares=5600 day=20250221 close=9.3973 phase=bt
+HlBand SELL by signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[1] shares=5600 signal_day=20250221 @close=9.3973
+HlBand SELL lot-can_use reason=trail_stop lots=[1] want=5600 avail=5600 same_day_lots=- other=- last_add=plat_break,w_macd_golden@20241206 risk=False
+HlBand SELL trail_stop 600350.SH x5600 20260825231901 @ 9.39733220150545
+HlBand SELL done trail_stop last= 9.39733220150545 cleared {'shares': 5600, 'price': 8.908080132075401, 'cost': 49885.25, 'opened_at': '20250212150000', 'lots': 1}
+HlBand pending_entry set signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) day=20250224 close=9.3973 phase=bt
+HlBand BUY by signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) signal_day=20250224 @close=9.3973
+HlBand BUY BUY 600350.SH x5300 20260825231901 @ 9.397332201505447
+HlBand lots now n=1 [{'id': 1, 'shares': 5300, 'price': 9.397332201505447, 'opened_at': '20250224150000', 'hold_peak': 9.397332201505447, 'hold_close_peak': 9.397332201505447, 'hold_max_ret': 0.0, 'hold_bars': 0, 'hold_count_bar': ''}]
+HlBand BUY filled {'shares': 5300, 'price': 9.397332201505447, 'cost': 49805.86, 'opened_at': '20250224150000', 'lots': 1}
+HlBand bt T+1 unlock day= 20250225 was_locked= 5300
+HlBand 20250225 1500 n1d=180 n1w=110 close=9.3419 sig_d=20250225 sig_w=20250225 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.2054 w_ma30=8.596 w_hist=0.0052 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol,w_macd_golden sell=False sellR=- hold=True nlot=1 ret=-0.59% pe=False px=False bt_held=5300 avail=5300
+HlBand 20250226 1500 n1d=180 n1w=110 close=9.2035 sig_d=20250226 sig_w=20250226 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.1593 w_ma30=8.5881 w_hist=-0.0036 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=-2.06% pe=False px=False bt_held=5300 avail=5300
+HlBand 20250227 1500 n1d=180 n1w=110 close=9.4066 sig_d=20250227 sig_w=20250227 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.227 w_ma30=8.5997 w_hist=0.0093 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol,w_macd_golden sell=False sellR=- hold=True nlot=1 ret=0.10% pe=False px=False bt_held=5300 avail=5300
+HlBand 20250228 1500 n1d=180 n1w=110 close=9.3973 sig_d=20250228 sig_w=20250228 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.2239 w_ma30=8.5992 w_hist=0.0087 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol,w_macd_golden sell=False sellR=- hold=True nlot=1 ret=0.00% pe=False px=False bt_held=5300 avail=5300
+HlBand 20250303 1500 n1d=180 n1w=111 close=9.2681 sig_d=20250303 sig_w=20250303 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.2386 w_ma30=8.6374 w_hist=0.0026 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-1.38% pe=False px=False bt_held=5300 avail=5300
+HlBand 20250304 1500 n1d=180 n1w=111 close=9.3789 sig_d=20250304 sig_w=20250304 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.2755 w_ma30=8.6437 w_hist=0.0097 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-0.20% pe=False px=False bt_held=5300 avail=5300
+HlBand 20250305 1500 n1d=180 n1w=111 close=9.3050 sig_d=20250305 sig_w=20250305 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.2509 w_ma30=8.6395 w_hist=0.005 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=-0.98% pe=False px=False bt_held=5300 avail=5300
+HlBand 20250306 1500 n1d=180 n1w=111 close=9.1389 sig_d=20250306 sig_w=20250306 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.1955 w_ma30=8.63 w_hist=-0.0057 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-2.75% pe=False px=False bt_held=5300 avail=5300
+HlBand 20250307 1500 n1d=180 n1w=111 close=9.0373 sig_d=20250307 sig_w=20250307 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.1617 w_ma30=8.6242 w_hist=-0.0121 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-3.83% pe=False px=False bt_held=5300 avail=5300
+HlBand 20250310 1500 n1d=180 n1w=112 close=8.9912 sig_d=20250310 sig_w=20250310 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.1048 w_ma30=8.6452 w_hist=-0.0301 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-4.32% pe=False px=False bt_held=5300 avail=5300
+HlBand 20250311 1500 n1d=180 n1w=112 close=8.9542 sig_d=20250311 sig_w=20250311 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.0925 w_ma30=8.6431 w_hist=-0.0325 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=-4.72% pe=False px=False bt_held=5300 avail=5300
+HlBand 20250312 1500 n1d=180 n1w=112 close=8.9819 sig_d=20250312 sig_w=20250312 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.1018 w_ma30=8.6446 w_hist=-0.0307 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-4.42% pe=False px=False bt_held=5300 avail=5300
+HlBand 20250313 1500 n1d=180 n1w=112 close=8.9912 sig_d=20250313 sig_w=20250313 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.1048 w_ma30=8.6452 w_hist=-0.0301 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-4.32% pe=False px=False bt_held=5300 avail=5300
+HlBand 20250314 1500 n1d=180 n1w=112 close=8.9727 sig_d=20250314 sig_w=20250314 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.0987 w_ma30=8.6441 w_hist=-0.0313 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-4.52% pe=False px=False bt_held=5300 avail=5300
+HlBand 20250317 1500 n1d=180 n1w=113 close=8.9173 sig_d=20250317 sig_w=20250317 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.0382 w_ma30=8.6597 w_hist=-0.0477 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-5.11% pe=False px=False bt_held=5300 avail=5300
+HlBand 20250318 1500 n1d=180 n1w=113 close=8.8988 sig_d=20250318 sig_w=20250318 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.0321 w_ma30=8.6587 w_hist=-0.0489 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-5.30% pe=False px=False bt_held=5300 avail=5300
+HlBand 20250319 1500 n1d=180 n1w=113 close=9.0281 sig_d=20250319 sig_w=20250319 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.0752 w_ma30=8.6661 w_hist=-0.0406 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-3.93% pe=False px=False bt_held=5300 avail=5300
+HlBand 20250320 1500 n1d=180 n1w=113 close=8.9819 sig_d=20250320 sig_w=20250320 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.0598 w_ma30=8.6634 w_hist=-0.0436 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-4.42% pe=False px=False bt_held=5300 avail=5300
+HlBand 20250321 1500 n1d=180 n1w=113 close=9.2589 sig_d=20250321 sig_w=20250321 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.1521 w_ma30=8.6792 w_hist=-0.0259 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-1.47% pe=False px=False bt_held=5300 avail=5300
+HlBand 20250324 1500 n1d=180 n1w=114 close=9.3143 sig_d=20250324 sig_w=20250324 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.2061 w_ma30=8.7155 w_hist=-0.0201 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-0.88% pe=False px=False bt_held=5300 avail=5300
+HlBand 20250325 1500 n1d=180 n1w=114 close=9.3604 sig_d=20250325 sig_w=20250325 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.2215 w_ma30=8.7182 w_hist=-0.0172 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=-0.39% pe=False px=False bt_held=5300 avail=5300
+HlBand 20250326 1500 n1d=180 n1w=114 close=9.5635 sig_d=20250326 sig_w=20250326 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.2892 w_ma30=8.7298 w_hist=-0.0042 buy=False buyR=- scale=False scaleR=plat_break sell=False sellR=- hold=True nlot=1 ret=1.77% pe=False px=False bt_held=5300 avail=5300
+HlBand 20250327 1500 n1d=180 n1w=114 close=9.6004 sig_d=20250327 sig_w=20250327 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.3015 w_ma30=8.7319 w_hist=-0.0019 buy=False buyR=- scale=True scaleR=plat_break sell=False sellR=- hold=True nlot=1 ret=2.16% pe=False px=False bt_held=5300 avail=5300
+HlBand pending_entry set add signal=plat_break label=加仓-日线突破前期平台 all=plat_break(加仓-日线突破前期平台) day=20250327 close=9.6004 lots=1 phase=bt
+HlBand BUY add by signal=plat_break label=加仓-日线突破前期平台 all=plat_break(加仓-日线突破前期平台) signal_day=20250327 @close=9.6004
+HlBand ADD BUY 600350.SH x5200 20260825231901 @ 9.600417966174524
+HlBand lots now n=2 [{'id': 1, 'shares': 5300, 'price': 9.397332201505447, 'opened_at': '20250224150000', 'hold_peak': 9.692729677387742, 'hold_close_peak': 9.600417966174524, 'hold_max_ret': 0.031434184675835156, 'hold_bars': 23, 'hold_count_bar': '20250327'}, {'id': 2, 'shares': 5200, 'price': 9.600417966174524, 'opened_at': '20250327150000', 'hold_peak': 9.600417966174524, 'hold_close_peak': 9.600417966174524, 'hold_max_ret': 0.0, 'hold_bars': 0, 'hold_count_bar': ''}]
+HlBand BUY add filled {'add_shares': 5200, 'price': 9.600417966174524, 'lots': 2, 'total': 10500, 'avg': 9.497908008770134}
+HlBand skip sell eval after add fill day=20250327 signal=plat_break
+HlBand bt T+1 unlock day= 20250328 was_locked= 5200
+HlBand 20250328 1500 n1d=180 n1w=114 close=9.7850 sig_d=20250328 sig_w=20250328 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.3631 w_ma30=8.7424 w_hist=0.0099 buy=False buyR=- scale=False scaleR=plat_break,w_macd_golden sell=False sellR=- hold=True nlot=2 ret=3.02% pe=False px=False bt_held=10500 avail=10500
+HlBand 20250331 1500 n1d=180 n1w=115 close=9.8404 sig_d=20250331 sig_w=20250331 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.5222 w_ma30=8.8052 w_hist=0.0329 buy=False buyR=w_bias_skip scale=False scaleR=w_macd_golden sell=False sellR=- hold=True nlot=2 ret=3.61% pe=False px=False bt_held=10500 avail=10500
+HlBand 20250401 1500 n1d=180 n1w=115 close=9.9143 sig_d=20250401 sig_w=20250401 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.5468 w_ma30=8.8094 w_hist=0.0376 buy=False buyR=w_bias_skip scale=False scaleR=w_macd_golden sell=False sellR=- hold=True nlot=2 ret=4.38% pe=False px=False bt_held=10500 avail=10500
+HlBand 20250402 1500 n1d=180 n1w=115 close=9.6558 sig_d=20250402 sig_w=20250402 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.4606 w_ma30=8.7946 w_hist=0.0211 buy=False buyR=- scale=False scaleR=w_macd_golden sell=True sellR=trail_stop hold=True nlot=2 ret=1.66% pe=False px=False bt_held=10500 avail=10500
+HlBand pending_exit set signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[1, 2] shares=10500 day=20250402 close=9.6558 phase=bt
+HlBand SELL by signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[1, 2] shares=10500 signal_day=20250402 @close=9.6558
+HlBand SELL lot-can_use reason=trail_stop lots=[1, 2] want=10500 avail=10500 same_day_lots=- other=- last_add=plat_break@20250327 risk=False
+HlBand SELL trail_stop 600350.SH x10500 20260825231901 @ 9.655804992902453
+HlBand SELL done trail_stop last= 9.655804992902453 cleared {'shares': 10500, 'price': 9.497908008770134, 'cost': 99728.03, 'opened_at': '20250224150000', 'lots': 2}
+HlBand 20250411 1500 n1d=180 n1w=116 close=9.4896 sig_d=20250411 sig_w=20250411 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.4601 w_ma30=8.8319 w_hist=0.0122 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
+HlBand pending_entry set signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) day=20250411 close=9.4896 phase=bt
+HlBand BUY by signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) signal_day=20250411 @close=9.4896
+HlBand BUY BUY 600350.SH x5200 20260825231901 @ 9.489643912718664
+HlBand lots now n=1 [{'id': 1, 'shares': 5200, 'price': 9.489643912718664, 'opened_at': '20250411150000', 'hold_peak': 9.489643912718664, 'hold_close_peak': 9.489643912718664, 'hold_max_ret': 0.0, 'hold_bars': 0, 'hold_count_bar': ''}]
+HlBand BUY filled {'shares': 5200, 'price': 9.489643912718664, 'cost': 49346.15, 'opened_at': '20250411150000', 'lots': 1}
+HlBand bt T+1 unlock day= 20250414 was_locked= 5200
+HlBand 20250414 1500 n1d=180 n1w=117 close=9.4620 sig_d=20250414 sig_w=20250414 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.4607 w_ma30=8.8679 w_hist=0.0035 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=-0.29% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250415 1500 n1d=180 n1w=117 close=9.4989 sig_d=20250415 sig_w=20250415 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.473 w_ma30=8.87 w_hist=0.0059 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=0.10% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250416 1500 n1d=180 n1w=117 close=9.6558 sig_d=20250416 sig_w=20250416 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.5253 w_ma30=8.8789 w_hist=0.0159 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=1.75% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250417 1500 n1d=180 n1w=117 close=9.5912 sig_d=20250417 sig_w=20250417 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.5038 w_ma30=8.8752 w_hist=0.0118 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=1.07% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250418 1500 n1d=180 n1w=117 close=9.5635 sig_d=20250418 sig_w=20250418 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.4945 w_ma30=8.8737 w_hist=0.01 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=0.78% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250421 1500 n1d=180 n1w=118 close=9.4896 sig_d=20250421 sig_w=20250421 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.4929 w_ma30=8.9089 w_hist=0.0008 buy=False buyR=vol_dry_skip scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=0.00% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250422 1500 n1d=180 n1w=118 close=9.5173 sig_d=20250422 sig_w=20250422 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.5021 w_ma30=8.9104 w_hist=0.0026 buy=False buyR=vol_dry_skip scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=0.29% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250423 1500 n1d=180 n1w=118 close=9.5635 sig_d=20250423 sig_w=20250423 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.5175 w_ma30=8.9131 w_hist=0.0055 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=0.78% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250424 1500 n1d=180 n1w=118 close=9.5266 sig_d=20250424 sig_w=20250424 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.5052 w_ma30=8.911 w_hist=0.0031 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=0.39% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250425 1500 n1d=180 n1w=118 close=9.6743 sig_d=20250425 sig_w=20250425 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.5544 w_ma30=8.9194 w_hist=0.0126 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=1.95% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250428 1500 n1d=180 n1w=119 close=9.8589 sig_d=20250428 sig_w=20250428 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.6559 w_ma30=8.9731 w_hist=0.0227 buy=False buyR=- scale=False scaleR=- sell=False sellR=- hold=True nlot=1 ret=3.89% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250429 1500 n1d=180 n1w=119 close=9.9327 sig_d=20250429 sig_w=20250429 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.6805 w_ma30=8.9773 w_hist=0.0274 buy=False buyR=- scale=False scaleR=- sell=False sellR=- hold=True nlot=1 ret=4.67% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250430 1500 n1d=180 n1w=119 close=9.9974 sig_d=20250430 sig_w=20250430 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.7021 w_ma30=8.981 w_hist=0.0315 buy=False buyR=w_bias_skip scale=False scaleR=- sell=False sellR=- hold=True nlot=1 ret=5.35% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250506 1500 n1d=180 n1w=120 close=10.0158 sig_d=20250506 sig_w=20250506 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.8067 w_ma30=9.0401 w_hist=0.0403 buy=False buyR=w_bias_skip scale=False scaleR=- sell=False sellR=- hold=True nlot=1 ret=5.54% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250507 1500 n1d=180 n1w=120 close=9.9050 sig_d=20250507 sig_w=20250507 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.7697 w_ma30=9.0338 w_hist=0.0332 buy=False buyR=w_bias_skip scale=False scaleR=- sell=False sellR=- hold=True nlot=1 ret=4.38% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250508 1500 n1d=180 n1w=120 close=9.9697 sig_d=20250508 sig_w=20250508 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.7913 w_ma30=9.0375 w_hist=0.0373 buy=False buyR=w_bias_skip scale=False scaleR=- sell=False sellR=- hold=True nlot=1 ret=5.06% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250509 1500 n1d=180 n1w=120 close=10.0989 sig_d=20250509 sig_w=20250509 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.8344 w_ma30=9.0449 w_hist=0.0456 buy=False buyR=w_bias_skip scale=False scaleR=plat_break sell=False sellR=- hold=True nlot=1 ret=6.42% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250512 1500 n1d=180 n1w=120 close=9.9789 sig_d=20250512 sig_w=20250512 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.8825 w_ma30=9.0983 w_hist=0.0415 buy=False buyR=w_bias_skip,pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=5.16% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250513 1500 n1d=180 n1w=120 close=9.9789 sig_d=20250513 sig_w=20250513 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.8825 w_ma30=9.0983 w_hist=0.0415 buy=False buyR=w_bias_skip,pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=5.16% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250514 1500 n1d=180 n1w=120 close=9.8774 sig_d=20250514 sig_w=20250514 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.8487 w_ma30=9.0925 w_hist=0.035 buy=False buyR=w_bias_skip scale=False scaleR=- sell=False sellR=- hold=True nlot=1 ret=4.09% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250515 1500 n1d=180 n1w=120 close=10.0251 sig_d=20250515 sig_w=20250515 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.8979 w_ma30=9.1009 w_hist=0.0445 buy=False buyR=w_bias_skip scale=False scaleR=- sell=False sellR=- hold=True nlot=1 ret=5.64% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250516 1500 n1d=180 n1w=120 close=9.9881 sig_d=20250516 sig_w=20250516 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.8856 w_ma30=9.0988 w_hist=0.0421 buy=False buyR=w_bias_skip,pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=5.25% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250519 1500 n1d=180 n1w=120 close=10.0343 sig_d=20250519 sig_w=20250519 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.9352 w_ma30=9.1523 w_hist=0.0378 buy=False buyR=w_bias_skip scale=False scaleR=- sell=False sellR=- hold=True nlot=1 ret=5.74% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250520 1500 n1d=180 n1w=120 close=10.0251 sig_d=20250520 sig_w=20250520 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.9321 w_ma30=9.1518 w_hist=0.0372 buy=False buyR=w_bias_skip scale=False scaleR=- sell=False sellR=- hold=True nlot=1 ret=5.64% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250521 1500 n1d=180 n1w=120 close=10.1451 sig_d=20250521 sig_w=20250521 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.9721 w_ma30=9.1586 w_hist=0.0449 buy=False buyR=w_bias_skip,pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=6.91% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250522 1500 n1d=180 n1w=120 close=10.3112 sig_d=20250522 sig_w=20250522 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.0275 w_ma30=9.1681 w_hist=0.0555 buy=False buyR=w_bias_skip scale=False scaleR=plat_break sell=False sellR=- hold=True nlot=1 ret=8.66% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250523 1500 n1d=180 n1w=120 close=10.2189 sig_d=20250523 sig_w=20250523 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.9967 w_ma30=9.1628 w_hist=0.0496 buy=False buyR=w_bias_skip scale=False scaleR=- sell=False sellR=- hold=True nlot=1 ret=7.68% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250526 1500 n1d=180 n1w=120 close=10.1912 sig_d=20250526 sig_w=20250526 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.0615 w_ma30=9.2216 w_hist=0.0469 buy=False buyR=w_bias_skip,pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=7.39% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250527 1500 n1d=180 n1w=120 close=10.1912 sig_d=20250527 sig_w=20250527 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.0615 w_ma30=9.2216 w_hist=0.0469 buy=False buyR=w_bias_skip,pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=7.39% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250528 1500 n1d=180 n1w=120 close=10.3943 sig_d=20250528 sig_w=20250528 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.1292 w_ma30=9.2332 w_hist=0.0599 buy=False buyR=w_bias_skip scale=False scaleR=- sell=False sellR=- hold=True nlot=1 ret=9.53% pe=False px=False bt_held=5200 avail=5200
+HlBand time_force skip trend peak=9.82% ma60=9.7266 hold=31 lot=1
+HlBand 20250529 1500 n1d=180 n1w=120 close=10.3943 sig_d=20250529 sig_w=20250529 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.1292 w_ma30=9.2332 w_hist=0.0599 buy=False buyR=w_bias_skip scale=False scaleR=- sell=False sellR=- hold=True nlot=1 ret=9.53% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250530 1500 n1d=180 n1w=120 close=10.5605 sig_d=20250530 sig_w=20250530 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.1846 w_ma30=9.2427 w_hist=0.0705 buy=False buyR=w_bias_skip scale=False scaleR=plat_break sell=False sellR=- hold=True nlot=1 ret=11.28% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250603 1500 n1d=180 n1w=120 close=10.3389 sig_d=20250603 sig_w=20250603 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.2361 w_ma30=9.3054 w_hist=0.0626 buy=False buyR=w_bias_skip scale=False scaleR=- sell=False sellR=- hold=True nlot=1 ret=8.95% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250604 1500 n1d=180 n1w=120 close=10.3574 sig_d=20250604 sig_w=20250604 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.2422 w_ma30=9.3064 w_hist=0.0638 buy=False buyR=w_bias_skip scale=False scaleR=- sell=False sellR=- hold=True nlot=1 ret=9.14% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250605 1500 n1d=180 n1w=120 close=10.3574 sig_d=20250605 sig_w=20250605 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.2422 w_ma30=9.3064 w_hist=0.0638 buy=False buyR=w_bias_skip scale=False scaleR=- sell=False sellR=- hold=True nlot=1 ret=9.14% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250606 1500 n1d=180 n1w=120 close=10.3389 sig_d=20250606 sig_w=20250606 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.2361 w_ma30=9.3054 w_hist=0.0626 buy=False buyR=w_bias_skip,pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=8.95% pe=False px=False bt_held=5200 avail=5200
+HlBand 20250609 1500 n1d=180 n1w=120 close=10.2097 sig_d=20250609 sig_w=20250609 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.2273 w_ma30=9.3571 w_hist=0.0428 buy=False buyR=w_bias_skip scale=False scaleR=- sell=True sellR=trail_stop hold=True nlot=1 ret=7.59% pe=False px=False bt_held=5200 avail=5200
+HlBand pending_exit set signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[1] shares=5200 day=20250609 close=10.2097 phase=bt
+HlBand SELL by signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[1] shares=5200 signal_day=20250609 @close=10.2097
+HlBand SELL lot-can_use reason=trail_stop lots=[1] want=5200 avail=5200 same_day_lots=- other=- last_add=plat_break@20250327 risk=False
+HlBand SELL trail_stop 600350.SH x5200 20260825231901 @ 10.209675260181754
+HlBand SELL done trail_stop last= 10.209675260181754 cleared {'shares': 5200, 'price': 9.489643912718664, 'cost': 49346.15, 'opened_at': '20250411150000', 'lots': 1}
+HlBand 20250630 1500 n1d=180 n1w=120 close=9.8404 sig_d=20250630 sig_w=20250630 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=10.0364 w_ma30=9.4656 w_hist=-0.0403 buy=False buyR=- scale=False scaleR=scale_no_pos sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20250701 1500 n1d=180 n1w=120 close=9.8774 sig_d=20250701 sig_w=20250701 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=10.0487 w_ma30=9.4677 w_hist=-0.038 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
+HlBand pending_entry set signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) day=20250701 close=9.8774 phase=bt
+HlBand BUY by signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) signal_day=20250701 @close=9.8774
+HlBand BUY BUY 600350.SH x5000 20260825231901 @ 9.877353099814176
+HlBand lots now n=1 [{'id': 1, 'shares': 5000, 'price': 9.877353099814176, 'opened_at': '20250701150000', 'hold_peak': 9.877353099814176, 'hold_close_peak': 9.877353099814176, 'hold_max_ret': 0.0, 'hold_bars': 0, 'hold_count_bar': ''}]
+HlBand BUY filled {'shares': 5000, 'price': 9.877353099814176, 'cost': 49386.77, 'opened_at': '20250701150000', 'lots': 1}
+HlBand bt T+1 unlock day= 20250702 was_locked= 5000
+HlBand 20250702 1500 n1d=180 n1w=120 close=9.6743 sig_d=20250702 sig_w=20250702 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.981 w_ma30=9.4561 w_hist=-0.0509 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-2.06% pe=False px=False bt_held=5000 avail=5000
+HlBand 20250703 1500 n1d=180 n1w=120 close=9.6281 sig_d=20250703 sig_w=20250703 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.9656 w_ma30=9.4535 w_hist=-0.0539 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-2.52% pe=False px=False bt_held=5000 avail=5000
+HlBand 20250704 1500 n1d=180 n1w=120 close=9.6004 sig_d=20250704 sig_w=20250704 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.9564 w_ma30=9.4519 w_hist=-0.0556 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-2.80% pe=False px=False bt_held=5000 avail=5000
+HlBand 20250707 1500 n1d=180 n1w=120 close=9.6373 sig_d=20250707 sig_w=20250707 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.8501 w_ma30=9.4626 w_hist=-0.0827 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-2.43% pe=False px=False bt_held=5000 avail=5000
+HlBand w_bear streak=1/2 day=20250708
+HlBand 20250708 1500 n1d=180 n1w=120 close=9.3789 sig_d=20250708 sig_w=20250708 phase=bt prev_d=False prev_w=False w_bull=False w_bear=True w_bn=1/2 w_ma5=9.7639 w_ma30=9.4479 w_hist=-0.0992 buy=False buyR=weekly_bear scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-5.05% pe=False px=False bt_held=5000 avail=5000
+HlBand w_bear streak reset day=20250709 (was 1)
+HlBand 20250709 1500 n1d=180 n1w=120 close=9.4896 sig_d=20250709 sig_w=20250709 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.8008 w_ma30=9.4542 w_hist=-0.0922 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-3.93% pe=False px=False bt_held=5000 avail=5000
+HlBand 20250710 1500 n1d=180 n1w=120 close=9.6743 sig_d=20250710 sig_w=20250710 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.8624 w_ma30=9.4647 w_hist=-0.0804 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-2.06% pe=False px=False bt_held=5000 avail=5000
+HlBand 20250711 1500 n1d=180 n1w=120 close=9.7850 sig_d=20250711 sig_w=20250711 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.8993 w_ma30=9.4711 w_hist=-0.0733 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-0.93% pe=False px=False bt_held=5000 avail=5000
+HlBand 20250714 1500 n1d=180 n1w=120 close=9.8681 sig_d=20250714 sig_w=20250714 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.8889 w_ma30=9.4938 w_hist=-0.0784 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-0.09% pe=False px=False bt_held=5000 avail=5000
+HlBand 20250715 1500 n1d=180 n1w=120 close=9.8958 sig_d=20250715 sig_w=20250715 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.8981 w_ma30=9.4954 w_hist=-0.0767 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=0.19% pe=False px=False bt_held=5000 avail=5000
+HlBand 20250716 1500 n1d=180 n1w=120 close=10.0620 sig_d=20250716 sig_w=20250716 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.9535 w_ma30=9.5049 w_hist=-0.0661 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=1.87% pe=False px=False bt_held=5000 avail=5000
+HlBand 20250717 1500 n1d=180 n1w=120 close=9.7758 sig_d=20250717 sig_w=20250717 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.8581 w_ma30=9.4886 w_hist=-0.0843 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-1.03% pe=False px=False bt_held=5000 avail=5000
+HlBand 20250718 1500 n1d=180 n1w=120 close=9.8866 sig_d=20250718 sig_w=20250718 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.8951 w_ma30=9.4949 w_hist=-0.0773 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=0.09% pe=False px=False bt_held=5000 avail=5000
+HlBand 20250721 1500 n1d=180 n1w=120 close=9.7481 sig_d=20250721 sig_w=20250721 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.8461 w_ma30=9.5095 w_hist=-0.0875 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=-1.31% pe=False px=False bt_held=5000 avail=5000
+HlBand 20250722 1500 n1d=180 n1w=120 close=9.7297 sig_d=20250722 sig_w=20250722 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.8399 w_ma30=9.5084 w_hist=-0.0887 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=-1.50% pe=False px=False bt_held=5000 avail=5000
+HlBand 20250723 1500 n1d=180 n1w=120 close=9.6927 sig_d=20250723 sig_w=20250723 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.8276 w_ma30=9.5063 w_hist=-0.091 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=-1.87% pe=False px=False bt_held=5000 avail=5000
+HlBand 20250724 1500 n1d=180 n1w=120 close=9.5820 sig_d=20250724 sig_w=20250724 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.7907 w_ma30=9.5 w_hist=-0.0981 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-2.99% pe=False px=False bt_held=5000 avail=5000
+HlBand 20250725 1500 n1d=180 n1w=120 close=9.4989 sig_d=20250725 sig_w=20250725 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.763 w_ma30=9.4952 w_hist=-0.1034 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-3.83% pe=False px=False bt_held=5000 avail=5000
+HlBand w_bear streak=1/2 day=20250728
+HlBand 20250728 1500 n1d=180 n1w=120 close=9.4343 sig_d=20250728 sig_w=20250728 phase=bt prev_d=False prev_w=False w_bull=False w_bear=True w_bn=1/2 w_ma5=9.6534 w_ma30=9.4919 w_hist=-0.1213 buy=False buyR=weekly_bear scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-4.49% pe=False px=False bt_held=5000 avail=5000
+HlBand w_bear streak=2/2 day=20250729
+HlBand 20250729 1500 n1d=180 n1w=120 close=9.4804 sig_d=20250729 sig_w=20250729 phase=bt prev_d=False prev_w=False w_bull=False w_bear=True w_bn=2/2 w_ma5=9.6688 w_ma30=9.4945 w_hist=-0.1183 buy=False buyR=weekly_bear,pullback_vol scale=False scaleR=pullback_vol sell=True sellR=weekly_bear,weekly_bear hold=True nlot=1 ret=-4.02% pe=False px=False bt_held=5000 avail=5000
+HlBand pending_exit set signal=weekly_bear label=周线转空强制清仓 all=weekly_bear(周线转空强制清仓) lots=[1] shares=5000 day=20250729 close=9.4804 phase=bt
+HlBand SELL by signal=weekly_bear label=周线转空强制清仓 all=weekly_bear(周线转空强制清仓) lots=[1] shares=5000 signal_day=20250729 @close=9.4804
+HlBand SELL lot-can_use reason=weekly_bear lots=[1] want=5000 avail=5000 same_day_lots=- other=- last_add=plat_break@20250327 risk=False
+HlBand SELL weekly_bear 600350.SH x5000 20260825231902 @ 9.480412741597343
+HlBand SELL done weekly_bear last= 9.480412741597343 cleared {'shares': 5000, 'price': 9.877353099814176, 'cost': 49386.77, 'opened_at': '20250701150000', 'lots': 1}
+HlBand w_bear streak=3/2 day=20250730
+HlBand w_bear streak=4/2 day=20250731
+HlBand w_bear streak=5/2 day=20250801
+HlBand w_bear streak=6/2 day=20250804
+HlBand w_bear streak=7/2 day=20250805
+HlBand w_bear streak=8/2 day=20250806
+HlBand w_bear streak=9/2 day=20250807
+HlBand w_bear streak=10/2 day=20250808
+HlBand w_bear streak=11/2 day=20250811
+HlBand w_bear streak=12/2 day=20250812
+HlBand w_bear streak=13/2 day=20250813
+HlBand w_bear streak=14/2 day=20250814
+HlBand w_bear streak=15/2 day=20250815
+HlBand w_bear streak=16/2 day=20250818
+HlBand w_bear streak=17/2 day=20250819
+HlBand w_bear streak=18/2 day=20250820
+HlBand w_bear streak=19/2 day=20250821
+HlBand w_bear streak=20/2 day=20250822
+HlBand w_bear streak=21/2 day=20250825
+HlBand 20250825 1500 n1d=180 n1w=120 close=9.1193 sig_d=20250825 sig_w=20250825 phase=bt prev_d=False prev_w=False w_bull=False w_bear=True w_bn=21/2 w_ma5=9.2196 w_ma30=9.4151 w_hist=-0.1564 buy=False buyR=weekly_bear scale=False scaleR=scale_no_pos sell=True sellR=weekly_bear hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
+HlBand w_bear streak=22/2 day=20250826
+HlBand w_bear streak=23/2 day=20250827
+HlBand w_bear streak=24/2 day=20250828
+HlBand w_bear streak=25/2 day=20250829
+HlBand w_bear streak=26/2 day=20250901
+HlBand w_bear streak=27/2 day=20250902
+HlBand w_bear streak=28/2 day=20250903
+HlBand w_bear streak=29/2 day=20250904
+HlBand w_bear streak=30/2 day=20250905
+HlBand w_bear streak=31/2 day=20250908
+HlBand w_bear streak=32/2 day=20250909
+HlBand w_bear streak=33/2 day=20250910
+HlBand w_bear streak=34/2 day=20250911
+HlBand w_bear streak=35/2 day=20250912
+HlBand w_bear streak=36/2 day=20250915
+HlBand w_bear streak=37/2 day=20250916
+HlBand w_bear streak=38/2 day=20250917
+HlBand w_bear streak=39/2 day=20250918
+HlBand w_bear streak=40/2 day=20250919
+HlBand w_bear streak=41/2 day=20250922
+HlBand 20250922 1500 n1d=180 n1w=120 close=8.2141 sig_d=20250922 sig_w=20250922 phase=bt prev_d=False prev_w=False w_bull=False w_bear=True w_bn=41/2 w_ma5=8.5695 w_ma30=9.213 w_hist=-0.1902 buy=False buyR=weekly_bear scale=False scaleR=scale_no_pos sell=True sellR=weekly_bear hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
+HlBand w_bear streak=42/2 day=20250923
+HlBand w_bear streak=43/2 day=20250924
+HlBand w_bear streak=44/2 day=20250925
+HlBand w_bear streak=45/2 day=20250926
+HlBand w_bear streak=46/2 day=20250929
+HlBand w_bear streak=47/2 day=20250930
+HlBand w_bear streak=48/2 day=20251009
+HlBand w_bear streak=49/2 day=20251010
+HlBand w_bear streak=50/2 day=20251013
+HlBand w_bear streak=51/2 day=20251014
+HlBand w_bear streak=52/2 day=20251015
+HlBand w_bear streak=53/2 day=20251016
+HlBand w_bear streak=54/2 day=20251017
+HlBand w_bear streak=55/2 day=20251020
+HlBand w_bear streak=56/2 day=20251021
+HlBand w_bear streak=57/2 day=20251022
+HlBand w_bear streak=58/2 day=20251023
+HlBand w_bear streak=59/2 day=20251024
+HlBand w_bear streak=60/2 day=20251027
+HlBand w_bear streak reset day=20251028 (was 60)
+HlBand 20251028 1500 n1d=180 n1w=120 close=9.1674 sig_d=20251028 sig_w=20251028 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.8803 w_ma30=9.1078 w_hist=-0.0084 buy=False buyR=w_slope_skip scale=False scaleR=scale_no_pos sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
+HlBand w_bear streak=1/2 day=20251030
+HlBand w_bear streak=2/2 day=20251031
+HlBand 20251031 1500 n1d=180 n1w=120 close=8.9844 sig_d=20251031 sig_w=20251031 phase=bt prev_d=False prev_w=False w_bull=False w_bear=True w_bn=2/2 w_ma5=8.8194 w_ma30=9.0973 w_hist=-0.0201 buy=False buyR=weekly_bear,pullback_vol scale=False scaleR=pullback_vol sell=True sellR=weekly_bear hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
+HlBand w_bear streak=3/2 day=20251103
+HlBand w_bear streak reset day=20251104 (was 3)
+HlBand w_bear streak=1/2 day=20251107
+HlBand w_bear streak reset day=20251110 (was 1)
+HlBand w_bear streak=1/2 day=20251113
+HlBand w_bear streak=2/2 day=20251114
+HlBand 20251114 1500 n1d=180 n1w=120 close=9.0519 sig_d=20251114 sig_w=20251114 phase=bt prev_d=False prev_w=False w_bull=False w_bear=True w_bn=2/2 w_ma5=8.9549 w_ma30=9.0937 w_hist=0.028 buy=False buyR=weekly_bear,pullback_vol scale=False scaleR=pullback_vol,w_macd_golden sell=True sellR=weekly_bear hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
+HlBand w_bear streak=3/2 day=20251117
+HlBand w_bear streak=4/2 day=20251118
+HlBand w_bear streak=5/2 day=20251119
+HlBand w_bear streak reset day=20251120 (was 5)
+HlBand w_bear streak=1/2 day=20251124
+HlBand w_bear streak=2/2 day=20251125
+HlBand 20251125 1500 n1d=180 n1w=120 close=8.9556 sig_d=20251125 sig_w=20251125 phase=bt prev_d=False prev_w=False w_bull=False w_bear=True w_bn=2/2 w_ma5=8.9874 w_ma30=9.086 w_hist=0.0418 buy=False buyR=weekly_bear scale=False scaleR=scale_no_pos sell=True sellR=weekly_bear hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
+HlBand w_bear streak=3/2 day=20251126
+HlBand w_bear streak=4/2 day=20251127
+HlBand w_bear streak=5/2 day=20251128
+HlBand w_bear streak=6/2 day=20251201
+HlBand w_bear streak=7/2 day=20251202
+HlBand w_bear streak=8/2 day=20251203
+HlBand w_bear streak=9/2 day=20251204
+HlBand w_bear streak=10/2 day=20251205
+HlBand w_bear streak=11/2 day=20251208
+HlBand w_bear streak=12/2 day=20251209
+HlBand w_bear streak=13/2 day=20251210
+HlBand w_bear streak=14/2 day=20251211
+HlBand w_bear streak=15/2 day=20251212
+HlBand w_bear streak=16/2 day=20251215
+HlBand w_bear streak=17/2 day=20251216
+HlBand w_bear streak=18/2 day=20251217
+HlBand w_bear streak reset day=20251218 (was 18)
+HlBand w_bear streak=1/2 day=20251219
+HlBand w_bear streak reset day=20251222 (was 1)
+HlBand 20251223 1500 n1d=180 n1w=120 close=9.1193 sig_d=20251223 sig_w=20251223 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=8.9572 w_ma30=9.0402 w_hist=0.0427 buy=False buyR=w_slope_skip,pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
+HlBand w_bear streak=1/2 day=20260107
+HlBand w_bear streak reset day=20260108 (was 1)
+HlBand 20260109 1500 n1d=180 n1w=120 close=9.1578 sig_d=20260109 sig_w=20260109 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.1542 w_ma30=9.0773 w_hist=0.0725 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
+HlBand pending_entry set signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) day=20260109 close=9.1578 phase=bt
+HlBand BUY by signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) signal_day=20260109 @close=9.1578
+HlBand BUY BUY 600350.SH x5400 20260825231902 @ 9.157782526257606
+HlBand lots now n=1 [{'id': 1, 'shares': 5400, 'price': 9.157782526257606, 'opened_at': '20260109150000', 'hold_peak': 9.157782526257606, 'hold_close_peak': 9.157782526257606, 'hold_max_ret': 0.0, 'hold_bars': 0, 'hold_count_bar': ''}]
+HlBand BUY filled {'shares': 5400, 'price': 9.157782526257606, 'cost': 49452.03, 'opened_at': '20260109150000', 'lots': 1}
+HlBand bt T+1 unlock day= 20260112 was_locked= 5400
+HlBand 20260112 1500 n1d=180 n1w=120 close=9.3696 sig_d=20260112 sig_w=20260112 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.226 w_ma30=9.0939 w_hist=0.0798 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=2.31% pe=False px=False bt_held=5400 avail=5400
+HlBand 20260113 1500 n1d=180 n1w=120 close=9.3022 sig_d=20260113 sig_w=20260113 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.2036 w_ma30=9.0901 w_hist=0.0755 buy=False buyR=- scale=False scaleR=scale_bars sell=True sellR=trail_stop hold=True nlot=1 ret=1.58% pe=False px=False bt_held=5400 avail=5400
+HlBand pending_exit set signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[1] shares=5400 day=20260113 close=9.3022 phase=bt
+HlBand SELL by signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[1] shares=5400 signal_day=20260113 @close=9.3022
+HlBand SELL lot-can_use reason=trail_stop lots=[1] want=5400 avail=5400 same_day_lots=- other=- last_add=plat_break@20250327 risk=False
+HlBand SELL trail_stop 600350.SH x5400 20260825231902 @ 9.302227045599208
+HlBand SELL done trail_stop last= 9.302227045599208 cleared {'shares': 5400, 'price': 9.157782526257606, 'cost': 49452.03, 'opened_at': '20260109150000', 'lots': 1}
+HlBand 20260115 1500 n1d=180 n1w=120 close=9.2348 sig_d=20260115 sig_w=20260115 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=9.1811 w_ma30=9.0862 w_hist=0.0712 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
+HlBand pending_entry set signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) day=20260115 close=9.2348 phase=bt
+HlBand BUY by signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) signal_day=20260115 @close=9.2348
+HlBand BUY BUY 600350.SH x5400 20260825231902 @ 9.234819603239794
+HlBand lots now n=1 [{'id': 1, 'shares': 5400, 'price': 9.234819603239794, 'opened_at': '20260115150000', 'hold_peak': 9.234819603239794, 'hold_close_peak': 9.234819603239794, 'hold_max_ret': 0.0, 'hold_bars': 0, 'hold_count_bar': ''}]
+HlBand BUY filled {'shares': 5400, 'price': 9.234819603239794, 'cost': 49868.03, 'opened_at': '20260115150000', 'lots': 1}
+HlBand bt T+1 unlock day= 20260116 was_locked= 5400
+HlBand 20260116 1500 n1d=180 n1w=120 close=9.4178 sig_d=20260116 sig_w=20260116 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.2421 w_ma30=9.0967 w_hist=0.0829 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=1.98% pe=False px=False bt_held=5400 avail=5400
+HlBand 20260119 1500 n1d=180 n1w=120 close=9.4274 sig_d=20260119 sig_w=20260119 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.3039 w_ma30=9.1155 w_hist=0.0864 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=2.09% pe=False px=False bt_held=5400 avail=5400
+HlBand 20260120 1500 n1d=180 n1w=120 close=9.8030 sig_d=20260120 sig_w=20260120 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.429 w_ma30=9.1369 w_hist=0.1103 buy=False buyR=- scale=False scaleR=plat_break sell=False sellR=- hold=True nlot=1 ret=6.15% pe=False px=False bt_held=5400 avail=5400
+HlBand 20260121 1500 n1d=180 n1w=120 close=9.7067 sig_d=20260121 sig_w=20260121 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.3969 w_ma30=9.1314 w_hist=0.1042 buy=False buyR=- scale=False scaleR=scale_bars sell=False sellR=- hold=True nlot=1 ret=5.11% pe=False px=False bt_held=5400 avail=5400
+HlBand 20260122 1500 n1d=180 n1w=120 close=9.5526 sig_d=20260122 sig_w=20260122 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.3456 w_ma30=9.1226 w_hist=0.0944 buy=False buyR=- scale=False scaleR=scale_bars sell=False sellR=- hold=True nlot=1 ret=3.44% pe=False px=False bt_held=5400 avail=5400
+HlBand 20260123 1500 n1d=180 n1w=120 close=9.4756 sig_d=20260123 sig_w=20260123 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.3199 w_ma30=9.1182 w_hist=0.0894 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=True sellR=trail_stop hold=True nlot=1 ret=2.61% pe=False px=False bt_held=5400 avail=5400
+HlBand pending_exit set signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[1] shares=5400 day=20260123 close=9.4756 phase=bt
+HlBand SELL by signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[1] shares=5400 signal_day=20260123 @close=9.4756
+HlBand SELL lot-can_use reason=trail_stop lots=[1] want=5400 avail=5400 same_day_lots=- other=- last_add=plat_break@20250327 risk=False
+HlBand SELL trail_stop 600350.SH x5400 20260825231902 @ 9.475560468809132
+HlBand SELL done trail_stop last= 9.475560468809132 cleared {'shares': 5400, 'price': 9.234819603239794, 'cost': 49868.03, 'opened_at': '20260115150000', 'lots': 1}
+HlBand pending_entry set signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) day=20260126 close=9.5815 phase=bt
+HlBand BUY by signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) signal_day=20260126 @close=9.5815
+HlBand BUY BUY 600350.SH x5200 20260825231902 @ 9.581486449659641
+HlBand lots now n=1 [{'id': 1, 'shares': 5200, 'price': 9.581486449659641, 'opened_at': '20260126150000', 'hold_peak': 9.581486449659641, 'hold_close_peak': 9.581486449659641, 'hold_max_ret': 0.0, 'hold_bars': 0, 'hold_count_bar': ''}]
+HlBand BUY filled {'shares': 5200, 'price': 9.581486449659641, 'cost': 49823.73, 'opened_at': '20260126150000', 'lots': 1}
+HlBand bt T+1 unlock day= 20260127 was_locked= 5200
+HlBand 20260127 1500 n1d=180 n1w=120 close=9.7452 sig_d=20260127 sig_w=20260127 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.4617 w_ma30=9.1539 w_hist=0.1065 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=1.71% pe=False px=False bt_held=5200 avail=5200
+HlBand 20260128 1500 n1d=180 n1w=120 close=9.8607 sig_d=20260128 sig_w=20260128 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.5002 w_ma30=9.1605 w_hist=0.1139 buy=False buyR=- scale=False scaleR=plat_break sell=False sellR=- hold=True nlot=1 ret=2.91% pe=False px=False bt_held=5200 avail=5200
+HlBand 20260129 1500 n1d=180 n1w=120 close=9.8511 sig_d=20260129 sig_w=20260129 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.497 w_ma30=9.16 w_hist=0.1133 buy=False buyR=- scale=False scaleR=scale_bars sell=False sellR=- hold=True nlot=1 ret=2.81% pe=False px=False bt_held=5200 avail=5200
+HlBand 20260130 1500 n1d=180 n1w=120 close=9.6489 sig_d=20260130 sig_w=20260130 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.4296 w_ma30=9.1484 w_hist=0.1004 buy=False buyR=- scale=False scaleR=scale_bars sell=True sellR=trail_stop hold=True nlot=1 ret=0.70% pe=False px=False bt_held=5200 avail=5200
+HlBand pending_exit set signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[1] shares=5200 day=20260130 close=9.6489 phase=bt
+HlBand SELL by signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[1] shares=5200 signal_day=20260130 @close=9.6489
+HlBand SELL lot-can_use reason=trail_stop lots=[1] want=5200 avail=5200 same_day_lots=- other=- last_add=plat_break@20250327 risk=False
+HlBand SELL trail_stop 600350.SH x5200 20260825231902 @ 9.648893892019053
+HlBand SELL done trail_stop last= 9.648893892019053 cleared {'shares': 5200, 'price': 9.581486449659641, 'cost': 49823.73, 'opened_at': '20260126150000', 'lots': 1}
+HlBand 20260203 1500 n1d=180 n1w=120 close=9.8030 sig_d=20260203 sig_w=20260203 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.554 w_ma30=9.1858 w_hist=0.112 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
+HlBand pending_entry set signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) day=20260203 close=9.8030 phase=bt
+HlBand BUY by signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) signal_day=20260203 @close=9.8030
+HlBand BUY BUY 600350.SH x5100 20260825231902 @ 9.80296804598343
+HlBand lots now n=1 [{'id': 1, 'shares': 5100, 'price': 9.80296804598343, 'opened_at': '20260203150000', 'hold_peak': 9.80296804598343, 'hold_close_peak': 9.80296804598343, 'hold_max_ret': 0.0, 'hold_bars': 0, 'hold_count_bar': ''}]
+HlBand BUY filled {'shares': 5100, 'price': 9.80296804598343, 'cost': 49995.14, 'opened_at': '20260203150000', 'lots': 1}
+HlBand bt T+1 unlock day= 20260204 was_locked= 5100
+HlBand 20260204 1500 n1d=180 n1w=120 close=9.8030 sig_d=20260204 sig_w=20260204 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.554 w_ma30=9.1858 w_hist=0.112 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=0.00% pe=False px=False bt_held=5100 avail=5100
+HlBand 20260205 1500 n1d=180 n1w=120 close=9.8704 sig_d=20260205 sig_w=20260205 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.5765 w_ma30=9.1897 w_hist=0.1163 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=0.69% pe=False px=False bt_held=5100 avail=5100
+HlBand 20260206 1500 n1d=180 n1w=120 close=9.8030 sig_d=20260206 sig_w=20260206 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.554 w_ma30=9.1858 w_hist=0.112 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=0.00% pe=False px=False bt_held=5100 avail=5100
+HlBand 20260209 1500 n1d=180 n1w=120 close=9.8415 sig_d=20260209 sig_w=20260209 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.6499 w_ma30=9.2233 w_hist=0.1159 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=0.39% pe=False px=False bt_held=5100 avail=5100
+HlBand 20260210 1500 n1d=180 n1w=120 close=9.8222 sig_d=20260210 sig_w=20260210 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.6434 w_ma30=9.2222 w_hist=0.1146 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=0.20% pe=False px=False bt_held=5100 avail=5100
+HlBand 20260211 1500 n1d=180 n1w=120 close=9.8126 sig_d=20260211 sig_w=20260211 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.6402 w_ma30=9.2216 w_hist=0.114 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=0.10% pe=False px=False bt_held=5100 avail=5100
+HlBand 20260212 1500 n1d=180 n1w=120 close=9.6585 sig_d=20260212 sig_w=20260212 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.5889 w_ma30=9.2128 w_hist=0.1042 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=-1.47% pe=False px=False bt_held=5100 avail=5100
+HlBand 20260213 1500 n1d=180 n1w=120 close=9.5911 sig_d=20260213 sig_w=20260213 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.5664 w_ma30=9.209 w_hist=0.0999 buy=False buyR=vol_dry_skip scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-2.16% pe=False px=False bt_held=5100 avail=5100
+HlBand 20260224 1500 n1d=180 n1w=120 close=9.5333 sig_d=20260224 sig_w=20260224 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.5554 w_ma30=9.2275 w_hist=0.0831 buy=False buyR=vol_dry_skip scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-2.75% pe=False px=False bt_held=5100 avail=5100
+HlBand 20260225 1500 n1d=180 n1w=120 close=9.4563 sig_d=20260225 sig_w=20260225 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.5297 w_ma30=9.2231 w_hist=0.0782 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-3.54% pe=False px=False bt_held=5100 avail=5100
+HlBand 20260226 1500 n1d=180 n1w=120 close=9.4948 sig_d=20260226 sig_w=20260226 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.5425 w_ma30=9.2253 w_hist=0.0806 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=-3.14% pe=False px=False bt_held=5100 avail=5100
+HlBand 20260227 1500 n1d=180 n1w=120 close=9.3793 sig_d=20260227 sig_w=20260227 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.504 w_ma30=9.2187 w_hist=0.0733 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-4.32% pe=False px=False bt_held=5100 avail=5100
+HlBand 20260302 1500 n1d=180 n1w=120 close=9.3889 sig_d=20260302 sig_w=20260302 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.4656 w_ma30=9.2284 w_hist=0.0529 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-4.22% pe=False px=False bt_held=5100 avail=5100
+HlBand 20260303 1500 n1d=180 n1w=120 close=9.3311 sig_d=20260303 sig_w=20260303 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.4464 w_ma30=9.2251 w_hist=0.0493 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-4.81% pe=False px=False bt_held=5100 avail=5100
+HlBand w_bear streak=1/2 day=20260304
+HlBand 20260304 1500 n1d=180 n1w=120 close=9.1770 sig_d=20260304 sig_w=20260304 phase=bt prev_d=False prev_w=False w_bull=True w_bear=True w_bn=1/2 w_ma5=9.395 w_ma30=9.2163 w_hist=0.0394 buy=False buyR=weekly_bear scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-6.39% pe=False px=False bt_held=5100 avail=5100
+HlBand w_bear streak reset day=20260305 (was 1)
+HlBand 20260305 1500 n1d=180 n1w=120 close=9.3119 sig_d=20260305 sig_w=20260305 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.44 w_ma30=9.224 w_hist=0.048 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=-5.01% pe=False px=False bt_held=5100 avail=5100
+HlBand 20260306 1500 n1d=180 n1w=120 close=9.2541 sig_d=20260306 sig_w=20260306 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.4207 w_ma30=9.2207 w_hist=0.0443 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-5.60% pe=False px=False bt_held=5100 avail=5100
+HlBand w_bear streak=1/2 day=20260309
+HlBand 20260309 1500 n1d=180 n1w=120 close=9.1482 sig_d=20260309 sig_w=20260309 phase=bt prev_d=False prev_w=False w_bull=True w_bear=True w_bn=1/2 w_ma5=9.3299 w_ma30=9.2166 w_hist=0.0166 buy=False buyR=weekly_bear scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-6.68% pe=False px=False bt_held=5100 avail=5100
+HlBand w_bear streak=2/2 day=20260310
+HlBand 20260310 1500 n1d=180 n1w=120 close=9.1289 sig_d=20260310 sig_w=20260310 phase=bt prev_d=False prev_w=False w_bull=True w_bear=True w_bn=2/2 w_ma5=9.3234 w_ma30=9.2155 w_hist=0.0154 buy=False buyR=weekly_bear scale=False scaleR=scale_arm sell=True sellR=weekly_bear,weekly_bear hold=True nlot=1 ret=-6.88% pe=False px=False bt_held=5100 avail=5100
+HlBand pending_exit set signal=weekly_bear label=周线转空强制清仓 all=weekly_bear(周线转空强制清仓) lots=[1] shares=5100 day=20260310 close=9.1289 phase=bt
+HlBand SELL by signal=weekly_bear label=周线转空强制清仓 all=weekly_bear(周线转空强制清仓) lots=[1] shares=5100 signal_day=20260310 @close=9.1289
+HlBand SELL lot-can_use reason=weekly_bear lots=[1] want=5100 avail=5100 same_day_lots=- other=- last_add=plat_break@20250327 risk=False
+HlBand SELL weekly_bear 600350.SH x5100 20260825231902 @ 9.128893622389285
+HlBand SELL done weekly_bear last= 9.128893622389285 cleared {'shares': 5100, 'price': 9.80296804598343, 'cost': 49995.14, 'opened_at': '20260203150000', 'lots': 1}
+HlBand w_bear streak reset day=20260311 (was 2)
+HlBand 20260313 1500 n1d=180 n1w=120 close=9.4948 sig_d=20260313 sig_w=20260313 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.4454 w_ma30=9.2364 w_hist=0.0387 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
+HlBand pending_entry set signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) day=20260313 close=9.4948 phase=bt
+HlBand BUY by signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) signal_day=20260313 @close=9.4948
+HlBand BUY BUY 600350.SH x5200 20260825231902 @ 9.49481973805468
+HlBand lots now n=1 [{'id': 1, 'shares': 5200, 'price': 9.49481973805468, 'opened_at': '20260313150000', 'hold_peak': 9.49481973805468, 'hold_close_peak': 9.49481973805468, 'hold_max_ret': 0.0, 'hold_bars': 0, 'hold_count_bar': ''}]
+HlBand BUY filled {'shares': 5200, 'price': 9.49481973805468, 'cost': 49373.06, 'opened_at': '20260313150000', 'lots': 1}
+HlBand bt T+1 unlock day= 20260316 was_locked= 5200
+HlBand 20260316 1500 n1d=180 n1w=120 close=9.7644 sig_d=20260316 sig_w=20260316 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.5518 w_ma30=9.2667 w_hist=0.0498 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=2.84% pe=False px=False bt_held=5200 avail=5200
+HlBand 20260317 1500 n1d=180 n1w=120 close=10.0533 sig_d=20260317 sig_w=20260317 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.6481 w_ma30=9.2832 w_hist=0.0682 buy=False buyR=- scale=False scaleR=plat_break sell=False sellR=- hold=True nlot=1 ret=5.88% pe=False px=False bt_held=5200 avail=5200
+HlBand 20260318 1500 n1d=180 n1w=120 close=10.0052 sig_d=20260318 sig_w=20260318 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.632 w_ma30=9.2805 w_hist=0.0651 buy=False buyR=- scale=False scaleR=scale_bars sell=False sellR=- hold=True nlot=1 ret=5.38% pe=False px=False bt_held=5200 avail=5200
+HlBand 20260319 1500 n1d=180 n1w=120 close=9.9956 sig_d=20260319 sig_w=20260319 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.6288 w_ma30=9.2799 w_hist=0.0645 buy=False buyR=- scale=False scaleR=scale_bars sell=False sellR=- hold=True nlot=1 ret=5.27% pe=False px=False bt_held=5200 avail=5200
+HlBand 20260320 1500 n1d=180 n1w=120 close=9.9474 sig_d=20260320 sig_w=20260320 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.6127 w_ma30=9.2772 w_hist=0.0615 buy=False buyR=- scale=False scaleR=scale_bars sell=False sellR=- hold=True nlot=1 ret=4.77% pe=False px=False bt_held=5200 avail=5200
+HlBand 20260323 1500 n1d=180 n1w=120 close=9.6778 sig_d=20260323 sig_w=20260323 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.6344 w_ma30=9.3002 w_hist=0.0545 buy=False buyR=- scale=False scaleR=scale_bars sell=True sellR=trail_stop hold=True nlot=1 ret=1.93% pe=False px=False bt_held=5200 avail=5200
+HlBand pending_exit set signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[1] shares=5200 day=20260323 close=9.6778 phase=bt
+HlBand SELL by signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[1] shares=5200 signal_day=20260323 @close=9.6778
+HlBand SELL lot-can_use reason=trail_stop lots=[1] want=5200 avail=5200 same_day_lots=- other=- last_add=plat_break@20250327 risk=False
+HlBand SELL trail_stop 600350.SH x5200 20260825231903 @ 9.677782795887374
+HlBand SELL done trail_stop last= 9.677782795887374 cleared {'shares': 5200, 'price': 9.49481973805468, 'cost': 49373.06, 'opened_at': '20260313150000', 'lots': 1}
+HlBand 20260327 1500 n1d=180 n1w=120 close=10.1015 sig_d=20260327 sig_w=20260327 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.7757 w_ma30=9.3244 w_hist=0.0816 buy=False buyR=- scale=False scaleR=scale_no_pos sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260409 1500 n1d=180 n1w=120 close=9.8993 sig_d=20260409 sig_w=20260409 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.9192 w_ma30=9.4066 w_hist=0.0798 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
+HlBand pending_entry set signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) day=20260409 close=9.8993 phase=bt
+HlBand BUY by signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) signal_day=20260409 @close=9.8993
+HlBand BUY BUY 600350.SH x5000 20260825231903 @ 9.899264392211165
+HlBand lots now n=1 [{'id': 1, 'shares': 5000, 'price': 9.899264392211165, 'opened_at': '20260409150000', 'hold_peak': 9.899264392211165, 'hold_close_peak': 9.899264392211165, 'hold_max_ret': 0.0, 'hold_bars': 0, 'hold_count_bar': ''}]
+HlBand BUY filled {'shares': 5000, 'price': 9.899264392211165, 'cost': 49496.32, 'opened_at': '20260409150000', 'lots': 1}
+HlBand bt T+1 unlock day= 20260410 was_locked= 5000
+HlBand 20260410 1500 n1d=180 n1w=120 close=9.6874 sig_d=20260410 sig_w=20260410 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.8486 w_ma30=9.3945 w_hist=0.0663 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-2.14% pe=False px=False bt_held=5000 avail=5000
+HlBand 20260413 1500 n1d=180 n1w=120 close=9.5622 sig_d=20260413 sig_w=20260413 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.7531 w_ma30=9.4041 w_hist=0.0339 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-3.40% pe=False px=False bt_held=5000 avail=5000
+HlBand 20260414 1500 n1d=180 n1w=120 close=9.5141 sig_d=20260414 sig_w=20260414 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.7371 w_ma30=9.4013 w_hist=0.0308 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-3.89% pe=False px=False bt_held=5000 avail=5000
+HlBand 20260415 1500 n1d=180 n1w=120 close=9.7259 sig_d=20260415 sig_w=20260415 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.8077 w_ma30=9.4134 w_hist=0.0444 buy=False buyR=- scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-1.75% pe=False px=False bt_held=5000 avail=5000
+HlBand 20260416 1500 n1d=180 n1w=120 close=9.7933 sig_d=20260416 sig_w=20260416 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.8302 w_ma30=9.4173 w_hist=0.0487 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=-1.07% pe=False px=False bt_held=5000 avail=5000
+HlBand 20260417 1500 n1d=180 n1w=120 close=9.8415 sig_d=20260417 sig_w=20260417 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.8462 w_ma30=9.42 w_hist=0.0517 buy=False buyR=vol_dry_skip scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=-0.58% pe=False px=False bt_held=5000 avail=5000
+HlBand 20260420 1500 n1d=180 n1w=120 close=9.9570 sig_d=20260420 sig_w=20260420 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.8832 w_ma30=9.4507 w_hist=0.0458 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=0.58% pe=False px=False bt_held=5000 avail=5000
+HlBand 20260421 1500 n1d=180 n1w=120 close=10.1400 sig_d=20260421 sig_w=20260421 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.9442 w_ma30=9.4612 w_hist=0.0575 buy=False buyR=- scale=False scaleR=- sell=False sellR=- hold=True nlot=1 ret=2.43% pe=False px=False bt_held=5000 avail=5000
+HlBand 20260422 1500 n1d=180 n1w=120 close=10.2652 sig_d=20260422 sig_w=20260422 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=9.9859 w_ma30=9.4683 w_hist=0.0655 buy=False buyR=- scale=False scaleR=- sell=False sellR=- hold=True nlot=1 ret=3.70% pe=False px=False bt_held=5000 avail=5000
+HlBand 20260423 1500 n1d=180 n1w=120 close=10.5444 sig_d=20260423 sig_w=20260423 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.079 w_ma30=9.4843 w_hist=0.0833 buy=False buyR=- scale=True scaleR=plat_break sell=False sellR=- hold=True nlot=1 ret=6.52% pe=False px=False bt_held=5000 avail=5000
+HlBand pending_entry set add signal=plat_break label=加仓-日线突破前期平台 all=plat_break(加仓-日线突破前期平台) day=20260423 close=10.5444 lots=1 phase=bt
+HlBand BUY add by signal=plat_break label=加仓-日线突破前期平台 all=plat_break(加仓-日线突破前期平台) signal_day=20260423 @close=10.5444
+HlBand ADD BUY 600350.SH x4700 20260825231903 @ 10.54444991193699
+HlBand lots now n=2 [{'id': 1, 'shares': 5000, 'price': 9.899264392211165, 'opened_at': '20260409150000', 'hold_peak': 10.554079546559763, 'hold_close_peak': 10.54444991193699, 'hold_max_ret': 0.06614785992217885, 'hold_bars': 10, 'hold_count_bar': '20260423'}, {'id': 2, 'shares': 4700, 'price': 10.54444991193699, 'opened_at': '20260423150000', 'hold_peak': 10.54444991193699, 'hold_close_peak': 10.54444991193699, 'hold_max_ret': 0.0, 'hold_bars': 0, 'hold_count_bar': ''}]
+HlBand BUY add filled {'add_shares': 4700, 'price': 10.54444991193699, 'lots': 2, 'total': 9700, 'avg': 10.211880056408216}
+HlBand skip sell eval after add fill day=20260423 signal=plat_break
+HlBand bt T+1 unlock day= 20260424 was_locked= 4700
+HlBand 20260424 1500 n1d=180 n1w=120 close=10.5541 sig_d=20260424 sig_w=20260424 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.0822 w_ma30=9.4848 w_hist=0.0839 buy=False buyR=- scale=False scaleR=scale_once sell=False sellR=- hold=True nlot=2 ret=3.35% pe=False px=False bt_held=9700 avail=9700
+HlBand 20260427 1500 n1d=180 n1w=120 close=10.4963 sig_d=20260427 sig_w=20260427 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.2202 w_ma30=9.5428 w_hist=0.0944 buy=False buyR=- scale=False scaleR=scale_once sell=False sellR=- hold=True nlot=2 ret=2.79% pe=False px=False bt_held=9700 avail=9700
+HlBand 20260428 1500 n1d=180 n1w=120 close=10.6600 sig_d=20260428 sig_w=20260428 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.2748 w_ma30=9.5521 w_hist=0.1049 buy=False buyR=- scale=False scaleR=scale_once sell=False sellR=- hold=True nlot=2 ret=4.39% pe=False px=False bt_held=9700 avail=9700
+HlBand 20260429 1500 n1d=180 n1w=120 close=10.3422 sig_d=20260429 sig_w=20260429 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.1689 w_ma30=9.5339 w_hist=0.0846 buy=False buyR=- scale=False scaleR=scale_once sell=True sellR=trail_stop hold=True nlot=2 ret=1.28% pe=False px=False bt_held=9700 avail=9700
+HlBand pending_exit set signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[1] shares=5000 day=20260429 close=10.3422 phase=bt
+HlBand SELL by signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[1] shares=5000 signal_day=20260429 @close=10.3422
+HlBand SELL lot-can_use reason=trail_stop lots=[1] want=5000 avail=9700 same_day_lots=- other=[2] last_add=plat_break@20260423 risk=False
+HlBand SELL trail_stop 600350.SH x5000 20260825231903 @ 10.342227584858747
+HlBand partial sell fill 5000 remain~ 4700
+HlBand lots now n=1 [{'id': 2, 'shares': 4700, 'price': 10.54444991193699, 'opened_at': '20260423150000', 'hold_peak': 10.823709315997423, 'hold_close_peak': 10.660005527410274, 'hold_max_ret': 0.026484018264840287, 'hold_bars': 4, 'hold_count_bar': '20260429'}]
+HlBand 20260430 1500 n1d=180 n1w=120 close=10.3037 sig_d=20260430 sig_w=20260430 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.156 w_ma30=9.5317 w_hist=0.0821 buy=False buyR=- scale=False scaleR=scale_once sell=False sellR=- hold=True nlot=1 ret=-2.28% pe=False px=False bt_held=4700 avail=4700
+HlBand 20260506 1500 n1d=180 n1w=120 close=10.4000 sig_d=20260506 sig_w=20260506 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.2374 w_ma30=9.5814 w_hist=0.081 buy=False buyR=- scale=False scaleR=scale_once sell=False sellR=- hold=True nlot=1 ret=-1.37% pe=False px=False bt_held=4700 avail=4700
+HlBand 20260507 1500 n1d=180 n1w=120 close=10.5348 sig_d=20260507 sig_w=20260507 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.2823 w_ma30=9.5891 w_hist=0.0896 buy=False buyR=- scale=False scaleR=scale_once sell=False sellR=- hold=True nlot=1 ret=-0.09% pe=False px=False bt_held=4700 avail=4700
+HlBand 20260508 1500 n1d=180 n1w=120 close=10.6985 sig_d=20260508 sig_w=20260508 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.3369 w_ma30=9.5984 w_hist=0.1001 buy=False buyR=- scale=False scaleR=scale_once sell=False sellR=- hold=True nlot=1 ret=1.46% pe=False px=False bt_held=4700 avail=4700
+HlBand 20260511 1500 n1d=180 n1w=120 close=10.7852 sig_d=20260511 sig_w=20260511 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.4863 w_ma30=9.6663 w_hist=0.1096 buy=False buyR=w_bias_skip scale=False scaleR=scale_once sell=False sellR=- hold=True nlot=1 ret=2.28% pe=False px=False bt_held=4700 avail=4700
+HlBand 20260512 1500 n1d=180 n1w=120 close=10.8141 sig_d=20260512 sig_w=20260512 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.4959 w_ma30=9.668 w_hist=0.1114 buy=False buyR=w_bias_skip scale=False scaleR=scale_once sell=False sellR=- hold=True nlot=1 ret=2.56% pe=False px=False bt_held=4700 avail=4700
+HlBand 20260513 1500 n1d=180 n1w=120 close=10.6793 sig_d=20260513 sig_w=20260513 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.451 w_ma30=9.6603 w_hist=0.1028 buy=False buyR=w_bias_skip scale=False scaleR=scale_once sell=True sellR=trail_stop hold=True nlot=1 ret=1.28% pe=False px=False bt_held=4700 avail=4700
+HlBand pending_exit set signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[2] shares=4700 day=20260513 close=10.6793 phase=bt
+HlBand SELL by signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[2] shares=4700 signal_day=20260513 @close=10.6793
+HlBand SELL lot-can_use reason=trail_stop lots=[2] want=4700 avail=4700 same_day_lots=- other=- last_add=plat_break@20260423 risk=False
+HlBand SELL trail_stop 600350.SH x4700 20260825231903 @ 10.67926479665582
+HlBand SELL done trail_stop last= 10.67926479665582 cleared {'shares': 4700, 'price': 10.54444991193699, 'cost': 49558.91, 'opened_at': '20260423150000', 'lots': 1}
+HlBand 20260514 1500 n1d=180 n1w=120 close=10.5926 sig_d=20260514 sig_w=20260514 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.4221 w_ma30=9.6553 w_hist=0.0973 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
+HlBand pending_entry set signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) day=20260514 close=10.5926 phase=bt
+HlBand BUY by signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) signal_day=20260514 @close=10.5926
+HlBand BUY BUY 600350.SH x4700 20260825231903 @ 10.592598085050858
+HlBand lots now n=1 [{'id': 1, 'shares': 4700, 'price': 10.592598085050858, 'opened_at': '20260514150000', 'hold_peak': 10.592598085050858, 'hold_close_peak': 10.592598085050858, 'hold_max_ret': 0.0, 'hold_bars': 0, 'hold_count_bar': ''}]
+HlBand BUY filled {'shares': 4700, 'price': 10.592598085050858, 'cost': 49785.21, 'opened_at': '20260514150000', 'lots': 1}
+HlBand bt T+1 unlock day= 20260515 was_locked= 4700
+HlBand 20260515 1500 n1d=180 n1w=120 close=10.5637 sig_d=20260515 sig_w=20260515 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.4125 w_ma30=9.6537 w_hist=0.0955 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=-0.27% pe=False px=False bt_held=4700 avail=4700
+HlBand 20260518 1500 n1d=180 n1w=120 close=10.8526 sig_d=20260518 sig_w=20260518 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.5592 w_ma30=9.7224 w_hist=0.1037 buy=False buyR=w_bias_skip scale=False scaleR=scale_arm sell=False sellR=- hold=True nlot=1 ret=2.45% pe=False px=False bt_held=4700 avail=4700
+HlBand 20260519 1500 n1d=180 n1w=120 close=11.1319 sig_d=20260519 sig_w=20260519 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.6523 w_ma30=9.7383 w_hist=0.1216 buy=False buyR=w_bias_skip scale=False scaleR=scale_bars sell=False sellR=- hold=True nlot=1 ret=5.09% pe=False px=False bt_held=4700 avail=4700
+HlBand 20260520 1500 n1d=180 n1w=120 close=11.4015 sig_d=20260520 sig_w=20260520 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.7421 w_ma30=9.7538 w_hist=0.1388 buy=False buyR=w_bias_skip scale=False scaleR=scale_bars sell=False sellR=- hold=True nlot=1 ret=7.64% pe=False px=False bt_held=4700 avail=4700
+HlBand 20260521 1500 n1d=180 n1w=120 close=11.4785 sig_d=20260521 sig_w=20260521 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.7678 w_ma30=9.7582 w_hist=0.1437 buy=False buyR=w_bias_skip scale=False scaleR=scale_bars sell=False sellR=- hold=True nlot=1 ret=8.36% pe=False px=False bt_held=4700 avail=4700
+HlBand 20260522 1500 n1d=180 n1w=120 close=11.7770 sig_d=20260522 sig_w=20260522 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.8673 w_ma30=9.7752 w_hist=0.1627 buy=False buyR=w_bias_skip scale=False scaleR=scale_bars sell=False sellR=- hold=True nlot=1 ret=11.18% pe=False px=False bt_held=4700 avail=4700
+HlBand 20260525 1500 n1d=180 n1w=120 close=12.0370 sig_d=20260525 sig_w=20260525 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=11.2572 w_ma30=9.9046 w_hist=0.2104 buy=False buyR=w_bias_skip scale=False scaleR=scale_bars sell=False sellR=- hold=True nlot=1 ret=13.64% pe=False px=False bt_held=4700 avail=4700
+HlBand 20260526 1500 n1d=180 n1w=120 close=11.3822 sig_d=20260526 sig_w=20260526 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=11.039 w_ma30=9.8672 w_hist=0.1686 buy=False buyR=w_bias_skip scale=False scaleR=- sell=True sellR=trail_stop hold=True nlot=1 ret=7.45% pe=False px=False bt_held=4700 avail=4700
+HlBand pending_exit set signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[1] shares=4700 day=20260526 close=11.3822 phase=bt
+HlBand SELL by signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[1] shares=4700 signal_day=20260526 @close=11.3822
+HlBand SELL lot-can_use reason=trail_stop lots=[1] want=4700 avail=4700 same_day_lots=- other=- last_add=plat_break@20260423 risk=False
+HlBand SELL trail_stop 600350.SH x4700 20260825231903 @ 11.382228124118287
+HlBand SELL done trail_stop last= 11.382228124118287 cleared {'shares': 4700, 'price': 10.592598085050858, 'cost': 49785.21, 'opened_at': '20260514150000', 'lots': 1}
+HlBand 20260528 1500 n1d=180 n1w=120 close=11.5459 sig_d=20260528 sig_w=20260528 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=11.0935 w_ma30=9.8766 w_hist=0.179 buy=False buyR=w_bias_skip scale=False scaleR=scale_no_pos sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
+HlBand 20260624 1500 n1d=180 n1w=120 close=10.5800 sig_d=20260624 sig_w=20260624 phase=bt prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=10.7343 w_ma30=10.054 w_hist=-0.0006 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
+HlBand pending_entry set signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) day=20260624 close=10.5800 phase=bt
+HlBand BUY by signal=pullback_vol label=买点1-缩量回踩强支撑 all=pullback_vol(买点1-缩量回踩强支撑) signal_day=20260624 @close=10.5800
+HlBand BUY BUY 600350.SH x4700 20260825231903 @ 10.58
+HlBand lots now n=1 [{'id': 1, 'shares': 4700, 'price': 10.58, 'opened_at': '20260624150000', 'hold_peak': 10.58, 'hold_close_peak': 10.58, 'hold_max_ret': 0.0, 'hold_bars': 0, 'hold_count_bar': ''}]
+HlBand BUY filled {'shares': 4700, 'price': 10.58, 'cost': 49726.0, 'opened_at': '20260624150000', 'lots': 1}
+HlBand bt T+1 unlock day= 20260625 was_locked= 4700
+HlBand 20260625 1500 n1d=180 n1w=120 close=10.6400 sig_d=20260625 sig_w=20260625 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.7543 w_ma30=10.0574 w_hist=0.0032 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=0.57% pe=False px=False bt_held=4700 avail=4700
+HlBand 20260626 1500 n1d=180 n1w=120 close=10.8500 sig_d=20260626 sig_w=20260626 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.8243 w_ma30=10.0694 w_hist=0.0166 buy=True buyR=pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=True nlot=1 ret=2.55% pe=False px=False bt_held=4700 avail=4700
+HlBand 20260629 1500 n1d=180 n1w=120 close=11.0900 sig_d=20260629 sig_w=20260629 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.9129 w_ma30=10.1278 w_hist=0.0157 buy=False buyR=- scale=False scaleR=scale_bars sell=False sellR=- hold=True nlot=1 ret=4.82% pe=False px=False bt_held=4700 avail=4700
+HlBand 20260630 1500 n1d=180 n1w=120 close=11.1300 sig_d=20260630 sig_w=20260630 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.9262 w_ma30=10.1301 w_hist=0.0182 buy=False buyR=- scale=False scaleR=scale_bars sell=False sellR=- hold=True nlot=1 ret=5.20% pe=False px=False bt_held=4700 avail=4700
+HlBand 20260701 1500 n1d=180 n1w=120 close=11.3400 sig_d=20260701 sig_w=20260701 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.9962 w_ma30=10.1421 w_hist=0.0316 buy=False buyR=w_bias_skip scale=False scaleR=scale_bars sell=False sellR=- hold=True nlot=1 ret=7.18% pe=False px=False bt_held=4700 avail=4700
+HlBand 20260702 1500 n1d=180 n1w=120 close=11.8200 sig_d=20260702 sig_w=20260702 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=11.1562 w_ma30=10.1695 w_hist=0.0623 buy=False buyR=w_bias_skip scale=False scaleR=scale_bars sell=False sellR=- hold=True nlot=1 ret=11.72% pe=False px=False bt_held=4700 avail=4700
+HlBand 20260703 1500 n1d=180 n1w=120 close=11.8700 sig_d=20260703 sig_w=20260703 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=11.1729 w_ma30=10.1724 w_hist=0.0654 buy=False buyR=w_bias_skip scale=False scaleR=scale_bars sell=False sellR=- hold=True nlot=1 ret=12.19% pe=False px=False bt_held=4700 avail=4700
+HlBand 20260706 1500 n1d=180 n1w=120 close=12.1500 sig_d=20260706 sig_w=20260706 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=11.4986 w_ma30=10.2855 w_hist=0.1066 buy=False buyR=w_bias_skip scale=False scaleR=- sell=False sellR=- hold=True nlot=1 ret=14.84% pe=False px=False bt_held=4700 avail=4700
+HlBand 20260707 1500 n1d=180 n1w=120 close=12.2600 sig_d=20260707 sig_w=20260707 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=11.5352 w_ma30=10.2917 w_hist=0.1136 buy=False buyR=w_bias_skip scale=False scaleR=- sell=False sellR=- hold=True nlot=1 ret=15.88% pe=False px=False bt_held=4700 avail=4700
+HlBand 20260708 1500 n1d=180 n1w=120 close=13.4900 sig_d=20260708 sig_w=20260708 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=11.9452 w_ma30=10.362 w_hist=0.1921 buy=False buyR=w_bias_skip,chase_skip scale=False scaleR=- sell=False sellR=- hold=True nlot=1 ret=27.50% pe=False px=False bt_held=4700 avail=4700
+HlBand 20260709 1500 n1d=180 n1w=120 close=12.1400 sig_d=20260709 sig_w=20260709 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=11.4952 w_ma30=10.2849 w_hist=0.106 buy=False buyR=w_bias_skip scale=False scaleR=- sell=True sellR=trail_stop hold=True nlot=1 ret=14.74% pe=False px=False bt_held=4700 avail=4700
+HlBand pending_exit set signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[1] shares=4700 day=20260709 close=12.1400 phase=bt
+HlBand SELL by signal=trail_stop label=卖点1-移动止盈回撤 all=trail_stop(卖点1-移动止盈回撤) lots=[1] shares=4700 signal_day=20260709 @close=12.1400
+HlBand SELL lot-can_use reason=trail_stop lots=[1] want=4700 avail=4700 same_day_lots=- other=- last_add=plat_break@20260423 risk=False
+HlBand SELL trail_stop 600350.SH x4700 20260825231903 @ 12.14
+HlBand SELL done trail_stop last= 12.14 cleared {'shares': 4700, 'price': 10.58, 'cost': 49726.0, 'opened_at': '20260624150000', 'lots': 1}
+HlBand 20260724 1500 n1d=180 n1w=120 close=11.2700 sig_d=20260724 sig_w=20260724 phase=bt prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=11.4546 w_ma30=10.4108 w_hist=0.0494 buy=False buyR=w_bias_skip,pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=0 avail=0
