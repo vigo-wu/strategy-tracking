@@ -18,14 +18,16 @@ ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 
 # 跟踪池仓位（实盘）。空仓不锁 1/N，只锁 MIN_LOT。当天多只买单先写入共享账本，冻结后均分可部署资金。
 # 单只硬顶 MAX_NAME_FRAC * E_s（默认 50%）。E_s = 账户总资产 - 非白名单股票市值（约等于现金+池内市值）。
-# k / book_mv 只统计 BOOK_STOCKS；其它持股不占名额、不进 50% 分母。N 以名单长度为准。
-# 约束：N * MIN_LOT <= CASH_RATIO * E_s。增减标的改本名单后四图 re-deploy。
-BOOK_STOCKS = (
-    "600350.SH",
-    "601398.SH",
-    "601939.SH",
-    "513530.SH",
-)
+# k / book_mv 只统计 BOOK_STOCKS；其它持股不占名额、不进 50% 分母。N = 字典长度。
+# 约束：N * MIN_LOT <= CASH_RATIO * E_s。增减标的改本表后四图 re-deploy。
+# 形态：code → 配置字典。首期字段 ma_type（EMA|SMA）；后续可同级扩展 w_ma_life 等。
+# 简写兼容：value 写成 "SMA" 视为 {"ma_type": "SMA"}；旧纯字符串 tuple 仍认作白名单。
+BOOK_STOCKS = {
+    "600350.SH": {"ma_type": "EMA"},
+    "601398.SH": {"ma_type": "SMA"},
+    "601939.SH": {"ma_type": "EMA"},
+    "513530.SH": {"ma_type": "SMA"},
+}
 BOOK_N = 4
 DYNAMIC_BUDGET = True
 EQUAL_SPLIT = True
@@ -35,7 +37,7 @@ BOOK_FILE = r"D:\tradingStrategy\hlband_book.json"
 BOOK_FREEZE_CLOSE = "145630"
 BOOK_FREEZE_OPEN = "093200"
 # 可部署比例（相对 E_s = 总资产-其它股票市值）；其余留作 T+1 / 废单重试
-CASH_RATIO = 0.95
+CASH_RATIO = 0.90
 # 每只空仓预留的最小进场金额（元）；不足 100 股则实际成交仍按 100 股市值
 MIN_LOT = 20000.0
 # 单标的市值上限占 E_s 的比例
@@ -46,10 +48,10 @@ TRADE_BUDGET = 50000.0
 TRADE_BUDGET_BY_STOCK = {}
 
 # ---- 周线过滤（跨周期；主图仍是日线）----
-# 价格均线类型：EMA 或 SMA（大小写不敏感）。只作用于周/日价格均线；
-# 成交量均量始终 SMA；MACD 仍用 EMA。非法值回落 EMA。
+# 价格均线缺省：EMA 或 SMA（大小写不敏感）。BOOK_STOCKS[code].ma_type 优先；
+# 缺省/非法回落本常量。只作用于周/日价格均线；成交量均量始终 SMA；MACD 仍用 EMA。
 MA_TYPE = "EMA"
-# 周线均线：快/中/生命线/慢线（斐波那契 5/13/34/55）；算法见 MA_TYPE
+# 周线均线：快/中/生命线/慢线（斐波那契 5/13/34/55）；算法见标的 ma_type / MA_TYPE
 #   MA5 vs MA13 + MACD → 多头判定（仅日志；开仓不强制 weekly_bull）
 #   MA34 → 生命线（收盘跌破即周线空，强制清仓）；乖离/斜率过滤也用它
 #   MA55 → 数据暖机长度参考（market 取数 need）
@@ -72,7 +74,7 @@ W_BIAS_LOW = 0.02
 W_MA30_SLOPE_WEEKS = 2
 
 # ---- 日线买卖 ----
-# 日线均线（算法见 MA_TYPE）：MA20→回踩/站上/无量阴跌；MA60→回踩支撑 + 时间成本线
+# 日线均线（算法见标的 ma_type / MA_TYPE）：MA20→回踩/站上/无量阴跌；MA60→回踩支撑 + 时间成本线
 D_MA_MID = 20
 D_MA_SLOW = 60
 
@@ -147,7 +149,7 @@ SCALE_W_HIST_EXPAND_RATIO = 1.2
 
 # 策略交易面板 bind → 模块常量。编辑器/回测无注入时用上面默认值。
 # 只上屏：开关 / 预算袖子 / 硬风控。买点窗口、时间成本、加仓细节、SCALE_LOTS、
-# BOOK_N、TRAIL_TIERS、均线周期、MA_TYPE、路径、账号仍只在 config（N 以 BOOK_STOCKS 长度为准）。
+# BOOK_N、TRAIL_TIERS、均线周期、BOOK_STOCKS 子配置、MA_TYPE、路径、账号仍只在 config（N 以 BOOK_STOCKS 长度为准）。
 PANEL_BINDS = (
     ("panel_dry_run", "DRY_RUN", "bool"),
     ("panel_budget", "TRADE_BUDGET", "float"),
@@ -211,7 +213,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.46"
+STRATEGY_VER = "v1.47"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
@@ -1239,14 +1241,31 @@ def _ema(closes, n):
 
 
 def _ma_kind():
-    """价格均线类型：EMA 或 SMA。非法值回落 EMA。"""
-    raw = globals().get("MA_TYPE", "EMA")
+    """价格均线类型：优先 BOOK_STOCKS[A.stock].ma_type，否则 MA_TYPE；非法回落 EMA。"""
+    raw = None
+    stock = str(getattr(A, "stock", "") or "").strip().upper()
+    book = globals().get("BOOK_STOCKS")
+    if stock and isinstance(book, dict):
+        entry = None
+        if stock in book:
+            entry = book.get(stock)
+        else:
+            for k, v in book.items():
+                if str(k or "").strip().upper() == stock:
+                    entry = v
+                    break
+        if isinstance(entry, dict):
+            raw = entry.get("ma_type")
+        elif isinstance(entry, (str, bytes)):
+            raw = entry
+    if raw is None or str(raw or "").strip() == "":
+        raw = globals().get("MA_TYPE", "EMA")
     kind = str(raw or "EMA").strip().upper()
     if kind in ("SMA", "EMA"):
         return kind
     if not globals().get("_MA_TYPE_BAD"):
         globals()["_MA_TYPE_BAD"] = True
-        print("%s MA_TYPE=%s invalid, fallback EMA" % (STRATEGY_NAME, raw))
+        print("%s ma_type=%s invalid, fallback EMA" % (STRATEGY_NAME, raw))
     return "EMA"
 
 
@@ -2676,18 +2695,57 @@ def _norm_code(code):
     return str(code or "").strip().upper()
 
 
-def _book_stock_set():
-    out = set()
-    raw = globals().get("BOOK_STOCKS") or ()
+def _book_entry_normalize(val):
+    """把 BOOK_STOCKS 的 value 规范成 dict。str → {ma_type: str}；其它非 dict → {}。"""
+    if isinstance(val, dict):
+        return dict(val)
+    if isinstance(val, (str, bytes)):
+        s = str(val or "").strip()
+        if s:
+            return {"ma_type": s}
+        return {}
+    return {}
+
+
+def _book_stock_map():
+    """解析 BOOK_STOCKS → {norm_code: cfg_dict}。兼容 dict / 旧纯字符串序列。"""
+    out = {}
+    raw = globals().get("BOOK_STOCKS")
+    if raw is None:
+        return out
+    if isinstance(raw, dict):
+        for k, v in raw.items():
+            code = _norm_code(k)
+            if not code:
+                continue
+            out[code] = _book_entry_normalize(v)
+        return out
     try:
         seq = list(raw)
     except Exception:
-        seq = []
+        return out
     for x in seq:
-        s = _norm_code(x)
-        if s:
-            out.add(s)
+        if isinstance(x, (list, tuple)) and len(x) >= 1:
+            code = _norm_code(x[0])
+            cfg = _book_entry_normalize(x[1] if len(x) >= 2 else {})
+        else:
+            code = _norm_code(x)
+            cfg = {}
+        if code:
+            out[code] = cfg
     return out
+
+
+def _book_stock_set():
+    return set(_book_stock_map().keys())
+
+
+def _book_cfg(stock):
+    """当前标的在 BOOK_STOCKS 中的子配置；不在池则 {}。"""
+    ncode = _norm_code(stock)
+    if not ncode:
+        return {}
+    return dict(_book_stock_map().get(ncode) or {})
 
 
 def _code_in_book(code):

@@ -15,18 +15,57 @@ def _norm_code(code):
     return str(code or "").strip().upper()
 
 
-def _book_stock_set():
-    out = set()
-    raw = globals().get("BOOK_STOCKS") or ()
+def _book_entry_normalize(val):
+    """把 BOOK_STOCKS 的 value 规范成 dict。str → {ma_type: str}；其它非 dict → {}。"""
+    if isinstance(val, dict):
+        return dict(val)
+    if isinstance(val, (str, bytes)):
+        s = str(val or "").strip()
+        if s:
+            return {"ma_type": s}
+        return {}
+    return {}
+
+
+def _book_stock_map():
+    """解析 BOOK_STOCKS → {norm_code: cfg_dict}。兼容 dict / 旧纯字符串序列。"""
+    out = {}
+    raw = globals().get("BOOK_STOCKS")
+    if raw is None:
+        return out
+    if isinstance(raw, dict):
+        for k, v in raw.items():
+            code = _norm_code(k)
+            if not code:
+                continue
+            out[code] = _book_entry_normalize(v)
+        return out
     try:
         seq = list(raw)
     except Exception:
-        seq = []
+        return out
     for x in seq:
-        s = _norm_code(x)
-        if s:
-            out.add(s)
+        if isinstance(x, (list, tuple)) and len(x) >= 1:
+            code = _norm_code(x[0])
+            cfg = _book_entry_normalize(x[1] if len(x) >= 2 else {})
+        else:
+            code = _norm_code(x)
+            cfg = {}
+        if code:
+            out[code] = cfg
     return out
+
+
+def _book_stock_set():
+    return set(_book_stock_map().keys())
+
+
+def _book_cfg(stock):
+    """当前标的在 BOOK_STOCKS 中的子配置；不在池则 {}。"""
+    ncode = _norm_code(stock)
+    if not ncode:
+        return {}
+    return dict(_book_stock_map().get(ncode) or {})
 
 
 def _code_in_book(code):
