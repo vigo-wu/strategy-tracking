@@ -120,6 +120,21 @@ def _nearest_ohlc_idx(ohlc: pd.DataFrame, day_raw) -> pd.Timestamp | None:
     return ohlc.index[int(loc) if not isinstance(loc, slice) else loc.start]
 
 
+def _ohlc_x_pos(ohlc: pd.DataFrame, ts: pd.Timestamp) -> int:
+    loc = ohlc.index.get_loc(ts)
+    return int(loc) if not isinstance(loc, slice) else int(loc.start)
+
+
+def _kline_tick_vals(n: int, max_ticks: int = 12) -> list[int]:
+    if n <= 0:
+        return []
+    if n == 1:
+        return [0]
+    n_ticks = min(max_ticks, n)
+    vals = [int(round(i * (n - 1) / (n_ticks - 1))) for i in range(n_ticks)]
+    return sorted(set(vals))
+
+
 def _plot_kline(
     ohlc: pd.DataFrame,
     trades: list[dict],
@@ -136,13 +151,16 @@ def _plot_kline(
         fig.add_annotation(text="无 OHLC", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
         return fig
 
-    # 保证 x 轴与标记用同一套日期索引
+    # 按交易日等间距排布，周末/节假日不占轴（日历空隙不画）
     ohlc = ohlc.copy()
     ohlc.index = pd.DatetimeIndex(pd.to_datetime(ohlc.index).normalize())
+    ohlc = ohlc[~ohlc.index.duplicated(keep="last")].sort_index()
+    x_pos = list(range(len(ohlc)))
+    x_dates = ohlc.index.strftime("%Y-%m-%d").tolist()
 
     fig.add_trace(
         go.Candlestick(
-            x=ohlc.index,
+            x=x_pos,
             open=ohlc["Open"],
             high=ohlc["High"],
             low=ohlc["Low"],
@@ -150,13 +168,26 @@ def _plot_kline(
             name="日线",
             increasing_line_color="#e53935",
             decreasing_line_color="#43a047",
+            customdata=x_dates,
+            hovertemplate=(
+                "%{customdata}<br>"
+                "开 %{open}<br>高 %{high}<br>低 %{low}<br>收 %{close}"
+                "<extra></extra>"
+            ),
         ),
         row=1,
         col=1,
     )
     if "Volume" in ohlc.columns:
         fig.add_trace(
-            go.Bar(x=ohlc.index, y=ohlc["Volume"], name="成交量", marker_color="#90a4ae"),
+            go.Bar(
+                x=x_pos,
+                y=ohlc["Volume"],
+                name="成交量",
+                marker_color="#90a4ae",
+                customdata=x_dates,
+                hovertemplate="%{customdata}<br>量 %{y}<extra></extra>",
+            ),
             row=2,
             col=1,
         )
@@ -175,37 +206,39 @@ def _plot_kline(
         sd = _nearest_ohlc_idx(ohlc, t.get("sell_exec_day") or t.get("sell_signal_day"))
         ti = t.get("i", "")
         if bd is not None:
+            xi = _ohlc_x_pos(ohlc, bd)
             low = float(ohlc.loc[bd, "Low"])
             px = float(t.get("buy_price") or low)
             label_y = low - pad
             fig.add_shape(
                 type="line",
-                x0=bd,
-                x1=bd,
+                x0=xi,
+                x1=xi,
                 y0=low,
                 y1=label_y,
                 line=dict(color=color_b, width=1, dash="dash"),
                 row=1,
                 col=1,
             )
-            buy_x.append(bd)
+            buy_x.append(xi)
             buy_y.append(label_y)
             buy_hover.append(f"买 #{ti} @ {px:.4g}<br>{bd.strftime('%Y-%m-%d')}")
         if sd is not None:
+            xi = _ohlc_x_pos(ohlc, sd)
             high = float(ohlc.loc[sd, "High"])
             px = float(t.get("sell_price") or high)
             label_y = high + pad
             fig.add_shape(
                 type="line",
-                x0=sd,
-                x1=sd,
+                x0=xi,
+                x1=xi,
                 y0=high,
                 y1=label_y,
                 line=dict(color=color_s, width=1, dash="dash"),
                 row=1,
                 col=1,
             )
-            sell_x.append(sd)
+            sell_x.append(xi)
             sell_y.append(label_y)
             sell_hover.append(f"卖 #{ti} @ {px:.4g}<br>{sd.strftime('%Y-%m-%d')}")
 
@@ -252,10 +285,19 @@ def _plot_kline(
     # 允许 x 轴缩放/平移；y 轴留出 B/S 边距
     y_lo = float(ohlc["Low"].min()) - pad * 2.2
     y_hi = float(ohlc["High"].max()) + pad * 2.2
-    fig.update_xaxes(fixedrange=False, rangeslider_visible=False)
+    tickvals = _kline_tick_vals(len(ohlc))
+    fig.update_xaxes(
+        type="linear",
+        fixedrange=False,
+        rangeslider_visible=False,
+        tickmode="array",
+        tickvals=tickvals,
+        ticktext=[x_dates[i] for i in tickvals],
+    )
     fig.update_yaxes(title_text="价格", fixedrange=False, range=[y_lo, y_hi], row=1, col=1)
     fig.update_yaxes(title_text="量", fixedrange=False, row=2, col=1)
-    fig.update_xaxes(title_text="日期", row=2, col=1)
+    fig.update_xaxes(title_text="日期", showticklabels=True, row=2, col=1)
+    fig.update_xaxes(showticklabels=False, row=1, col=1)
     return fig
 
 
