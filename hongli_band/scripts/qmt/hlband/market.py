@@ -1,4 +1,20 @@
 # === hlband/market.py ===
+def _dividend_type():
+    """QMT 复权参数。follow=跟随主图/公式「复权方式」。"""
+    raw = str(globals().get("DIVIDEND_TYPE") or "follow").strip().lower()
+    if raw in ("", "follow", "chart", "main"):
+        return "follow"
+    return raw
+
+
+def _chart_dividend(C):
+    """主图/公式当前复权（只用于日志）。"""
+    try:
+        return str(getattr(C, "dividend_type", "") or "")
+    except Exception:
+        return ""
+
+
 def _norm_bar_day(x):
     """行情时间戳/索引 → yyyymmdd。"""
     if x is None:
@@ -65,6 +81,7 @@ def _get_daily_bar_days(C, stock, count=8):
         end = end[:8]
     fields = ["close"]
     md = None
+    div = _dividend_type()
     try:
         md = C.get_market_data_ex(
             fields=fields,
@@ -72,7 +89,7 @@ def _get_daily_bar_days(C, stock, count=8):
             period=getattr(A, "period", "1d"),
             end_time=end,
             count=int(count),
-            dividend_type="front_ratio",
+            dividend_type=div,
             fill_data=True,
             subscribe=False,
         )
@@ -85,7 +102,7 @@ def _get_daily_bar_days(C, stock, count=8):
                 start_time="",
                 end_time=end,
                 count=int(count),
-                dividend_type="front_ratio",
+                dividend_type=div,
             )
         except Exception:
             md = None
@@ -141,6 +158,7 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
     source = None
     open_ = high = low = close = volume = None
     fields = ["open", "high", "low", "close", "volume"]
+    div = _dividend_type()
 
     try:
         md = C.get_market_data_ex(
@@ -149,7 +167,7 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
             period=period,
             end_time=end,
             count=count,
-            dividend_type="front_ratio",
+            dividend_type=div,
             fill_data=True,
             subscribe=False,
         )
@@ -163,7 +181,7 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
                 start_time="",
                 end_time=end,
                 count=count,
-                dividend_type="front_ratio",
+                dividend_type=div,
             )
             source = "get_market_data_ex/pos"
         except Exception as e:
@@ -189,7 +207,7 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
                 period=period,
                 end_time=end,
                 count=count,
-                dividend_type="front_ratio",
+                dividend_type=div,
             )
             source = "get_market_data"
             md_used = md2
@@ -268,6 +286,10 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
         end,
         "last=",
         round(float(close[-1]), 4),
+        "div=",
+        div,
+        "chart=",
+        _chart_dividend(C) or "-",
     )
     return open_, high, low, close, volume
 

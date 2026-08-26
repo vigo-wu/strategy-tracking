@@ -195,6 +195,15 @@ SIGNAL_CONFIRM_END = "160000"
 # 实盘心跳/状态行间隔（秒）；空仓与持仓无新信号沿时均按此节流
 LIVE_HEARTBEAT_SEC = 300
 
+# 行情复权（传给 get_market_data_ex 的 dividend_type）
+#   follow       跟随主图 / 公式「基本信息 → 复权方式」（默认）
+#   none         不复权
+#   front        前复权（价差）
+#   back         后复权（价差）
+#   front_ratio  等比前复权
+#   back_ratio   等比后复权
+DIVIDEND_TYPE = "follow"
+
 # download_history_data 最长回溯（自然日）；回测暖机用
 HIST_MAX_LOOKBACK_DAYS = 800
 DOWNLOAD_HIST_LIVE = False
@@ -214,7 +223,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.48"
+STRATEGY_VER = "v1.49"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
@@ -1467,6 +1476,22 @@ def _live_heartbeat(reason=""):
     )
 
 # === hlband/market.py ===
+def _dividend_type():
+    """QMT 复权参数。follow=跟随主图/公式「复权方式」。"""
+    raw = str(globals().get("DIVIDEND_TYPE") or "follow").strip().lower()
+    if raw in ("", "follow", "chart", "main"):
+        return "follow"
+    return raw
+
+
+def _chart_dividend(C):
+    """主图/公式当前复权（只用于日志）。"""
+    try:
+        return str(getattr(C, "dividend_type", "") or "")
+    except Exception:
+        return ""
+
+
 def _norm_bar_day(x):
     """行情时间戳/索引 → yyyymmdd。"""
     if x is None:
@@ -1533,6 +1558,7 @@ def _get_daily_bar_days(C, stock, count=8):
         end = end[:8]
     fields = ["close"]
     md = None
+    div = _dividend_type()
     try:
         md = C.get_market_data_ex(
             fields=fields,
@@ -1540,7 +1566,7 @@ def _get_daily_bar_days(C, stock, count=8):
             period=getattr(A, "period", "1d"),
             end_time=end,
             count=int(count),
-            dividend_type="front_ratio",
+            dividend_type=div,
             fill_data=True,
             subscribe=False,
         )
@@ -1553,7 +1579,7 @@ def _get_daily_bar_days(C, stock, count=8):
                 start_time="",
                 end_time=end,
                 count=int(count),
-                dividend_type="front_ratio",
+                dividend_type=div,
             )
         except Exception:
             md = None
@@ -1609,6 +1635,7 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
     source = None
     open_ = high = low = close = volume = None
     fields = ["open", "high", "low", "close", "volume"]
+    div = _dividend_type()
 
     try:
         md = C.get_market_data_ex(
@@ -1617,7 +1644,7 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
             period=period,
             end_time=end,
             count=count,
-            dividend_type="front_ratio",
+            dividend_type=div,
             fill_data=True,
             subscribe=False,
         )
@@ -1631,7 +1658,7 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
                 start_time="",
                 end_time=end,
                 count=count,
-                dividend_type="front_ratio",
+                dividend_type=div,
             )
             source = "get_market_data_ex/pos"
         except Exception as e:
@@ -1657,7 +1684,7 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
                 period=period,
                 end_time=end,
                 count=count,
-                dividend_type="front_ratio",
+                dividend_type=div,
             )
             source = "get_market_data"
             md_used = md2
@@ -1736,6 +1763,10 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
         end,
         "last=",
         round(float(close[-1]), 4),
+        "div=",
+        div,
+        "chart=",
+        _chart_dividend(C) or "-",
     )
     return open_, high, low, close, volume
 
@@ -6013,6 +6044,10 @@ def _init_impl(C):
         A.acct_type,
         "PERIOD=",
         A.period,
+        "DIVIDEND=",
+        _dividend_type(),
+        "chart_div=",
+        _chart_dividend(C) or "-",
         "BACKTEST=",
         A.is_backtest,
         "DRY_RUN=",
@@ -6079,6 +6114,8 @@ def _init_impl(C):
         acct=A.acct,
         acct_type=A.acct_type,
         period=A.period,
+        dividend=_dividend_type(),
+        chart_div=_chart_dividend(C) or "",
         backtest=A.is_backtest,
         dry_run=DRY_RUN,
         scale=SCALE_ENABLE,

@@ -1,6 +1,6 @@
 # 红利板块波段策略：周线定方向，日线找买卖点
 
-**主题目录**：`hongli_band/`｜**版本**：v1.47｜**形态**：单仓骨架 / 分笔多仓｜**运行**：国金 QMT 终端模型（见 §5）  
+**主题目录**：`hongli_band/`｜**版本**：v1.49｜**形态**：单仓骨架 / 分笔多仓｜**运行**：国金 QMT 终端模型（见 §5）  
 **参数默认值**：`hongli_band/scripts/qmt/hlband/config.py`（文档以该文件为准）。实盘在「模型交易 → 新建/编辑策略交易」面板只覆盖开关 / 预算袖子 / 硬风控（`hlband/panel.xml`）；编辑器回测无注入时用 config。买点窗口、时间成本、加仓细节、`SCALE_LOTS`、`BOOK_N`、阶梯止盈 `TRAIL_TIERS`、均线周期、`BOOK_STOCKS` 子配置 / `MA_TYPE`、路径仍只在 config。
 
 ---
@@ -8,7 +8,7 @@
 ## 核心逻辑
 
 红利资产慢牛爬坡、震荡抗跌。脚本做 **周线估值/斜率过滤 + 日线缩量低吸 + 动态锁利卖出**。  
-行情一律 **前复权**（`dividend_type=front_ratio`）。主图 **日线**；实盘信号在收盘确认窗评估（默认 14:56 起），**尾盘成交窗**（`PENDING_EXEC_START`～`PENDING_EXEC_END`，默认 14:56:00–14:57:00）在连续竞价最后一分钟按 **卖一价限价**买入、买一价限价卖出（`prType=11`）。**14:57 起已是收盘集合竞价，本窗不再报单。** 错过则保留到下一交易日 **开盘兜底窗**（`OPEN_EXEC_START`～`OPEN_EXEC_END`，默认 09:30–09:45）按开盘价补成交（连续竞价走市价）。若收盘窗未跑到，开盘对上一根已收盘日兜底评估（`confirmed_eval_day < 上一完整交易日`），同日开盘窗可成交。回测与尾盘主路径对齐：信号日按**收盘价**成交；T+1 隔夜残留按下一日开盘价。  
+行情复权 **跟随主图**（`dividend_type=follow`，与公式「基本信息 → 复权方式」一致；改等比前复权/前复权会改变均线与买卖点）。主图 **日线**；实盘信号在收盘确认窗评估（默认 14:56 起），**尾盘成交窗**（`PENDING_EXEC_START`～`PENDING_EXEC_END`，默认 14:56:00–14:57:00）在连续竞价最后一分钟按 **卖一价限价**买入、买一价限价卖出（`prType=11`）。**14:57 起已是收盘集合竞价，本窗不再报单。** 错过则保留到下一交易日 **开盘兜底窗**（`OPEN_EXEC_START`～`OPEN_EXEC_END`，默认 09:30–09:45）按开盘价补成交（连续竞价走市价）。若收盘窗未跑到，开盘对上一根已收盘日兜底评估（`confirmed_eval_day < 上一完整交易日`），同日开盘窗可成交。回测与尾盘主路径对齐：信号日按**收盘价**成交；T+1 隔夜残留按下一日开盘价。  
 实盘报单成功后**保留**信号 pending / 止盈元数据，**仅成交回调**后清除；废单/撤单后下一尾盘或开盘窗自动重试。  
 **加仓成交后当日不再评新卖点**（`skip_sell_eval_day`，实盘同一根日 K 的后续 tick 也跳过）；已挂的 `pending_exit` 仍可成交。T+1 导致整仓/多笔只卖掉一部分时，若 `pending_exit.lot_ids` 还有剩余笔则**保留** pending，不因部分成交清掉。
 
@@ -166,6 +166,7 @@
 | 配置 | 当前值 | 说明 |
 | :--- | :--- | :--- |
 | `DRY_RUN` | `False` | **默认真下单**；联调可改 `True` 或面板勾选「模拟下单」 |
+| `DIVIDEND_TYPE` | `"follow"` | 行情复权跟随主图/公式「复权方式」（仅 config） |
 | `TRADE_BUDGET` | `50000` | 回测单笔回落；实盘填满不锁此值；可被 `TRADE_BUDGET_BY_STOCK` 覆盖 |
 | `BOOK_STOCKS` | 四只默认 `{code: {ma_type}}` | 跟踪池 + 按标的配置（仅 config）；N=字典长度；首期读 `ma_type`，后续可同级扩键 |
 | `BOOK_N` | `4` | 仅 config 回落；有 `BOOK_STOCKS` 时 N=名单只数（面板不上屏） |
@@ -207,4 +208,4 @@
 | `STATE_FILE` | `D:\tradingStrategy\hlband_{stock}.json` | 实盘状态；按主图标的分文件 |
 | `LOG_DIR` | `D:\tradingStrategy\logs` | 实盘结构化日志根目录 |
 
-日志确认 `HlBand v1.47 init` 且 `BOOK_N= 4` 与 `book_stocks= 513530.SH,600350.SH,601398.SH,601939.SH`（逗号名单）一致、`cash_ratio= 0.95`、`min_lot= 20000`、`max_name_frac= 0.5`、`dynamic_budget= True`、`equal_split= True`、`book_freeze= 145630/093200`、`close_exec= 145600-145700`、`open_exec= 093000-094500`、`scale= True`、`scale_lots= True`、`scale_once= True`、`scale_arm_bars= 8`、`scale_plat= 20/0.10`、`scale_w_expand= 1.2`、`time_force_min_ret= 0.03`、`wMA= 5/13/34`（`dMA=20/60`，`ma_type=` 为当前主图解析结果，`DRY_RUN=False` 与面板或 config 一致）后再挂实盘。策略交易下应另有 `panel applied ...` 行。四图须都能写 `BOOK_FILE`；无信号也要打卡。实盘买入应看到 `fill ... k_other= other_mv= n_buy= split= why=split`（持股查询失败备用为 `src=local`）；未冻结为 `why=wait`。顶满应看到 `buy_cap` / `scale_cap`。验收：回测先见 `diag: ok`；买卖日志为 `@close=`（同日）或残留 `@open=`；买卖闭合、无孤儿仓。第一笔仍为 `pullback_vol`；加仓应为 `pullback_vol` / `plat_break` / `w_macd_golden`（状态行 `scale= True`），成交附近有 `lots now n=2` 与 `skip sell eval after add fill`。加仓当日状态行 `sellR` 应含 `skip_add_bar`，且不应新挂卖点。本轮已加过仓后再出第一笔时，不应再出现 `BUY add`（可见 `scale_once` 或 `pending_entry cancel scale_once`）。执行日已触发卖点时应看到 `pending_entry cancel scale_sell_block` 且不出现 `BUY add`。只出一笔时应看到 `SELL ... lots=[1]` 且另一笔仍持有。卖出前应有 `SELL lot-can_use`；若 `BUY add` 后同日仍出现 `SELL lots=[2]`，看 `risk=True` 的 WARN（券商成交未必是第二笔）。T+1 部分成交应看到 `pending_exit keep after partial fill`。趋势仓满 30 日且峰值≥3%、仍站上 EMA60 时应看到 `time_force skip trend`，之后由 `trail_stop` / `weekly_bear` / 破 EMA60 出场；磨人仓仍应看到 `time_force grace`。
+日志确认 `HlBand v1.49 init` 且 `DIVIDEND= follow`、`BOOK_N= 4` 与 `book_stocks= 513530.SH,600350.SH,601398.SH,601939.SH`（逗号名单）一致、`cash_ratio= 0.95`、`min_lot= 20000`、`max_name_frac= 0.5`、`dynamic_budget= True`、`equal_split= True`、`book_freeze= 145630/093200`、`close_exec= 145600-145700`、`open_exec= 093000-094500`、`scale= True`、`scale_lots= True`、`scale_once= True`、`scale_arm_bars= 8`、`scale_plat= 20/0.10`、`scale_w_expand= 1.2`、`time_force_min_ret= 0.03`、`wMA= 5/13/34`（`dMA=20/60`，`ma_type=` 为当前主图解析结果，`DRY_RUN=False` 与面板或 config 一致）后再挂实盘。策略交易下应另有 `panel applied ...` 行。四图须都能写 `BOOK_FILE`；无信号也要打卡。实盘买入应看到 `fill ... k_other= other_mv= n_buy= split= why=split`（持股查询失败备用为 `src=local`）；未冻结为 `why=wait`。顶满应看到 `buy_cap` / `scale_cap`。验收：回测先见 `diag: ok`；买卖日志为 `@close=`（同日）或残留 `@open=`；买卖闭合、无孤儿仓。第一笔仍为 `pullback_vol`；加仓应为 `pullback_vol` / `plat_break` / `w_macd_golden`（状态行 `scale= True`），成交附近有 `lots now n=2` 与 `skip sell eval after add fill`。加仓当日状态行 `sellR` 应含 `skip_add_bar`，且不应新挂卖点。本轮已加过仓后再出第一笔时，不应再出现 `BUY add`（可见 `scale_once` 或 `pending_entry cancel scale_once`）。执行日已触发卖点时应看到 `pending_entry cancel scale_sell_block` 且不出现 `BUY add`。只出一笔时应看到 `SELL ... lots=[1]` 且另一笔仍持有。卖出前应有 `SELL lot-can_use`；若 `BUY add` 后同日仍出现 `SELL lots=[2]`，看 `risk=True` 的 WARN（券商成交未必是第二笔）。T+1 部分成交应看到 `pending_exit keep after partial fill`。趋势仓满 30 日且峰值≥3%、仍站上 EMA60 时应看到 `time_force skip trend`，之后由 `trail_stop` / `weekly_bear` / 破 EMA60 出场；磨人仓仍应看到 `time_force grace`。

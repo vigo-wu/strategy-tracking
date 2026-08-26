@@ -185,6 +185,15 @@ SIGNAL_CONFIRM_END = "160000"
 # 实盘心跳/状态行间隔（秒）；空仓与持仓无新信号沿时均按此节流
 LIVE_HEARTBEAT_SEC = 300
 
+# 行情复权（传给 get_market_data_ex 的 dividend_type）
+#   follow       跟随主图 / 公式「基本信息 → 复权方式」（默认）
+#   none         不复权
+#   front        前复权（价差）
+#   back         后复权（价差）
+#   front_ratio  等比前复权
+#   back_ratio   等比后复权
+DIVIDEND_TYPE = "follow"
+
 # download_history_data 最长回溯（自然日）；回测暖机用
 HIST_MAX_LOOKBACK_DAYS = 800
 DOWNLOAD_HIST_LIVE = False
@@ -204,7 +213,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.48"
+STRATEGY_VER = "v1.49"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
