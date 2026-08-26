@@ -152,6 +152,81 @@ class WeeklyFormingTests(unittest.TestCase):
         self.assertEqual(compact_day("20260107"), "20260107")
 
 
+class IndexedSliceTests(unittest.TestCase):
+    def test_daily_bisect_matches_linear(self):
+        from market_csv import slice_bars
+
+        days = [
+            "20200102",
+            "20200103",
+            "20200106",
+            "20200107",
+            "20200108",
+            "20200109",
+            "20200110",
+            "20200113",
+            "20200114",
+            "20200115",
+        ]
+        bars = [_bar(d, float(i + 1)) for i, d in enumerate(days)]
+        store = MarketStore(bars, "600350.SH")
+        for end, count, start in (
+            ("20200115", None, ""),
+            ("20200110", 3, ""),
+            ("20200115", 5, "20200107"),
+            ("20200103", 10, ""),
+            ("20190101", 5, ""),
+        ):
+            old = slice_bars(bars, end, count=count, start_day=start)
+            new = store.slice_daily(end, start_day=start, count=count)
+            self.assertEqual([b.day for b in new], [b.day for b in old], (end, count, start))
+            frame = store.frame("1d", end, count, fields=["close"], start_time=start)
+            self.assertEqual(len(frame), len(old))
+            if old:
+                self.assertEqual(float(frame["close"][-1]), float(old[-1].close))
+
+    def test_weekly_precompute_matches_aggregate(self):
+        dailies = [
+            _bar("20251229", 9.0),
+            _bar("20251230", 9.5),
+            _bar("20251231", 9.2),
+            _bar("20260105", 10.0),
+            _bar("20260106", 11.0),
+            _bar("20260107", 12.5),
+            _bar("20260108", 13.0),
+            _bar("20260109", 14.0),
+        ]
+        store = MarketStore(dailies, "600350.SH")
+        weeks = aggregate_weekly([b for b in dailies if b.day <= "20260107"], drop_forming=True, end_day="20260107")
+        frame = store.frame("1w", "20260107", count=8, fields=["close"])
+        self.assertEqual(len(frame), len(weeks))
+        self.assertEqual(float(frame["close"][-1]), float(weeks[-1].close))
+
+
+class QuietLogTests(unittest.TestCase):
+    def test_drop_status_keep_trades(self):
+        from run import _drop_quiet_line
+
+        self.assertTrue(_drop_quiet_line("HlBand 20260701 0000 n1d=180 n1w=120 close=1.37"))
+        self.assertTrue(_drop_quiet_line("HlBand w_bear streak=3/2 day=20260703"))
+        self.assertFalse(_drop_quiet_line("HlBand BUY filled {'shares': 100}"))
+        self.assertFalse(_drop_quiet_line("HlBand SELL by signal=stop"))
+        self.assertFalse(_drop_quiet_line("HlBand pending_entry set signal=pullback_vol"))
+        self.assertFalse(_drop_quiet_line("HlBand diag: d1_ok source=get_market_data_ex"))
+
+
+class WorkerCountTests(unittest.TestCase):
+    def test_resolve_workers(self):
+        from run import resolve_workers
+
+        self.assertEqual(resolve_workers(0, 1), 1)
+        self.assertEqual(resolve_workers(1, 4), 1)
+        self.assertEqual(resolve_workers(8, 3), 3)
+        auto = resolve_workers(0, 16)
+        self.assertGreaterEqual(auto, 1)
+        self.assertLessEqual(auto, 8)
+
+
 class TradeLedgerTests(unittest.TestCase):
     def test_fifo_sell_pnl_and_qmt_header(self):
         from trades_csv import HEADER, TradeLedger

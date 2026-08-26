@@ -2,11 +2,14 @@
 """KlineDump 日线 CSV → 切片；周线默认对齐 QMT 回测原生 1w（不含未收盘周）。"""
 from __future__ import annotations
 
+import bisect
 import csv
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable, Sequence
+
+import numpy as np
 
 
 OHLC_FIELDS = ("open", "high", "low", "close", "volume")
@@ -29,35 +32,116 @@ class DailyBar:
 class BarFrame:
     """get_market_data_ex 返回值：有 index / columns，可供 _series_from_ex 解析。"""
 
-    def __init__(self, bars: Sequence[DailyBar], fields: Sequence[str] | None = None):
+    def __init__(
+        self,
+        bars: Sequence[DailyBar] | None = None,
+        fields: Sequence[str] | None = None,
+        *,
+        index: Sequence[datetime] | None = None,
+        cols: dict | None = None,
+    ):
         fields = list(fields) if fields else list(OHLC_FIELDS)
         self.columns = fields
+        if cols is not None:
+            self.index = list(index) if index is not None else []
+            self._cols = cols
+            return
+        bars = list(bars or [])
         self.index = [b.dt for b in bars]
-        self._cols: dict[str, list] = {}
+        self._cols = {}
         for field in fields:
-            key = str(field).strip().lower()
-            if key == "open":
-                self._cols[field] = [float(b.open) for b in bars]
-            elif key == "high":
-                self._cols[field] = [float(b.high) for b in bars]
-            elif key == "low":
-                self._cols[field] = [float(b.low) for b in bars]
-            elif key == "close":
-                self._cols[field] = [float(b.close) for b in bars]
-            elif key == "volume":
-                self._cols[field] = [float(b.volume) for b in bars]
-            elif key == "amount":
-                self._cols[field] = [float(b.amount) for b in bars]
-            elif key in ("time", "date", "datetime", "stime"):
-                self._cols[field] = [b.dt for b in bars]
-            else:
-                self._cols[field] = [float(b.close) for b in bars]
+            self._cols[field] = _col_from_bars(bars, field, self.index)
 
     def __getitem__(self, field: str):
         return self._cols[field]
 
     def __len__(self) -> int:
         return len(self.index)
+
+
+def _col_from_bars(bars: Sequence[DailyBar], field: str, index: Sequence[datetime]):
+    key = str(field).strip().lower()
+    if key == "open":
+        return [float(b.open) for b in bars]
+    if key == "high":
+        return [float(b.high) for b in bars]
+    if key == "low":
+        return [float(b.low) for b in bars]
+    if key == "close":
+        return [float(b.close) for b in bars]
+    if key == "volume":
+        return [float(b.volume) for b in bars]
+    if key == "amount":
+        return [float(b.amount) for b in bars]
+    if key in ("time", "date", "datetime", "stime"):
+        return list(index)
+    return [float(b.close) for b in bars]
+
+
+class _ColPack:
+    """已排序日/周 K：days 供 bisect，OHLCV 为 numpy 列。"""
+
+    def __init__(self, bars: Sequence[DailyBar]):
+        self.bars = list(bars)
+        n = len(self.bars)
+        self.days = [b.day for b in self.bars]
+        self.index = [b.dt for b in self.bars]
+        if n == 0:
+            z = np.zeros(0, dtype=float)
+            self.open = self.high = self.low = self.close = self.volume = self.amount = z
+            return
+        self.open = np.fromiter((b.open for b in self.bars), dtype=float, count=n)
+        self.high = np.fromiter((b.high for b in self.bars), dtype=float, count=n)
+        self.low = np.fromiter((b.low for b in self.bars), dtype=float, count=n)
+        self.close = np.fromiter((b.close for b in self.bars), dtype=float, count=n)
+        self.volume = np.fromiter((b.volume for b in self.bars), dtype=float, count=n)
+        self.amount = np.fromiter((b.amount for b in self.bars), dtype=float, count=n)
+
+    def bounds(self, end_day: str, start_day: str = "", count: int | None = None) -> tuple[int, int]:
+        end = compact_day(end_day) or "99991231"
+        start = compact_day(start_day)
+        hi = bisect.bisect_right(self.days, end)
+        lo = bisect.bisect_left(self.days, start) if start else 0
+        if lo > hi:
+            lo = hi
+        if count is not None and int(count) > 0:
+            want = int(count)
+            if hi - lo > want:
+                lo = hi - want
+        return lo, hi
+
+    def drop_forming_hi(self, lo: int, hi: int, end_day: str) -> int:
+        end = compact_day(end_day)
+        if not end or hi <= lo:
+            return hi
+        cur = week_monday(end)
+        while hi > lo and week_monday(self.days[hi - 1]) == cur:
+            hi -= 1
+        return hi
+
+    def as_frame(self, lo: int, hi: int, fields: Sequence[str]) -> BarFrame:
+        fields = list(fields)
+        idx = self.index[lo:hi]
+        cols = {}
+        for field in fields:
+            key = str(field).strip().lower()
+            if key == "open":
+                cols[field] = self.open[lo:hi]
+            elif key == "high":
+                cols[field] = self.high[lo:hi]
+            elif key == "low":
+                cols[field] = self.low[lo:hi]
+            elif key == "close":
+                cols[field] = self.close[lo:hi]
+            elif key == "volume":
+                cols[field] = self.volume[lo:hi]
+            elif key == "amount":
+                cols[field] = self.amount[lo:hi]
+            elif key in ("time", "date", "datetime", "stime"):
+                cols[field] = idx
+            else:
+                cols[field] = self.close[lo:hi]
+        return BarFrame(fields=fields, index=idx, cols=cols)
 
 
 def digits_only(s: str) -> str:
@@ -341,6 +425,21 @@ class MarketStore:
         self.bars = list(bars)
         self.weekly = list(weekly) if weekly else []
         self.stock = str(stock).strip().upper()
+        self._daily = _ColPack(self.bars)
+        if self.weekly:
+            self._weekly = _ColPack(self.weekly)
+        else:
+            formed = aggregate_weekly(self.bars, drop_forming=False)
+            self._weekly = _ColPack(formed)
+
+    def slice_daily(
+        self,
+        end_day: str,
+        start_day: str = "",
+        count: int | None = None,
+    ) -> list[DailyBar]:
+        lo, hi = self._daily.bounds(end_day, start_day, count)
+        return self._daily.bars[lo:hi]
 
     def frame(
         self,
@@ -351,16 +450,12 @@ class MarketStore:
         start_time: str = "",
         stock: str = "",
     ) -> BarFrame:
-        dailies = slice_bars(self.bars, end_time, count=None, start_day=start_time)
-        if _is_weekly_period(period):
-            if self.weekly:
-                seq = slice_bars(self.weekly, end_time, count=None, start_day=start_time)
-                seq = drop_unclosed_week(seq, end_time)
-            else:
-                seq = aggregate_weekly(dailies, drop_forming=True, end_day=end_time)
-            if count is not None and int(count) > 0:
-                seq = seq[-int(count) :]
-        else:
-            seq = slice_bars(dailies, end_time, count=count, start_day="")
         cols = list(fields) if fields else list(OHLC_FIELDS)
-        return BarFrame(seq, cols)
+        if _is_weekly_period(period):
+            lo, hi = self._weekly.bounds(end_time, start_time, count=None)
+            hi = self._weekly.drop_forming_hi(lo, hi, end_time)
+            if count is not None and int(count) > 0 and hi - lo > int(count):
+                lo = hi - int(count)
+            return self._weekly.as_frame(lo, hi, cols)
+        lo, hi = self._daily.bounds(end_time, start_time, count)
+        return self._daily.as_frame(lo, hi, cols)

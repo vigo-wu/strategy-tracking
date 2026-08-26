@@ -7,7 +7,6 @@
 """
 from __future__ import annotations
 
-import io
 import sys
 import traceback
 from datetime import date
@@ -314,22 +313,6 @@ _KLINE_PLOT_CONFIG = {
 }
 
 
-class _Cap:
-    """把策略 print 同时写到终端和缓冲区。"""
-
-    def __init__(self, primary, buf):
-        self.primary = primary
-        self.buf = buf
-
-    def write(self, data):
-        self.primary.write(data)
-        self.buf.write(data)
-        return len(data) if data else 0
-
-    def flush(self):
-        self.primary.flush()
-
-
 def _render_analysis(
     detail_path: Path,
     budget: float,
@@ -420,7 +403,7 @@ def _render_analysis(
         st.warning("无法读取原始明细：%s" % e)
 
 
-def _render_batch_run(csv_dir: str) -> None:
+def _render_batch_run(csv_dir: str, *, workers: int = 0, quiet: bool = True) -> None:
     metas = daily_csvs_by_stock(csv_dir)
     if not metas:
         st.warning("目录无可用 `*_1d_*.csv`：%s" % csv_dir)
@@ -468,10 +451,6 @@ def _render_batch_run(csv_dir: str) -> None:
             else:
                 status.success("批量完成 %s 只" % n)
 
-        log_buf = io.StringIO()
-        old_out, old_err = sys.stdout, sys.stderr
-        sys.stdout = _Cap(old_out, log_buf)
-        sys.stderr = _Cap(old_err, log_buf)
         try:
             raw = run_batch(
                 [Path(m["path"]) for m in picked],
@@ -479,6 +458,8 @@ def _render_batch_run(csv_dir: str) -> None:
                 end=end_s,
                 out_dir=out_dir,
                 on_progress=on_progress,
+                workers=int(workers),
+                quiet=bool(quiet),
             )
             rows = [summarize_batch_row(r) for r in raw]
             write_batch_summary_csv(rows, out_dir / "local_bt_batch_summary.csv")
@@ -495,8 +476,6 @@ def _render_batch_run(csv_dir: str) -> None:
         except Exception:
             st.error("批量回测失败")
             st.code(traceback.format_exc())
-        finally:
-            sys.stdout, sys.stderr = old_out, old_err
 
     batch = st.session_state.get("batch_result")
     if not batch:
@@ -538,11 +517,19 @@ with st.sidebar:
     daily_files = list_daily_csvs(csv_dir)
     daily_labels = [p.name for p in daily_files]
     uploaded = None
+    quiet = True
+    workers = 0
     if mode == "跑本地回测" and scope == "单标的":
         uploaded = st.file_uploader("或上传日线 CSV", type=["csv"])
+    if mode == "跑本地回测":
+        quiet = not st.checkbox("详细日志（慢）", value=False, key="bt_verbose")
+        if scope == "批量（按标的汇总）":
+            workers = int(
+                st.number_input("进程数（0=自动）", min_value=0, max_value=16, value=0, step=1, key="bt_workers")
+            )
 
 if mode == "跑本地回测" and scope == "批量（按标的汇总）":
-    _render_batch_run(csv_dir)
+    _render_batch_run(csv_dir, workers=workers, quiet=quiet)
 elif mode == "跑本地回测":
     col_a, col_b = st.columns([2, 1])
     with col_a:
@@ -586,22 +573,16 @@ elif mode == "跑本地回测":
         start_s = _fmt_ymd(start_d)
         end_s = _fmt_ymd(end_d)
         out_dir = THEME / "report"
-        log_buf = io.StringIO()
         with st.spinner(f"回测 {meta['stock']} {start_s}–{end_s} …"):
             try:
-                old_out, old_err = sys.stdout, sys.stderr
-                sys.stdout = _Cap(old_out, log_buf)
-                sys.stderr = _Cap(old_err, log_buf)
-                try:
-                    log_path = run_backtest(
-                        selected_csv,
-                        start=start_s,
-                        end=end_s,
-                        stock=meta["stock"],
-                        out_dir=out_dir,
-                    )
-                finally:
-                    sys.stdout, sys.stderr = old_out, old_err
+                log_path = run_backtest(
+                    selected_csv,
+                    start=start_s,
+                    end=end_s,
+                    stock=meta["stock"],
+                    out_dir=out_dir,
+                    quiet=bool(quiet),
+                )
                 detail = trades_csv_path(log_path)
                 budget = parse_budget_from_log(log_path)
                 st.session_state["last_result"] = {

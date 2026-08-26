@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import os
 import runpy
 import sys
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from multiprocessing import get_context
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Sequence, TextIO
 
 
 HERE = Path(__file__).resolve().parent
@@ -37,19 +40,18 @@ from trades_csv import TradeLedger, trades_csv_path, wrap_fill_hooks  # noqa: E4
 
 from qmt_common._deploy_lib import build_bundle  # noqa: E402
 
+_BUNDLE_CODE = None
+
 
 class _Tee:
-    def __init__(self, *streams):
+    def __init__(self, *streams: TextIO):
         self.streams = streams
 
     def write(self, data):
+        n = len(data) if data is not None else 0
         for s in self.streams:
             s.write(data)
-            try:
-                s.flush()
-            except Exception:
-                pass
-        return len(data) if data is not None else 0
+        return n
 
     def flush(self):
         for s in self.streams:
@@ -57,6 +59,53 @@ class _Tee:
                 s.flush()
             except Exception:
                 pass
+
+    def isatty(self):
+        return False
+
+
+def _drop_quiet_line(line: str) -> bool:
+    if "BUY" in line or "SELL" in line or "pending" in line or "diag:" in line:
+        return False
+    if " n1d=" in line or "w_bear streak" in line:
+        return True
+    return False
+
+
+class _QuietFile:
+    """块缓冲写 log；丢掉状态行 / w_bear streak。"""
+
+    def __init__(self, inner: TextIO):
+        self.inner = inner
+        self._buf = ""
+
+    def write(self, data):
+        if not data:
+            return 0
+        text = data if isinstance(data, str) else str(data)
+        self._buf += text
+        while "\n" in self._buf:
+            line, self._buf = self._buf.split("\n", 1)
+            if not _drop_quiet_line(line):
+                self.inner.write(line + "\n")
+        return len(text)
+
+    def flush(self):
+        if self._buf:
+            if not _drop_quiet_line(self._buf):
+                self.inner.write(self._buf)
+            self._buf = ""
+        try:
+            self.inner.flush()
+        except Exception:
+            pass
+
+    def isatty(self):
+        return False
+
+    @property
+    def encoding(self):
+        return getattr(self.inner, "encoding", "utf-8")
 
 
 def _load_module_order():
@@ -72,14 +121,42 @@ def _stock_tag(stock: str) -> str:
     return str(stock).replace(".", "_")
 
 
+def _bundle_code():
+    global _BUNDLE_CODE
+    if _BUNDLE_CODE is None:
+        order = _load_module_order()
+        text = build_bundle(order, HLBAND)
+        _BUNDLE_CODE = compile(text, "qmt_terminal_hlband.py", "exec")
+    return _BUNDLE_CODE
+
+
 def _exec_bundle() -> dict:
-    order = _load_module_order()
-    text = build_bundle(order, HLBAND)
-    compile(text, "qmt_terminal_hlband.py", "exec")
     ns: dict = {"__name__": "hlband_local"}
-    exec(text, ns, ns)
+    exec(_bundle_code(), ns, ns)
     inject_qmt_globals(ns)
     return ns
+
+
+def _patch_quiet_status(ns: dict) -> None:
+    def _should_emit_bar_status(_c, _now, force, _status_idle):
+        return bool(force)
+
+    ns["_should_emit_bar_status"] = _should_emit_bar_status
+
+
+def _empty_row(csv_path: Path, stock: str) -> dict[str, Any]:
+    return {
+        "stock": stock,
+        "csv": str(csv_path),
+        "log": "",
+        "detail": "",
+        "budget": None,
+        "walk_start": "",
+        "walk_end": "",
+        "n_bars": 0,
+        "ok": False,
+        "error": "",
+    }
 
 
 def run_backtest(
@@ -90,6 +167,7 @@ def run_backtest(
     out_dir: str | Path | None = None,
     log_name: str = "",
     weekly_csv: str | Path | None = None,
+    quiet: bool = True,
 ) -> Path:
     code, bars = load_daily_csv(csv_path, stock=stock)
     walk = walk_days(bars, start=start, end=end)
@@ -115,44 +193,55 @@ def run_backtest(
     fname = log_name.strip() if log_name else ("local_bt_%s.txt" % _stock_tag(code))
     log_path = dest / fname
 
+    n_w0 = len(store.frame("1w", walk[0].day, count=120, fields=["close"]))
+    banner = "local_bt %s csv= %s walk= %s %s n= %s hist_n= %s weekly= %s n_w_start= %s" % (
+        code,
+        csv_path,
+        walk[0].day,
+        walk[-1].day,
+        len(walk),
+        len(bars),
+        weekly_src,
+        n_w0,
+    )
+    print(banner)
+    if n_w0 < 60:
+        print(
+            "WARN weekly bars at start < 60 (need ~60 for w1, QMT uses 120); "
+            "extend daily CSV or dump native 1w with HIST_START well before walk start"
+        )
+
     ns = _exec_bundle()
+    if quiet:
+        _patch_quiet_status(ns)
     ledger = TradeLedger(code)
     wrap_fill_hooks(ns, ledger)
-    log_f = open(log_path, "w", encoding="utf-8", newline="\n")
-    old_out, old_err = sys.stdout, sys.stderr
-    sys.stdout = _Tee(old_out, log_f)
-    sys.stderr = _Tee(old_err, log_f)
-    try:
-        n_w0 = len(store.frame("1w", walk[0].day, count=120, fields=["close"]))
-        print(
-            "local_bt",
-            code,
-            "csv=",
-            csv_path,
-            "walk=",
-            walk[0].day,
-            walk[-1].day,
-            "n=",
-            len(walk),
-            "hist_n=",
-            len(bars),
-            "weekly=",
-            weekly_src,
-            "n_w_start=",
-            n_w0,
+    log_f = open(log_path, "w", encoding="utf-8", newline="\n", buffering=1024 * 1024)
+    log_f.write(banner + "\n")
+    if n_w0 < 60:
+        log_f.write(
+            "WARN weekly bars at start < 60 (need ~60 for w1, QMT uses 120); "
+            "extend daily CSV or dump native 1w with HIST_START well before walk start\n"
         )
-        if n_w0 < 60:
-            print(
-                "WARN weekly bars at start < 60 (need ~60 for w1, QMT uses 120); "
-                "extend daily CSV or dump native 1w with HIST_START well before walk start"
-            )
+    sink: TextIO = _QuietFile(log_f) if quiet else log_f
+    old_out, old_err = sys.stdout, sys.stderr
+    if quiet:
+        sys.stdout = sink
+        sys.stderr = sink
+    else:
+        sys.stdout = _Tee(old_out, sink)
+        sys.stderr = _Tee(old_err, sink)
+    try:
         ns["init"](ctx)
-        for i, bar in enumerate(walk):
+        for i, _bar in enumerate(walk):
             ctx.barpos = i
             ns["handlebar"](ctx)
     finally:
-        sys.stdout = old_out
-        sys.stderr = old_err
+        try:
+            sink.flush()
+        except Exception:
+            pass
+        sys.stdout, sys.stderr = old_out, old_err
         log_f.close()
     trades_path = trades_csv_path(log_path)
     ledger.write(trades_path)
@@ -161,71 +250,125 @@ def run_backtest(
     return log_path
 
 
+def backtest_one_result(
+    csv_path: str | Path,
+    start: str = "",
+    end: str = "",
+    out_dir: str | Path | None = None,
+    quiet: bool = True,
+) -> dict[str, Any]:
+    """单只回测 → 批量行（失败不抛给调用方）。"""
+    from analyze import parse_budget_from_log  # noqa: WPS433
+
+    path = Path(csv_path)
+    dest = Path(out_dir) if out_dir else THEME / "report"
+    dest.mkdir(parents=True, exist_ok=True)
+    stock = path.stem
+    row = _empty_row(path, stock)
+    try:
+        code, bars = load_daily_csv(path)
+        stock = code
+        row["stock"] = code
+        walk = walk_days(bars, start=start, end=end)
+        if not walk:
+            row["error"] = "无行情交集 start=%s end=%s" % (start, end)
+            return row
+        row["walk_start"] = walk[0].day
+        row["walk_end"] = walk[-1].day
+        row["n_bars"] = len(walk)
+        log_path = run_backtest(
+            path,
+            start=start,
+            end=end,
+            stock=code,
+            out_dir=dest,
+            quiet=quiet,
+        )
+        detail = trades_csv_path(log_path)
+        row["log"] = str(log_path)
+        row["detail"] = str(detail)
+        row["budget"] = parse_budget_from_log(log_path)
+        row["ok"] = True
+    except SystemExit as e:
+        msg = str(e).strip()
+        row["error"] = msg or ("exit %s" % e.code)
+        row["stock"] = stock
+    except Exception as e:
+        row["error"] = "%s: %s" % (type(e).__name__, e)
+        row["stock"] = stock
+    return row
+
+
+def resolve_workers(requested: int, n_tasks: int) -> int:
+    n_tasks = max(0, int(n_tasks))
+    if n_tasks <= 1:
+        return 1
+    cpu = os.cpu_count() or 2
+    if requested is None or int(requested) <= 0:
+        return max(1, min(n_tasks, int(cpu), 8))
+    return max(1, min(int(requested), n_tasks))
+
+
 def run_batch(
     csv_paths: Sequence[str | Path],
     start: str = "",
     end: str = "",
     out_dir: str | Path | None = None,
     on_progress: Callable[[int, int, str], None] | None = None,
+    workers: int = 0,
+    quiet: bool = True,
 ) -> list[dict[str, Any]]:
-    """逐只独立回测；单只失败不中断。"""
-    from analyze import parse_budget_from_log  # noqa: WPS433
-
+    """独立回测多标的；单只失败不中断。workers<=0 为自动。"""
     dest = Path(out_dir) if out_dir else THEME / "report"
     dest.mkdir(parents=True, exist_ok=True)
     paths = [Path(p) for p in csv_paths]
     n = len(paths)
-    rows: list[dict[str, Any]] = []
-    for i, csv_path in enumerate(paths):
-        stock = csv_path.stem
+    if n == 0:
+        return []
+    n_workers = resolve_workers(workers, n)
+
+    if n_workers <= 1:
+        rows: list[dict[str, Any]] = []
+        for i, csv_path in enumerate(paths):
+            if on_progress:
+                on_progress(i, n, csv_path.stem)
+            rows.append(
+                backtest_one_result(csv_path, start=start, end=end, out_dir=dest, quiet=quiet)
+            )
         if on_progress:
-            on_progress(i, n, stock)
-        base: dict[str, Any] = {
-            "stock": stock,
-            "csv": str(csv_path),
-            "log": "",
-            "detail": "",
-            "budget": None,
-            "walk_start": "",
-            "walk_end": "",
-            "n_bars": 0,
-            "ok": False,
-            "error": "",
+            last = rows[-1].get("stock") if rows else ""
+            on_progress(n, n, str(last or ""))
+        return rows
+
+    from batch_job import run_one
+
+    payloads = [
+        {
+            "csv": str(p),
+            "start": start,
+            "end": end,
+            "out_dir": str(dest),
+            "quiet": bool(quiet),
         }
-        try:
-            code, bars = load_daily_csv(csv_path)
-            stock = code
-            base["stock"] = code
-            walk = walk_days(bars, start=start, end=end)
-            if not walk:
-                base["error"] = "无行情交集 start=%s end=%s" % (start, end)
-            else:
-                base["walk_start"] = walk[0].day
-                base["walk_end"] = walk[-1].day
-                base["n_bars"] = len(walk)
-                log_path = run_backtest(
-                    csv_path,
-                    start=start,
-                    end=end,
-                    stock=code,
-                    out_dir=dest,
-                )
-                detail = trades_csv_path(log_path)
-                base["log"] = str(log_path)
-                base["detail"] = str(detail)
-                base["budget"] = parse_budget_from_log(log_path)
-                base["ok"] = True
-        except SystemExit as e:
-            msg = str(e).strip()
-            base["error"] = msg or ("exit %s" % e.code)
-            base["stock"] = stock
-        except Exception as e:
-            base["error"] = "%s: %s" % (type(e).__name__, e)
-            base["stock"] = stock
-        rows.append(base)
+        for p in paths
+    ]
+    rows = [_empty_row(p, p.stem) for p in paths]
     if on_progress:
-        last = rows[-1].get("stock") if rows else ""
-        on_progress(n, n, str(last or ""))
+        on_progress(0, n, paths[0].stem)
+    ctx = get_context("spawn")
+    with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx) as pool:
+        futs = {pool.submit(run_one, payloads[i]): i for i in range(n)}
+        done = 0
+        for fut in as_completed(futs):
+            i = futs[fut]
+            try:
+                rows[i] = fut.result()
+            except Exception as e:
+                rows[i] = _empty_row(paths[i], paths[i].stem)
+                rows[i]["error"] = "%s: %s" % (type(e).__name__, e)
+            done += 1
+            if on_progress:
+                on_progress(done, n, str(rows[i].get("stock") or paths[i].stem))
     return rows
 
 
@@ -274,7 +417,15 @@ def main(argv: list[str] | None = None) -> None:
         help="QMT 原生 1w CSV；缺省则同目录 {code}_1w_*.csv，再缺省则日线合成并丢掉未收盘周",
     )
     ap.add_argument("--report", action="store_true", help="事后用 gen_report；成交真源为本回测操作明细")
+    ap.add_argument("--verbose", action="store_true", help="刷屏写 log（默认安静：过滤状态行，不 tee 控制台）")
+    ap.add_argument(
+        "--workers",
+        type=int,
+        default=0,
+        help="批量进程数；0=min(标的数, CPU, 8)；1=串行",
+    )
     args = ap.parse_args(argv)
+    quiet = not bool(args.verbose)
 
     if args.csv_dir:
         from analyze import (  # noqa: WPS433
@@ -297,6 +448,8 @@ def main(argv: list[str] | None = None) -> None:
             end=args.end,
             out_dir=args.out,
             on_progress=_prog,
+            workers=args.workers,
+            quiet=quiet,
         )
         rows = [summarize_batch_row(r) for r in raw]
         summary = write_batch_summary_csv(rows, Path(args.out) / "local_bt_batch_summary.csv")
@@ -319,10 +472,14 @@ def main(argv: list[str] | None = None) -> None:
         out_dir=args.out,
         log_name=args.log_name,
         weekly_csv=args.weekly_csv or None,
+        quiet=quiet,
     )
     if args.report:
         _run_report(log_path, Path(args.out))
 
 
 if __name__ == "__main__":
+    from multiprocessing import freeze_support
+
+    freeze_support()
     main()
