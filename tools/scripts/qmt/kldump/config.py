@@ -3,13 +3,18 @@
 # QMT 模型无 __file__，OUT_DIR 必须是绝对路径
 
 STRATEGY_NAME = "KlineDump"
-STRATEGY_VER = "v1.3"
+STRATEGY_VER = "v1.4"
 
 # 跟随主图；填 1d/15m 等则覆盖 C.period
 PERIOD = "follow"
 
+# 非空则按名单批量导出（不自动并入主图）；空=只导主图
+# 示例: ("600350.SH", "601398.SH", "601939.SH", "513530.SH")
+# 也可用 list / 逗号分隔字符串 / dict 的 key
+DUMP_STOCKS = ("600350.SH", "601398.SH", "601939.SH", "513530.SH")
+
 # 导出根目录（绝对路径）
-OUT_DIR = r"D:\persion\strategy-tracking\tools\csv"
+OUT_DIR = r"D:\vigo\strategy-tracking\tools\csv"
 
 # False=按 HIST_START 起导，给本地回测留足周线暖机（QMT 1w 约 120 根）
 FOLLOW_CHART_RANGE = False
@@ -18,7 +23,13 @@ BAR_COUNT = 5000
 HIST_START = "20180101"
 HIST_MAX_LOOKBACK_DAYS = 0
 
-DIVIDEND_TYPE = "front_ratio"
+# 复权，传给 get_market_data_ex 的 dividend_type。改完须 re-deploy 再编译
+#   none         不复权
+#   front        前复权（价差）
+#   back         后复权（价差）
+#   front_ratio  等比前复权（默认；最新价贴近市价，与红利波段取数一致）
+#   back_ratio   等比后复权
+DIVIDEND_TYPE = "front"
 DOWNLOAD_HIST = True
 
 # 额外周期。本地回测优先读同目录 {code}_1w_*.csv，对齐 QMT 原生周线

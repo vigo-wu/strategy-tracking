@@ -537,20 +537,113 @@ def _dump_period(C, stock, period):
     return path
 
 
+def _infer_dump_market(code6):
+    if not code6:
+        return ""
+    first = str(code6)[0]
+    if first in ("6", "9", "5"):
+        return "SH"
+    if first in ("0", "1", "2", "3"):
+        return "SZ"
+    if first in ("4", "8"):
+        return "BJ"
+    return ""
+
+
+def _norm_dump_stock(raw):
+    s = str(raw or "").strip().upper().replace(" ", "")
+    if not s:
+        return ""
+    if "." in s:
+        parts = s.split(".")
+        if len(parts) != 2:
+            return ""
+        digits = _digits_only(parts[0])
+        mkt = str(parts[1] or "").strip()
+        if len(digits) != 6:
+            return ""
+        if mkt not in ("SH", "SZ", "BJ"):
+            return ""
+        return digits + "." + mkt
+    digits = _digits_only(s)
+    if len(digits) == 6 and s == digits:
+        mkt = _infer_dump_market(digits)
+        if not mkt:
+            return ""
+        return digits + "." + mkt
+    return ""
+
+
+def _iter_dump_stock_raw():
+    raw = globals().get("DUMP_STOCKS")
+    if raw is None or raw is False:
+        return []
+    if isinstance(raw, dict):
+        return list(raw.keys())
+    if isinstance(raw, (str, bytes)):
+        s = str(raw or "").strip()
+        if not s:
+            return []
+        parts = []
+        for chunk in s.replace(",", " ").split():
+            if chunk:
+                parts.append(chunk)
+        return parts
+    try:
+        seq = list(raw)
+    except Exception:
+        return []
+    out = []
+    for x in seq:
+        if isinstance(x, (list, tuple)) and len(x) >= 1:
+            out.append(x[0])
+        else:
+            out.append(x)
+    return out
+
+
+def _resolve_dump_stocks():
+    stocks = []
+    seen = set()
+    for x in _iter_dump_stock_raw():
+        code = _norm_dump_stock(x)
+        if not code:
+            if str(x or "").strip():
+                print(_strategy_tag(), "dump skip bad stock=", x)
+            continue
+        key = code.upper()
+        if key in seen:
+            continue
+        seen.add(key)
+        stocks.append(code)
+    if stocks:
+        return stocks
+    chart = str(getattr(A, "stock", "") or "").strip()
+    if chart:
+        return [chart]
+    return []
+
+
 def _dump_periods(C):
+    stocks = _resolve_dump_stocks()
     periods = [A.period]
     for p in (globals().get("EXTRA_PERIODS") or ()):
         n = _norm_period(p)
         if n and n not in periods:
             periods.append(n)
+    print(_strategy_tag(), "batch stocks=", stocks, "periods=", periods)
     do_dl = bool(globals().get("DOWNLOAD_HIST", True))
-    for period in periods:
-        if do_dl:
+    for stock in stocks:
+        for period in periods:
+            if do_dl:
+                try:
+                    _download_hist(stock, period)
+                except Exception as e:
+                    print(_strategy_tag(), "download_hist abort-safe", stock, period, e)
             try:
-                _download_hist(A.stock, period)
+                _dump_period(C, stock, period)
             except Exception as e:
-                print(_strategy_tag(), "download_hist abort-safe", period, e)
-        _dump_period(C, A.stock, period)
+                print(_strategy_tag(), "dump abort-safe", stock, period, e)
     A._dumped = True
 
 
@@ -565,6 +658,7 @@ def _dump_init(C):
     A.dump_start = start
     A.dump_end = end
     _apply_hist_start(start)
+    dump_stocks = _resolve_dump_stocks()
     print(
         "%s %s init" % (STRATEGY_NAME, STRATEGY_VER),
         A.stock,
@@ -575,6 +669,8 @@ def _dump_init(C):
         "range=",
         start,
         end,
+        "DUMP_STOCKS=",
+        dump_stocks,
         "OUT_DIR=",
         globals().get("OUT_DIR") or "",
     )
