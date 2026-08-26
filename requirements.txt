@@ -1,2 +1,6 @@
 # 本仓库脚本在国金 QMT 终端内置 Python 中运行（GBK 部署）。
 # 外部 xtquant 路径依赖本机已安装的 xtquant / MiniQMT，无需 pip 本文件。
+#
+# HlBand 本地回测可视化（可选）:
+#   pip install -r hongli_band/scripts/local_bt/requirements.txt
+#   python hongli_band/local_bt_ui.py
