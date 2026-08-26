@@ -66,6 +66,43 @@ def list_daily_csvs(data_dir: str | Path | None = None) -> list[Path]:
     return sorted(root.glob("*_1d_*.csv"))
 
 
+def _prefer_daily_meta(cur: dict[str, Any], other: dict[str, Any]) -> dict[str, Any]:
+    """同代码多份日线：结束日更新、根数更多、路径名字典序更大者优先。"""
+    if other["end"] != cur["end"]:
+        return other if other["end"] > cur["end"] else cur
+    n_o, n_c = int(other.get("n") or 0), int(cur.get("n") or 0)
+    if n_o != n_c:
+        return other if n_o > n_c else cur
+    p_o, p_c = str(other.get("path") or ""), str(cur.get("path") or "")
+    return other if p_o > p_c else cur
+
+
+def daily_csvs_by_stock(data_dir: str | Path | None = None) -> list[dict[str, Any]]:
+    """行情目录按标的去重，每只保留一份最新日线。"""
+    by_stock: dict[str, dict[str, Any]] = {}
+    for path in list_daily_csvs(data_dir):
+        try:
+            meta = csv_date_range(path)
+        except Exception:
+            continue
+        stock = str(meta.get("stock") or "").strip().upper()
+        if not stock:
+            continue
+        prev = by_stock.get(stock)
+        by_stock[stock] = meta if prev is None else _prefer_daily_meta(prev, meta)
+    return [by_stock[k] for k in sorted(by_stock)]
+
+
+def union_date_range(metas: list[dict[str, Any]]) -> tuple[str, str]:
+    starts = [compact_day(str(m.get("start") or "")) for m in metas]
+    ends = [compact_day(str(m.get("end") or "")) for m in metas]
+    starts = [s for s in starts if len(s) == 8]
+    ends = [e for e in ends if len(e) == 8]
+    if not starts or not ends:
+        raise ValueError("empty date range")
+    return min(starts), max(ends)
+
+
 def list_detail_csvs() -> list[Path]:
     """已有操作明细：回测记录 + report 下 *_操作明细.csv。"""
     out: list[Path] = []
@@ -257,3 +294,134 @@ def trades_to_dataframe(trades: list[dict]) -> pd.DataFrame:
     ]
     rows = [{c: t.get(c) for c in cols} for t in trades]
     return pd.DataFrame(rows)
+
+
+def summarize_detail(
+    detail_path: str | Path,
+    budget: float = 50000.0,
+    stock: str = "",
+) -> dict[str, Any]:
+    """操作明细 → 汇总表一行用的 KPI。"""
+    result = analyze_detail(
+        detail_path,
+        budget=budget,
+        meta={
+            "tag": "HlBand",
+            "ver": "local",
+            "stock": stock or "?",
+            "period": "1d",
+            "budget": float(budget),
+        },
+    )
+    stats = result["stats"] or {}
+    return {
+        "n_buy": int(stats.get("n_buy") or 0),
+        "sum_pnl": float(stats.get("sum_pnl") or 0.0),
+        "win_rate": float(stats.get("win_rate") or 0.0),
+        "avg_ret": float(stats.get("avg_ret") or 0.0),
+        "max_win": float(stats.get("max_win") or 0.0),
+        "max_loss": float(stats.get("max_loss") or 0.0),
+    }
+
+
+def summarize_batch_row(row: dict[str, Any]) -> dict[str, Any]:
+    """把 run_batch 一行补上 KPI / 中文状态。"""
+    out = dict(row)
+    if not out.get("ok"):
+        out["status"] = "失败"
+        out.setdefault("n_buy", None)
+        out.setdefault("sum_pnl", None)
+        out.setdefault("win_rate", None)
+        out.setdefault("avg_ret", None)
+        out.setdefault("max_win", None)
+        out.setdefault("max_loss", None)
+        return out
+    detail = out.get("detail") or ""
+    try:
+        kpi = summarize_detail(
+            detail,
+            budget=float(out.get("budget") or 50000.0),
+            stock=str(out.get("stock") or ""),
+        )
+        out.update(kpi)
+        out["status"] = "成功"
+    except Exception as e:
+        out["ok"] = False
+        out["status"] = "失败"
+        out["error"] = "analyze: %s" % e
+        out.setdefault("n_buy", None)
+        out.setdefault("sum_pnl", None)
+        out.setdefault("win_rate", None)
+        out.setdefault("avg_ret", None)
+        out.setdefault("max_win", None)
+        out.setdefault("max_loss", None)
+    return out
+
+
+def batch_summary_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
+    recs = []
+    for r in rows:
+        walk_s = compact_day(str(r.get("walk_start") or ""))
+        walk_e = compact_day(str(r.get("walk_end") or ""))
+        walk = ""
+        if walk_s or walk_e:
+            walk = "%s–%s" % (walk_s or "?", walk_e or "?")
+        recs.append(
+            {
+                "标的": r.get("stock") or "",
+                "状态": r.get("status") or ("成功" if r.get("ok") else "失败"),
+                "walk 区间": walk,
+                "轮次": r.get("n_buy"),
+                "总盈亏": r.get("sum_pnl"),
+                "胜率": r.get("win_rate"),
+                "平均收益%": r.get("avg_ret"),
+                "最大单笔%": r.get("max_win"),
+                "最大亏损%": r.get("max_loss"),
+                "说明": r.get("error") or "",
+            }
+        )
+    cols = [
+        "标的",
+        "状态",
+        "walk 区间",
+        "轮次",
+        "总盈亏",
+        "胜率",
+        "平均收益%",
+        "最大单笔%",
+        "最大亏损%",
+        "说明",
+    ]
+    df = pd.DataFrame(recs, columns=cols)
+    for col in ("轮次",):
+        df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
+    for col in ("总盈亏", "胜率", "平均收益%", "最大单笔%", "最大亏损%"):
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df
+
+
+def write_batch_summary_csv(rows: list[dict[str, Any]], path: str | Path) -> Path:
+    dest = Path(path)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    fields = [
+        "stock",
+        "ok",
+        "status",
+        "walk_start",
+        "walk_end",
+        "n_bars",
+        "n_buy",
+        "sum_pnl",
+        "win_rate",
+        "avg_ret",
+        "max_win",
+        "max_loss",
+        "budget",
+        "error",
+        "csv",
+        "log",
+        "detail",
+    ]
+    recs = [{k: r.get(k) for k in fields} for r in rows]
+    pd.DataFrame(recs, columns=fields).to_csv(dest, index=False, encoding="utf-8-sig")
+    return dest

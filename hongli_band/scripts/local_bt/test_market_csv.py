@@ -188,5 +188,70 @@ class TradeLedgerTests(unittest.TestCase):
             self.assertIn("港股通红利ETF华泰柏瑞", text)
 
 
+class DailyByStockTests(unittest.TestCase):
+    def test_group_keeps_latest_end(self):
+        from analyze import daily_csvs_by_stock, union_date_range
+
+        header = "stock,period,datetime,open,high,low,close,volume,amount"
+
+        def write_daily(path: Path, stock: str, days: list[str]) -> None:
+            lines = [header]
+            for d in days:
+                lines.append(
+                    "%s,1d,%s,1,1,1,1,100,100" % (stock, d)
+                )
+            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            write_daily(root / "AAA_SH_1d_20200101_20210101.csv", "600000.SH", ["20200102", "20210101"])
+            write_daily(root / "AAA_SH_1d_20200101_20230101.csv", "600000.SH", ["20200102", "20220101", "20230101"])
+            write_daily(root / "BBB_SH_1d_20210101_20220101.csv", "600001.SH", ["20210104", "20220101"])
+            grouped = daily_csvs_by_stock(root)
+            stocks = [m["stock"] for m in grouped]
+            self.assertEqual(stocks, ["600000.SH", "600001.SH"])
+            a = grouped[0]
+            self.assertEqual(a["end"], "20230101")
+            self.assertEqual(a["n"], 3)
+            u0, u1 = union_date_range(grouped)
+            self.assertEqual(u0, "20200102")
+            self.assertEqual(u1, "20230101")
+
+
+class BatchRunTests(unittest.TestCase):
+    def test_missing_csv_does_not_stop_batch(self):
+        from analyze import summarize_batch_row
+        from run import run_batch
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            missing_a = root / "a.csv"
+            missing_b = root / "b.csv"
+            rows = run_batch([missing_a, missing_b], start="20200101", end="20201231")
+            self.assertEqual(len(rows), 2)
+            self.assertTrue(all(not r["ok"] for r in rows))
+            self.assertTrue(all(r["error"] for r in rows))
+            summarized = [summarize_batch_row(r) for r in rows]
+            self.assertEqual(summarized[0]["status"], "失败")
+
+    def test_empty_walk_is_row_error(self):
+        from run import run_batch
+
+        header = "stock,period,datetime,open,high,low,close,volume,amount"
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "600000_SH_1d_20200102_20200103.csv"
+            path.write_text(
+                header
+                + "\n600000.SH,1d,20200102,1,1,1,1,100,100\n"
+                + "600000.SH,1d,20200103,1,1,1,1,100,100\n",
+                encoding="utf-8",
+            )
+            rows = run_batch([path], start="20220101", end="20220131")
+            self.assertEqual(len(rows), 1)
+            self.assertFalse(rows[0]["ok"])
+            self.assertIn("无行情交集", rows[0]["error"])
+            self.assertEqual(rows[0]["stock"], "600000.SH")
+
+
 if __name__ == "__main__":
     unittest.main()

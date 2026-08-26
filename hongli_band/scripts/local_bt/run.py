@@ -7,6 +7,7 @@ import importlib.util
 import runpy
 import sys
 from pathlib import Path
+from typing import Any, Callable, Sequence
 
 
 HERE = Path(__file__).resolve().parent
@@ -160,6 +161,74 @@ def run_backtest(
     return log_path
 
 
+def run_batch(
+    csv_paths: Sequence[str | Path],
+    start: str = "",
+    end: str = "",
+    out_dir: str | Path | None = None,
+    on_progress: Callable[[int, int, str], None] | None = None,
+) -> list[dict[str, Any]]:
+    """逐只独立回测；单只失败不中断。"""
+    from analyze import parse_budget_from_log  # noqa: WPS433
+
+    dest = Path(out_dir) if out_dir else THEME / "report"
+    dest.mkdir(parents=True, exist_ok=True)
+    paths = [Path(p) for p in csv_paths]
+    n = len(paths)
+    rows: list[dict[str, Any]] = []
+    for i, csv_path in enumerate(paths):
+        stock = csv_path.stem
+        if on_progress:
+            on_progress(i, n, stock)
+        base: dict[str, Any] = {
+            "stock": stock,
+            "csv": str(csv_path),
+            "log": "",
+            "detail": "",
+            "budget": None,
+            "walk_start": "",
+            "walk_end": "",
+            "n_bars": 0,
+            "ok": False,
+            "error": "",
+        }
+        try:
+            code, bars = load_daily_csv(csv_path)
+            stock = code
+            base["stock"] = code
+            walk = walk_days(bars, start=start, end=end)
+            if not walk:
+                base["error"] = "无行情交集 start=%s end=%s" % (start, end)
+            else:
+                base["walk_start"] = walk[0].day
+                base["walk_end"] = walk[-1].day
+                base["n_bars"] = len(walk)
+                log_path = run_backtest(
+                    csv_path,
+                    start=start,
+                    end=end,
+                    stock=code,
+                    out_dir=dest,
+                )
+                detail = trades_csv_path(log_path)
+                base["log"] = str(log_path)
+                base["detail"] = str(detail)
+                base["budget"] = parse_budget_from_log(log_path)
+                base["ok"] = True
+        except SystemExit as e:
+            msg = str(e).strip()
+            base["error"] = msg or ("exit %s" % e.code)
+            base["stock"] = stock
+        except Exception as e:
+            base["error"] = "%s: %s" % (type(e).__name__, e)
+            base["stock"] = stock
+        rows.append(base)
+    if on_progress:
+        last = rows[-1].get("stock") if rows else ""
+        on_progress(n, n, str(last or ""))
+    return rows
+
+
 def _run_report(log_path: Path, out_dir: Path) -> None:
     if not REPORT_PY.is_file():
         raise SystemExit("missing report script: %s" % REPORT_PY)
@@ -187,7 +256,9 @@ def _run_report(log_path: Path, out_dir: Path) -> None:
 
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description="HlBand local backtest from KlineDump daily CSV")
-    ap.add_argument("--csv", required=True, help="KlineDump 日线 CSV")
+    src = ap.add_mutually_exclusive_group(required=True)
+    src.add_argument("--csv", default="", help="KlineDump 日线 CSV（单标的）")
+    src.add_argument("--csv-dir", default="", help="批量：目录下按标的去重后的 *_1d_*.csv")
     ap.add_argument("--start", default="", help="回测起点 yyyymmdd（CSV 须含更早暖机）")
     ap.add_argument("--end", default="", help="回测终点 yyyymmdd")
     ap.add_argument("--stock", default="", help="覆盖 CSV 中的代码，如 600350.SH")
@@ -204,6 +275,41 @@ def main(argv: list[str] | None = None) -> None:
     )
     ap.add_argument("--report", action="store_true", help="事后用 gen_report；成交真源为本回测操作明细")
     args = ap.parse_args(argv)
+
+    if args.csv_dir:
+        from analyze import (  # noqa: WPS433
+            daily_csvs_by_stock,
+            summarize_batch_row,
+            write_batch_summary_csv,
+        )
+
+        metas = daily_csvs_by_stock(args.csv_dir)
+        paths = [Path(m["path"]) for m in metas]
+        if not paths:
+            raise SystemExit("no *_1d_*.csv in %s" % args.csv_dir)
+
+        def _prog(i: int, n: int, stock: str) -> None:
+            print("batch [%s/%s] %s" % (min(i + 1, n), n, stock), flush=True)
+
+        raw = run_batch(
+            paths,
+            start=args.start,
+            end=args.end,
+            out_dir=args.out,
+            on_progress=_prog,
+        )
+        rows = [summarize_batch_row(r) for r in raw]
+        summary = write_batch_summary_csv(rows, Path(args.out) / "local_bt_batch_summary.csv")
+        print("wrote batch summary", summary)
+        for r in rows:
+            print(
+                r.get("stock"),
+                r.get("status"),
+                "pnl=",
+                r.get("sum_pnl"),
+                r.get("error") or "",
+            )
+        return
 
     log_path = run_backtest(
         args.csv,

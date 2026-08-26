@@ -29,7 +29,9 @@ if str(REPO / "scripts") not in sys.path:
 
 from analyze import (  # noqa: E402
     analyze_detail,
+    batch_summary_dataframe,
     csv_date_range,
+    daily_csvs_by_stock,
     date_to_ymd,
     filter_trades_by_range,
     list_daily_csvs,
@@ -37,10 +39,13 @@ from analyze import (  # noqa: E402
     load_detail_raw,
     ohlc_from_csv,
     parse_budget_from_log,
+    summarize_batch_row,
     trades_to_dataframe,
+    union_date_range,
+    write_batch_summary_csv,
     ymd_to_date,
 )
-from run import run_backtest  # noqa: E402
+from run import run_backtest, run_batch  # noqa: E402
 from trades_csv import trades_csv_path  # noqa: E402
 
 import streamlit as st  # noqa: E402
@@ -309,6 +314,22 @@ _KLINE_PLOT_CONFIG = {
 }
 
 
+class _Cap:
+    """把策略 print 同时写到终端和缓冲区。"""
+
+    def __init__(self, primary, buf):
+        self.primary = primary
+        self.buf = buf
+
+    def write(self, data):
+        self.primary.write(data)
+        self.buf.write(data)
+        return len(data) if data else 0
+
+    def flush(self):
+        self.primary.flush()
+
+
 def _render_analysis(
     detail_path: Path,
     budget: float,
@@ -399,17 +420,130 @@ def _render_analysis(
         st.warning("无法读取原始明细：%s" % e)
 
 
+def _render_batch_run(csv_dir: str) -> None:
+    metas = daily_csvs_by_stock(csv_dir)
+    if not metas:
+        st.warning("目录无可用 `*_1d_*.csv`：%s" % csv_dir)
+        return
+    by_stock = {m["stock"]: m for m in metas}
+    stocks = [m["stock"] for m in metas]
+    selected = st.multiselect(
+        "标的",
+        options=stocks,
+        default=stocks,
+        format_func=lambda s: "%s  ·  %s–%s  (%s根)"
+        % (s, by_stock[s]["start"], by_stock[s]["end"], by_stock[s]["n"]),
+        key="batch_stocks",
+    )
+    picked = [by_stock[s] for s in selected if s in by_stock]
+    start_d = end_d = None
+    run_btn = False
+    if not picked:
+        st.info("请至少选择一只标的")
+    else:
+        u0, u1 = union_date_range(picked)
+        d0, d1 = ymd_to_date(u0), ymd_to_date(u1)
+        c_start, c_end = st.columns(2)
+        with c_start:
+            start_d = st.date_input("开始时间", value=d0, min_value=d0, max_value=d1, key="bt_batch_start")
+        with c_end:
+            end_d = st.date_input("结束时间", value=d1, min_value=d0, max_value=d1, key="bt_batch_end")
+        if start_d > end_d:
+            st.error("开始时间不能晚于结束时间")
+        run_btn = st.button("开始批量回测", type="primary", disabled=start_d > end_d)
+
+    if run_btn and picked and start_d and end_d and start_d <= end_d:
+        start_s = _fmt_ymd(start_d)
+        end_s = _fmt_ymd(end_d)
+        out_dir = THEME / "report"
+        bar = st.progress(0.0)
+        status = st.empty()
+
+        def on_progress(i: int, n: int, stock: str) -> None:
+            bar.progress(0.0 if n <= 0 else min(1.0, float(i) / float(n)))
+            if n <= 0:
+                return
+            if i < n:
+                status.info("正在回测 **%s**（%s/%s）…" % (stock, i + 1, n))
+            else:
+                status.success("批量完成 %s 只" % n)
+
+        log_buf = io.StringIO()
+        old_out, old_err = sys.stdout, sys.stderr
+        sys.stdout = _Cap(old_out, log_buf)
+        sys.stderr = _Cap(old_err, log_buf)
+        try:
+            raw = run_batch(
+                [Path(m["path"]) for m in picked],
+                start=start_s,
+                end=end_s,
+                out_dir=out_dir,
+                on_progress=on_progress,
+            )
+            rows = [summarize_batch_row(r) for r in raw]
+            write_batch_summary_csv(rows, out_dir / "local_bt_batch_summary.csv")
+            st.session_state["batch_result"] = {
+                "start": start_s,
+                "end": end_s,
+                "rows": rows,
+            }
+            n_ok = sum(1 for r in rows if r.get("ok"))
+            st.success(
+                "完成 · 成功 %s · 失败 %s · 汇总 `local_bt_batch_summary.csv`"
+                % (n_ok, len(rows) - n_ok)
+            )
+        except Exception:
+            st.error("批量回测失败")
+            st.code(traceback.format_exc())
+        finally:
+            sys.stdout, sys.stderr = old_out, old_err
+
+    batch = st.session_state.get("batch_result")
+    if not batch:
+        return
+    st.divider()
+    st.subheader("按标的汇总")
+    st.caption("各标的独立账户、独立预算；合计盈亏不是组合净值。")
+    st.dataframe(batch_summary_dataframe(batch["rows"]), use_container_width=True, hide_index=True)
+
+    ok_rows = [r for r in batch["rows"] if r.get("ok") and r.get("detail")]
+    if not ok_rows:
+        st.warning("没有成功的标的，无法查看明细。")
+        return
+    labels = [str(r["stock"]) for r in ok_rows]
+    pick = st.selectbox("查看标的明细", labels, key="batch_detail_stock")
+    row = next(r for r in ok_rows if str(r["stock"]) == pick)
+    st.divider()
+    st.subheader("明细 · %s" % pick)
+    ohlc = Path(row["csv"]) if row.get("csv") else None
+    _render_analysis(
+        Path(row["detail"]),
+        budget=float(row.get("budget") or 50000.0),
+        ohlc_csv=ohlc if ohlc and ohlc.is_file() else None,
+        range_start=str(row.get("walk_start") or batch.get("start") or ""),
+        range_end=str(row.get("walk_end") or batch.get("end") or ""),
+        stock=str(row.get("stock") or ""),
+    )
+
+
 # ---------- sidebar / controls ----------
 mode = st.radio("模式", ["跑本地回测", "仅分析已有明细"], horizontal=True)
+scope = "单标的"
+if mode == "跑本地回测":
+    scope = st.radio("范围", ["单标的", "批量（按标的汇总）"], horizontal=True)
 
 with st.sidebar:
     st.header("参数")
     csv_dir = st.text_input("行情目录", value=str(DEFAULT_CSV_DIR))
     daily_files = list_daily_csvs(csv_dir)
     daily_labels = [p.name for p in daily_files]
-    uploaded = st.file_uploader("或上传日线 CSV", type=["csv"])
+    uploaded = None
+    if mode == "跑本地回测" and scope == "单标的":
+        uploaded = st.file_uploader("或上传日线 CSV", type=["csv"])
 
-if mode == "跑本地回测":
+if mode == "跑本地回测" and scope == "批量（按标的汇总）":
+    _render_batch_run(csv_dir)
+elif mode == "跑本地回测":
     col_a, col_b = st.columns([2, 1])
     with col_a:
         if uploaded is not None:
@@ -455,22 +589,7 @@ if mode == "跑本地回测":
         log_buf = io.StringIO()
         with st.spinner(f"回测 {meta['stock']} {start_s}–{end_s} …"):
             try:
-                # 捕获 print
                 old_out, old_err = sys.stdout, sys.stderr
-
-                class _Cap:
-                    def __init__(self, primary, buf):
-                        self.primary = primary
-                        self.buf = buf
-
-                    def write(self, data):
-                        self.primary.write(data)
-                        self.buf.write(data)
-                        return len(data) if data else 0
-
-                    def flush(self):
-                        self.primary.flush()
-
                 sys.stdout = _Cap(old_out, log_buf)
                 sys.stderr = _Cap(old_err, log_buf)
                 try:
