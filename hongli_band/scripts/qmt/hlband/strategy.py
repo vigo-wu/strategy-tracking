@@ -1458,7 +1458,8 @@ def _handle(C):
     conf_end = str(globals().get("SIGNAL_CONFIRM_END", "160000") or "160000")
     in_exec = (not bt) and (DECISION_START <= now_s < conf_start)
     in_confirm = (not bt) and (conf_start <= now_s <= conf_end)
-    # 收盘确认：用当日完整 K；开盘：日 K 去未收盘根，周 K 含未收盘根
+    # 收盘确认：用当日完整日 K；周 K 不含未收盘周（与回测 0000 原生 1w 一致）
+    # 开盘：日 K 去未收盘根；周 K 同样不含未收盘周
     prev_d = False
     prev_w = False
     phase = "bt" if bt else "live"
@@ -1540,8 +1541,8 @@ def _handle(C):
         sig_day_weekly = day
     elif need_fallback or (live_cc and phase == "exec"):
         # 开盘兜底 / 盘中执行：日 K 去掉未收盘根，避免未完成日线误触 vol_dry 等；
-        # 周 K 含本周未收盘根，与 confirm/回测一致（新周首日即可 weekly_bear 撤买入 pending）
-        # 日信号日=上一完整交易日；周线 streak/清仓信号日=今日（与含未收盘周根对齐）
+        # 周 K 已在 _get_ohlcv_1w 丢掉未收盘周，与 confirm/回测一致
+        # 日信号日=上一完整交易日；周线 streak 仍按今日计（看的是上一完整周）
         prev_d = True
         prev_w = False
         highs_s = _drop_forming_bar(highs_d)

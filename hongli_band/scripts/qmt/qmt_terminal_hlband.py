@@ -176,7 +176,8 @@ LIVE_ONLY_LAST_BAR = True
 # 错过尾盘则保留到下一交易日 OPEN_EXEC_* 开盘窗按开盘价成交。
 # 若收盘窗未跑到，开盘对「上一根已收盘日」兜底评估并挂起（同日开盘窗可成交）。
 # 判定：confirmed_eval_day < 上一完整交易日 且今日尚未 fallback
-# 周线：bt/confirm/开盘 exec·兜底一律含本周未收盘根；日线开盘仍去未收盘日 K
+# 周线：bt/confirm/开盘一律丢掉未收盘周（对齐 QMT 回测 0000 原生 1w；周五仍看上周）
+# 日线开盘仍去未收盘日 K
 LIVE_CLOSE_CONFIRM = True
 # 实盘决策时窗（HHmmss）：盘中处理券商 pending / 心跳；信号成交见 PENDING_EXEC_* / OPEN_EXEC_*
 DECISION_START = "093000"
@@ -213,7 +214,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.47"
+STRATEGY_VER = "v1.48"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
@@ -1562,11 +1563,49 @@ def _get_daily_bar_days(C, stock, count=8):
     return days
 
 
+def _week_monday(day):
+    s = _norm_bar_day(day)
+    if len(s) < 8:
+        return ""
+    d = datetime.datetime.strptime(s[:8], "%Y%m%d")
+    monday = d - datetime.timedelta(days=int(d.weekday()))
+    return monday.strftime("%Y%m%d")
+
+
+def _is_weekly_period(period):
+    p = str(period or "").strip().lower()
+    return p in ("1w", "week", "weekly", "w")
+
+
+def _drop_unclosed_week_ohlcv(open_, high, low, close, volume, days, end_day):
+    """丢掉 end_day 所在自然周，对齐 QMT 回测 0000 原生 1w（周五当天也不含本周）。"""
+    if not close:
+        return None
+    n = len(close)
+    cur = _week_monday(end_day)
+    keep = None
+    if cur and days and len(days) == n:
+        keep = [i for i in range(n) if _week_monday(days[i]) != cur]
+    elif cur and (not getattr(A, "is_backtest", False)) and n >= 2:
+        keep = list(range(n - 1))
+        _diag_once("w1_drop_last_no_days", "end=", end_day, "n=", n)
+    if keep is None:
+        return open_, high, low, close, volume
+    if len(keep) < 1:
+        return None
+
+    def _take(seq):
+        return [seq[i] for i in keep]
+
+    return _take(open_), _take(high), _take(low), _take(close), _take(volume)
+
+
 def _get_ohlcv_period(C, stock, period, count, need, diag_key):
     end = _bar_end_str(C)
     if period in ("1d", "1w", "1mon", "1q", "1hy", "1y"):
         end = end[:8] if len(end) >= 8 else end
     md = None
+    md_used = None
     source = None
     open_ = high = low = close = volume = None
     fields = ["open", "high", "low", "close", "volume"]
@@ -1603,6 +1642,7 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
         md = None
 
     if md is not None:
+        md_used = md
         open_ = _series_from_ex(md, stock, "open")
         high = _series_from_ex(md, stock, "high")
         low = _series_from_ex(md, stock, "low")
@@ -1620,6 +1660,7 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
                 dividend_type="front_ratio",
             )
             source = "get_market_data"
+            md_used = md2
             open_ = _series_from_ex(md2, stock, "open")
             high = _series_from_ex(md2, stock, "high")
             low = _series_from_ex(md2, stock, "low")
@@ -1628,7 +1669,7 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
         except Exception as e:
             _diag_once(diag_key + "_gmd_fail", e)
 
-    if not close or len(close) < need:
+    if not close:
         _diag_once(
             diag_key + "_empty",
             "period=",
@@ -1636,7 +1677,7 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
             "end=",
             end,
             "n=",
-            0 if not close else len(close),
+            0,
         )
         return None
 
@@ -1649,6 +1690,35 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
         low = list(close)
     if not volume or len(volume) != n:
         volume = [0.0] * n
+
+    if _is_weekly_period(period):
+        days = _days_from_ex(md_used, stock) if md_used is not None else None
+        trimmed = _drop_unclosed_week_ohlcv(
+            open_, high, low, close, volume, days, end
+        )
+        if trimmed is None:
+            _diag_once(
+                diag_key + "_empty",
+                "period=",
+                period,
+                "end=",
+                end,
+                "n=0 after drop forming week",
+            )
+            return None
+        open_, high, low, close, volume = trimmed
+
+    if len(close) < need:
+        _diag_once(
+            diag_key + "_empty",
+            "period=",
+            period,
+            "end=",
+            end,
+            "n=",
+            len(close),
+        )
+        return None
 
     if np.std(np.asarray(close[-min(20, len(close)) :], dtype=float)) < 1e-8:
         _diag_once(diag_key + "_flat", "n=", len(close), "source=", source)
@@ -5109,7 +5179,8 @@ def _handle(C):
     conf_end = str(globals().get("SIGNAL_CONFIRM_END", "160000") or "160000")
     in_exec = (not bt) and (DECISION_START <= now_s < conf_start)
     in_confirm = (not bt) and (conf_start <= now_s <= conf_end)
-    # 收盘确认：用当日完整 K；开盘：日 K 去未收盘根，周 K 含未收盘根
+    # 收盘确认：用当日完整日 K；周 K 不含未收盘周（与回测 0000 原生 1w 一致）
+    # 开盘：日 K 去未收盘根；周 K 同样不含未收盘周
     prev_d = False
     prev_w = False
     phase = "bt" if bt else "live"
@@ -5191,8 +5262,8 @@ def _handle(C):
         sig_day_weekly = day
     elif need_fallback or (live_cc and phase == "exec"):
         # 开盘兜底 / 盘中执行：日 K 去掉未收盘根，避免未完成日线误触 vol_dry 等；
-        # 周 K 含本周未收盘根，与 confirm/回测一致（新周首日即可 weekly_bear 撤买入 pending）
-        # 日信号日=上一完整交易日；周线 streak/清仓信号日=今日（与含未收盘周根对齐）
+        # 周 K 已在 _get_ohlcv_1w 丢掉未收盘周，与 confirm/回测一致
+        # 日信号日=上一完整交易日；周线 streak 仍按今日计（看的是上一完整周）
         prev_d = True
         prev_w = False
         highs_s = _drop_forming_bar(highs_d)

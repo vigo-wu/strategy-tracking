@@ -166,7 +166,8 @@ LIVE_ONLY_LAST_BAR = True
 # 错过尾盘则保留到下一交易日 OPEN_EXEC_* 开盘窗按开盘价成交。
 # 若收盘窗未跑到，开盘对「上一根已收盘日」兜底评估并挂起（同日开盘窗可成交）。
 # 判定：confirmed_eval_day < 上一完整交易日 且今日尚未 fallback
-# 周线：bt/confirm/开盘 exec·兜底一律含本周未收盘根；日线开盘仍去未收盘日 K
+# 周线：bt/confirm/开盘一律丢掉未收盘周（对齐 QMT 回测 0000 原生 1w；周五仍看上周）
+# 日线开盘仍去未收盘日 K
 LIVE_CLOSE_CONFIRM = True
 # 实盘决策时窗（HHmmss）：盘中处理券商 pending / 心跳；信号成交见 PENDING_EXEC_* / OPEN_EXEC_*
 DECISION_START = "093000"
@@ -203,7 +204,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.47"
+STRATEGY_VER = "v1.48"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）

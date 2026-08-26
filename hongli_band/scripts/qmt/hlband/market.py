@@ -95,11 +95,49 @@ def _get_daily_bar_days(C, stock, count=8):
     return days
 
 
+def _week_monday(day):
+    s = _norm_bar_day(day)
+    if len(s) < 8:
+        return ""
+    d = datetime.datetime.strptime(s[:8], "%Y%m%d")
+    monday = d - datetime.timedelta(days=int(d.weekday()))
+    return monday.strftime("%Y%m%d")
+
+
+def _is_weekly_period(period):
+    p = str(period or "").strip().lower()
+    return p in ("1w", "week", "weekly", "w")
+
+
+def _drop_unclosed_week_ohlcv(open_, high, low, close, volume, days, end_day):
+    """丢掉 end_day 所在自然周，对齐 QMT 回测 0000 原生 1w（周五当天也不含本周）。"""
+    if not close:
+        return None
+    n = len(close)
+    cur = _week_monday(end_day)
+    keep = None
+    if cur and days and len(days) == n:
+        keep = [i for i in range(n) if _week_monday(days[i]) != cur]
+    elif cur and (not getattr(A, "is_backtest", False)) and n >= 2:
+        keep = list(range(n - 1))
+        _diag_once("w1_drop_last_no_days", "end=", end_day, "n=", n)
+    if keep is None:
+        return open_, high, low, close, volume
+    if len(keep) < 1:
+        return None
+
+    def _take(seq):
+        return [seq[i] for i in keep]
+
+    return _take(open_), _take(high), _take(low), _take(close), _take(volume)
+
+
 def _get_ohlcv_period(C, stock, period, count, need, diag_key):
     end = _bar_end_str(C)
     if period in ("1d", "1w", "1mon", "1q", "1hy", "1y"):
         end = end[:8] if len(end) >= 8 else end
     md = None
+    md_used = None
     source = None
     open_ = high = low = close = volume = None
     fields = ["open", "high", "low", "close", "volume"]
@@ -136,6 +174,7 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
         md = None
 
     if md is not None:
+        md_used = md
         open_ = _series_from_ex(md, stock, "open")
         high = _series_from_ex(md, stock, "high")
         low = _series_from_ex(md, stock, "low")
@@ -153,6 +192,7 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
                 dividend_type="front_ratio",
             )
             source = "get_market_data"
+            md_used = md2
             open_ = _series_from_ex(md2, stock, "open")
             high = _series_from_ex(md2, stock, "high")
             low = _series_from_ex(md2, stock, "low")
@@ -161,7 +201,7 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
         except Exception as e:
             _diag_once(diag_key + "_gmd_fail", e)
 
-    if not close or len(close) < need:
+    if not close:
         _diag_once(
             diag_key + "_empty",
             "period=",
@@ -169,7 +209,7 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
             "end=",
             end,
             "n=",
-            0 if not close else len(close),
+            0,
         )
         return None
 
@@ -182,6 +222,35 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
         low = list(close)
     if not volume or len(volume) != n:
         volume = [0.0] * n
+
+    if _is_weekly_period(period):
+        days = _days_from_ex(md_used, stock) if md_used is not None else None
+        trimmed = _drop_unclosed_week_ohlcv(
+            open_, high, low, close, volume, days, end
+        )
+        if trimmed is None:
+            _diag_once(
+                diag_key + "_empty",
+                "period=",
+                period,
+                "end=",
+                end,
+                "n=0 after drop forming week",
+            )
+            return None
+        open_, high, low, close, volume = trimmed
+
+    if len(close) < need:
+        _diag_once(
+            diag_key + "_empty",
+            "period=",
+            period,
+            "end=",
+            end,
+            "n=",
+            len(close),
+        )
+        return None
 
     if np.std(np.asarray(close[-min(20, len(close)) :], dtype=float)) < 1e-8:
         _diag_once(diag_key + "_flat", "n=", len(close), "source=", source)
