@@ -22,7 +22,7 @@ def timetag_to_datetime(tag: Any, fmt: str) -> str:
     if len(str(raw)) >= 14 and str(raw).isdigit():
         dt = datetime.strptime(str(raw)[:14], "%Y%m%d%H%M%S")
     elif d:
-        dt = datetime.strptime(d, "%Y%m%d").replace(hour=15, minute=0, second=0)
+        dt = datetime.strptime(d, "%Y%m%d").replace(hour=0, minute=0, second=0)
     else:
         dt = datetime.now()
     return dt.strftime(fmt)

@@ -1,7 +1,8 @@
 # coding: utf-8
-"""周线合成：周中最后一根收盘 = 当日收盘。"""
+"""周线：丢掉未收盘周，对齐 QMT 回测原生 1w。"""
 from __future__ import annotations
 
+import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
@@ -12,11 +13,18 @@ import sys
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
-from market_csv import DailyBar, MarketStore, aggregate_weekly, compact_day, week_monday
+from market_csv import (
+    DailyBar,
+    MarketStore,
+    aggregate_weekly,
+    compact_day,
+    find_weekly_csv,
+    week_monday,
+)
 
 
 def _bar(day: str, close: float, high: float | None = None, low: float | None = None) -> DailyBar:
-    dt = datetime.strptime(day, "%Y%m%d").replace(hour=15, minute=0, second=0)
+    dt = datetime.strptime(day, "%Y%m%d").replace(hour=0, minute=0, second=0)
     px = float(close)
     hi = float(high if high is not None else px)
     lo = float(low if low is not None else px)
@@ -32,29 +40,75 @@ def _bar(day: str, close: float, high: float | None = None, low: float | None = 
     )
 
 
+def _wbar(day: str, close: float) -> DailyBar:
+    b = _bar(day, close)
+    return DailyBar(
+        day=b.day,
+        dt=b.dt,
+        open=b.open,
+        high=b.high,
+        low=b.low,
+        close=b.close,
+        volume=b.volume,
+        stock=b.stock,
+        period="1w",
+    )
+
+
 class WeeklyFormingTests(unittest.TestCase):
     def test_week_monday(self):
         self.assertEqual(week_monday("20260107"), "20260105")
         self.assertEqual(week_monday("20260105"), "20260105")
 
-    def test_midweek_close_is_today_not_friday(self):
+    def test_midweek_last_bar_is_previous_week(self):
         dailies = [
+            _bar("20251229", 9.0, high=9.5, low=8.5),
+            _bar("20251230", 9.5),
+            _bar("20251231", 9.2),
             _bar("20260105", 10.0, high=11.0, low=9.0),
             _bar("20260106", 11.0, high=12.0, low=10.0),
             _bar("20260107", 12.5, high=13.0, low=11.0),
-            _bar("20260108", 13.0),
-            _bar("20260109", 14.0),
         ]
         wed = [b for b in dailies if b.day <= "20260107"]
         weeks = aggregate_weekly(wed)
         self.assertTrue(weeks)
         last = weeks[-1]
-        self.assertEqual(last.close, 12.5)
-        self.assertEqual(last.day, "20260107")
-        self.assertEqual(last.open, 10.0)
-        self.assertEqual(last.high, 13.0)
-        self.assertEqual(last.low, 9.0)
-        self.assertNotEqual(last.close, 14.0)
+        self.assertEqual(last.close, 9.2)
+        self.assertEqual(last.day, "20251231")
+        forming = aggregate_weekly(wed, drop_forming=False)
+        self.assertEqual(forming[-1].close, 12.5)
+        self.assertEqual(forming[-1].day, "20260107")
+
+    def test_friday_still_excludes_current_week(self):
+        dailies = [
+            _bar("20251229", 9.0),
+            _bar("20251230", 9.5),
+            _bar("20251231", 9.2),
+            _bar("20260105", 10.0),
+            _bar("20260106", 11.0),
+            _bar("20260107", 12.5),
+            _bar("20260108", 13.0),
+            _bar("20260109", 14.0),
+        ]
+        weeks = aggregate_weekly(dailies)
+        self.assertEqual(weeks[-1].close, 9.2)
+        self.assertEqual(weeks[-1].day, "20251231")
+
+    def test_next_monday_includes_last_complete_week(self):
+        dailies = [
+            _bar("20251229", 9.0),
+            _bar("20251230", 9.5),
+            _bar("20251231", 9.2),
+            _bar("20260105", 10.0),
+            _bar("20260106", 11.0),
+            _bar("20260107", 12.5),
+            _bar("20260108", 13.0),
+            _bar("20260109", 14.0),
+            _bar("20260112", 15.0),
+        ]
+        weeks = aggregate_weekly(dailies)
+        self.assertEqual(weeks[-1].close, 14.0)
+        self.assertEqual(weeks[-1].day, "20260109")
 
     def test_store_weekly_slice_on_wednesday(self):
         dailies = [
@@ -69,10 +123,29 @@ class WeeklyFormingTests(unittest.TestCase):
         ]
         store = MarketStore(dailies, "600350.SH")
         frame = store.frame("1w", "20260107", count=8, fields=["open", "high", "low", "close", "volume"])
-        self.assertGreaterEqual(len(frame), 2)
-        self.assertEqual(float(frame["close"][-1]), 12.5)
+        self.assertGreaterEqual(len(frame), 1)
+        self.assertEqual(float(frame["close"][-1]), 9.2)
         last_dt = frame.index[-1]
-        self.assertEqual(last_dt.strftime("%Y%m%d"), "20260107")
+        self.assertEqual(last_dt.strftime("%Y%m%d"), "20251231")
+        self.assertEqual(last_dt.hour, 0)
+
+    def test_native_weekly_drops_forming_week(self):
+        dailies = [_bar("20260107", 12.5)]
+        weekly = [_wbar("20260102", 9.2), _wbar("20260107", 12.5)]
+        store = MarketStore(dailies, "600350.SH", weekly=weekly)
+        frame = store.frame("1w", "20260107", count=8, fields=["close"])
+        self.assertEqual(len(frame), 1)
+        self.assertEqual(float(frame["close"][-1]), 9.2)
+
+    def test_find_weekly_csv_prefers_code_prefix(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            daily = root / "600350_SH_1d_20220104_20260826.csv"
+            weekly = root / "600350_SH_1w_20180105_20260821.csv"
+            daily.write_text("x", encoding="utf-8")
+            weekly.write_text("x", encoding="utf-8")
+            found = find_weekly_csv(daily, "600350.SH")
+            self.assertEqual(found, weekly)
 
     def test_compact_day(self):
         self.assertEqual(compact_day("2026-01-07 15:00:00"), "20260107")
@@ -97,7 +170,6 @@ class TradeLedgerTests(unittest.TestCase):
         self.assertEqual(len(book.rows[0]), len(HEADER))
 
     def test_etf_decimals_and_write_gbk(self):
-        import tempfile
         from pathlib import Path
         from trades_csv import HEADER, TradeLedger
 

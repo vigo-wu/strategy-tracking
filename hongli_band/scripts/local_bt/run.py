@@ -24,7 +24,13 @@ if str(HERE) not in sys.path:
 if str(REPO / "scripts") not in sys.path:
     sys.path.insert(0, str(REPO / "scripts"))
 
-from market_csv import MarketStore, load_daily_csv, walk_days  # noqa: E402
+from market_csv import (  # noqa: E402
+    MarketStore,
+    find_weekly_csv,
+    load_daily_csv,
+    load_weekly_csv,
+    walk_days,
+)
 from mock_qmt import MockContext, _as_tag, inject_qmt_globals  # noqa: E402
 from trades_csv import TradeLedger, trades_csv_path, wrap_fill_hooks  # noqa: E402
 
@@ -82,13 +88,21 @@ def run_backtest(
     stock: str = "",
     out_dir: str | Path | None = None,
     log_name: str = "",
+    weekly_csv: str | Path | None = None,
 ) -> Path:
     code, bars = load_daily_csv(csv_path, stock=stock)
     walk = walk_days(bars, start=start, end=end)
     if not walk:
         raise SystemExit("no bars in walk range start=%s end=%s" % (start, end))
 
-    store = MarketStore(bars, code)
+    weekly_path = Path(weekly_csv) if weekly_csv else find_weekly_csv(csv_path, code)
+    weekly_bars = None
+    weekly_src = "aggregate drop_forming"
+    if weekly_path and Path(weekly_path).is_file():
+        _, weekly_bars = load_weekly_csv(weekly_path, stock=code)
+        weekly_src = "native %s n=%s" % (weekly_path, len(weekly_bars))
+
+    store = MarketStore(bars, code, weekly=weekly_bars)
     tags = [_as_tag(b.dt) for b in walk]
     ctx = MockContext(store, tags, code)
     ctx.start = start or walk[0].day
@@ -108,6 +122,7 @@ def run_backtest(
     sys.stdout = _Tee(old_out, log_f)
     sys.stderr = _Tee(old_err, log_f)
     try:
+        n_w0 = len(store.frame("1w", walk[0].day, count=120, fields=["close"]))
         print(
             "local_bt",
             code,
@@ -120,7 +135,16 @@ def run_backtest(
             len(walk),
             "hist_n=",
             len(bars),
+            "weekly=",
+            weekly_src,
+            "n_w_start=",
+            n_w0,
         )
+        if n_w0 < 60:
+            print(
+                "WARN weekly bars at start < 60 (need ~60 for w1, QMT uses 120); "
+                "extend daily CSV or dump native 1w with HIST_START well before walk start"
+            )
         ns["init"](ctx)
         for i, bar in enumerate(walk):
             ctx.barpos = i
@@ -173,6 +197,11 @@ def main(argv: list[str] | None = None) -> None:
         help="日志输出目录（默认 hongli_band/report）",
     )
     ap.add_argument("--log-name", default="", help="日志文件名，默认 local_bt_{stock}.txt")
+    ap.add_argument(
+        "--weekly-csv",
+        default="",
+        help="QMT 原生 1w CSV；缺省则同目录 {code}_1w_*.csv，再缺省则日线合成并丢掉未收盘周",
+    )
     ap.add_argument("--report", action="store_true", help="事后用 gen_report；成交真源为本回测操作明细")
     args = ap.parse_args(argv)
 
@@ -183,6 +212,7 @@ def main(argv: list[str] | None = None) -> None:
         stock=args.stock,
         out_dir=args.out,
         log_name=args.log_name,
+        weekly_csv=args.weekly_csv or None,
     )
     if args.report:
         _run_report(log_path, Path(args.out))

@@ -1,5 +1,5 @@
 # coding: utf-8
-"""KlineDump 日线 CSV → 切片 / 形成中周 K。"""
+"""KlineDump 日线 CSV → 切片；周线默认对齐 QMT 回测原生 1w（不含未收盘周）。"""
 from __future__ import annotations
 
 import csv
@@ -82,7 +82,7 @@ def parse_bar_datetime(raw: str) -> datetime | None:
     if len(d) >= 8:
         try:
             dt = datetime.strptime(d[:8], "%Y%m%d")
-            return dt.replace(hour=15, minute=0, second=0)
+            return dt.replace(hour=0, minute=0, second=0)
         except ValueError:
             return None
     return None
@@ -99,8 +99,26 @@ def _is_weekly_period(period: str | None) -> bool:
     return p in ("1w", "week", "weekly", "w")
 
 
-def aggregate_weekly(dailies: Sequence[DailyBar]) -> list[DailyBar]:
-    """按自然周一分组；最后一组含截至序列末日的未收盘周。"""
+def drop_unclosed_week(bars: Sequence[DailyBar], end_day: str) -> list[DailyBar]:
+    """丢掉 end_day 所在自然周。QMT 回测 K 线在 00:00，本周 1w 尚未收盘。"""
+    end = compact_day(end_day)
+    if not end or not bars:
+        return list(bars)
+    cur = week_monday(end)
+    return [b for b in bars if week_monday(b.day) != cur]
+
+
+def aggregate_weekly(
+    dailies: Sequence[DailyBar],
+    *,
+    drop_forming: bool = True,
+    end_day: str = "",
+) -> list[DailyBar]:
+    """按自然周（周一为一周）把日 K 合成周 K。
+
+    默认 drop_forming=True：不含 end_day 所在周，对齐 QMT 原生 1w。
+    周五当天也不把本周算进去（回测 bar=0000，本周周 K 要到下一周才出现）。
+    """
     groups: dict[str, list[DailyBar]] = {}
     order: list[str] = []
     for bar in dailies:
@@ -116,10 +134,11 @@ def aggregate_weekly(dailies: Sequence[DailyBar]) -> list[DailyBar]:
             continue
         first = bucket[0]
         last = bucket[-1]
+        dt = last.dt.replace(hour=0, minute=0, second=0, microsecond=0)
         out.append(
             DailyBar(
                 day=last.day,
-                dt=last.dt,
+                dt=dt,
                 open=float(first.open),
                 high=max(float(x.high) for x in bucket),
                 low=min(float(x.low) for x in bucket),
@@ -130,6 +149,9 @@ def aggregate_weekly(dailies: Sequence[DailyBar]) -> list[DailyBar]:
                 period="1w",
             )
         )
+    if drop_forming:
+        end = compact_day(end_day) or (dailies[-1].day if dailies else "")
+        out = drop_unclosed_week(out, end)
     return out
 
 
@@ -172,30 +194,37 @@ def _float(val, default: float = 0.0) -> float:
         return default
 
 
-def load_daily_csv(path: str | Path, stock: str = "") -> tuple[str, list[DailyBar]]:
-    """读取 KlineDump 日线 CSV。返回 (stock, bars)。"""
+def _csv_missing_hint(p: Path) -> str:
+    parent = p.parent
+    if parent.is_dir():
+        names = [x.name for x in sorted(parent.glob("*.csv"))]
+        if names:
+            hint = "; existing csv: " + ", ".join(names[:12])
+            if len(names) > 12:
+                hint += ", ..."
+            return hint
+        return ""
+    return "; directory missing: %s" % parent
+
+
+def _load_ohlcv_csv(
+    path: str | Path,
+    stock: str = "",
+    want_period: str = "1d",
+) -> tuple[str, list[DailyBar]]:
     p = Path(path)
     if not p.is_file():
-        hint = ""
-        parent = p.parent
-        if parent.is_dir():
-            names = [x.name for x in sorted(parent.glob("*.csv"))]
-            if names:
-                hint = "; existing csv: " + ", ".join(names[:12])
-                if len(names) > 12:
-                    hint += ", ..."
-        else:
-            hint = "; directory missing: %s" % parent
-        raise FileNotFoundError(str(p) + hint)
+        raise FileNotFoundError(str(p) + _csv_missing_hint(p))
+    weekly_want = _is_weekly_period(want_period)
     rows = csv.DictReader(_open_csv(p))
     want = str(stock or "").strip().upper()
     bars: list[DailyBar] = []
-    periods: list[str] = []
     inferred = ""
     for row in rows:
         if not row:
             continue
         keys = {str(k).strip().lower(): k for k in row.keys() if k is not None}
+
         def col(*names: str) -> str:
             for name in names:
                 k = keys.get(name.lower())
@@ -203,11 +232,13 @@ def load_daily_csv(path: str | Path, stock: str = "") -> tuple[str, list[DailyBa
                     return str(row.get(k) or "")
             return ""
 
-        period = str(col("period") or "1d").strip().lower() or "1d"
-        if period in ("1w", "week", "weekly", "w"):
-            periods.append("1w")
+        period_raw = str(col("period") or "").strip().lower()
+        if period_raw:
+            is_week = _is_weekly_period(period_raw)
+        else:
+            is_week = weekly_want
+        if weekly_want != is_week:
             continue
-        periods.append(period)
         dt = parse_bar_datetime(col("datetime", "time", "date", "stime"))
         if dt is None:
             continue
@@ -220,7 +251,7 @@ def load_daily_csv(path: str | Path, stock: str = "") -> tuple[str, list[DailyBa
         if not inferred and code:
             inferred = code
         day = dt.strftime("%Y%m%d")
-        dt = dt.replace(hour=15, minute=0, second=0, microsecond=0)
+        dt = dt.replace(hour=0, minute=0, second=0, microsecond=0)
         open_ = _float(col("open"), close)
         high = _float(col("high"), max(open_, close))
         low = _float(col("low"), min(open_, close))
@@ -237,13 +268,11 @@ def load_daily_csv(path: str | Path, stock: str = "") -> tuple[str, list[DailyBa
                 volume=volume,
                 amount=amount,
                 stock=code or want,
-                period="1d",
+                period="1w" if weekly_want else "1d",
             )
         )
     if not bars:
-        raise ValueError("no daily bars in %s" % p)
-    if periods and all(x == "1w" for x in periods):
-        raise ValueError("need daily 1d CSV, got weekly: %s" % p)
+        raise ValueError("no %s bars in %s" % ("weekly" if weekly_want else "daily", p))
     bars.sort(key=lambda b: b.day)
     dedup: dict[str, DailyBar] = {}
     for b in bars:
@@ -253,6 +282,38 @@ def load_daily_csv(path: str | Path, stock: str = "") -> tuple[str, list[DailyBa
     if not out_stock:
         raise ValueError("stock code missing; pass --stock or CSV stock column")
     return out_stock, bars
+
+
+def load_daily_csv(path: str | Path, stock: str = "") -> tuple[str, list[DailyBar]]:
+    """读取 KlineDump 日线 CSV。返回 (stock, bars)。"""
+    return _load_ohlcv_csv(path, stock=stock, want_period="1d")
+
+
+def load_weekly_csv(path: str | Path, stock: str = "") -> tuple[str, list[DailyBar]]:
+    """读取 KlineDump 周线 CSV。返回 (stock, bars)。"""
+    return _load_ohlcv_csv(path, stock=stock, want_period="1w")
+
+
+def find_weekly_csv(daily_path: str | Path, stock: str = "") -> Path | None:
+    """同目录下找 `{code}_1w_*.csv`，与日线文件前缀一致时优先。"""
+    p = Path(daily_path)
+    parent = p.parent
+    if not parent.is_dir():
+        return None
+    prefixes: list[str] = []
+    name = p.name
+    if "_1d_" in name:
+        prefixes.append(name.split("_1d_")[0])
+    tag = str(stock or "").strip().upper().replace(".", "_")
+    if tag and tag not in prefixes:
+        prefixes.append(tag)
+    matches: list[Path] = []
+    for pref in prefixes:
+        matches.extend(sorted(parent.glob("%s_1w_*.csv" % pref)))
+    if not matches:
+        return None
+    uniq = sorted(set(matches), key=lambda x: x.name)
+    return uniq[-1]
 
 
 def walk_days(
@@ -271,8 +332,14 @@ def walk_days(
 
 
 class MarketStore:
-    def __init__(self, bars: Sequence[DailyBar], stock: str):
+    def __init__(
+        self,
+        bars: Sequence[DailyBar],
+        stock: str,
+        weekly: Sequence[DailyBar] | None = None,
+    ):
         self.bars = list(bars)
+        self.weekly = list(weekly) if weekly else []
         self.stock = str(stock).strip().upper()
 
     def frame(
@@ -286,7 +353,11 @@ class MarketStore:
     ) -> BarFrame:
         dailies = slice_bars(self.bars, end_time, count=None, start_day=start_time)
         if _is_weekly_period(period):
-            seq = aggregate_weekly(dailies)
+            if self.weekly:
+                seq = slice_bars(self.weekly, end_time, count=None, start_day=start_time)
+                seq = drop_unclosed_week(seq, end_time)
+            else:
+                seq = aggregate_weekly(dailies, drop_forming=True, end_day=end_time)
             if count is not None and int(count) > 0:
                 seq = seq[-int(count) :]
         else:
