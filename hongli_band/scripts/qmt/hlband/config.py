@@ -10,13 +10,13 @@ ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 # 单只硬顶 MAX_NAME_FRAC * E_s（默认 50%）。E_s = 账户总资产 - 非白名单股票市值（约等于现金+池内市值）。
 # k / book_mv 只统计 BOOK_STOCKS；其它持股不占名额、不进 50% 分母。N = 字典长度。
 # 约束：N * MIN_LOT <= CASH_RATIO * E_s。增减标的改本表后四图 re-deploy。
-# 形态：code → 配置字典。首期字段 ma_type（EMA|SMA）；后续可同级扩展 w_ma_life 等。
+# 形态：code → 配置字典。ma_type（EMA|SMA）；dividend_type 见下方复权注释。
 # 简写兼容：value 写成 "SMA" 视为 {"ma_type": "SMA"}；旧纯字符串 tuple 仍认作白名单。
 BOOK_STOCKS = {
-    "600350.SH": {"ma_type": "EMA"},
-    "601398.SH": {"ma_type": "SMA"},
-    "601939.SH": {"ma_type": "EMA"},
-    "513530.SH": {"ma_type": "SMA"},
+    "600350.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "601398.SH": {"ma_type": "SMA", "dividend_type": "front_ratio"},
+    "601939.SH": {"ma_type": "EMA", "dividend_type": "front"},
+    "513530.SH": {"ma_type": "SMA", "dividend_type": "front_ratio"},
 }
 BOOK_N = 4
 DYNAMIC_BUDGET = True
@@ -139,7 +139,8 @@ SCALE_W_HIST_EXPAND_RATIO = 1.2
 
 # 策略交易面板 bind → 模块常量。编辑器/回测无注入时用上面默认值。
 # 只上屏：开关 / 预算袖子 / 硬风控。买点窗口、时间成本、加仓细节、SCALE_LOTS、
-# BOOK_N、TRAIL_TIERS、均线周期、BOOK_STOCKS 子配置、MA_TYPE、路径、账号仍只在 config（N 以 BOOK_STOCKS 长度为准）。
+# BOOK_N、TRAIL_TIERS、均线周期、BOOK_STOCKS 子配置（ma_type / dividend_type）、
+# MA_TYPE、路径、账号仍只在 config（N 以 BOOK_STOCKS 长度为准）。
 PANEL_BINDS = (
     ("panel_dry_run", "DRY_RUN", "bool"),
     ("panel_budget", "TRADE_BUDGET", "float"),
@@ -186,13 +187,14 @@ SIGNAL_CONFIRM_END = "160000"
 LIVE_HEARTBEAT_SEC = 300
 
 # 行情复权（传给 get_market_data_ex 的 dividend_type）
-#   follow       跟随主图 / 公式「基本信息 → 复权方式」（默认）
+# 优先 BOOK_STOCKS[code].dividend_type；缺键/非法回落本常量。不上屏。
+#   follow       跟随主图 / 公式「基本信息 → 复权方式」
 #   none         不复权
 #   front        前复权（价差）
 #   back         后复权（价差）
-#   front_ratio  等比前复权
+#   front_ratio  等比前复权（池外/未写字段的缺省）
 #   back_ratio   等比后复权
-DIVIDEND_TYPE = "follow"
+DIVIDEND_TYPE = "front_ratio"
 
 # download_history_data 最长回溯（自然日）；回测暖机用
 HIST_MAX_LOOKBACK_DAYS = 800
@@ -213,7 +215,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.49"
+STRATEGY_VER = "v1.50"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）

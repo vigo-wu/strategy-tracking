@@ -60,7 +60,7 @@ def main() -> None:
         stems=[p.stem for p in TARGETS],
     )
     print("OK: 打开国金 QMT -> 模型交易 -> 新建策略交易 -> HlBand / 红利波段")
-    print("主图: 红利标的(如银行/煤炭/电力/红利ETF) | 周期=日线 | 复权跟随主图")
+    print("主图: 红利标的(如银行/煤炭/电力/红利ETF) | 周期=日线 | 复权见 BOOK_STOCKS.dividend_type")
     print("编辑 hlband/*.py 与 panel.xml；策略交易改参，编辑器回测仍用 config.py")
 
 

@@ -1,9 +1,11 @@
+[2026-08-27 15:28:01][HLBAND][SH601939][日线] [trade]start simulation mode
+[2026-08-27 15:28:01][HLBAND][SH601939][日线] HlBand panel CASH_RATIO 0.9 -> 0.95
+HlBand panel applied DRY_RUN,TRADE_BUDGET,CASH_RATIO,MIN_LOT,MAX_NAME_FRAC,W_BIAS_HARD,CHASE_MAX_PCT,STOP_LOSS,SCALE_ENABLE
+HlBand skip download_history (live) 1d +1w
+HlBand state loaded path= D:\tradingStrategy\hlband_601939_SH.json None pending= False
+HlBand v1.49 init 601939.SH 39953913 STOCK PERIOD= 1d DIVIDEND= front_ratio chart_div= front BACKTEST= False DRY_RUN= False budget= 50000.0 dynamic_budget= True BOOK_N= 4 book_stocks= 513530.SH,600350.SH,601398.SH,601939.SH cash_ratio= 0.95 min_lot= 20000.0 max_name_frac= 0.5 equal_split= True book_freeze= 145630/093200 wMA= 5/13/34 dMA= 20/60 ma_type= EMA stop= 0.08 chase< 0.05 scale= True scale_lots= True scale_once= True scale_arm= 0.03 scale_arm_bars= 8 scale_plat= 20/0.10 scale_w_expand= 1.2 time_force_bars= 30 time_force_min_ret= 0.03 close_exec= 145600-145700 open_exec= 093000-094500
 
-[2026-08-26 18:03:56][HLBAND_PROD][SH600350][日线] 0D:\service\GJQMT\python\HLBAND_PROD.py_60035010: 策略停止
-[2026-08-26 18:03:56][HLBAND_PROD][SH600350][日线] [trade]start trading mode
-[2026-08-26 18:03:56][HLBAND_PROD][SH600350][日线] HLBAND_PROD panel applied DRY_RUN,TRADE_BUDGET,CASH_RATIO,MIN_LOT,MAX_NAME_FRAC,W_BIAS_HARD,CHASE_MAX_PCT,STOP_LOSS,SCALE_ENABLE
-HLBAND_PROD skip download_history (live) 1d +1w
-HLBAND_PROD state loaded path= D:\tradingStrategy\hlband_600350_SH.json None pending= False
-HLBAND_PROD v1.47 init 600350.SH 39953913 STOCK PERIOD= 1d BACKTEST= False DRY_RUN= False budget= 50000.0 dynamic_budget= True BOOK_N= 4 book_stocks= 513530.SH,600350.SH,601398.SH,601939.SH cash_ratio= 0.9 min_lot= 20000.0 max_name_frac= 0.5 equal_split= True book_freeze= 145630/093200 wMA= 5/13/34 dMA= 20/60 ma_type= EMA stop= 0.08 chase< 0.05 scale= True scale_lots= True scale_once= True scale_arm= 0.03 scale_arm_bars= 8 scale_plat= 20/0.10 scale_w_expand= 1.2 time_force_bars= 30 time_force_min_ret= 0.03 close_exec= 145600-145700 open_exec= 093000-094500
-
-[2026-08-26 18:03:56][HLBAND_PROD][SH600350][日线] HLBAND_PROD live heartbeat 2026-08-26 18:03:56 PERIOD= 1d stock= 600350.SH E=0 N=4 k=0 k_other=0 reserve=0 lot=0 book_mv=0 other_mv=0 name_mv=0 n_buy=0 why=wait src=- reason=outside_session
+[2026-08-27 15:28:02][HLBAND][SH601939][日线] HlBand live heartbeat 2026-08-27 15:28:02 PERIOD= 1d stock= 601939.SH E=0 N=4 k=0 k_other=0 reserve=0 lot=0 book_mv=0 other_mv=0 name_mv=0 n_buy=0 why=wait src=- reason=confirm
+HlBand diag: d1_ok source= get_market_data_ex period= 1d n= 180 end= 20260827 last= 10.57 div= front_ratio chart= front
+HlBand diag: w1_ok source= get_market_data_ex period= 1w n= 120 end= 20260827 last= 10.53 div= front_ratio chart= front
+HlBand 20260827 1528 n1d=180 n1w=120 close=10.5700 sig_d=20260827 sig_w=20260827 phase=confirm prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.3224 w_ma30=9.6158 w_hist=0.0389 buy=False buyR=- scale=False scaleR=scale_no_pos sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=- avail=-

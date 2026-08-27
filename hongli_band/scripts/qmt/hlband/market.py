@@ -1,10 +1,67 @@
 # === hlband/market.py ===
-def _dividend_type():
-    """QMT 复权参数。follow=跟随主图/公式「复权方式」。"""
-    raw = str(globals().get("DIVIDEND_TYPE") or "follow").strip().lower()
-    if raw in ("", "follow", "chart", "main"):
+_VALID_DIVIDEND = (
+    "follow",
+    "none",
+    "front",
+    "back",
+    "front_ratio",
+    "back_ratio",
+)
+
+
+def _norm_dividend(raw):
+    s = str(raw or "").strip().lower()
+    if s in ("", "follow", "chart", "main"):
         return "follow"
-    return raw
+    return s
+
+
+def _book_dividend_raw():
+    """BOOK_STOCKS[A.stock].dividend_type；无键返回 None。"""
+    stock = str(getattr(A, "stock", "") or "").strip()
+    cfg_fn = globals().get("_book_cfg")
+    if callable(cfg_fn):
+        entry = cfg_fn(stock)
+        if isinstance(entry, dict) and "dividend_type" in entry:
+            return entry.get("dividend_type")
+        return None
+    book = globals().get("BOOK_STOCKS")
+    if not stock or not isinstance(book, dict):
+        return None
+    key = stock.upper()
+    entry = book.get(stock)
+    if entry is None:
+        entry = book.get(key)
+    if entry is None:
+        for k, v in book.items():
+            if str(k or "").strip().upper() == key:
+                entry = v
+                break
+    if isinstance(entry, dict) and "dividend_type" in entry:
+        return entry.get("dividend_type")
+    return None
+
+
+def _dividend_type():
+    """QMT 复权：优先 BOOK_STOCKS[code].dividend_type，否则 DIVIDEND_TYPE。"""
+    glob_raw = globals().get("DIVIDEND_TYPE")
+    book_raw = _book_dividend_raw()
+    picked = book_raw
+    if picked is None or str(picked).strip() == "":
+        picked = glob_raw
+    norm = _norm_dividend(picked)
+    if norm in _VALID_DIVIDEND:
+        return norm
+    if not globals().get("_DIVIDEND_TYPE_BAD"):
+        globals()["_DIVIDEND_TYPE_BAD"] = True
+        print(
+            "%s dividend_type=%s invalid, fallback"
+            % (STRATEGY_NAME, picked)
+        )
+    glob_norm = _norm_dividend(glob_raw)
+    if glob_norm in _VALID_DIVIDEND:
+        return glob_norm
+    return "front_ratio"
 
 
 def _chart_dividend(C):
