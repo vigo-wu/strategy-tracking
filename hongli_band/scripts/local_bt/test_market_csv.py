@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -19,6 +19,7 @@ from market_csv import (
     aggregate_weekly,
     compact_day,
     find_weekly_csv,
+    peek_daily_csv_meta,
     week_monday,
 )
 
@@ -261,6 +262,66 @@ class TradeLedgerTests(unittest.TestCase):
             text = path.read_text(encoding="gbk")
             self.assertTrue(text.startswith(",".join(HEADER)))
             self.assertIn("港股通红利ETF华泰柏瑞", text)
+
+
+class PeekDailyMetaTests(unittest.TestCase):
+    _HEADER = "stock,period,datetime,open,high,low,close,volume,amount"
+
+    def _write_daily(
+        self,
+        path: Path,
+        stock: str,
+        days: list[str],
+        *,
+        encoding: str = "utf-8",
+        bom: bool = False,
+    ) -> None:
+        lines = [self._HEADER]
+        for d in days:
+            lines.append("%s,1d,%s,1,1,1,1,100,100" % (stock, d))
+        text = "\n".join(lines) + "\n"
+        data = text.encode(encoding)
+        if bom:
+            data = b"\xef\xbb\xbf" + data
+        path.write_bytes(data)
+
+    def test_peek_first_last_and_count(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "AAA_SH_1d_20200101_20200103.csv"
+            self._write_daily(path, "600000.SH", ["20200102", "20200103"])
+            meta = peek_daily_csv_meta(path)
+            self.assertEqual(meta["stock"], "600000.SH")
+            self.assertEqual(meta["start"], "20200102")
+            self.assertEqual(meta["end"], "20200103")
+            self.assertEqual(meta["n"], 2)
+            self.assertEqual(Path(meta["path"]), path.resolve())
+
+    def test_peek_utf8_sig(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "600001_SH_1d_20210104_20210105.csv"
+            self._write_daily(path, "600001.SH", ["20210104", "20210105"], bom=True)
+            meta = peek_daily_csv_meta(path)
+            self.assertEqual(meta["stock"], "600001.SH")
+            self.assertEqual(meta["start"], "20210104")
+            self.assertEqual(meta["end"], "20210105")
+            self.assertEqual(meta["n"], 2)
+
+    def test_peek_large_file_uses_tail(self):
+        days: list[str] = []
+        d = datetime.strptime("20180102", "%Y%m%d")
+        while len(days) < 400:
+            if d.weekday() < 5:
+                days.append(d.strftime("%Y%m%d"))
+            d += timedelta(days=1)
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / ("600000_SH_1d_%s_%s.csv" % (days[0], days[-1]))
+            self._write_daily(path, "600000.SH", days)
+            self.assertGreater(path.stat().st_size, 8192)
+            meta = peek_daily_csv_meta(path)
+            self.assertEqual(meta["stock"], "600000.SH")
+            self.assertEqual(meta["start"], days[0])
+            self.assertEqual(meta["end"], days[-1])
+            self.assertEqual(meta["n"], len(days))
 
 
 class DailyByStockTests(unittest.TestCase):

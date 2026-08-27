@@ -340,7 +340,7 @@ def run_batch(
             on_progress(n, n, str(last or ""))
         return rows
 
-    from batch_job import run_one
+    from batch_job import init_worker, run_one
 
     payloads = [
         {
@@ -356,7 +356,12 @@ def run_batch(
     if on_progress:
         on_progress(0, n, paths[0].stem)
     ctx = get_context("spawn")
-    with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx) as pool:
+    with ProcessPoolExecutor(
+        max_workers=n_workers,
+        mp_context=ctx,
+        initializer=init_worker,
+        initargs=(str(HERE),),
+    ) as pool:
         futs = {pool.submit(run_one, payloads[i]): i for i in range(n)}
         done = 0
         for fut in as_completed(futs):

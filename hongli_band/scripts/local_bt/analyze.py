@@ -21,7 +21,7 @@ REPORT_PY = (
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
-from market_csv import compact_day, load_daily_csv  # noqa: E402
+from market_csv import compact_day, load_daily_csv, peek_daily_csv_meta  # noqa: E402
 
 
 def _load_report_mod():
@@ -82,7 +82,7 @@ def daily_csvs_by_stock(data_dir: str | Path | None = None) -> list[dict[str, An
     by_stock: dict[str, dict[str, Any]] = {}
     for path in list_daily_csvs(data_dir):
         try:
-            meta = csv_date_range(path)
+            meta = peek_daily_csv_meta(path)
         except Exception:
             continue
         stock = str(meta.get("stock") or "").strip().upper()

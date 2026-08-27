@@ -39,7 +39,7 @@ HIST_MAX_LOOKBACK_DAYS = 0
 #   back         后复权（价差）
 #   front_ratio  等比前复权（默认；最新价贴近市价，与红利波段取数一致）
 #   back_ratio   等比后复权
-DIVIDEND_TYPE = "front"
+DIVIDEND_TYPE = "follow"
 DOWNLOAD_HIST = True
 
 # 额外周期。本地回测优先读同目录 {code}_1w_*.csv，对齐 QMT 原生周线

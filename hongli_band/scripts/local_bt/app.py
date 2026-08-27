@@ -54,6 +54,27 @@ st.set_page_config(page_title="HlBand 本地回测", layout="wide")
 st.title("HlBand 本地回测可视化")
 
 
+def _daily_dir_fingerprint(csv_dir: str) -> tuple:
+    root = Path(csv_dir)
+    if not root.is_dir():
+        return ()
+    out = []
+    for p in sorted(root.glob("*_1d_*.csv")):
+        try:
+            st_ = p.stat()
+        except OSError:
+            continue
+        out.append((p.name, int(st_.st_mtime_ns), int(st_.st_size)))
+    return tuple(out)
+
+
+@st.cache_data(show_spinner="扫描行情目录…")
+def _cached_daily_metas(csv_dir: str, fingerprint: tuple) -> list[dict]:
+    # fingerprint 仅作缓存键：目录内文件名/mtime/size 变化即失效
+    _ = fingerprint
+    return daily_csvs_by_stock(csv_dir)
+
+
 def _fmt_ymd(d: date) -> str:
     return d.strftime("%Y%m%d")
 
@@ -404,21 +425,35 @@ def _render_analysis(
 
 
 def _render_batch_run(csv_dir: str, *, workers: int = 0, quiet: bool = True) -> None:
-    metas = daily_csvs_by_stock(csv_dir)
+    metas = _cached_daily_metas(csv_dir, _daily_dir_fingerprint(csv_dir))
     if not metas:
         st.warning("目录无可用 `*_1d_*.csv`：%s" % csv_dir)
         return
     by_stock = {m["stock"]: m for m in metas}
     stocks = [m["stock"] for m in metas]
-    selected = st.multiselect(
-        "标的",
-        options=stocks,
-        default=stocks,
-        format_func=lambda s: "%s  ·  %s–%s  (%s根)"
-        % (s, by_stock[s]["start"], by_stock[s]["end"], by_stock[s]["n"]),
-        key="batch_stocks",
+    pick_mode = st.radio(
+        "标的范围",
+        ["全部标的", "筛选标的"],
+        horizontal=True,
+        key="batch_pick_mode",
     )
-    picked = [by_stock[s] for s in selected if s in by_stock]
+    if pick_mode == "全部标的":
+        picked = list(metas)
+        st.caption("已选 **%s** 只（目录去重后）" % len(picked))
+    else:
+        q = str(st.text_input("代码过滤", value="", key="batch_stock_filter") or "").strip().upper()
+        options = [s for s in stocks if (not q or q in s.upper())]
+        selected = st.multiselect(
+            "标的",
+            options=options,
+            default=[],
+            format_func=lambda s: "%s  ·  %s–%s  (%s根)"
+            % (s, by_stock[s]["start"], by_stock[s]["end"], by_stock[s]["n"]),
+            key="batch_stocks",
+        )
+        picked = [by_stock[s] for s in selected if s in by_stock]
+        if options and not picked:
+            st.caption("过滤后 %s 只，尚未勾选" % len(options))
     start_d = end_d = None
     run_btn = False
     if not picked:

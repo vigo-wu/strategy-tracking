@@ -7,7 +7,7 @@ import csv
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Any, Iterable, Sequence
 
 import numpy as np
 
@@ -289,6 +289,134 @@ def _csv_missing_hint(p: Path) -> str:
             return hint
         return ""
     return "; directory missing: %s" % parent
+
+
+_PEEK_HEAD = 8192
+_PEEK_TAIL = 2048
+_PEEK_CHUNK = 1 << 20
+
+
+def _try_decode_bytes(data: bytes, encodings: tuple[str, ...], trim: str) -> str:
+    """trim=end 丢掉尾部残缺字节；trim=start 丢掉头部残缺字节。"""
+    last_err: UnicodeDecodeError | None = None
+    for enc in encodings:
+        for i in range(0, 4):
+            if trim == "end":
+                piece = data if i == 0 else data[:-i]
+            else:
+                piece = data if i == 0 else data[i:]
+            if not piece:
+                continue
+            try:
+                return piece.decode(enc)
+            except UnicodeDecodeError as e:
+                last_err = e
+                continue
+    raise ValueError("cannot decode csv bytes") from last_err
+
+
+def _csv_header_index(header_line: str) -> dict[str, int]:
+    row = next(csv.reader([header_line]))
+    return {str(c).strip().lower(): i for i, c in enumerate(row) if c is not None}
+
+
+def _csv_cell(row: list[str], keys: dict[str, int], *names: str) -> str:
+    for name in names:
+        i = keys.get(name.lower())
+        if i is not None and 0 <= i < len(row):
+            return str(row[i] or "")
+    return ""
+
+
+def _peek_daily_row(line: str, keys: dict[str, int]) -> tuple[str, str] | None:
+    """有效日线行 → (stock, yyyymmdd)；周线 / 空行 / 无日期则跳过。"""
+    raw = str(line or "").strip()
+    if not raw:
+        return None
+    row = next(csv.reader([raw]))
+    if not row or all(not str(c).strip() for c in row):
+        return None
+    period_raw = str(_csv_cell(row, keys, "period") or "").strip().lower()
+    if period_raw and _is_weekly_period(period_raw):
+        return None
+    dt = parse_bar_datetime(_csv_cell(row, keys, "datetime", "time", "date", "stime"))
+    if dt is None:
+        return None
+    close = _float(_csv_cell(row, keys, "close"))
+    if close <= 0:
+        return None
+    code = str(_csv_cell(row, keys, "stock", "code") or "").strip().upper()
+    return code, dt.strftime("%Y%m%d")
+
+
+def peek_daily_csv_meta(path: str | Path) -> dict[str, Any]:
+    """只读头尾 + 换行计数，得到 stock / start / end / n。不物化 OHLCV。"""
+    p = Path(path)
+    if not p.is_file():
+        raise FileNotFoundError(str(p) + _csv_missing_hint(p))
+    head = b""
+    tail = b""
+    n_nl = 0
+    last_byte = b""
+    with p.open("rb") as f:
+        while True:
+            chunk = f.read(_PEEK_CHUNK)
+            if not chunk:
+                break
+            if len(head) < _PEEK_HEAD:
+                need = _PEEK_HEAD - len(head)
+                head += chunk[:need]
+            n_nl += chunk.count(b"\n")
+            last_byte = chunk[-1:]
+            tail = (tail + chunk)[-_PEEK_TAIL:]
+    if not head:
+        raise ValueError("empty csv: %s" % p)
+    if last_byte and last_byte not in (b"\n", b"\r"):
+        n_nl += 1
+    n = max(0, n_nl - 1)
+
+    head_text = _try_decode_bytes(head, ("utf-8-sig", "utf-8", "gbk"), trim="end")
+    head_lines = head_text.splitlines()
+    # 大文件时 head 末行可能被截断
+    if len(head) >= _PEEK_HEAD and head_lines and not (
+        head_text.endswith("\n") or head_text.endswith("\r")
+    ):
+        head_lines = head_lines[:-1]
+    if not head_lines:
+        raise ValueError("no header in %s" % p)
+    keys = _csv_header_index(head_lines[0])
+    first: tuple[str, str] | None = None
+    for line in head_lines[1:]:
+        parsed = _peek_daily_row(line, keys)
+        if parsed is not None:
+            first = parsed
+            break
+    last: tuple[str, str] | None = None
+    if len(head) < _PEEK_HEAD:
+        body = head_lines[1:]
+    else:
+        # 滑动尾窗不一定落在行首，丢掉首段残缺行；只要最后一行完整即可
+        tail_text = _try_decode_bytes(tail, ("utf-8", "gbk"), trim="start")
+        body = tail_text.splitlines()
+        if body:
+            body = body[1:]
+    for line in reversed(body):
+        parsed = _peek_daily_row(line, keys)
+        if parsed is not None:
+            last = parsed
+            break
+    if first is None or last is None or n <= 0:
+        raise ValueError("no daily bars in %s" % p)
+    code = first[0] or last[0]
+    if not code:
+        raise ValueError("stock code missing in %s" % p)
+    return {
+        "stock": code,
+        "start": first[1],
+        "end": last[1],
+        "n": int(n),
+        "path": str(p.resolve()),
+    }
 
 
 def _load_ohlcv_csv(
