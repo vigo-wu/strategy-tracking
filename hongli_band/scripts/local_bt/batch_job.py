@@ -32,4 +32,6 @@ def run_one(payload: dict[str, Any]) -> dict[str, Any]:
         end=str(payload.get("end") or ""),
         out_dir=payload.get("out_dir"),
         quiet=bool(payload.get("quiet", True)),
+        log_name=str(payload.get("log_name") or ""),
+        year=str(payload.get("year") or ""),
     )

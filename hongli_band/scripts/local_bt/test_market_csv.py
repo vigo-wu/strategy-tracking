@@ -389,5 +389,99 @@ class BatchRunTests(unittest.TestCase):
             self.assertEqual(rows[0]["stock"], "600000.SH")
 
 
+class YearSplitTests(unittest.TestCase):
+    def test_iter_year_windows_span_and_clip(self):
+        from analyze import iter_year_windows
+
+        self.assertEqual(
+            iter_year_windows("20180301", "20200630"),
+            [
+                ("2018", "20180301", "20181231"),
+                ("2019", "20190101", "20191231"),
+                ("2020", "20200101", "20200630"),
+            ],
+        )
+        self.assertEqual(
+            iter_year_windows("20200301", "20200630"),
+            [("2020", "20200301", "20200630")],
+        )
+
+    def test_build_year_jobs_skips_no_overlap(self):
+        from analyze import build_year_jobs
+
+        metas = [
+            {
+                "stock": "600000.SH",
+                "path": "/tmp/a.csv",
+                "start": "20200102",
+                "end": "20200103",
+            }
+        ]
+        jobs = build_year_jobs(metas, "20180101", "20201231")
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0]["year"], "2020")
+        self.assertEqual(jobs[0]["start"], "20200102")
+        self.assertEqual(jobs[0]["end"], "20200103")
+
+    def test_year_weighted_win_rate(self):
+        from analyze import summarize_batch_by_year
+
+        rows = [
+            {
+                "year": "2020",
+                "ok": True,
+                "n_buy": 1,
+                "win_rate": 100.0,
+                "avg_ret": 10.0,
+                "sum_pnl": 1.0,
+                "max_win": 10.0,
+                "max_loss": 0.0,
+            },
+            {
+                "year": "2020",
+                "ok": True,
+                "n_buy": 3,
+                "win_rate": 0.0,
+                "avg_ret": -2.0,
+                "sum_pnl": -1.0,
+                "max_win": 0.0,
+                "max_loss": -5.0,
+            },
+        ]
+        agg = summarize_batch_by_year(rows)
+        self.assertEqual(len(agg), 1)
+        self.assertEqual(agg[0]["n_buy"], 4)
+        self.assertAlmostEqual(agg[0]["win_rate"], 25.0)
+        self.assertAlmostEqual(agg[0]["avg_ret"], 1.0)
+        self.assertAlmostEqual(agg[0]["sum_pnl"], 0.0)
+        self.assertAlmostEqual(agg[0]["max_win"], 10.0)
+        self.assertAlmostEqual(agg[0]["max_loss"], -5.0)
+
+    def test_backtest_one_result_year_in_log_name(self):
+        from run import backtest_one_result
+
+        header = "stock,period,datetime,open,high,low,close,volume,amount"
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "600000_SH_1d_20200102_20200103.csv"
+            path.write_text(
+                header
+                + "\n600000.SH,1d,20200102,1,1,1,1,100,100\n"
+                + "600000.SH,1d,20200103,1,1,1,1,100,100\n",
+                encoding="utf-8",
+            )
+            out = Path(td) / "out"
+            row = backtest_one_result(
+                path,
+                start="20200102",
+                end="20200103",
+                out_dir=out,
+                year="2020",
+            )
+            self.assertTrue(row.get("ok"), row.get("error"))
+            self.assertEqual(row.get("year"), "2020")
+            self.assertIn("2020", Path(row["log"]).name)
+            self.assertTrue(Path(row["log"]).is_file())
+
+
 if __name__ == "__main__":
     unittest.main()

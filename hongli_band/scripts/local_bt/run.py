@@ -144,9 +144,10 @@ def _patch_quiet_status(ns: dict) -> None:
     ns["_should_emit_bar_status"] = _should_emit_bar_status
 
 
-def _empty_row(csv_path: Path, stock: str) -> dict[str, Any]:
+def _empty_row(csv_path: Path, stock: str, year: str = "") -> dict[str, Any]:
     return {
         "stock": stock,
+        "year": str(year or ""),
         "csv": str(csv_path),
         "log": "",
         "detail": "",
@@ -256,6 +257,8 @@ def backtest_one_result(
     end: str = "",
     out_dir: str | Path | None = None,
     quiet: bool = True,
+    log_name: str = "",
+    year: str = "",
 ) -> dict[str, Any]:
     """单只回测 → 批量行（失败不抛给调用方）。"""
     from analyze import parse_budget_from_log  # noqa: WPS433
@@ -264,7 +267,8 @@ def backtest_one_result(
     dest = Path(out_dir) if out_dir else THEME / "report"
     dest.mkdir(parents=True, exist_ok=True)
     stock = path.stem
-    row = _empty_row(path, stock)
+    year_s = str(year or "").strip()
+    row = _empty_row(path, stock, year=year_s)
     try:
         code, bars = load_daily_csv(path)
         stock = code
@@ -276,12 +280,16 @@ def backtest_one_result(
         row["walk_start"] = walk[0].day
         row["walk_end"] = walk[-1].day
         row["n_bars"] = len(walk)
+        fname = str(log_name or "").strip()
+        if not fname and year_s:
+            fname = "local_bt_%s_%s.txt" % (_stock_tag(code), year_s)
         log_path = run_backtest(
             path,
             start=start,
             end=end,
             stock=code,
             out_dir=dest,
+            log_name=fname,
             quiet=quiet,
         )
         detail = trades_csv_path(log_path)
@@ -309,52 +317,62 @@ def resolve_workers(requested: int, n_tasks: int) -> int:
     return max(1, min(int(requested), n_tasks))
 
 
-def run_batch(
-    csv_paths: Sequence[str | Path],
-    start: str = "",
-    end: str = "",
-    out_dir: str | Path | None = None,
-    on_progress: Callable[[int, int, str], None] | None = None,
-    workers: int = 0,
-    quiet: bool = True,
+def _job_label(payload: dict[str, Any], row: dict[str, Any] | None = None) -> str:
+    stock = ""
+    if row:
+        stock = str(row.get("stock") or "")
+    if not stock:
+        stock = str(payload.get("stock") or "") or Path(str(payload.get("csv") or "")).stem
+    year = str((row or {}).get("year") or payload.get("year") or "").strip()
+    if year:
+        return "%s %s" % (stock, year)
+    return str(stock)
+
+
+def _run_payloads(
+    payloads: list[dict[str, Any]],
+    dest: Path,
+    on_progress: Callable[[int, int, str], None] | None,
+    workers: int,
 ) -> list[dict[str, Any]]:
-    """独立回测多标的；单只失败不中断。workers<=0 为自动。"""
-    dest = Path(out_dir) if out_dir else THEME / "report"
-    dest.mkdir(parents=True, exist_ok=True)
-    paths = [Path(p) for p in csv_paths]
-    n = len(paths)
+    n = len(payloads)
     if n == 0:
         return []
     n_workers = resolve_workers(workers, n)
 
     if n_workers <= 1:
         rows: list[dict[str, Any]] = []
-        for i, csv_path in enumerate(paths):
+        for i, payload in enumerate(payloads):
             if on_progress:
-                on_progress(i, n, csv_path.stem)
+                on_progress(i, n, _job_label(payload))
             rows.append(
-                backtest_one_result(csv_path, start=start, end=end, out_dir=dest, quiet=quiet)
+                backtest_one_result(
+                    payload["csv"],
+                    start=str(payload.get("start") or ""),
+                    end=str(payload.get("end") or ""),
+                    out_dir=dest,
+                    quiet=bool(payload.get("quiet", True)),
+                    log_name=str(payload.get("log_name") or ""),
+                    year=str(payload.get("year") or ""),
+                )
             )
         if on_progress:
-            last = rows[-1].get("stock") if rows else ""
-            on_progress(n, n, str(last or ""))
+            last = rows[-1] if rows else {}
+            on_progress(n, n, _job_label(payloads[-1], last) if payloads else "")
         return rows
 
     from batch_job import init_worker, run_one
 
-    payloads = [
-        {
-            "csv": str(p),
-            "start": start,
-            "end": end,
-            "out_dir": str(dest),
-            "quiet": bool(quiet),
-        }
-        for p in paths
+    rows = [
+        _empty_row(
+            Path(str(p.get("csv") or "")),
+            str(p.get("stock") or Path(str(p.get("csv") or "")).stem),
+            year=str(p.get("year") or ""),
+        )
+        for p in payloads
     ]
-    rows = [_empty_row(p, p.stem) for p in paths]
     if on_progress:
-        on_progress(0, n, paths[0].stem)
+        on_progress(0, n, _job_label(payloads[0]))
     ctx = get_context("spawn")
     with ProcessPoolExecutor(
         max_workers=n_workers,
@@ -369,12 +387,91 @@ def run_batch(
             try:
                 rows[i] = fut.result()
             except Exception as e:
-                rows[i] = _empty_row(paths[i], paths[i].stem)
+                rows[i] = _empty_row(
+                    Path(str(payloads[i].get("csv") or "")),
+                    str(payloads[i].get("stock") or Path(str(payloads[i].get("csv") or "")).stem),
+                    year=str(payloads[i].get("year") or ""),
+                )
                 rows[i]["error"] = "%s: %s" % (type(e).__name__, e)
             done += 1
             if on_progress:
-                on_progress(done, n, str(rows[i].get("stock") or paths[i].stem))
+                on_progress(done, n, _job_label(payloads[i], rows[i]))
     return rows
+
+
+def run_batch(
+    csv_paths: Sequence[str | Path],
+    start: str = "",
+    end: str = "",
+    out_dir: str | Path | None = None,
+    on_progress: Callable[[int, int, str], None] | None = None,
+    workers: int = 0,
+    quiet: bool = True,
+    split: str = "range",
+    metas: Sequence[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """独立回测多标的；单只失败不中断。workers<=0 为自动。split=year 时按自然年分段。"""
+    dest = Path(out_dir) if out_dir else THEME / "report"
+    dest.mkdir(parents=True, exist_ok=True)
+    paths = [Path(p) for p in csv_paths]
+    mode = str(split or "range").strip().lower()
+    if mode not in ("range", "year"):
+        mode = "range"
+
+    if mode == "year":
+        from analyze import (  # noqa: WPS433
+            build_year_jobs,
+            compact_day,
+            peek_daily_csv_meta,
+            union_date_range,
+        )
+
+        meta_list: list[dict[str, Any]]
+        if metas:
+            meta_list = [dict(m) for m in metas]
+        else:
+            meta_list = []
+            for p in paths:
+                try:
+                    meta_list.append(peek_daily_csv_meta(p))
+                except Exception:
+                    continue
+        if not meta_list:
+            return []
+        start_s = compact_day(start)
+        end_s = compact_day(end)
+        if len(start_s) != 8 or len(end_s) != 8:
+            start_s, end_s = union_date_range(meta_list)
+        jobs = build_year_jobs(meta_list, start_s, end_s)
+        payloads = [
+            {
+                "csv": j["csv"],
+                "stock": j.get("stock") or "",
+                "start": j["start"],
+                "end": j["end"],
+                "year": j["year"],
+                "out_dir": str(dest),
+                "quiet": bool(quiet),
+                "log_name": "",
+            }
+            for j in jobs
+        ]
+        return _run_payloads(payloads, dest, on_progress, workers)
+
+    payloads = [
+        {
+            "csv": str(p),
+            "stock": p.stem,
+            "start": start,
+            "end": end,
+            "year": "",
+            "out_dir": str(dest),
+            "quiet": bool(quiet),
+            "log_name": "",
+        }
+        for p in paths
+    ]
+    return _run_payloads(payloads, dest, on_progress, workers)
 
 
 def _run_report(log_path: Path, out_dir: Path) -> None:
@@ -427,7 +524,13 @@ def main(argv: list[str] | None = None) -> None:
         "--workers",
         type=int,
         default=0,
-        help="批量进程数；0=min(标的数, CPU, 8)；1=串行",
+        help="批量进程数；0=min(任务数, CPU, 8)；1=串行",
+    )
+    ap.add_argument(
+        "--split",
+        choices=("range", "year"),
+        default="range",
+        help="批量切分：range=整段区间；year=按自然年分段独立回测",
     )
     args = ap.parse_args(argv)
     quiet = not bool(args.verbose)
@@ -437,6 +540,7 @@ def main(argv: list[str] | None = None) -> None:
             daily_csvs_by_stock,
             summarize_batch_row,
             write_batch_summary_csv,
+            write_batch_year_summary_csv,
         )
 
         metas = daily_csvs_by_stock(args.csv_dir)
@@ -455,13 +559,21 @@ def main(argv: list[str] | None = None) -> None:
             on_progress=_prog,
             workers=args.workers,
             quiet=quiet,
+            split=args.split,
+            metas=metas,
         )
         rows = [summarize_batch_row(r) for r in raw]
         summary = write_batch_summary_csv(rows, Path(args.out) / "local_bt_batch_summary.csv")
         print("wrote batch summary", summary)
+        if args.split == "year":
+            year_summary = write_batch_year_summary_csv(
+                rows, Path(args.out) / "local_bt_batch_year_summary.csv"
+            )
+            print("wrote year summary", year_summary)
         for r in rows:
             print(
                 r.get("stock"),
+                r.get("year") or "",
                 r.get("status"),
                 "pnl=",
                 r.get("sum_pnl"),

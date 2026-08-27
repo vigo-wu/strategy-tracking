@@ -29,6 +29,7 @@ if str(REPO / "scripts") not in sys.path:
 from analyze import (  # noqa: E402
     analyze_detail,
     batch_summary_dataframe,
+    batch_year_summary_dataframe,
     csv_date_range,
     daily_csvs_by_stock,
     date_to_ymd,
@@ -42,6 +43,7 @@ from analyze import (  # noqa: E402
     trades_to_dataframe,
     union_date_range,
     write_batch_summary_csv,
+    write_batch_year_summary_csv,
     ymd_to_date,
 )
 from run import run_backtest, run_batch  # noqa: E402
@@ -456,6 +458,7 @@ def _render_batch_run(csv_dir: str, *, workers: int = 0, quiet: bool = True) -> 
             st.caption("过滤后 %s 只，尚未勾选" % len(options))
     start_d = end_d = None
     run_btn = False
+    split_label = "整段区间"
     if not picked:
         st.info("请至少选择一只标的")
     else:
@@ -468,7 +471,17 @@ def _render_batch_run(csv_dir: str, *, workers: int = 0, quiet: bool = True) -> 
             end_d = st.date_input("结束时间", value=d1, min_value=d0, max_value=d1, key="bt_batch_end")
         if start_d > end_d:
             st.error("开始时间不能晚于结束时间")
+        split_label = st.radio(
+            "跑批类型",
+            ["整段区间", "按自然年分段"],
+            horizontal=True,
+            key="batch_split",
+        )
+        if split_label == "按自然年分段":
+            st.caption("每年独立账户、年初空仓；暖机仍用 walk 之前的历史 K 线。")
         run_btn = st.button("开始批量回测", type="primary", disabled=start_d > end_d)
+
+    split_mode = "year" if split_label == "按自然年分段" else "range"
 
     if run_btn and picked and start_d and end_d and start_d <= end_d:
         start_s = _fmt_ymd(start_d)
@@ -481,10 +494,11 @@ def _render_batch_run(csv_dir: str, *, workers: int = 0, quiet: bool = True) -> 
             bar.progress(0.0 if n <= 0 else min(1.0, float(i) / float(n)))
             if n <= 0:
                 return
+            unit = "个任务" if split_mode == "year" else "只"
             if i < n:
                 status.info("正在回测 **%s**（%s/%s）…" % (stock, i + 1, n))
             else:
-                status.success("批量完成 %s 只" % n)
+                status.success("批量完成 %s %s" % (n, unit))
 
         try:
             raw = run_batch(
@@ -495,19 +509,30 @@ def _render_batch_run(csv_dir: str, *, workers: int = 0, quiet: bool = True) -> 
                 on_progress=on_progress,
                 workers=int(workers),
                 quiet=bool(quiet),
+                split=split_mode,
+                metas=picked,
             )
-            rows = [summarize_batch_row(r) for r in raw]
-            write_batch_summary_csv(rows, out_dir / "local_bt_batch_summary.csv")
-            st.session_state["batch_result"] = {
-                "start": start_s,
-                "end": end_s,
-                "rows": rows,
-            }
-            n_ok = sum(1 for r in rows if r.get("ok"))
-            st.success(
-                "完成 · 成功 %s · 失败 %s · 汇总 `local_bt_batch_summary.csv`"
-                % (n_ok, len(rows) - n_ok)
-            )
+            if not raw:
+                st.warning("所选区间与行情无交集，未生成任务。")
+            else:
+                rows = [summarize_batch_row(r) for r in raw]
+                write_batch_summary_csv(rows, out_dir / "local_bt_batch_summary.csv")
+                if split_mode == "year":
+                    write_batch_year_summary_csv(rows, out_dir / "local_bt_batch_year_summary.csv")
+                st.session_state["batch_result"] = {
+                    "start": start_s,
+                    "end": end_s,
+                    "rows": rows,
+                    "split": split_mode,
+                }
+                n_ok = sum(1 for r in rows if r.get("ok"))
+                extra = ""
+                if split_mode == "year":
+                    extra = " · 年汇总 `local_bt_batch_year_summary.csv`"
+                st.success(
+                    "完成 · 成功 %s · 失败 %s · 汇总 `local_bt_batch_summary.csv`%s"
+                    % (n_ok, len(rows) - n_ok, extra)
+                )
         except Exception:
             st.error("批量回测失败")
             st.code(traceback.format_exc())
@@ -515,7 +540,16 @@ def _render_batch_run(csv_dir: str, *, workers: int = 0, quiet: bool = True) -> 
     batch = st.session_state.get("batch_result")
     if not batch:
         return
+    split_saved = str(batch.get("split") or "range")
     st.divider()
+    if split_saved == "year":
+        st.subheader("按年汇总")
+        st.caption("每年独立账户；胜率 / 平均收益% 按轮次加权。合计盈亏不是组合净值。")
+        st.dataframe(
+            batch_year_summary_dataframe(batch["rows"]),
+            use_container_width=True,
+            hide_index=True,
+        )
     st.subheader("按标的汇总")
     st.caption("各标的独立账户、独立预算；合计盈亏不是组合净值。")
     st.dataframe(batch_summary_dataframe(batch["rows"]), use_container_width=True, hide_index=True)
@@ -524,9 +558,16 @@ def _render_batch_run(csv_dir: str, *, workers: int = 0, quiet: bool = True) -> 
     if not ok_rows:
         st.warning("没有成功的标的，无法查看明细。")
         return
-    labels = [str(r["stock"]) for r in ok_rows]
+
+    def _detail_label(r: dict) -> str:
+        year = str(r.get("year") or "").strip()
+        if split_saved == "year" and year:
+            return "%s · %s" % (r.get("stock") or "", year)
+        return str(r.get("stock") or "")
+
+    labels = [_detail_label(r) for r in ok_rows]
     pick = st.selectbox("查看标的明细", labels, key="batch_detail_stock")
-    row = next(r for r in ok_rows if str(r["stock"]) == pick)
+    row = next(r for r in ok_rows if _detail_label(r) == pick)
     st.divider()
     st.subheader("明细 · %s" % pick)
     ohlc = Path(row["csv"]) if row.get("csv") else None
