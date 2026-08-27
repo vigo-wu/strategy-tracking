@@ -483,5 +483,21 @@ class YearSplitTests(unittest.TestCase):
             self.assertTrue(Path(row["log"]).is_file())
 
 
+class TestScoreYears(unittest.TestCase):
+    def test_infer_score_years_keeps_incomplete_max_year(self):
+        from stock_select import infer_score_years
+
+        stocks = {
+            "600000.SH": {"years": {"2024": {}, "2025": {}, "2026": {}}},
+            "000001.SZ": {"years": {"2025": {}, "2026": {}}},
+        }
+        self.assertEqual(infer_score_years(stocks), ("2024", "2025", "2026"))
+
+    def test_infer_score_years_empty(self):
+        from stock_select import infer_score_years
+
+        self.assertEqual(infer_score_years({}), ())
+
+
 if __name__ == "__main__":
     unittest.main()

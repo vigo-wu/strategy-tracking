@@ -656,7 +656,7 @@ def _plot_year_heatmap(heat: pd.DataFrame, score_years: tuple[str, ...] | None =
         )
     )
     fig.update_layout(
-        title="年度盈亏（过线标的；近期不进主分）",
+        title="年度盈亏（过线标的；含未走完年；无年份整段不进主分）",
         xaxis_title="区间",
         yaxis_title="标的",
         height=max(280, 22 * len(zdf) + 80),

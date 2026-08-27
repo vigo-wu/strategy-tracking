@@ -49,8 +49,8 @@ SKIP_CODES = (
     "chase_skip",
     "weekly_bear",
 )
-# 默认回落；实际打分年由扫描结果推断（去掉尚未走完的最大年）
-SCORE_YEARS = ("2021", "2022", "2023", "2024", "2025")
+# 默认回落；实际打分年由扫描结果推断（含尚未走完的最大年）
+SCORE_YEARS = ("2021", "2022", "2023", "2024", "2025", "2026")
 RECENT_KEY = "recent"
 
 DEFAULT_FILTERS: dict[str, Any] = {
@@ -393,16 +393,13 @@ def scan_reports(
 
 
 def infer_score_years(stocks: dict[str, Any]) -> tuple[str, ...]:
-    """打分用自然年：去掉最大年（视为尚未走完，留给近期确认）。"""
+    """打分用自然年：扫描到的分年文件全部纳入（含尚未走完的最大年）。"""
     found: set[str] = set()
     for rec in stocks.values():
         for y in rec.get("years") or {}:
             if str(y).isdigit():
                 found.add(str(y))
-    years = tuple(sorted(found))
-    if len(years) <= 1:
-        return years
-    return years[:-1]
+    return tuple(sorted(found))
 
 
 def _year_kpis(rec: dict[str, Any], score_years: tuple[str, ...]) -> list[dict[str, Any]]:
@@ -742,7 +739,10 @@ def coverage_notes(coverage: dict[str, Any], scanned: dict[str, Any] | None = No
     if ycounts:
         notes.append("分年覆盖：%s；无年份（近期）%s 只。" % (" / ".join(ycounts), int(coverage.get(RECENT_KEY) or 0)))
     score_years = coverage.get("score_years") or ((scanned or {}).get("score_years") or SCORE_YEARS)
-    notes.append("主排序使用完整自然年 **%s**；最大年与无年份文件只作近期确认。" % "、".join(str(y) for y in score_years))
+    notes.append(
+        "主排序使用分年回测 **%s**（含尚未走完的最大年，年等权盈亏把该年当作一整年）；无年份整段文件只作近期确认。"
+        % "、".join(str(y) for y in score_years)
+    )
     if years and len(years) >= 2:
         last, prev = years[-1], years[-2]
         if int(coverage.get(prev) or 0) and int(coverage.get(last) or 0) < int(0.9 * int(coverage.get(prev) or 0)):
