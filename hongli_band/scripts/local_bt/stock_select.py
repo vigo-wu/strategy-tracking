@@ -1,0 +1,881 @@
+# coding: utf-8
+"""HlBand 批量回测 → 选股打分。只读 report 明细/日志 + 日线 CSV，不改策略、不重跑。
+
+CLI（模块名避开标准库 select）::
+
+  python hongli_band/scripts/local_bt/stock_select.py
+"""
+from __future__ import annotations
+
+import argparse
+import importlib.util
+import re
+import sys
+from collections import Counter
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import pandas as pd
+
+HERE = Path(__file__).resolve().parent
+REPO = HERE.parents[2]
+THEME = REPO / "hongli_band"
+DEFAULT_REPORT = THEME / "report"
+DEFAULT_CSV_DIR = REPO / "tools" / "csv"
+CONFIG_PY = THEME / "scripts" / "qmt" / "hlband" / "config.py"
+
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+
+from analyze import (  # noqa: E402
+    analyze_detail,
+    daily_csvs_by_stock,
+    parse_budget_from_log,
+)
+from market_csv import load_daily_csv  # noqa: E402
+
+DETAIL_RE = re.compile(
+    r"^local_bt_(\d{6})_(SZ|SH)(?:_(\d{4}))?_操作明细\.csv$",
+    re.IGNORECASE,
+)
+RE_SELL_SIG = re.compile(r"SELL by signal=(\w+)")
+RE_BUY_SIG = re.compile(r"BUY(?: add)? by signal=(\w+)")
+RE_BANNER_N = re.compile(r"\bn=\s*(\d+)")
+SKIP_CODES = (
+    "w_bias_skip",
+    "w_slope_skip",
+    "vol_dry_skip",
+    "chase_skip",
+    "weekly_bear",
+)
+# 默认回落；实际打分年由扫描结果推断（去掉尚未走完的最大年）
+SCORE_YEARS = ("2021", "2022", "2023", "2024", "2025")
+RECENT_KEY = "recent"
+
+DEFAULT_FILTERS: dict[str, Any] = {
+    "min_n_buy": 6,
+    "min_years_traded": 2,
+    "min_pos_years": 2,
+    "min_pos_ratio": 0.50,
+    "max_win_pnl_share": 0.70,
+    "vol_drop_top": 0.10,
+    "top_n": 6,
+}
+
+WEIGHTS = {
+    "pnl": 0.30,
+    "win_rate": 0.20,
+    "stability": 0.20,
+    "profit_factor": 0.15,
+    "quality": 0.15,
+}
+PF_CAP = 10.0
+VOL_MIN_BARS = 40
+TOUCH_TOL = 0.025
+
+
+def report_fingerprint(report_dir: str | Path) -> tuple[int, int, int]:
+    """报告目录指纹：明细文件数 / 最新 mtime / 体积和。"""
+    root = Path(report_dir)
+    n = 0
+    mx = 0
+    sz = 0
+    if not root.is_dir():
+        return (0, 0, 0)
+    for p in root.glob("local_bt_*操作明细.csv"):
+        n += 1
+        try:
+            st = p.stat()
+        except OSError:
+            continue
+        mx = max(mx, int(st.st_mtime_ns))
+        sz += int(st.st_size)
+    return (n, mx, sz)
+
+
+def csv_dir_fingerprint(csv_dir: str | Path) -> tuple[int, int, int]:
+    root = Path(csv_dir)
+    n = 0
+    mx = 0
+    sz = 0
+    if not root.is_dir():
+        return (0, 0, 0)
+    for p in root.glob("*_1d_*.csv"):
+        n += 1
+        try:
+            st = p.stat()
+        except OSError:
+            continue
+        mx = max(mx, int(st.st_mtime_ns))
+        sz += int(st.st_size)
+    return (n, mx, sz)
+
+
+def load_book_stocks(config_path: str | Path | None = None) -> dict[str, str]:
+    """config.BOOK_STOCKS → {code: ma_type}。读失败则空字典。"""
+    path = Path(config_path) if config_path else CONFIG_PY
+    if not path.is_file():
+        return {}
+    spec = importlib.util.spec_from_file_location("hlband_config_select", path)
+    if spec is None or spec.loader is None:
+        return {}
+    mod = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(mod)
+    except Exception:
+        return {}
+    raw = getattr(mod, "BOOK_STOCKS", None)
+    out: dict[str, str] = {}
+    if isinstance(raw, dict):
+        items = raw.items()
+    elif isinstance(raw, (list, tuple)):
+        items = [(str(x), {}) for x in raw]
+    else:
+        return {}
+    for k, v in items:
+        code = str(k or "").strip().upper()
+        if not code:
+            continue
+        if isinstance(v, dict):
+            kind = str(v.get("ma_type") or "EMA").strip().upper()
+        elif isinstance(v, str):
+            kind = v.strip().upper()
+        else:
+            kind = "EMA"
+        if kind not in ("EMA", "SMA"):
+            kind = "EMA"
+        out[code] = kind
+    return out
+
+
+def _log_path_for_detail(detail: Path) -> Path:
+    name = detail.name
+    if name.endswith("_操作明细.csv"):
+        return detail.with_name(name[: -len("_操作明细.csv")] + ".txt")
+    return detail.with_suffix(".txt")
+
+
+def list_detail_files(report_dir: str | Path) -> list[dict[str, Any]]:
+    root = Path(report_dir)
+    if not root.is_dir():
+        return []
+    rows: list[dict[str, Any]] = []
+    for p in sorted(root.glob("local_bt_*操作明细.csv")):
+        m = DETAIL_RE.match(p.name)
+        if not m:
+            continue
+        code, ex, year = m.group(1), m.group(2).upper(), m.group(3)
+        stock = "%s.%s" % (code, ex)
+        rows.append(
+            {
+                "stock": stock,
+                "year": year or RECENT_KEY,
+                "detail": p,
+                "log": _log_path_for_detail(p),
+            }
+        )
+    return rows
+
+
+def parse_log_signals(log_path: str | Path | None) -> dict[str, Any]:
+    sell: Counter[str] = Counter()
+    buy: Counter[str] = Counter()
+    skip: Counter[str] = Counter()
+    n_bars = 0
+    if not log_path:
+        return {"sell": dict(sell), "buy": dict(buy), "skip": dict(skip), "n_bars": n_bars}
+    p = Path(log_path)
+    if not p.is_file():
+        return {"sell": dict(sell), "buy": dict(buy), "skip": dict(skip), "n_bars": n_bars}
+    text = p.read_text(encoding="utf-8", errors="replace")
+    first = text.splitlines()[0] if text else ""
+    bm = RE_BANNER_N.search(first)
+    if bm:
+        try:
+            n_bars = int(bm.group(1))
+        except ValueError:
+            n_bars = 0
+    for m in RE_SELL_SIG.finditer(text):
+        sell[m.group(1)] += 1
+    for m in RE_BUY_SIG.finditer(text):
+        buy[m.group(1)] += 1
+    for code in SKIP_CODES:
+        skip[code] = text.count(code)
+    return {"sell": dict(sell), "buy": dict(buy), "skip": dict(skip), "n_bars": n_bars}
+
+
+def _max_dd(equity: pd.DataFrame, budget: float) -> float | None:
+    if equity is None or equity.empty or "equity" not in equity.columns:
+        return None
+    eq = pd.to_numeric(equity["equity"], errors="coerce").dropna()
+    if eq.empty:
+        return None
+    peak = eq.cummax()
+    base = peak.replace(0, np.nan)
+    if float(budget or 0) > 0:
+        base = base.fillna(float(budget))
+    dd = (eq - peak) / base
+    val = float(dd.min()) if len(dd) else None
+    if val is None or not np.isfinite(val):
+        return None
+    return round(val, 6)
+
+
+def _profit_factor(gross_profit: float, gross_loss: float) -> float | None:
+    gp = float(gross_profit or 0.0)
+    gl = abs(float(gross_loss or 0.0))
+    if gl <= 1e-12:
+        if gp > 0:
+            return PF_CAP
+        return None
+    return min(PF_CAP, gp / gl)
+
+
+def kpi_from_detail(detail: Path, log: Path | None, stock: str) -> dict[str, Any]:
+    budget = parse_budget_from_log(log, default=50000.0) if log else 50000.0
+    result = analyze_detail(
+        detail,
+        budget=budget,
+        meta={"tag": "HlBand", "ver": "local", "stock": stock, "period": "1d", "budget": budget},
+    )
+    stats = result.get("stats") or {}
+    trades = result.get("trades") or []
+    holds = []
+    win_pnls = []
+    for t in trades:
+        h = t.get("hold_calendar_days")
+        if h is not None and h != "":
+            try:
+                holds.append(float(h))
+            except (TypeError, ValueError):
+                pass
+        try:
+            pnl = float(t.get("pnl") or 0.0)
+        except (TypeError, ValueError):
+            pnl = 0.0
+        if pnl > 0:
+            win_pnls.append(pnl)
+    gp = float(stats.get("gross_profit") or 0.0)
+    gl = float(stats.get("gross_loss") or 0.0)
+    sig = parse_log_signals(log)
+    return {
+        "n_buy": int(stats.get("n_buy") or 0),
+        "sum_pnl": float(stats.get("sum_pnl") or 0.0),
+        "win_rate": float(stats.get("win_rate") or 0.0),
+        "avg_ret": float(stats.get("avg_ret") or 0.0),
+        "max_win": float(stats.get("max_win") or 0.0),
+        "max_loss": float(stats.get("max_loss") or 0.0),
+        "gross_profit": gp,
+        "gross_loss": gl,
+        "profit_factor": _profit_factor(gp, gl),
+        "max_dd": _max_dd(result.get("equity"), budget),
+        "avg_hold_days": (sum(holds) / len(holds)) if holds else None,
+        "max_win_pnl": max(win_pnls) if win_pnls else 0.0,
+        "budget": float(budget),
+        "sell": sig["sell"],
+        "buy": sig["buy"],
+        "skip": sig["skip"],
+        "n_bars": int(sig["n_bars"] or 0),
+        "detail": str(detail),
+        "log": str(log) if log else "",
+    }
+
+
+def style_from_closes(closes: list[float], *, tol: float = TOUCH_TOL) -> dict[str, Any]:
+    arr = np.asarray(closes, dtype=float)
+    arr = arr[np.isfinite(arr) & (arr > 0)]
+    if len(arr) < 20:
+        return {"vol_ann": None, "touch_ma20": None, "n_close": int(len(arr))}
+    window = arr[-252:] if len(arr) > 252 else arr
+    vol = None
+    if len(window) >= VOL_MIN_BARS + 1:
+        rets = np.diff(np.log(window[-(VOL_MIN_BARS + 1) :]))
+        if len(rets) >= VOL_MIN_BARS:
+            vol = float(np.std(rets, ddof=1) * np.sqrt(252.0))
+    s = pd.Series(window, dtype=float)
+    ma = s.rolling(20, min_periods=20).mean()
+    valid = ma.notna() & (ma > 0)
+    touch = None
+    if int(valid.sum()) >= 20:
+        ratio = (s[valid] - ma[valid]).abs() / ma[valid]
+        touch = float((ratio <= float(tol)).mean())
+    return {"vol_ann": vol, "touch_ma20": touch, "n_close": int(len(arr))}
+
+
+def _add_counter(dst: Counter[str], src: dict | None) -> None:
+    if not src:
+        return
+    for k, v in src.items():
+        try:
+            dst[str(k)] += int(v)
+        except (TypeError, ValueError):
+            continue
+
+
+def scan_reports(
+    report_dir: str | Path | None = None,
+    csv_dir: str | Path | None = None,
+    *,
+    progress: bool = False,
+) -> dict[str, Any]:
+    """扫描 local_bt 明细/日志 + 日线股性。结果可供 score_universe 反复打分。"""
+    report = Path(report_dir) if report_dir else DEFAULT_REPORT
+    data_dir = Path(csv_dir) if csv_dir else DEFAULT_CSV_DIR
+    files = list_detail_files(report)
+    stocks: dict[str, dict[str, Any]] = {}
+    cov: dict[str, int] = {}
+    n_files = len(files)
+    for i, item in enumerate(files):
+        stock = item["stock"]
+        year = item["year"]
+        if progress and (i == 0 or (i + 1) % 100 == 0 or (i + 1) == n_files):
+            print("scan detail %s/%s %s %s" % (i + 1, n_files, stock, year), flush=True)
+        rec = stocks.setdefault(
+            stock,
+            {
+                "stock": stock,
+                "years": {},
+                "recent": None,
+                "style": {},
+                "error": "",
+            },
+        )
+        log = item["log"] if item["log"].is_file() else None
+        try:
+            kpi = kpi_from_detail(item["detail"], log, stock)
+        except Exception as e:
+            rec["error"] = (rec.get("error") or "") + ("%s: %s; " % (year, e))
+            continue
+        if year == RECENT_KEY:
+            rec["recent"] = kpi
+            cov[RECENT_KEY] = cov.get(RECENT_KEY, 0) + 1
+        else:
+            rec["years"][year] = kpi
+            cov[year] = cov.get(year, 0) + 1
+
+    ohlc_by = {}
+    try:
+        for meta in daily_csvs_by_stock(data_dir):
+            ohlc_by[str(meta.get("stock") or "").strip().upper()] = meta
+    except Exception:
+        ohlc_by = {}
+
+    for stock, rec in stocks.items():
+        meta = ohlc_by.get(stock)
+        if not meta or not meta.get("path"):
+            rec["style"] = {"vol_ann": None, "touch_ma20": None, "n_close": 0}
+            continue
+        try:
+            _code, bars = load_daily_csv(meta["path"], stock=stock)
+            closes = [float(b.close) for b in bars if float(b.close) > 0]
+            rec["style"] = style_from_closes(closes)
+            rec["csv"] = str(meta["path"])
+        except Exception as e:
+            rec["style"] = {"vol_ann": None, "touch_ma20": None, "n_close": 0}
+            rec["error"] = (rec.get("error") or "") + "ohlc: %s; " % e
+
+    book = load_book_stocks()
+    score_years = infer_score_years(stocks)
+    return {
+        "stocks": stocks,
+        "coverage": {
+            **cov,
+            "n_stock": len(stocks),
+            "n_detail": len(files),
+            "score_years": list(score_years),
+        },
+        "book": book,
+        "score_years": score_years,
+        "report_dir": str(report.resolve()),
+        "csv_dir": str(data_dir.resolve()),
+    }
+
+
+def infer_score_years(stocks: dict[str, Any]) -> tuple[str, ...]:
+    """打分用自然年：去掉最大年（视为尚未走完，留给近期确认）。"""
+    found: set[str] = set()
+    for rec in stocks.values():
+        for y in rec.get("years") or {}:
+            if str(y).isdigit():
+                found.add(str(y))
+    years = tuple(sorted(found))
+    if len(years) <= 1:
+        return years
+    return years[:-1]
+
+
+def _year_kpis(rec: dict[str, Any], score_years: tuple[str, ...]) -> list[dict[str, Any]]:
+    out = []
+    years = rec.get("years") or {}
+    for y in score_years:
+        k = years.get(y)
+        if k:
+            out.append(k)
+    return out
+
+
+def _agg_from_years(rec: dict[str, Any], score_years: tuple[str, ...]) -> dict[str, Any]:
+    kpis = _year_kpis(rec, score_years)
+    n_buy = sum(int(k.get("n_buy") or 0) for k in kpis)
+    years_traded = [k for k in kpis if int(k.get("n_buy") or 0) > 0]
+    n_years_traded = len(years_traded)
+    n_years_pos = sum(1 for k in years_traded if float(k.get("sum_pnl") or 0) > 0)
+    pnls = [float(k.get("sum_pnl") or 0.0) for k in kpis]
+    pnl_mean = (sum(pnls) / len(pnls)) if pnls else None
+    win_n = 0.0
+    ret_w = 0.0
+    gp = 0.0
+    gl = 0.0
+    holds = []
+    dds = []
+    max_win_pnl = 0.0
+    sell: Counter[str] = Counter()
+    buy: Counter[str] = Counter()
+    skip: Counter[str] = Counter()
+    n_bars = 0
+    for k in kpis:
+        nb = float(k.get("n_buy") or 0)
+        win_n += float(k.get("win_rate") or 0) / 100.0 * nb
+        ret_w += float(k.get("avg_ret") or 0) * nb
+        gp += float(k.get("gross_profit") or 0)
+        gl += float(k.get("gross_loss") or 0)
+        if k.get("avg_hold_days") is not None and nb > 0:
+            holds.append((float(k["avg_hold_days"]), nb))
+        if k.get("max_dd") is not None:
+            dds.append(float(k["max_dd"]))
+        max_win_pnl = max(max_win_pnl, float(k.get("max_win_pnl") or 0))
+        _add_counter(sell, k.get("sell"))
+        _add_counter(buy, k.get("buy"))
+        _add_counter(skip, k.get("skip"))
+        n_bars += int(k.get("n_bars") or 0)
+    win_rate = (100.0 * win_n / n_buy) if n_buy else None
+    avg_ret = (ret_w / n_buy) if n_buy else None
+    hold = (sum(h * w for h, w in holds) / sum(w for _h, w in holds)) if holds else None
+    n_sell = sum(sell.values())
+    trail = float(sell.get("trail_stop") or 0)
+    stop = float(sell.get("stop_loss") or 0)
+    bear = float(sell.get("weekly_bear") or 0)
+    trail_share = (trail / n_sell) if n_sell else None
+    stop_share = (stop / n_sell) if n_sell else None
+    bear_share = (bear / n_sell) if n_sell else None
+    quality = None
+    if n_sell:
+        quality = trail_share - stop_share - bear_share
+    bias_n = int(skip.get("w_bias_skip") or 0)
+    bias_density = (bias_n / n_bars) if n_bars else None
+    win_share = (max_win_pnl / gp) if gp > 1e-9 else None
+    recent = rec.get("recent") or {}
+    year_pnl = {y: None for y in score_years}
+    year_n = {y: None for y in score_years}
+    for y in score_years:
+        k = (rec.get("years") or {}).get(y)
+        if k:
+            year_pnl[y] = float(k.get("sum_pnl") or 0.0)
+            year_n[y] = int(k.get("n_buy") or 0)
+    return {
+        "n_buy": n_buy,
+        "n_years_files": len(kpis),
+        "n_years_traded": n_years_traded,
+        "n_years_pos": n_years_pos,
+        "stability": (n_years_pos / n_years_traded) if n_years_traded else None,
+        "pnl_year_mean": pnl_mean,
+        "win_rate": win_rate,
+        "avg_ret": avg_ret,
+        "profit_factor": _profit_factor(gp, gl),
+        "gross_profit": gp,
+        "gross_loss": gl,
+        "max_dd": min(dds) if dds else None,
+        "avg_hold_days": hold,
+        "max_win_pnl_share": win_share,
+        "trail_share": trail_share,
+        "stop_share": stop_share,
+        "bear_share": bear_share,
+        "quality": quality,
+        "sell": dict(sell),
+        "buy": dict(buy),
+        "skip": dict(skip),
+        "w_bias_skip_n": bias_n,
+        "w_bias_density": bias_density,
+        "n_bars": n_bars,
+        "year_pnl": year_pnl,
+        "year_n": year_n,
+        "recent_pnl": float(recent.get("sum_pnl") or 0.0) if recent else None,
+        "recent_n_buy": int(recent.get("n_buy") or 0) if recent else None,
+        "recent_win_rate": float(recent.get("win_rate") or 0.0) if recent else None,
+        "recent_sell": dict(recent.get("sell") or {}) if recent else {},
+    }
+
+
+def _pct_rank(s: pd.Series) -> pd.Series:
+    return s.rank(method="average", pct=True)
+
+
+def _suggest_ma(
+    stock: str,
+    touch: float | None,
+    vol: float | None,
+    book: dict[str, str],
+    touch_med: float | None,
+    vol_med: float | None,
+) -> tuple[str, str]:
+    if stock in book:
+        return book[stock], "book"
+    if touch is None or vol is None or touch_med is None or vol_med is None:
+        return "EMA", "default"
+    if touch >= touch_med and vol <= vol_med:
+        return "EMA", "sticky_lowvol"
+    return "SMA", "chop_pullback"
+
+
+def score_universe(
+    scanned: dict[str, Any],
+    filters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """硬过滤 + 百分位加权打分。"""
+    flt = dict(DEFAULT_FILTERS)
+    if filters:
+        flt.update(filters)
+    book: dict[str, str] = dict(scanned.get("book") or {})
+    score_years = tuple(scanned.get("score_years") or infer_score_years(scanned.get("stocks") or {}))
+    if not score_years:
+        score_years = SCORE_YEARS
+    rows: list[dict[str, Any]] = []
+    details: dict[str, Any] = {}
+    vols: list[float] = []
+    touches: list[float] = []
+    aggs: dict[str, dict[str, Any]] = {}
+    for stock, rec in (scanned.get("stocks") or {}).items():
+        agg = _agg_from_years(rec, score_years)
+        aggs[stock] = agg
+        style = rec.get("style") or {}
+        v = style.get("vol_ann")
+        t = style.get("touch_ma20")
+        if v is not None and np.isfinite(v):
+            vols.append(float(v))
+        if t is not None and np.isfinite(t):
+            touches.append(float(t))
+
+    vol_cut = None
+    if vols:
+        drop = float(flt.get("vol_drop_top") or 0.0)
+        drop = min(max(drop, 0.0), 0.5)
+        vol_cut = float(np.quantile(vols, 1.0 - drop)) if drop > 0 else None
+    touch_med = float(np.median(touches)) if touches else None
+    vol_med = float(np.median(vols)) if vols else None
+
+    min_n_buy = int(flt.get("min_n_buy") or 0)
+    min_years = int(flt.get("min_years_traded") or 0)
+    min_pos = int(flt.get("min_pos_years") or 0)
+    min_ratio = float(flt.get("min_pos_ratio") or 0.0)
+    max_win_share = float(flt.get("max_win_pnl_share") or 1.0)
+
+    for stock, rec in (scanned.get("stocks") or {}).items():
+        agg = aggs[stock]
+        style = rec.get("style") or {}
+        vol = style.get("vol_ann")
+        touch = style.get("touch_ma20")
+        reasons: list[str] = []
+        if int(agg["n_buy"] or 0) < min_n_buy:
+            reasons.append("轮次不足")
+        if int(agg["n_years_traded"] or 0) < min_years:
+            reasons.append("成交年数不足")
+        n_pos = int(agg["n_years_pos"] or 0)
+        n_tr = int(agg["n_years_traded"] or 0)
+        ratio = (n_pos / n_tr) if n_tr else 0.0
+        if n_pos < min_pos and ratio < min_ratio:
+            reasons.append("盈利年不稳定")
+        share = agg.get("max_win_pnl_share")
+        if share is not None and share > max_win_share and float(agg.get("gross_profit") or 0) > 0:
+            reasons.append("单笔盈利占比过高")
+        if vol_cut is not None and vol is not None and float(vol) > vol_cut:
+            reasons.append("波动过高")
+        ma_type, ma_why = _suggest_ma(stock, touch, vol, book, touch_med, vol_med)
+        recent_n = agg.get("recent_n_buy")
+        recent_pnl = agg.get("recent_pnl")
+        recent_flag = "无近期"
+        if recent_n is not None:
+            if int(recent_n) <= 0:
+                recent_flag = "近期无成交"
+            elif recent_pnl is not None and float(recent_pnl) > 0:
+                recent_flag = "近期盈利"
+            else:
+                recent_flag = "近期亏损"
+        row = {
+            "stock": stock,
+            "passed": not reasons,
+            "fail_reason": "；".join(reasons),
+            "in_book": stock in book,
+            "ma_type_suggest": ma_type,
+            "ma_type_why": ma_why,
+            "n_buy": agg["n_buy"],
+            "n_years_traded": agg["n_years_traded"],
+            "n_years_pos": agg["n_years_pos"],
+            "n_years_files": agg["n_years_files"],
+            "stability": agg["stability"],
+            "pnl_year_mean": agg["pnl_year_mean"],
+            "win_rate": agg["win_rate"],
+            "avg_ret": agg["avg_ret"],
+            "profit_factor": agg["profit_factor"],
+            "quality": agg["quality"],
+            "trail_share": agg["trail_share"],
+            "stop_share": agg["stop_share"],
+            "bear_share": agg["bear_share"],
+            "max_dd": agg["max_dd"],
+            "avg_hold_days": agg["avg_hold_days"],
+            "w_bias_skip_n": agg["w_bias_skip_n"],
+            "w_bias_density": agg["w_bias_density"],
+            "vol_ann": vol,
+            "touch_ma20": touch,
+            "recent_flag": recent_flag,
+            "recent_n_buy": recent_n,
+            "recent_pnl": recent_pnl,
+            "error": rec.get("error") or "",
+        }
+        for y in score_years:
+            row["pnl_%s" % y] = agg["year_pnl"].get(y)
+            row["n_buy_%s" % y] = agg["year_n"].get(y)
+        rows.append(row)
+        details[stock] = {
+            "years": rec.get("years") or {},
+            "recent": rec.get("recent"),
+            "sell": agg["sell"],
+            "buy": agg["buy"],
+            "skip": agg["skip"],
+            "style": style,
+        }
+
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return {
+            "df": df,
+            "passed": df,
+            "heatmap": pd.DataFrame(),
+            "details": details,
+            "coverage": scanned.get("coverage") or {},
+            "filters": flt,
+            "book": book,
+            "book_rank": pd.DataFrame(),
+            "recommend": pd.DataFrame(),
+            "snippet": "BOOK_STOCKS = {}",
+            "vol_cut": vol_cut,
+            "score_years": score_years,
+        }
+
+    passed_mask = df["passed"].astype(bool)
+    score = pd.Series(0.0, index=df.index)
+    if passed_mask.any():
+        sub = df.loc[passed_mask]
+        pnl_r = _pct_rank(sub["pnl_year_mean"])
+        wr_r = _pct_rank(sub["win_rate"])
+        st_r = _pct_rank(sub["stability"])
+        pf_r = _pct_rank(sub["profit_factor"])
+        q_r = _pct_rank(sub["quality"])
+        part = (
+            WEIGHTS["pnl"] * pnl_r.fillna(0.5)
+            + WEIGHTS["win_rate"] * wr_r.fillna(0.5)
+            + WEIGHTS["stability"] * st_r.fillna(0.5)
+            + WEIGHTS["profit_factor"] * pf_r.fillna(0.5)
+            + WEIGHTS["quality"] * q_r.fillna(0.5)
+        )
+        score.loc[passed_mask] = part
+        df.loc[passed_mask, "score_pnl"] = pnl_r
+        df.loc[passed_mask, "score_win"] = wr_r
+        df.loc[passed_mask, "score_stab"] = st_r
+        df.loc[passed_mask, "score_pf"] = pf_r
+        df.loc[passed_mask, "score_qual"] = q_r
+    df["score"] = score
+    df.loc[~passed_mask, "score"] = np.nan
+    df["rank"] = np.nan
+    if passed_mask.any():
+        df.loc[passed_mask, "rank"] = (
+            df.loc[passed_mask, "score"].rank(ascending=False, method="min").astype(int)
+        )
+    df = df.sort_values(["passed", "score", "pnl_year_mean"], ascending=[False, False, False], na_position="last")
+    df = df.reset_index(drop=True)
+
+    passed = df[df["passed"]].copy()
+    heat_cols = ["stock"] + ["pnl_%s" % y for y in score_years] + ["recent_pnl"]
+    heat_cols = [c for c in heat_cols if c in (passed.columns if not passed.empty else heat_cols)]
+    heatmap = passed[heat_cols].copy() if not passed.empty else pd.DataFrame(columns=heat_cols)
+
+    book_rank = df[df["in_book"]].copy()
+    top_n = int(flt.get("top_n") or 6)
+    top_n = min(max(top_n, 1), 9)
+    recommend = passed.head(top_n).copy()
+    snippet = format_book_snippet(recommend)
+
+    return {
+        "df": df,
+        "passed": passed,
+        "heatmap": heatmap,
+        "details": details,
+        "coverage": scanned.get("coverage") or {},
+        "filters": flt,
+        "book": book,
+        "book_rank": book_rank,
+        "recommend": recommend,
+        "snippet": snippet,
+        "vol_cut": vol_cut,
+        "score_years": score_years,
+    }
+
+
+def format_book_snippet(recommend: pd.DataFrame) -> str:
+    if recommend is None or recommend.empty:
+        return "BOOK_STOCKS = {}"
+    lines = ["BOOK_STOCKS = {"]
+    for _, r in recommend.iterrows():
+        lines.append(
+            '    "%s": {"ma_type": "%s"},' % (r["stock"], r.get("ma_type_suggest") or "EMA")
+        )
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def coverage_notes(coverage: dict[str, Any], scanned: dict[str, Any] | None = None) -> list[str]:
+    notes = []
+    n = int(coverage.get("n_stock") or 0)
+    notes.append("扫描到 **%s** 只标的的本地回测产物。" % n)
+    years = [k for k in sorted(coverage) if str(k).isdigit()]
+    ycounts = ["%s 年 %s 只" % (y, int(coverage.get(y) or 0)) for y in years]
+    if ycounts:
+        notes.append("分年覆盖：%s；无年份（近期）%s 只。" % (" / ".join(ycounts), int(coverage.get(RECENT_KEY) or 0)))
+    score_years = coverage.get("score_years") or ((scanned or {}).get("score_years") or SCORE_YEARS)
+    notes.append("主排序使用完整自然年 **%s**；最大年与无年份文件只作近期确认。" % "、".join(str(y) for y in score_years))
+    if years and len(years) >= 2:
+        last, prev = years[-1], years[-2]
+        if int(coverage.get(prev) or 0) and int(coverage.get(last) or 0) < int(0.9 * int(coverage.get(prev) or 0)):
+            notes.append("%s 年批明显少于 %s，覆盖不齐。" % (last, prev))
+    notes.append("绝大多数票按全局 EMA 回测；`ma_type` 建议是股性启发式，不是 SMA/EMA 对照回测。")
+    notes.append("在全池里取 Top N 有多重选择偏差，不要把得分当分真实夏普。")
+    book = (scanned or {}).get("book") or {}
+    if book:
+        notes.append("现白名单：%s" % "、".join(sorted(book)))
+    return notes
+
+
+def select_csv_columns(score_years: tuple[str, ...] | None = None) -> list[str]:
+    years = score_years or SCORE_YEARS
+    cols = [
+        "rank",
+        "stock",
+        "passed",
+        "score",
+        "fail_reason",
+        "in_book",
+        "ma_type_suggest",
+        "ma_type_why",
+        "n_buy",
+        "n_years_traded",
+        "n_years_pos",
+        "stability",
+        "pnl_year_mean",
+        "win_rate",
+        "avg_ret",
+        "profit_factor",
+        "quality",
+        "trail_share",
+        "stop_share",
+        "bear_share",
+        "max_dd",
+        "avg_hold_days",
+        "w_bias_skip_n",
+        "w_bias_density",
+        "vol_ann",
+        "touch_ma20",
+        "recent_flag",
+        "recent_n_buy",
+        "recent_pnl",
+    ]
+    for y in years:
+        cols.append("pnl_%s" % y)
+        cols.append("n_buy_%s" % y)
+    cols.append("error")
+    return cols
+
+
+def write_select_csv(df: pd.DataFrame, path: str | Path) -> Path:
+    dest = Path(path)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    years = []
+    if df is not None and not df.empty:
+        for c in df.columns:
+            if str(c).startswith("pnl_") and str(c) != "pnl_year_mean":
+                years.append(str(c).replace("pnl_", "", 1))
+    years = tuple(years) if years else SCORE_YEARS
+    preferred = select_csv_columns(years)
+    cols = [c for c in preferred if df is not None and c in df.columns]
+    extra = [c for c in (df.columns if df is not None else []) if c not in cols]
+    out = df[cols + extra].copy() if df is not None and not df.empty else pd.DataFrame(columns=preferred)
+    out.to_csv(dest, index=False, encoding="utf-8-sig")
+    return dest
+
+
+def run_select(
+    report_dir: str | Path | None = None,
+    csv_dir: str | Path | None = None,
+    out: str | Path | None = None,
+    filters: dict[str, Any] | None = None,
+    scanned: dict[str, Any] | None = None,
+    progress: bool = False,
+) -> dict[str, Any]:
+    packed = scanned if scanned is not None else scan_reports(report_dir, csv_dir, progress=progress)
+    scored = score_universe(packed, filters=filters)
+    dest = Path(out) if out else (Path(report_dir) if report_dir else DEFAULT_REPORT) / "local_bt_stock_select.csv"
+    scored["out_csv"] = str(write_select_csv(scored["df"], dest))
+    scored["scanned"] = packed
+    return scored
+
+
+def main(argv: list[str] | None = None) -> None:
+    ap = argparse.ArgumentParser(description="HlBand 批量回测选股打分")
+    ap.add_argument("--report-dir", default=str(DEFAULT_REPORT), help="local_bt 报告目录")
+    ap.add_argument("--csv-dir", default=str(DEFAULT_CSV_DIR), help="日线 CSV 目录（股性）")
+    ap.add_argument(
+        "--out",
+        default="",
+        help="输出 CSV（默认 <report-dir>/local_bt_stock_select.csv）",
+    )
+    ap.add_argument("--min-n-buy", type=int, default=DEFAULT_FILTERS["min_n_buy"])
+    ap.add_argument("--min-years", type=int, default=DEFAULT_FILTERS["min_years_traded"])
+    ap.add_argument("--min-pos-years", type=int, default=DEFAULT_FILTERS["min_pos_years"])
+    ap.add_argument("--min-pos-ratio", type=float, default=DEFAULT_FILTERS["min_pos_ratio"])
+    ap.add_argument("--max-win-share", type=float, default=DEFAULT_FILTERS["max_win_pnl_share"])
+    ap.add_argument("--vol-drop-top", type=float, default=DEFAULT_FILTERS["vol_drop_top"])
+    ap.add_argument("--top-n", type=int, default=DEFAULT_FILTERS["top_n"])
+    args = ap.parse_args(argv)
+    filters = {
+        "min_n_buy": args.min_n_buy,
+        "min_years_traded": args.min_years,
+        "min_pos_years": args.min_pos_years,
+        "min_pos_ratio": args.min_pos_ratio,
+        "max_win_pnl_share": args.max_win_share,
+        "vol_drop_top": args.vol_drop_top,
+        "top_n": args.top_n,
+    }
+    out = args.out or str(Path(args.report_dir) / "local_bt_stock_select.csv")
+    print("scanning", args.report_dir, flush=True)
+    scored = run_select(
+        report_dir=args.report_dir,
+        csv_dir=args.csv_dir,
+        out=out,
+        filters=filters,
+        progress=True,
+    )
+    cov = scored.get("coverage") or {}
+    for line in coverage_notes(cov, scored.get("scanned")):
+        print(re.sub(r"\*\*", "", line))
+    passed = scored.get("passed")
+    n_pass = 0 if passed is None or passed.empty else len(passed)
+    print("passed", n_pass, "/", cov.get("n_stock"), "wrote", scored.get("out_csv"))
+    rec = scored.get("recommend")
+    if rec is not None and not rec.empty:
+        print("recommend")
+        show = rec[["rank", "stock", "score", "pnl_year_mean", "win_rate", "stability", "ma_type_suggest"]]
+        print(show.to_string(index=False))
+        print(scored.get("snippet") or "")
+
+
+if __name__ == "__main__":
+    main()

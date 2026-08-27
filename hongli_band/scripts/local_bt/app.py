@@ -47,13 +47,24 @@ from analyze import (  # noqa: E402
     ymd_to_date,
 )
 from run import run_backtest, run_batch  # noqa: E402
+from stock_select import (  # noqa: E402
+    DEFAULT_FILTERS,
+    SCORE_YEARS,
+    coverage_notes,
+    csv_dir_fingerprint,
+    format_book_snippet,
+    report_fingerprint,
+    scan_reports,
+    score_universe,
+    write_select_csv,
+)
 from trades_csv import trades_csv_path  # noqa: E402
 
 import streamlit as st  # noqa: E402
 
 
 st.set_page_config(page_title="HlBand 本地回测", layout="wide")
-st.title("HlBand 本地回测可视化")
+st.title("HlBand Backtesting")
 
 
 def _daily_dir_fingerprint(csv_dir: str) -> tuple:
@@ -75,6 +86,12 @@ def _cached_daily_metas(csv_dir: str, fingerprint: tuple) -> list[dict]:
     # fingerprint 仅作缓存键：目录内文件名/mtime/size 变化即失效
     _ = fingerprint
     return daily_csvs_by_stock(csv_dir)
+
+
+@st.cache_data(show_spinner="扫描回测报告与日线股性…")
+def _cached_select_scan(report_dir: str, csv_dir: str, fp_report: tuple, fp_csv: tuple) -> dict:
+    _ = fp_report, fp_csv
+    return scan_reports(report_dir, csv_dir)
 
 
 def _fmt_ymd(d: date) -> str:
@@ -581,8 +598,230 @@ def _render_batch_run(csv_dir: str, *, workers: int = 0, quiet: bool = True) -> 
     )
 
 
+def _select_display_df(df: pd.DataFrame, *, passed_only: bool = False, score_years: tuple[str, ...] | None = None) -> pd.DataFrame:
+    src = df[df["passed"]].copy() if passed_only and "passed" in df.columns else df.copy()
+    if src.empty:
+        return pd.DataFrame()
+    out = pd.DataFrame()
+    out["名次"] = src["rank"]
+    out["标的"] = src["stock"]
+    out["得分"] = pd.to_numeric(src["score"], errors="coerce") * 100.0
+    out["建议均线"] = src["ma_type_suggest"]
+    out["白名单"] = src["in_book"].map(lambda x: "是" if x else "")
+    out["跨年轮次"] = src["n_buy"]
+    out["成交年"] = src["n_years_traded"]
+    out["盈利年"] = src["n_years_pos"]
+    out["稳定性"] = pd.to_numeric(src["stability"], errors="coerce") * 100.0
+    out["年等权盈亏"] = src["pnl_year_mean"]
+    out["胜率"] = src["win_rate"]
+    out["利润因子"] = src["profit_factor"]
+    out["策略质量"] = src["quality"]
+    out["trail占比"] = pd.to_numeric(src["trail_share"], errors="coerce") * 100.0
+    out["最大回撤"] = pd.to_numeric(src["max_dd"], errors="coerce") * 100.0
+    out["年化波动"] = pd.to_numeric(src["vol_ann"], errors="coerce") * 100.0
+    out["贴线率"] = pd.to_numeric(src["touch_ma20"], errors="coerce") * 100.0
+    out["近期"] = src["recent_flag"]
+    out["未过原因"] = src["fail_reason"]
+    years = score_years or SCORE_YEARS
+    for y in years:
+        col = "pnl_%s" % y
+        if col in src.columns:
+            out["盈亏%s" % y] = src[col]
+    return out.reset_index(drop=True)
+
+
+def _plot_year_heatmap(heat: pd.DataFrame, score_years: tuple[str, ...] | None = None) -> go.Figure:
+    fig = go.Figure()
+    if heat is None or heat.empty:
+        fig.add_annotation(text="无过线标的", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
+        fig.update_layout(height=200, margin=dict(l=40, r=20, t=40, b=40))
+        return fig
+    zdf = heat.copy()
+    years = score_years or SCORE_YEARS
+    y_cols = ["pnl_%s" % y for y in years]
+    rename = {c: c.replace("pnl_", "") for c in y_cols}
+    rename["recent_pnl"] = "近期"
+    keep = ["stock"] + [c for c in y_cols + ["recent_pnl"] if c in zdf.columns]
+    zdf = zdf[keep].set_index("stock")
+    zdf = zdf.rename(columns=rename)
+    fig.add_trace(
+        go.Heatmap(
+            z=zdf.values,
+            x=list(zdf.columns),
+            y=list(zdf.index),
+            colorscale="RdYlGn",
+            zmid=0,
+            colorbar=dict(title="盈亏 (元)"),
+            hovertemplate="%{y} · %{x}<br>盈亏 %{z:,.0f} 元<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        title="年度盈亏（过线标的；近期不进主分）",
+        xaxis_title="区间",
+        yaxis_title="标的",
+        height=max(280, 22 * len(zdf) + 80),
+        margin=dict(l=80, r=20, t=50, b=40),
+        yaxis=dict(autorange="reversed"),
+    )
+    return fig
+
+
+def _plot_sell_pie(counts: dict) -> go.Figure:
+    fig = go.Figure()
+    labels = []
+    values = []
+    for k, v in (counts or {}).items():
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            continue
+        if n <= 0:
+            continue
+        labels.append(str(k))
+        values.append(n)
+    if not values:
+        fig.add_annotation(text="无卖出信号", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
+        fig.update_layout(height=280, margin=dict(l=20, r=20, t=40, b=20))
+        return fig
+    fig.add_trace(go.Pie(labels=labels, values=values, hole=0.35, name="卖出"))
+    fig.update_layout(
+        title="卖出原因（分年合计）",
+        height=320,
+        margin=dict(l=20, r=20, t=50, b=20),
+        legend=dict(orientation="h"),
+    )
+    return fig
+
+
+def _render_select(csv_dir: str, filters: dict) -> None:
+    report_dir = str(THEME / "report")
+    try:
+        scanned = _cached_select_scan(
+            report_dir,
+            csv_dir,
+            report_fingerprint(report_dir),
+            csv_dir_fingerprint(csv_dir),
+        )
+    except Exception:
+        st.error("扫描回测报告失败")
+        st.code(traceback.format_exc())
+        return
+
+    scored = score_universe(scanned, filters=filters)
+    df = scored["df"]
+    passed = scored["passed"]
+    rec = scored["recommend"]
+    cov = scored.get("coverage") or {}
+    years = tuple(scored.get("score_years") or SCORE_YEARS)
+    out_path = THEME / "report" / "local_bt_stock_select.csv"
+    try:
+        write_select_csv(df, out_path)
+    except Exception as e:
+        st.warning("写选股 CSV 失败：%s" % e)
+
+    for line in coverage_notes(cov, scanned):
+        st.markdown("- " + line)
+
+    n_all = int(cov.get("n_stock") or 0)
+    n_pass = 0 if passed is None or passed.empty else len(passed)
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("扫描标的", n_all)
+    c2.metric("过线", n_pass)
+    c3.metric("推荐池", 0 if rec is None or rec.empty else len(rec))
+    cut = scored.get("vol_cut")
+    c4.metric("波动上限", "-" if cut is None else "%.1f%%" % (float(cut) * 100.0))
+    st.caption("产物：`hongli_band/report/local_bt_stock_select.csv` · 不自动改 `BOOK_STOCKS`")
+
+    st.subheader("现白名单对照")
+    book_rank = scored.get("book_rank")
+    if book_rank is None or book_rank.empty:
+        st.info("现白名单四只不在本次扫描结果里（可能还没跑过分年回测）。")
+    else:
+        st.dataframe(_select_display_df(book_rank, score_years=years), use_container_width=True, hide_index=True)
+
+    st.subheader("推荐池 Top %s" % int(filters.get("top_n") or 6))
+    if rec is None or rec.empty:
+        st.warning("没有过线标的。放宽侧栏阈值，或先补齐分年批量回测。")
+    else:
+        st.dataframe(_select_display_df(rec, score_years=years), use_container_width=True, hide_index=True)
+        st.caption("`ma_type` 为启发式（贴线+低波→EMA，否则 SMA）；白名单已有配置优先。")
+        st.code(format_book_snippet(rec), language="python")
+
+    st.subheader("打分总表")
+    view = st.radio("显示", ["仅过线", "全部（含未过）"], horizontal=True, key="select_view")
+    table = _select_display_df(df, passed_only=(view == "仅过线"), score_years=years)
+    if table.empty:
+        st.info("无行可显示")
+    else:
+        st.dataframe(table, use_container_width=True, hide_index=True)
+
+    st.subheader("年度盈亏热力")
+    heat = scored.get("heatmap")
+    if heat is not None and not heat.empty and len(heat) > 40:
+        heat = heat.head(40)
+        st.caption("过线标的较多，热力只画得分最高的 40 只。")
+    st.plotly_chart(_plot_year_heatmap(heat, score_years=years), use_container_width=True)
+
+    details = scored.get("details") or {}
+    names = [] if passed is None or passed.empty else passed["stock"].tolist()
+    if names:
+        st.subheader("标的展开")
+        pick = st.selectbox("过线标的", names, key="select_detail_stock")
+        one = df[df["stock"] == pick]
+        if not one.empty:
+            st.dataframe(_select_display_df(one, score_years=years), use_container_width=True, hide_index=True)
+        info = details.get(pick) or {}
+        year_rows = []
+        years = info.get("years") or {}
+        for y in years:
+            k = years.get(y)
+            if not k:
+                year_rows.append({"年份": y, "状态": "缺文件", "轮次": None, "总盈亏": None, "胜率": None})
+                continue
+            year_rows.append(
+                {
+                    "年份": y,
+                    "状态": "有",
+                    "轮次": k.get("n_buy"),
+                    "总盈亏": k.get("sum_pnl"),
+                    "胜率": k.get("win_rate"),
+                    "平均收益%": k.get("avg_ret"),
+                    "利润因子": k.get("profit_factor"),
+                    "最大回撤": None if k.get("max_dd") is None else float(k["max_dd"]) * 100.0,
+                    "trail占比": None
+                    if not k.get("sell")
+                    else 100.0
+                    * float(k["sell"].get("trail_stop") or 0)
+                    / max(1, sum(int(v) for v in k["sell"].values())),
+                }
+            )
+        recent = info.get("recent")
+        if recent:
+            year_rows.append(
+                {
+                    "年份": "近期",
+                    "状态": "有",
+                    "轮次": recent.get("n_buy"),
+                    "总盈亏": recent.get("sum_pnl"),
+                    "胜率": recent.get("win_rate"),
+                    "平均收益%": recent.get("avg_ret"),
+                    "利润因子": recent.get("profit_factor"),
+                    "最大回撤": None
+                    if recent.get("max_dd") is None
+                    else float(recent["max_dd"]) * 100.0,
+                    "trail占比": None,
+                }
+            )
+        left, right = st.columns([1.4, 1])
+        with left:
+            st.dataframe(pd.DataFrame(year_rows), use_container_width=True, hide_index=True)
+        with right:
+            st.plotly_chart(_plot_sell_pie(info.get("sell") or {}), use_container_width=True)
+        st.caption("看 K 线 / 成交明细请切到「仅分析已有明细」。")
+
+
 # ---------- sidebar / controls ----------
-mode = st.radio("模式", ["跑本地回测", "仅分析已有明细"], horizontal=True)
+mode = st.radio("模式", ["跑本地回测", "仅分析已有明细", "选股方案"], horizontal=True)
 scope = "单标的"
 if mode == "跑本地回测":
     scope = st.radio("范围", ["单标的", "批量（按标的汇总）"], horizontal=True)
@@ -603,8 +842,37 @@ with st.sidebar:
             workers = int(
                 st.number_input("进程数（0=自动）", min_value=0, max_value=16, value=0, step=1, key="bt_workers")
             )
+    select_filters = dict(DEFAULT_FILTERS)
+    if mode == "选股方案":
+        st.subheader("硬过滤")
+        select_filters["min_n_buy"] = int(
+            st.number_input("最少跨年轮次", min_value=0, max_value=50, value=int(DEFAULT_FILTERS["min_n_buy"]), step=1)
+        )
+        select_filters["min_years_traded"] = int(
+            st.number_input("最少成交年数", min_value=1, max_value=5, value=int(DEFAULT_FILTERS["min_years_traded"]), step=1)
+        )
+        select_filters["min_pos_years"] = int(
+            st.number_input("最少盈利年数", min_value=0, max_value=5, value=int(DEFAULT_FILTERS["min_pos_years"]), step=1)
+        )
+        select_filters["min_pos_ratio"] = float(
+            st.slider("或盈利年占比 ≥", min_value=0.0, max_value=1.0, value=float(DEFAULT_FILTERS["min_pos_ratio"]), step=0.05)
+        )
+        select_filters["max_win_pnl_share"] = float(
+            st.slider("单笔盈利占毛利上限", min_value=0.3, max_value=1.0, value=float(DEFAULT_FILTERS["max_win_pnl_share"]), step=0.05)
+        )
+        select_filters["vol_drop_top"] = float(
+            st.slider("剔除最高波动分位", min_value=0.0, max_value=0.3, value=float(DEFAULT_FILTERS["vol_drop_top"]), step=0.05)
+        )
+        select_filters["top_n"] = int(
+            st.slider("推荐池 N", min_value=4, max_value=9, value=int(DEFAULT_FILTERS["top_n"]), step=1)
+        )
+        if st.button("刷新缓存"):
+            _cached_select_scan.clear()
+            st.rerun()
 
-if mode == "跑本地回测" and scope == "批量（按标的汇总）":
+if mode == "选股方案":
+    _render_select(csv_dir, select_filters)
+elif mode == "跑本地回测" and scope == "批量（按标的汇总）":
     _render_batch_run(csv_dir, workers=workers, quiet=quiet)
 elif mode == "跑本地回测":
     col_a, col_b = st.columns([2, 1])
