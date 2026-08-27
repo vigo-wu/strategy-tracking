@@ -1,6 +1,6 @@
 # 红利板块波段策略：周线定方向，日线找买卖点
 
-**主题目录**：`hongli_band/`｜**版本**：v1.57｜**形态**：单仓骨架 / 分笔多仓｜**运行**：国金 QMT 终端模型（见 §5）  
+**主题目录**：`hongli_band/`｜**版本**：v1.58｜**形态**：单仓骨架 / 分笔多仓｜**运行**：国金 QMT 终端模型（见 §5）  
 **参数默认值**：`hongli_band/scripts/qmt/hlband/config.py`（文档以该文件为准）。实盘在「模型交易 → 新建/编辑策略交易」面板只覆盖开关 / 可部署比例 / 硬风控（`hlband/panel.xml`）；编辑器回测无注入时用 config。买点窗口、时间成本、加仓细节、`SCALE_LOTS`、阶梯止盈 `TRAIL_TIERS`、均线周期、`BOOK_STOCKS` 子配置 / `MA_TYPE`、路径仍只在 config。
 
 ---
@@ -12,7 +12,7 @@
 实盘报单成功后**保留**信号 pending / 止盈元数据，**仅成交回调**后清除；废单/撤单后下一尾盘或开盘窗自动重试。  
 **加仓成交后当日不再评新卖点**（`skip_sell_eval_day`，实盘同一根日 K 的后续 tick 也跳过）；已挂的 `pending_exit` 仍可成交。T+1 导致整仓/多笔只卖掉一部分时，若 `pending_exit.lot_ids` 还有剩余笔则**保留** pending，不因部分成交清掉。
 
-**加仓**（`SCALE_ENABLE`）：已有仓且同时满足门槛：任一笔峰值浮盈 `>= SCALE_ARM`（`0.03`）、该笔持仓日 `>= SCALE_ARM_BARS`（`8`）、周线 MACD 柱 `>= SCALE_W_HIST_MIN`（`-0.01`）。第二笔触发为下列**任一**：① 合格缩量回踩（`pullback_vol`，回踩加仓）；② 日线收盘确认突破前期平台（`plat_break`，破平台推仓）；③ 近两周周线 MACD 黄金交叉且柱放大（`w_macd_golden`）。最多 `SCALE_MAX=2` **同时持有**。`SCALE_ONCE_PER_ROUND`（默认开）：**同一轮只加一次**——加仓成交后锁定，该只只要还剩任何一笔就不能再买；两笔都平掉后才能再开下一轮。金额：第二笔 25% cap；若该笔已是全池第三槽则吃剩余可部署资金。执行日若已触发卖点则**取消加仓、让路出场**。全池最多 3 笔（`BOOK_LOT_MAX`），前两笔 50%/25%、第三笔吃剩余；满则 `book_lot_cap`。回踩加仓仍受 `chase_skip`；破平台/金叉不受。**移动止盈不让路加仓信号评估**，但执行日卖点优先。  
+**加仓**（`SCALE_ENABLE`）：已有仓且同时满足门槛：任一笔峰值浮盈 `>= SCALE_ARM`（`0.03`）、该笔持仓日 `>= SCALE_ARM_BARS`（`8`）、周线 MACD 柱 `>= SCALE_W_HIST_MIN`（`-0.01`）。第二笔触发为下列**任一**：① 合格缩量回踩（`pullback_vol`，回踩加仓）；② 日线收盘确认突破前期平台（`plat_break`，破平台推仓）；③ 近两周周线 MACD 黄金交叉且柱放大（`w_macd_golden`）。最多 `SCALE_MAX=2` **同时持有**。`SCALE_ONCE_PER_ROUND`（默认开）：**同一轮只加一次**——加仓成交后锁定，该只只要还剩任何一笔就不能再买；两笔都平掉后才能再开下一轮。金额：第二笔 30% cap；若该笔已是全池第三槽则吃剩余可部署资金。执行日若已触发卖点则**取消加仓、让路出场**。全池最多 3 笔（`BOOK_LOT_MAX`），前两笔 50%/30%、第三笔吃剩余（约 20% cap）；满则 `book_lot_cap`。回踩加仓仍受 `chase_skip`；破平台/金叉不受。**移动止盈不让路加仓信号评估**，但执行日卖点优先。  
 **多仓**（`SCALE_LOTS`，默认开）：记账在共用模块 `scripts/qmt_common/single/lots.py`。每笔自己的成本、峰值、持仓日数、时间成本豁免；`stop_loss` / `trail_stop` / `time_force` **按笔**出。`weekly_bear` 仍一次出清剩余各笔。第一笔可以先止盈，第二笔继续拿（本轮已加过则不再加第三笔）。券商可卖是合计 `can_use`，与 `lots=[id]` 可能对不齐；卖出时打 `SELL lot-can_use`，若目标笔当日新开且可卖来自旧仓则打 `WARN`。  
 关 `SCALE_LOTS` 则均价合并、整仓出。
 
@@ -37,7 +37,7 @@
 - 收盘靠近 `MA20` 或 `MA60`（容差 `MA_TOUCH_TOL`，当前 ±2.5%；算法见标的 `ma_type` / `MA_TYPE`）
 - 成交量 `< MAVOL10 × VOL_PULLBACK_RATIO`（当前 `0.9`）
 
-空仓时开第一笔（`pullback_vol`）。已持仓且门槛+触发都满足、且本轮尚未加过仓时挂 `pending_entry add=True`，尾盘按**分档金额**成交（第二笔 25% cap；全池最后一槽吃剩余；错过则次日开盘补）。加仓仍受下方全局拦截（破平台/金叉不受 `chase_skip`）；另有 `scale_once` / `scale_bars` / `scale_w_hist` / `scale_sell_block` / `scale_cap` / `book_lot_cap`。周线空头 / 乖离 / 斜率 / 无量阴跌会取消加仓 pending。
+空仓时开第一笔（`pullback_vol`）。已持仓且门槛+触发都满足、且本轮尚未加过仓时挂 `pending_entry add=True`，尾盘按**分档金额**成交（第二笔 30% cap；全池最后一槽吃剩余；错过则次日开盘补）。加仓仍受下方全局拦截（破平台/金叉不受 `chase_skip`）；另有 `scale_once` / `scale_bars` / `scale_w_hist` / `scale_sell_block` / `scale_cap` / `book_lot_cap`。周线空头 / 乖离 / 斜率 / 无量阴跌会取消加仓 pending。
 
 ### 加仓触发（持仓中，回踩或破平台任一）
 
@@ -61,19 +61,19 @@
 
 ---
 
-## 仓位：全池三笔分档（50% / 25% / 剩余资金）
+## 仓位：全池三笔分档（50% / 30% / 剩余资金）
 
-跟踪池以 config `BOOK_STOCKS` 为准（默认 600350 / 600028 / 601988 / 601939）。N = 字典长度。四图各评各的票，**当天买单写入同一份账本**，冻结后按空档赋额。全池最多 `BOOK_LOT_MAX=3` 笔（开仓+加仓合计）。
+跟踪池以 config `BOOK_STOCKS` 为准（默认 600350 / 600028 / 601939）。N = 字典长度。三图各评各的票，**当天买单写入同一份账本**，冻结后按空档赋额。全池最多 `BOOK_LOT_MAX=3` 笔（开仓+加仓合计）。已从池中移除的 601988 若仍持仓，其市值算其它股票，从 `E_s` 扣掉；须停掉该主图实例，勿再参与打卡。
 
 `E_s = 账户总资产 − 其它股票市值`。`cap = CASH_RATIO×E_s`（20 万账户、0.90 → 约 18 万）。`k` / `book_mv` 只统计白名单。
 
 | 槽位 | 占 cap | 谁来填 |
 | :--- | :--- | :--- |
 | 第 1 笔（大仓） | 50% ≈ 9 万 | **只开仓**（空池第一笔，或大仓卖掉后**另一只空仓**开仓） |
-| 第 2 笔 | 25% ≈ 4.5 万 | 加仓，或大仓已在时别的标的新开 |
-| 第 3 笔 | **剩余**（`cap − 已占用`，并受现金、单只 room 限制） | 开仓或加仓；吸收前两笔 100 股取整未打满的余额 |
+| 第 2 笔 | 30% ≈ 5.4 万 | 加仓，或大仓已在时别的标的新开 |
+| 第 3 笔 | **剩余**（约 20% cap；`cap − 已占用`，并受现金、单只 room 限制） | 开仓或加仓；吸收前两笔 100 股取整未打满的余额 |
 
-同标的一轮：开仓 1 笔 + 加仓最多 1 笔。加过仓后该只只要还剩任何仓就不再买（`scale_once`）；两笔都平掉才能再开。卖掉该只大仓、还留着 25% 时，大仓由**其他空仓标的**开仓补回（此时只剩 1 槽，该开仓吃剩余，约等于 50%），不是同一只再开。大仓空且只剩 1 个槽时不加仓，留给开仓。
+同标的一轮：开仓 1 笔 + 加仓最多 1 笔。加过仓后该只只要还剩任何仓就不再买（`scale_once`）；两笔都平掉才能再开。卖掉该只大仓、还留着 30% 时，大仓由**其他空仓标的**开仓补回（此时只剩 1 槽，该开仓吃剩余，约等于 50%），不是同一只再开。大仓空且只剩 1 个槽时不加仓，留给开仓。
 
 账本路径 `BOOK_FILE`（默认 `D:\tradingStrategy\hlband_book.json`），**不是**按标的分的 `STATE_FILE`。无买点也要打卡。
 
@@ -84,16 +84,16 @@
 | 14:56:30–14:57:00 | 按空档结果、卖一价限价下单（14:57 起不报） |
 | 次日 09:30–09:32（`BOOK_FREEZE_OPEN`） | 隔夜残留同样打卡冻结，再开盘成交 |
 
-卖出不走分档，仍可在成交窗立即报。持股查询失败时先用本地账本（日志 `src=local`）。成交时 lot 写入 `book_frac`（空档标签 0.50 / 0.25，第三笔金额可大于该档、标签不变）。卖掉哪一档下一笔就补哪一档。
+卖出不走分档，仍可在成交窗立即报。持股查询失败时先用本地账本（日志 `src=local`）。成交时 lot 写入 `book_frac`（空档标签 0.50 / 0.30 / 剩余档，第三笔金额可大于该档、标签不变；旧账本 0.25 收到 0.30）。卖掉哪一档下一笔就补哪一档。
 
 实盘冻结后：
 
 1. 券商快照：`E_s`、现金、白名单各股市值；整只卖出先虚拟减仓
-2. 按各笔 `book_frac` 认占用槽；空档优先 50% 再 25%
-3. **大仓空时开仓优先于加仓**；前两笔按 50%/25% 赋额；**全池最后一槽金额吃 `remain_free`**（标签仍是该空档的 0.50 或 0.25）
+2. 按各笔 `book_frac` 认占用槽；空档优先 50% 再 30% 再剩余档
+3. **大仓空时开仓优先于加仓**；前两笔按 50%/30% 赋额；**全池最后一槽金额吃 `remain_free`**（标签仍是该空档的 0.50 / 0.30 / 剩余档）
 4. 向下到 100 股。满 3 笔 `book_lot_cap`；加仓被大仓空档拦住则 `scale_cap`
 
-回测无全账户账本：本图 `frac × TRADE_BUDGET`（5 万袖子 → 开仓 2.5 万或 1.25 万；最后一槽按剩余比例）。第一笔按 50% 档，不会打满 cap。
+回测无全账户账本：本图 `frac × TRADE_BUDGET`（10 万袖子 → 开仓 5 万或加仓 3 万；最后一槽按剩余比例）。第一笔按 50% 档，不会打满 cap。
 
 日志含：`frac=` `n_held=` `vacant=` `lot=` `why=`（`split` 分档成功 / `book_lot_cap` / `scale_cap` / `wait` / `book_fail`）。
 
@@ -102,9 +102,9 @@
 | 场景 | 开仓 | 加仓 |
 | :--- | :--- | :--- |
 | 空池 | 该只 50% | — |
-| 该只已开未加 | 其他空仓 25%（若已是第三槽则吃剩余） | 该只 25%（仅一次；若已是第三槽则吃剩余） |
+| 该只已开未加 | 其他空仓 30%（若已是第三槽则吃剩余） | 该只 30%（仅一次；若已是第三槽则吃剩余） |
 | 该只已加过仍有仓 | 其他空仓（大仓空则 50% / 最后一槽吃剩余） | 该只不下 |
-| 卖掉 50% 还留 25% | 其他空仓开仓吃剩余（约补回大仓）；该只不下 | 该只不下 |
+| 卖掉 50% 还留 30% | 其他空仓开仓吃剩余（约补回大仓）；该只不下 | 该只不下 |
 | 该只全平 | 可重新开仓 | — |
 | 全池已 3 笔 | `book_lot_cap` | `book_lot_cap` |
 
@@ -114,8 +114,8 @@
 
 | 动作 | 顺序 | 原因 |
 | :--- | :--- | :--- |
-| **增加**（4 → 5） | 先改 `BOOK_STOCKS` 并四图 re-deploy，再挂新图 | 被删出名单但仍持有的票算其它股票，市值从 `E_s` 里减掉 |
-| **减少**（4 → 3） | 先停并**清空**被删标的，再从名单去掉 | 未平就删名单，该市值变成其它股票、`E_s` 变小 |
+| **增加**（3 → 4） | 先改 `BOOK_STOCKS` 并三图 re-deploy，再挂新图 | 被删出名单但仍持有的票算其它股票，市值从 `E_s` 里减掉 |
+| **减少**（3 → 2） | 先停并**清空**被删标的，再从名单去掉 | 未平就删名单，该市值变成其它股票、`E_s` 变小 |
 
 ---
 
@@ -151,7 +151,7 @@
 | 日线低吸 | 位置+10日量 | 近 MA20/60 且 `vol < MAVOL10×0.9`（仅第一笔） |
 | 顺势加仓 | 回踩 / 日线平台 / 周线 MACD | 再缩量回踩，或收盘站上 20 日平台高，或近两周金叉且柱放大 |
 | 无量阴跌 | MA20+20日量 | 收盘 < MA20 且 `vol < MAVOL20×0.60` → 禁开 |
-| 填满仓位 | 全池最多 3 笔 50/25/剩余 | 前两笔 50%/25%；第三笔吃剩余可部署资金；满 3 笔 `book_lot_cap` |
+| 填满仓位 | 全池最多 3 笔 50/30/剩余 | 前两笔 50%/30%；第三笔吃剩余可部署资金；满 3 笔 `book_lot_cap` |
 | 动态防御 | 阶梯峰值回撤 | 3%/6%/10% 档 → 回撤 1.5%/3%/4%（6% 档另有 3% 底线） |
 | 智能时间 | MA60 地板 | `>MA60/2` 日：破 MA60 强平；站上且峰值<3% 则 +5 日豁免后强平；峰值≥3% 不按日历强平 |
 | 硬止损 | 成本 | `close ≤ cost×0.92` |
@@ -170,14 +170,14 @@
 | :--- | :--- | :--- |
 | `DRY_RUN` | `False` | **默认真下单**；联调可改 `True` 或面板勾选「模拟下单」 |
 | `DIVIDEND_TYPE` | `"front_ratio"` | 池外/未写 `dividend_type` 时的复权缺省（仅 config） |
-| `TRADE_BUDGET` | `50000` | 回测单笔回落；实盘不锁此值；可被 `TRADE_BUDGET_BY_STOCK` 覆盖 |
-| `BOOK_STOCKS` | 四只 `{ma_type, dividend_type}` | 跟踪池 + 按标的配置（仅 config）；N=字典长度；`dividend_type`：601939=`front`，其余=`front_ratio` |
-| `BOOK_FILE` | `D:\tradingStrategy\hlband_book.json` | 四图共享信号账本；不是 STATE |
+| `TRADE_BUDGET` | `100000` | 回测单笔回落；实盘不锁此值；可被 `TRADE_BUDGET_BY_STOCK` 覆盖 |
+| `BOOK_STOCKS` | 三只 `{ma_type, dividend_type}` | 跟踪池 + 按标的配置（仅 config）；N=字典长度；`dividend_type`：600028/601939=`front`，600350=`front_ratio` |
+| `BOOK_FILE` | `D:\tradingStrategy\hlband_book.json` | 三图共享信号账本；不是 STATE |
 | `BOOK_FREEZE_CLOSE/OPEN` | `145630` / `093200` | 打卡截止；到点或打卡满 N 即冻结（14:57 竞价前） |
 | `CASH_RATIO` | `0.90` | 可部署比例（相对 E_s=总资产−其它市值） |
 | `BOOK_LOT_MAX` | `3` | 全池同时最多 3 笔（仅 config） |
-| `LOT_OPEN_FRAC` | `0.50` | 开仓：大仓空则 50%；大仓已在且非最后一槽则 25%（仅 config） |
-| `LOT_ADD_FRAC` | `0.25` | 第二笔 25%；全池最后一槽不锁此值，改吃剩余（仅 config） |
+| `LOT_OPEN_FRAC` | `0.50` | 开仓：大仓空则 50%；大仓已在且非最后一槽则 30%（仅 config） |
+| `LOT_ADD_FRAC` | `0.30` | 第二笔 30%；全池最后一槽不锁此值，改吃剩余约 20% cap（仅 config） |
 | `MA_TYPE` | `"EMA"` | 价格均线缺省：`EMA`/`SMA`；`BOOK_STOCKS[code].ma_type` 优先（仅 config；量均始终 SMA，MACD 仍 EMA） |
 | `W_MA_FAST/MID/LIFE/SLOW` | `5/13/34/55` | 周线周期；生命线=34（仅 config） |
 | `W_BIAS_HARD` | `0.08` | 周线高位乖离禁开（相对 MA34） |
@@ -209,4 +209,4 @@
 | `STATE_FILE` | `D:\tradingStrategy\hlband_{stock}.json` | 实盘状态；按主图标的分文件 |
 | `LOG_DIR` | `D:\tradingStrategy\logs` | 实盘结构化日志根目录 |
 
-日志确认 `HlBand v1.57 init` 且 `DIVIDEND=` 为当前主图解析结果（601939=`front`，600028=`front`，600350/601988=`front_ratio`）、`BOOK_N= 4` 与 `book_stocks= 600028.SH,600350.SH,601939.SH,601988.SH`（逗号名单）一致、`cash_ratio= 0.9`、`lot_open_frac= 0.5`、`lot_add_frac= 0.25`、`book_lot_max= 3`、`book_freeze= 145630/093200`、`close_exec= 145600-145700`、`open_exec= 093000-094500`、`scale= True`、`scale_lots= True`、`scale_once= True`、`scale_arm_bars= 8`、`scale_plat= 20/0.10`、`scale_w_expand= 1.2`、`time_force_min_ret= 0.03`、`wMA= 5/13/34`（`dMA=20/60`，`ma_type=` 为当前主图解析结果，`DRY_RUN=False` 与面板或 config 一致）后再挂实盘。策略交易下应另有 `panel applied ...` 行。四图须都能写 `BOOK_FILE`；无信号也要打卡。实盘买入应看到 `fill ... frac= n_held= vacant= lot= why=split`（持股查询失败备用为 `src=local`）；未冻结为 `why=wait`。空池第一笔 `frac=0.50`（20 万账户约 9 万），第二笔 `frac=0.25`，第三笔 `frac` 仍是空档 0.50/0.25、`lot` 接近 `cap - book_mv`。满 3 笔 `book_lot_cap`。本轮已加过仓后再出买点应 `scale_once`，无第 3 笔。验收：回测先见 `diag: ok`；买卖日志为 `@close=`（同日）或残留 `@open=`；买卖闭合、无孤儿仓。第一笔仍为 `pullback_vol`；加仓应为 `pullback_vol` / `plat_break` / `w_macd_golden`（状态行 `scale= True`），成交附近有 `lots now n=2`、`book_frac` 与 `skip sell eval after add fill`。加仓当日状态行 `sellR` 应含 `skip_add_bar`，且不应新挂卖点。本轮已加过仓后再出第一笔时，不应再出现 `BUY add`（可见 `scale_once` 或 `pending_entry cancel scale_once`）。执行日已触发卖点时应看到 `pending_entry cancel scale_sell_block` 且不出现 `BUY add`。只出一笔时应看到 `SELL ... lots=[1]` 且另一笔仍持有。卖出前应有 `SELL lot-can_use`；若 `BUY add` 后同日仍出现 `SELL lots=[2]`，看 `risk=True` 的 WARN（券商成交未必是第二笔）。T+1 部分成交应看到 `pending_exit keep after partial fill`。趋势仓满 30 日且峰值≥3%、仍站上 EMA60 时应看到 `time_force skip trend`，之后由 `trail_stop` / `weekly_bear` / 破 EMA60 出场；磨人仓仍应看到 `time_force grace`。
+日志确认 `HlBand v1.58 init` 且 `DIVIDEND=` 为当前主图解析结果（601939=`front`，600028=`front`，600350=`front_ratio`）、`BOOK_N= 3` 与 `book_stocks= 600028.SH,600350.SH,601939.SH`（逗号名单，无 601988）一致、`cash_ratio= 0.9`、`lot_open_frac= 0.5`、`lot_add_frac= 0.3`、`book_lot_max= 3`、`book_freeze= 145630/093200`、`close_exec= 145600-145700`、`open_exec= 093000-094500`、`scale= True`、`scale_lots= True`、`scale_once= True`、`scale_arm_bars= 8`、`scale_plat= 20/0.10`、`scale_w_expand= 1.2`、`time_force_min_ret= 0.03`、`wMA= 5/13/34`（`dMA=20/60`，`ma_type=` 为当前主图解析结果，`DRY_RUN=False` 与面板或 config 一致）后再挂实盘。策略交易下应另有 `panel applied ...` 行。三图须都能写 `BOOK_FILE`；无信号也要打卡。已停中国银行主图。实盘买入应看到 `fill ... frac= n_held= vacant= lot= why=split`（持股查询失败备用为 `src=local`）；未冻结为 `why=wait`。空池第一笔 `frac=0.50`（20 万账户约 9 万），第二笔 `frac=0.30`（约 5.4 万），第三笔 `frac` 仍是空档 0.50/0.30/0.20、`lot` 接近 `cap - book_mv`。满 3 笔 `book_lot_cap`。本轮已加过仓后再出买点应 `scale_once`，无第 3 笔。验收：回测先见 `diag: ok`；买卖日志为 `@close=`（同日）或残留 `@open=`；买卖闭合、无孤儿仓。第一笔仍为 `pullback_vol`；加仓应为 `pullback_vol` / `plat_break` / `w_macd_golden`（状态行 `scale= True`），成交附近有 `lots now n=2`、`book_frac` 与 `skip sell eval after add fill`。加仓当日状态行 `sellR` 应含 `skip_add_bar`，且不应新挂卖点。本轮已加过仓后再出第一笔时，不应再出现 `BUY add`（可见 `scale_once` 或 `pending_entry cancel scale_once`）。执行日已触发卖点时应看到 `pending_entry cancel scale_sell_block` 且不出现 `BUY add`。只出一笔时应看到 `SELL ... lots=[1]` 且另一笔仍持有。卖出前应有 `SELL lot-can_use`；若 `BUY add` 后同日仍出现 `SELL lots=[2]`，看 `risk=True` 的 WARN（券商成交未必是第二笔）。T+1 部分成交应看到 `pending_exit keep after partial fill`。趋势仓满 30 日且峰值≥3%、仍站上 EMA60 时应看到 `time_force skip trend`，之后由 `trail_stop` / `weekly_bear` / 破 EMA60 出场；磨人仓仍应看到 `time_force grace`。

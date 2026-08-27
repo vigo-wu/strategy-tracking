@@ -1,5 +1,5 @@
 # === hlband/budget.py ===
-# 覆盖 common:single/orders._buy_budget。实盘共享账本：前两笔 50%/25%，第三笔吃剩余；回测 TRADE_BUDGET×档位。
+# 覆盖 common:single/orders._buy_budget。实盘共享账本：前两笔 50%/30%，第三笔吃剩余；回测 TRADE_BUDGET×档位。
 # 勿改 scripts/qmt_common/single/orders.py。
 def _dynamic_budget_on():
     if getattr(A, "is_backtest", False):
@@ -72,9 +72,6 @@ def _code_in_book(code):
     ncode = _norm_code(code)
     if not ncode:
         return False
-    mine = _norm_code(getattr(A, "stock", ""))
-    if mine and ncode == mine:
-        return True
     s = _book_stock_set()
     if not s:
         return True
@@ -85,7 +82,7 @@ def _cfg_book_n():
     n_list = len(_book_stock_set())
     if n_list > 0:
         return n_list
-    return 4
+    return 3
 
 
 def _cfg_cash_ratio():
@@ -122,14 +119,36 @@ def _cfg_lot_open_frac():
 
 def _cfg_lot_add_frac():
     try:
-        v = float(globals().get("LOT_ADD_FRAC") or 0.25)
+        v = float(globals().get("LOT_ADD_FRAC") or 0.30)
     except Exception:
-        v = 0.25
+        v = 0.30
     if v <= 0:
-        v = 0.25
+        v = 0.30
     if v > 1.0:
         v = 1.0
     return v
+
+
+def _cfg_lot_rest_frac():
+    rest = 1.0 - _cfg_lot_open_frac() - _cfg_lot_add_frac()
+    if rest < 0:
+        return 0.0
+    return rest
+
+
+def _slot_targets():
+    open_f = _cfg_lot_open_frac()
+    add_f = _cfg_lot_add_frac()
+    rest = _cfg_lot_rest_frac()
+    max_n = _cfg_book_lot_max()
+    if max_n <= 1:
+        return [open_f]
+    if max_n == 2:
+        return [open_f, add_f]
+    targets = [open_f, add_f, rest]
+    if max_n > 3:
+        targets = targets + [add_f] * (max_n - 3)
+    return targets
 
 
 def _frac_is_big(v):
@@ -139,8 +158,29 @@ def _frac_is_big(v):
         return False
 
 
+def _frac_is_add(v):
+    try:
+        return abs(float(v) - _cfg_lot_add_frac()) < 0.02
+    except Exception:
+        return False
+
+
+def _vacant_rank(v):
+    if _frac_is_big(v):
+        return 0
+    if _frac_is_add(v):
+        return 1
+    return 2
+
+
+def _vacant_sort(vacant):
+    vacant = list(vacant or [])
+    vacant.sort(key=_vacant_rank)
+    return vacant
+
+
 def _snap_book_frac(raw, cap=0.0, mv=0.0, lot_id=1):
-    """把金额或旧字段收成 0.50 / 0.25。"""
+    """把金额或旧字段收成 0.50 / 0.30 / 剩余档。旧 0.25 收到 0.30。"""
     try:
         x = float(raw)
     except Exception:
@@ -151,9 +191,29 @@ def _snap_book_frac(raw, cap=0.0, mv=0.0, lot_id=1):
                 x = x / float(cap)
             else:
                 x = _cfg_lot_add_frac()
-        if x >= 0.375:
-            return _cfg_lot_open_frac()
-        return _cfg_lot_add_frac()
+        targets = []
+        for t in _slot_targets()[:3]:
+            dup = False
+            for s in targets:
+                if abs(s - t) < 1e-12:
+                    dup = True
+                    break
+            if not dup:
+                targets.append(t)
+        if not targets:
+            return _cfg_lot_add_frac()
+        best = targets[0]
+        best_d = abs(x - best)
+        add_f = _cfg_lot_add_frac()
+        for t in targets[1:]:
+            d = abs(x - t)
+            if d < best_d - 1e-12:
+                best, best_d = t, d
+            elif abs(d - best_d) < 1e-12:
+                if abs(t - add_f) < 0.02:
+                    best = t
+                    best_d = d
+        return best
     if cap and cap > 0 and mv and mv > 0:
         return _snap_book_frac(float(mv) / float(cap), cap=0.0)
     try:
@@ -280,7 +340,12 @@ def _collect_book_lot_rows(held=None):
                 continue
             if st not in rows_by or not rows_by.get(st):
                 rows_by[st] = [{"id": 1, "mv": v, "frac": None, "shares": 0}]
-    return rows_by
+    kept = {}
+    for st, rows in rows_by.items():
+        code = _norm_code(st)
+        if code and _code_in_book(code):
+            kept[code] = rows
+    return kept
 
 
 def _finalize_lot_fracs(rows_by, cap):
@@ -341,13 +406,7 @@ def _book_scale_blocked():
 
 
 def _vacant_slots(occupied):
-    targets = [_cfg_lot_open_frac(), _cfg_lot_add_frac(), _cfg_lot_add_frac()]
-    max_n = _cfg_book_lot_max()
-    if max_n < 3:
-        targets = targets[:max_n]
-    elif max_n > 3:
-        extra = max_n - 3
-        targets = targets + [_cfg_lot_add_frac()] * extra
+    targets = _slot_targets()
     used = [False] * len(targets)
     for raw in occupied or []:
         f = _snap_book_frac(raw)
@@ -359,15 +418,22 @@ def _vacant_slots(occupied):
                 matched = i
                 break
         if matched is None:
-            for i in range(len(targets)):
-                if not used[i]:
-                    matched = i
-                    break
+            best_i = None
+            best_d = None
+            for i, t in enumerate(targets):
+                if used[i]:
+                    continue
+                d = abs(t - f)
+                if best_i is None or d < best_d - 1e-12:
+                    best_i, best_d = i, d
+                elif abs(d - best_d) < 1e-12:
+                    if _frac_is_big(targets[best_i]) and (not _frac_is_big(t)):
+                        best_i, best_d = i, d
+            matched = best_i
         if matched is not None:
             used[matched] = True
     vacant = [targets[i] for i in range(len(targets)) if not used[i]]
-    vacant.sort(key=lambda x: 0 if _frac_is_big(x) else 1)
-    return vacant
+    return _vacant_sort(vacant)
 
 
 def _vacant_has_big(vacant):
@@ -1063,7 +1129,7 @@ def _apply_virtual_sells(rows_by, held, cash_v, sells):
             if rows:
                 rows = sorted(
                     rows,
-                    key=lambda r: 0 if _frac_is_big(r.get("frac")) else 1,
+                    key=lambda r: _vacant_rank(r.get("frac")),
                 )
                 dropped = rows.pop(0)
                 cash_v += float(dropped.get("mv") or 0)
@@ -1245,17 +1311,17 @@ def _allocate_equal(cash, now_s):
                 lots[st] = float(lots.get(st) or 0) + lot
                 remain_free -= lot
                 remain_slots -= 1
-                # 金额可吃剩余；档位标签仍用空档 0.50/0.25，避免 snap 把第三笔收成大仓。
+                # 金额可吃剩余；档位标签仍用空档 0.50/0.30/剩余档，避免 snap 把第三笔收成大仓。
                 fracs_by[st] = frac
             else:
                 why_hit = "scale_cap" if is_add else "buy_cap"
                 if frac:
                     remain_vacant.insert(0, frac)
-                    remain_vacant.sort(key=lambda x: 0 if _frac_is_big(x) else 1)
+                    remain_vacant = _vacant_sort(remain_vacant)
         elif frac > 0:
             why_hit = "scale_cap" if is_add else "buy_cap"
             remain_vacant.insert(0, frac)
-            remain_vacant.sort(key=lambda x: 0 if _frac_is_big(x) else 1)
+            remain_vacant = _vacant_sort(remain_vacant)
         if why_hit:
             why_by[st] = why_hit
     my_add = False

@@ -8,7 +8,7 @@ ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 
 # 跟踪池仓位（实盘）。全池最多 BOOK_LOT_MAX 笔（开仓+加仓合计）。
 # 第 1 笔开仓：大仓空则 LOT_OPEN_FRAC×cap。第 2 笔：LOT_ADD_FRAC×cap（加仓或其它标的开仓）。
-# 第 3 笔：金额吃剩余可部署资金；book_frac 仍记空档 0.50/0.25。
+# 第 3 笔：金额吃剩余可部署资金；book_frac 仍记空档（0.50 / 0.30 / 剩余档）。
 # 同标的一轮只加一次；加过仓后该只须全平才能再开。卖掉大仓由其他空仓标的开仓补回。
 # cap = CASH_RATIO * E_s；E_s = 总资产 - 非白名单股票市值。
 # k / book_mv 只统计 BOOK_STOCKS。N = 字典长度。实盘共享账本；回测用 TRADE_BUDGET。
@@ -17,10 +17,9 @@ ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 BOOK_STOCKS = {
     "600350.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
     "600028.SH": {"ma_type": "EMA", "dividend_type": "front"},
-    "601988.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
     "601939.SH": {"ma_type": "EMA", "dividend_type": "front"},
 }
-# 四图共享信号账本（不是 STATE_FILE；禁止按标的分文件）
+# 三图共享信号账本（不是 STATE_FILE；禁止按标的分文件）
 BOOK_FILE = r"D:\tradingStrategy\hlband_book.json"
 # 确认打卡截止：14:56 打卡，14:56:30 冻结，须在 14:57 集合竞价前完成分档下单
 BOOK_FREEZE_CLOSE = "145630"
@@ -29,11 +28,11 @@ BOOK_FREEZE_OPEN = "093200"
 CASH_RATIO = 0.90
 # 全池同时最多几笔（开仓+加仓）。第 4 笔不下。
 BOOK_LOT_MAX = 3
-# 开仓：大仓空档用 50%；大仓已在且不是最后一槽则新开走 25%。
+# 开仓：大仓空档用 50%；大仓已在且不是最后一槽则新开走 30%。
 LOT_OPEN_FRAC = 0.50
-# 第二笔（加仓或其它标的开仓）25%。全池最后一槽不锁此值，改吃剩余资金。
+# 第二笔（加仓或其它标的开仓）30%。全池最后一槽不锁此值，改吃剩余资金（约 20% cap）。
 # 大仓空且只剩 1 个槽时不加仓，留给开仓补大仓（该笔会吃剩余，约等于 50%）。
-LOT_ADD_FRAC = 0.25
+LOT_ADD_FRAC = 0.30
 # 回测无全账户账本时的单笔回落（元）
 TRADE_BUDGET = 100000.0
 # 按标的覆盖预算（key 须与 A.stock 一致）；仅回测生效
@@ -215,7 +214,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.57"
+STRATEGY_VER = "v1.58"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）

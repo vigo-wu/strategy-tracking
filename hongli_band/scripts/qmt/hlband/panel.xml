@@ -3,12 +3,12 @@
     <control note="控件">
         <variable note="控件">
             <item bind="panel_dry_run" name="模拟下单" note="勾选=只打日志不下单（DRY_RUN）" value="False" type="checkBox"/>
-            <item bind="panel_budget" name="回测单笔预算" note="元；仅编辑器回测。实盘按 50%/25%/剩余资金 分档，不锁此值" value="50000" type="intput"/>
-            <item bind="panel_cash_ratio" name="可部署比例" note="相对 E_s=总资产减去其它股票市值，0.90=策略袖子最多用 90%。四图须填相同值" value="0.90" type="intput"/>
+            <item bind="panel_budget" name="回测单笔预算" note="元；仅编辑器回测。实盘按 50%/30%/剩余资金 分档，不锁此值" value="100000" type="intput"/>
+            <item bind="panel_cash_ratio" name="可部署比例" note="相对 E_s=总资产减去其它股票市值，0.90=策略袖子最多用 90%。三图须填相同值" value="0.90" type="intput"/>
             <item bind="panel_w_bias_hard" name="周线 高位乖离禁开" note="(MA5-MA34)/MA34 达到此值禁开，0.08=8%；生命线=W_MA_LIFE=34" value="0.08" type="intput"/>
             <item bind="panel_chase_pct" name="买入 追高禁开" note="当日涨幅达到此比例禁开，0.05=5%" value="0.05" type="intput"/>
             <item bind="panel_stop_loss" name="卖出 硬止损" note="收盘相对成本回撤达到此比例清仓，0.08=8%" value="0.08" type="intput"/>
-            <item bind="panel_scale" name="盈利后加仓" note="勾选=浮盈够且持仓满最短日后加一笔；第二笔 25%，若是全池第三笔则吃剩余资金。同一轮只加一次，该只全平后才能再开" value="True" type="checkBox"/>
+            <item bind="panel_scale" name="盈利后加仓" note="勾选=浮盈够且持仓满最短日后加一笔；第二笔 30%，若是全池第三笔则吃剩余资金。同一轮只加一次，该只全平后才能再开" value="True" type="checkBox"/>
         </variable>
     </control>
 </TCStageLayout>
