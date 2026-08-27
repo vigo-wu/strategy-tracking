@@ -550,6 +550,9 @@ def _scale_gate(w_detail=None, price=None):
         return False, "scale_once"
     if _pos_lots() >= int(globals().get("SCALE_MAX") or 1):
         return False, "scale_max"
+    blocked, why_b = _book_scale_blocked()
+    if blocked:
+        return False, why_b or "book_lot_cap"
     arm = float(globals().get("SCALE_ARM") or 0)
     if arm <= 0:
         arm = 0.03
@@ -1068,8 +1071,14 @@ def _after_signal_buy_filled(px, day, add=False):
     """买入成交后初始化持仓元数据并清信号 pending。"""
     pe = getattr(A, "pending_entry", None)
     add_reasons = []
+    book_frac = None
     if isinstance(pe, dict):
         add_reasons = [str(x) for x in (pe.get("reasons") or []) if x]
+        if pe.get("book_frac") is not None:
+            try:
+                book_frac = float(pe.get("book_frac"))
+            except Exception:
+                book_frac = None
     A.pending_entry = None
     A.pending_exit = None
     A.round_scaled = True if add else False
@@ -1093,6 +1102,8 @@ def _after_signal_buy_filled(px, day, add=False):
             lots[-1]["hold_count_bar"] = str(day)
             if not add:
                 lots[-1]["hold_bars"] = 0
+        if lots and book_frac is not None:
+            lots[-1]["book_frac"] = float(book_frac)
         _mirror_hold_from_lots()
         _save_state()
         return
@@ -1207,6 +1218,7 @@ _BUY_LABELS = {
     "vol_dry_skip": "无量阴跌禁开",
     "weekly_bear": "周线空头禁开",
     "scale_once": "本轮已加仓",
+    "book_lot_cap": "跟踪池已满三笔跳过买入",
     "buy_cap": "账户或单标的额度已满跳过开仓",
     "scale_cap": "账户或单标的额度已满跳过加仓",
     "wait": "等待共享账本冻结",
@@ -1378,6 +1390,9 @@ def _try_exec_pending_entry(
     primary = reasons[0] if reasons else "entry"
     kind = "add" if pe_is_add else "buy"
     cap_ok, cap_why, snap = _fill_room_ok(px, opening=not pe_is_add)
+    if isinstance(pe_entry, dict):
+        pe_entry["book_frac"] = snap.get("frac")
+        A.pending_entry = pe_entry
     if _dynamic_budget_on():
         _log_fill_budget(snap, kind)
     if cap_why in ("wait", "book_fail", "no_E"):
@@ -1428,7 +1443,7 @@ def _try_exec_pending_entry(
         add=pe_is_add,
     )
     budget = float(snap.get("lot") or 0)
-    ok = _order_buy(C, px, now, budget, add=pe_is_add)
+    ok = _order_buy(C, px, now, budget, add=pe_is_add, book_frac=snap.get("frac"))
     if ok:
         _on_signal_order_ok("buy", px=px, day=day, add=pe_is_add)
     else:
@@ -1999,6 +2014,12 @@ def _handle(C):
         return
 
     if buy_sig and ("BUY" not in getattr(A, "acted", set())):
+        if _book_n_held_live() >= _cfg_book_lot_max():
+            if live_cc:
+                _mark_signal_eval_done(day, is_confirm)
+            print("%s skip open book_lot_cap n_held=%s" % (STRATEGY_NAME, _book_n_held_live()))
+            _event_log("pending_entry_skip", reason="book_lot_cap", n_held=_book_n_held_live())
+            return
         if isinstance(getattr(A, "pending_entry", None), dict):
             if live_cc:
                 _mark_signal_eval_done(day, is_confirm)

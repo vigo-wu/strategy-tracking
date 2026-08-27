@@ -1,14 +1,14 @@
 # === hlband/budget.py ===
-# 覆盖 common:single/orders._buy_budget。实盘共享账本均分；回测仍用 TRADE_BUDGET。
+# 覆盖 common:single/orders._buy_budget。实盘共享账本：前两笔 50%/25%，第三笔吃剩余；回测 TRADE_BUDGET×档位。
 # 勿改 scripts/qmt_common/single/orders.py。
 def _dynamic_budget_on():
     if getattr(A, "is_backtest", False):
         return False
-    return bool(globals().get("DYNAMIC_BUDGET", True))
+    return True
 
 
 def _equal_split_on():
-    return _dynamic_budget_on() and bool(globals().get("EQUAL_SPLIT", True))
+    return _dynamic_budget_on()
 
 
 def _norm_code(code):
@@ -83,35 +83,9 @@ def _code_in_book(code):
 
 def _cfg_book_n():
     n_list = len(_book_stock_set())
-    try:
-        n_cfg = int(globals().get("BOOK_N") or 0)
-    except Exception:
-        n_cfg = 0
     if n_list > 0:
-        if n_cfg and n_cfg != n_list:
-            _diag_once("book_n_mismatch", "BOOK_N=%s BOOK_STOCKS=%s" % (n_cfg, n_list))
         return n_list
-    return max(1, n_cfg or 4)
-
-
-def _cfg_min_lot():
-    try:
-        v = float(globals().get("MIN_LOT") or 0)
-    except Exception:
-        v = 0.0
-    return max(0.0, v)
-
-
-def _cfg_max_name_frac():
-    try:
-        v = float(globals().get("MAX_NAME_FRAC") or 0.50)
-    except Exception:
-        v = 0.50
-    if v <= 0:
-        v = 0.50
-    if v > 1.0:
-        v = 1.0
-    return v
+    return 4
 
 
 def _cfg_cash_ratio():
@@ -126,18 +100,385 @@ def _cfg_cash_ratio():
     return v
 
 
+def _cfg_book_lot_max():
+    try:
+        n = int(globals().get("BOOK_LOT_MAX") or 3)
+    except Exception:
+        n = 3
+    return max(1, n)
+
+
+def _cfg_lot_open_frac():
+    try:
+        v = float(globals().get("LOT_OPEN_FRAC") or 0.50)
+    except Exception:
+        v = 0.50
+    if v <= 0:
+        v = 0.50
+    if v > 1.0:
+        v = 1.0
+    return v
+
+
+def _cfg_lot_add_frac():
+    try:
+        v = float(globals().get("LOT_ADD_FRAC") or 0.25)
+    except Exception:
+        v = 0.25
+    if v <= 0:
+        v = 0.25
+    if v > 1.0:
+        v = 1.0
+    return v
+
+
+def _frac_is_big(v):
+    try:
+        return abs(float(v) - _cfg_lot_open_frac()) < 0.02
+    except Exception:
+        return False
+
+
+def _snap_book_frac(raw, cap=0.0, mv=0.0, lot_id=1):
+    """把金额或旧字段收成 0.50 / 0.25。"""
+    try:
+        x = float(raw)
+    except Exception:
+        x = None
+    if x is not None and x > 0:
+        if x > 1.0 + 1e-9:
+            if cap and cap > 0:
+                x = x / float(cap)
+            else:
+                x = _cfg_lot_add_frac()
+        if x >= 0.375:
+            return _cfg_lot_open_frac()
+        return _cfg_lot_add_frac()
+    if cap and cap > 0 and mv and mv > 0:
+        return _snap_book_frac(float(mv) / float(cap), cap=0.0)
+    try:
+        lid = int(lot_id or 1)
+    except Exception:
+        lid = 1
+    if lid <= 1:
+        return _cfg_lot_open_frac()
+    return _cfg_lot_add_frac()
+
+
+def _lot_row_from_dict(lot):
+    if not isinstance(lot, dict):
+        return None
+    try:
+        sh = int(lot.get("shares") or 0)
+    except Exception:
+        sh = 0
+    if sh < 100:
+        return None
+    try:
+        px = float(lot.get("price") or 0)
+    except Exception:
+        px = 0.0
+    try:
+        lid = int(lot.get("id") or 0)
+    except Exception:
+        lid = 0
+    raw_frac = lot.get("book_frac")
+    return {
+        "id": lid,
+        "mv": float(sh) * float(px) if px > 0 else 0.0,
+        "frac": raw_frac,
+        "shares": sh,
+    }
+
+
+def _lots_from_state_raw(raw):
+    if not isinstance(raw, dict):
+        return "", []
+    stock = _norm_code(raw.get("stock") or "")
+    rows = []
+    lots = raw.get("lots")
+    if isinstance(lots, list):
+        for lot in lots:
+            row = _lot_row_from_dict(lot)
+            if row:
+                rows.append(row)
+    if rows:
+        return stock, rows
+    pos = raw.get("position")
+    if isinstance(pos, dict):
+        try:
+            vol = int(pos.get("shares") or 0)
+        except Exception:
+            vol = 0
+        try:
+            px = float(pos.get("price") or 0)
+        except Exception:
+            px = 0.0
+        if vol >= 100 and px > 0:
+            rows.append({"id": 1, "mv": float(vol) * float(px), "frac": None, "shares": vol})
+    return stock, rows
+
+
+def _state_glob_lots():
+    """各图 STATE → {stock: [lot_row,...]}。"""
+    out = {}
+    base = str(globals().get("STATE_FILE") or "").strip()
+    if not base or "{stock}" not in base:
+        return out
+    folder = os.path.dirname(base)
+    fname = os.path.basename(base)
+    mid = fname.find("{stock}")
+    if mid < 0:
+        return out
+    pre = fname[:mid]
+    post = fname[mid + len("{stock}"):]
+    book_name = os.path.basename(_book_path() or "")
+    try:
+        names = os.listdir(folder) if folder else []
+    except Exception:
+        return out
+    for fn in names:
+        if book_name and fn == book_name:
+            continue
+        if not (fn.startswith(pre) and fn.endswith(post)):
+            continue
+        path = os.path.join(folder, fn) if folder else fn
+        try:
+            raw = json.loads(open(path, "r").read())
+        except Exception:
+            continue
+        stock, rows = _lots_from_state_raw(raw)
+        if stock and rows:
+            out[stock] = rows
+    return out
+
+
+def _collect_book_lot_rows(held=None):
+    """池内各笔。本图内存仓覆盖 STATE。held 有市值但无分笔时补 1 笔。"""
+    rows_by = _state_glob_lots()
+    mine = _norm_code(getattr(A, "stock", ""))
+    live = []
+    for lot in getattr(A, "lots", None) or []:
+        row = _lot_row_from_dict(lot)
+        if row:
+            live.append(row)
+    if mine:
+        if live:
+            rows_by[mine] = live
+        elif not _has_position():
+            rows_by[mine] = []
+    if held:
+        for code, mv in held.items():
+            st = _norm_code(code)
+            if not st or not _code_in_book(st):
+                continue
+            try:
+                v = float(mv or 0)
+            except Exception:
+                v = 0.0
+            if v <= 1e-6:
+                continue
+            if st not in rows_by or not rows_by.get(st):
+                rows_by[st] = [{"id": 1, "mv": v, "frac": None, "shares": 0}]
+    return rows_by
+
+
+def _finalize_lot_fracs(rows_by, cap):
+    out = {}
+    for stock, rows in (rows_by or {}).items():
+        nxt = []
+        for row in rows or []:
+            item = dict(row)
+            item["frac"] = _snap_book_frac(
+                item.get("frac"),
+                cap=cap,
+                mv=item.get("mv") or 0,
+                lot_id=item.get("id") or 1,
+            )
+            nxt.append(item)
+        out[_norm_code(stock)] = nxt
+    return out
+
+
+def _occupied_fracs(rows_by):
+    out = []
+    for rows in (rows_by or {}).values():
+        for row in rows or []:
+            out.append(float(row.get("frac") or 0))
+    return out
+
+
+def _book_n_held_live(held=None):
+    if getattr(A, "is_backtest", False):
+        n = 0
+        for lot in getattr(A, "lots", None) or []:
+            if isinstance(lot, dict) and int(lot.get("shares") or 0) >= 100:
+                n += 1
+        return int(n)
+    rows = _collect_book_lot_rows(held)
+    n = 0
+    for recs in rows.values():
+        n += len(recs or [])
+    return int(n)
+
+
+def _book_scale_blocked():
+    """全池满 3 笔，或大仓空且只剩 1 槽（留给开仓）。"""
+    n_held = _book_n_held_live()
+    if n_held >= _cfg_book_lot_max():
+        return True, "book_lot_cap"
+    if getattr(A, "is_backtest", False):
+        if _chart_next_frac(False) <= 1e-9:
+            return True, "scale_cap"
+        return False, ""
+    rows = _finalize_lot_fracs(_collect_book_lot_rows(), 0)
+    occupied = _occupied_fracs(rows)
+    vacant = _vacant_slots(occupied)
+    slots_left = _cfg_book_lot_max() - len(occupied)
+    if _vacant_has_big(vacant) and slots_left <= 1:
+        return True, "scale_cap"
+    return False, ""
+
+
+def _vacant_slots(occupied):
+    targets = [_cfg_lot_open_frac(), _cfg_lot_add_frac(), _cfg_lot_add_frac()]
+    max_n = _cfg_book_lot_max()
+    if max_n < 3:
+        targets = targets[:max_n]
+    elif max_n > 3:
+        extra = max_n - 3
+        targets = targets + [_cfg_lot_add_frac()] * extra
+    used = [False] * len(targets)
+    for raw in occupied or []:
+        f = _snap_book_frac(raw)
+        matched = None
+        for i, t in enumerate(targets):
+            if used[i]:
+                continue
+            if abs(t - f) < 0.02:
+                matched = i
+                break
+        if matched is None:
+            for i in range(len(targets)):
+                if not used[i]:
+                    matched = i
+                    break
+        if matched is not None:
+            used[matched] = True
+    vacant = [targets[i] for i in range(len(targets)) if not used[i]]
+    vacant.sort(key=lambda x: 0 if _frac_is_big(x) else 1)
+    return vacant
+
+
+def _vacant_has_big(vacant):
+    for v in vacant or []:
+        if _frac_is_big(v):
+            return True
+    return False
+
+
+def _vacant_has_small(vacant):
+    for v in vacant or []:
+        if not _frac_is_big(v):
+            return True
+    return False
+
+
+def _take_vacant(vacant, want_big):
+    vacant = list(vacant or [])
+    idx = None
+    for i, v in enumerate(vacant):
+        if want_big and _frac_is_big(v):
+            idx = i
+            break
+        if (not want_big) and (not _frac_is_big(v)):
+            idx = i
+            break
+    if idx is None:
+        return None, vacant
+    got = vacant.pop(idx)
+    return got, vacant
+
+
+def _rank_buy_intents(intents, vacant):
+    need_big = _vacant_has_big(vacant)
+    ranked = list(intents or [])
+
+    def key(it):
+        add = 1 if it.get("add") else 0
+        if need_big:
+            pri = add
+        else:
+            pri = 0 if add else 1
+        return (pri, str(it.get("hhmmss") or ""), str(it.get("stock") or ""))
+
+    ranked.sort(key=key)
+    return ranked
+
+
+def _remainder_frac(occupied):
+    """已占用档位之后，相对 cap 还剩多少（第三笔用）。"""
+    s = 0.0
+    for raw in occupied or []:
+        s += float(_snap_book_frac(raw) or 0)
+    left = 1.0 - s
+    if left < 0:
+        return 0.0
+    return left
+
+
+def _chart_next_frac(opening):
+    """回测/非均分：本图下一笔占 TRADE_BUDGET 的比例。最后一槽吃剩余。"""
+    opening = bool(opening)
+    sleeve = float(_trade_budget_cap() or 0)
+    live = []
+    for lot in getattr(A, "lots", None) or []:
+        row = _lot_row_from_dict(lot)
+        if row:
+            live.append(row)
+    mine = _norm_code(getattr(A, "stock", "")) or "_"
+    rows_by = _finalize_lot_fracs({mine: live}, sleeve)
+    occupied = _occupied_fracs(rows_by)
+    vacant = _vacant_slots(occupied)
+    n_held = len(occupied)
+    slots_left = _cfg_book_lot_max() - n_held
+    if slots_left <= 0:
+        return 0.0
+    if (not opening) and _vacant_has_big(vacant) and slots_left <= 1:
+        return 0.0
+    if slots_left <= 1:
+        return _remainder_frac(occupied)
+    if opening:
+        if _vacant_has_big(vacant):
+            return _cfg_lot_open_frac()
+        if _vacant_has_small(vacant):
+            return _cfg_lot_add_frac()
+        return 0.0
+    if _vacant_has_small(vacant):
+        return _cfg_lot_add_frac()
+    return 0.0
+
+
 def _buy_budget_fixed(cash):
-    """回测 / 关闭 DYNAMIC_BUDGET：沿用单笔 TRADE_BUDGET。"""
+    """回测：TRADE_BUDGET × 本图下一档。"""
     budget = _trade_budget_cap()
+    opening = not (
+        _has_position()
+        or (getattr(A, "is_backtest", False) and _bt_held_vol() >= 100)
+    )
+    frac = _chart_next_frac(opening)
+    lot = float(budget or 0) * float(frac or 0)
+    if lot < 0:
+        lot = 0.0
     if getattr(A, "is_backtest", False) or DRY_RUN:
-        return budget if budget > 0 else 0.0
+        return lot
     ratio = float(globals().get("CASH_RATIO") or 0)
     if cash is None or cash <= 0:
-        return budget
+        return lot
     if ratio > 0:
         by_ratio = float(cash) * ratio
-        return min(budget, by_ratio) if budget > 0 else by_ratio
-    return budget
+        return min(lot, by_ratio) if lot > 0 else 0.0
+    return lot
 
 
 def _pos_row_mv(p, vol):
@@ -436,56 +777,26 @@ def _empty_fill_snap():
         "why": "",
         "n_buy": 0,
         "split": 0.0,
+        "fill_cap": 0.0,
+        "name_lim": 0.0,
+        "scale_lim": 0.0,
+        "rsv_empty": False,
+        "fill_res": False,
+        "frac": 0.0,
+        "n_held": 0,
+        "vacant": "",
         "src": "",
     }
 
 
-def _name_limit(equity, cap, n, min_lot, name_frac):
-    lim = min(name_frac * float(equity), cap - (n - 1) * min_lot)
-    if lim < 0:
-        return 0.0
-    return float(lim)
-
-
-def _water_fill(rooms, pool):
-    """rooms: {stock: max_yuan}. 均分 pool，触顶后把剩余再分给未触顶的。"""
-    lots = {}
-    for s in rooms:
-        lots[s] = 0.0
+def _name_room(lim, mv):
     try:
-        remaining = float(pool)
+        left = float(lim or 0) - float(mv or 0)
     except Exception:
-        remaining = 0.0
-    if remaining <= 0:
-        return lots
-    active = [s for s in rooms if float(rooms.get(s) or 0) > 1e-6]
-    guard = 0
-    while active and remaining > 1e-6 and guard < 16:
-        guard += 1
-        share = remaining / float(len(active))
-        nxt = []
-        progressed = False
-        for s in active:
-            room = float(rooms.get(s) or 0) - lots[s]
-            if room <= 1e-6:
-                continue
-            if share + 1e-9 >= room:
-                lots[s] += room
-                remaining -= room
-                progressed = True
-            else:
-                lots[s] += share
-                remaining -= share
-                nxt.append(s)
-                progressed = True
-        if not nxt:
-            break
-        if len(nxt) == len(active) and share > 0:
-            break
-        if not progressed:
-            break
-        active = nxt
-    return lots
+        left = 0.0
+    if left < 0:
+        return 0.0
+    return left
 
 
 def _book_path():
@@ -550,7 +861,46 @@ def _book_save(data):
         return False
 
 
-def _book_checkin(day, window, now_s, buy=False, add=False, sell=False, sell_all=False):
+def _sell_fracs_from_exit():
+    px = getattr(A, "pending_exit", None)
+    if not isinstance(px, dict):
+        return []
+    ids = px.get("lot_ids") or []
+    try:
+        idset = set(int(x) for x in ids)
+    except Exception:
+        idset = set()
+    out = []
+    for lot in getattr(A, "lots", None) or []:
+        if not isinstance(lot, dict):
+            continue
+        try:
+            lid = int(lot.get("id") or 0)
+        except Exception:
+            lid = 0
+        if idset and lid not in idset:
+            continue
+        if not idset:
+            continue
+        row = _lot_row_from_dict(lot)
+        if not row:
+            continue
+        out.append(_snap_book_frac(row.get("frac"), mv=row.get("mv"), lot_id=lid))
+    return out
+
+
+def _book_checkin(
+    day,
+    window,
+    now_s,
+    buy=False,
+    add=False,
+    sell=False,
+    sell_all=False,
+    n_lots=0,
+    round_scaled=False,
+    sell_fracs=None,
+):
     """本图写入共享账本一条打卡。"""
     if not _equal_split_on():
         return
@@ -569,14 +919,19 @@ def _book_checkin(day, window, now_s, buy=False, add=False, sell=False, sell_all
     if not isinstance(names, dict):
         names = {}
         data["names"] = names
-    names[stock] = {
+    rec = {
         "checkin": True,
         "buy": bool(buy),
         "add": bool(add),
         "sell": bool(sell),
         "sell_all": bool(sell_all),
         "hhmmss": str(now_s or ""),
+        "n_lots": int(n_lots or 0),
+        "round_scaled": bool(round_scaled),
     }
+    if sell_fracs:
+        rec["sell_fracs"] = [float(x) for x in sell_fracs]
+    names[stock] = rec
     _book_save(data)
 
 
@@ -603,6 +958,10 @@ def _sync_signal_book(day, now_s, buy_sig, scale_sig, holding, sell_ok, force_em
         reasons = px.get("reasons") or []
         if (not px.get("lot_ids")) or ("weekly_bear" in reasons):
             sell_all = True
+    n_lots = 0
+    for lot in getattr(A, "lots", None) or []:
+        if isinstance(lot, dict) and int(lot.get("shares") or 0) >= 100:
+            n_lots += 1
     _book_checkin(
         day,
         window,
@@ -611,6 +970,9 @@ def _sync_signal_book(day, now_s, buy_sig, scale_sig, holding, sell_ok, force_em
         add=add,
         sell=sell,
         sell_all=sell_all,
+        n_lots=n_lots,
+        round_scaled=bool(getattr(A, "round_scaled", False)),
+        sell_fracs=_sell_fracs_from_exit() if sell else None,
     )
 
 
@@ -659,10 +1021,83 @@ def _book_buy_intents(data, now_s):
         if hh > cutoff:
             continue
         if rec.get("sell"):
-            sells.append((str(stock), bool(rec.get("sell_all"))))
+            fracs = rec.get("sell_fracs") or []
+            sells.append((str(stock), bool(rec.get("sell_all")), list(fracs), str(rec.get("hhmmss") or "")))
         if rec.get("buy") and (not rec.get("sell")):
-            intents.append({"stock": str(stock), "add": bool(rec.get("add"))})
+            intents.append(
+                {
+                    "stock": str(stock),
+                    "add": bool(rec.get("add")),
+                    "hhmmss": str(rec.get("hhmmss") or ""),
+                }
+            )
     return intents, sells
+
+
+def _apply_virtual_sells(rows_by, held, cash_v, sells):
+    rows_by = dict(rows_by or {})
+    held = dict(held or {})
+    try:
+        cash_v = float(cash_v or 0)
+    except Exception:
+        cash_v = 0.0
+    for item in sells or []:
+        stock = _norm_code(item[0] if item else "")
+        sell_all = bool(item[1]) if item and len(item) > 1 else False
+        fracs = list(item[2]) if item and len(item) > 2 else []
+        if not stock:
+            continue
+        rows = list(rows_by.get(stock) or [])
+        if sell_all:
+            mv = 0.0
+            for r in rows:
+                mv += float(r.get("mv") or 0)
+            if mv <= 1e-6:
+                mv = float(held.get(stock) or 0)
+            cash_v += mv
+            held.pop(stock, None)
+            rows_by[stock] = []
+            continue
+        want = [_snap_book_frac(x) for x in fracs]
+        if not want:
+            if rows:
+                rows = sorted(
+                    rows,
+                    key=lambda r: 0 if _frac_is_big(r.get("frac")) else 1,
+                )
+                dropped = rows.pop(0)
+                cash_v += float(dropped.get("mv") or 0)
+            left_mv = 0.0
+            for r in rows:
+                left_mv += float(r.get("mv") or 0)
+            if left_mv > 1e-6:
+                held[stock] = left_mv
+            else:
+                held.pop(stock, None)
+            rows_by[stock] = rows
+            continue
+        remain = []
+        for r in rows:
+            f = _snap_book_frac(r.get("frac"))
+            hit = None
+            for i, w in enumerate(want):
+                if abs(w - f) < 0.02:
+                    hit = i
+                    break
+            if hit is None:
+                remain.append(r)
+            else:
+                cash_v += float(r.get("mv") or 0)
+                want.pop(hit)
+        rows_by[stock] = remain
+        left_mv = 0.0
+        for r in remain:
+            left_mv += float(r.get("mv") or 0)
+        if left_mv > 1e-6:
+            held[stock] = left_mv
+        else:
+            held.pop(stock, None)
+    return rows_by, held, cash_v
 
 
 def _allocate_equal(cash, now_s):
@@ -682,37 +1117,54 @@ def _allocate_equal(cash, now_s):
             held[_norm_code(code)] = v
     data = _book_load()
     intents, sells = _book_buy_intents(data, now_s)
-    intents = [{"stock": _norm_code(it.get("stock")), "add": bool(it.get("add"))} for it in intents if _code_in_book(it.get("stock"))]
-    sells = [(_norm_code(st), sa) for st, sa in sells if _code_in_book(st)]
+    clean_intents = []
+    for it in intents:
+        if not _code_in_book(it.get("stock")):
+            continue
+        clean_intents.append(
+            {
+                "stock": _norm_code(it.get("stock")),
+                "add": bool(it.get("add")),
+                "hhmmss": str(it.get("hhmmss") or ""),
+            }
+        )
+    intents = clean_intents
+    clean_sells = []
+    for item in sells:
+        st = _norm_code(item[0] if item else "")
+        if not _code_in_book(st):
+            continue
+        sa = bool(item[1]) if item and len(item) > 1 else False
+        fracs = list(item[2]) if item and len(item) > 2 else []
+        clean_sells.append((st, sa, fracs))
+    sells = clean_sells
     cash_v = 0.0
     try:
         cash_v = float(cash) if cash is not None else 0.0
     except Exception:
         cash_v = 0.0
-    for stock, sell_all in sells:
-        if not sell_all:
-            continue
-        mv = float(held.pop(stock, 0) or 0)
-        cash_v += mv
+    other_mv = float(broker.get("other_mv") or 0)
+    equity = _account_equity(cash, float(broker.get("book_mv") or 0), other_mv)
+    ratio = _cfg_cash_ratio()
+    n = _cfg_book_n()
+    stock = _norm_code(getattr(A, "stock", ""))
+    cap_guess = ratio * float(equity) if equity and equity > 0 else 0.0
+    rows_by = _finalize_lot_fracs(_collect_book_lot_rows(held), cap_guess)
+    rows_by, held, cash_v = _apply_virtual_sells(rows_by, held, cash_v, sells)
     book_mv = 0.0
     for mv in held.values():
         book_mv += float(mv or 0)
+    if sells:
+        equity = cash_v + book_mv
     k = len([1 for mv in held.values() if float(mv or 0) > 1e-6])
     n_new = 0
     for it in intents:
         st = it.get("stock")
         if float(held.get(st) or 0) <= 1e-6:
             n_new += 1
-    n = _cfg_book_n()
-    min_lot = _cfg_min_lot()
     k_after = k + n_new
     empty = max(0, n - k_after)
-    reserve = empty * min_lot
-    other_mv = float(broker.get("other_mv") or 0)
-    equity = _account_equity(cash, float(broker.get("book_mv") or 0), other_mv)
-    if sells:
-        equity = cash_v + book_mv
-    stock = _norm_code(getattr(A, "stock", ""))
+    reserve = 0.0
     name_mv = float(held.get(stock) or 0)
     snap.update(
         {
@@ -728,41 +1180,119 @@ def _allocate_equal(cash, now_s):
             "cash": cash_v,
             "n_buy": len(intents),
             "opening": name_mv <= 1e-6,
+            "rsv_empty": False,
+            "fill_res": False,
         }
     )
     if equity is None or equity <= 0:
         snap["why"] = "no_E"
         return {}, snap
-    ratio = _cfg_cash_ratio()
-    name_frac = _cfg_max_name_frac()
     cap = ratio * float(equity)
-    pool = cap - book_mv - reserve
-    pool = min(pool, cash_v)
-    if pool < 0:
-        pool = 0.0
-    name_lim = _name_limit(equity, cap, n, min_lot, name_frac)
-    rooms = {}
-    for it in intents:
+    name_lim = cap
+    scale_lim = cap
+    rows_by = _finalize_lot_fracs(rows_by, cap)
+    occupied = _occupied_fracs(rows_by)
+    vacant = _vacant_slots(occupied)
+    n_held = len(occupied)
+    slots_left = _cfg_book_lot_max() - n_held
+    free = cap - book_mv
+    if free < 0:
+        free = 0.0
+    free = min(free, cash_v)
+    lots = {}
+    fracs_by = {}
+    why_by = {}
+    ranked = _rank_buy_intents(intents, vacant)
+    remain_free = free
+    remain_vacant = list(vacant)
+    remain_slots = slots_left
+    for it in ranked:
         st = it.get("stock")
-        mv = float(held.get(st) or 0)
-        room = name_lim - mv
-        if room < 0:
-            room = 0.0
-        rooms[st] = room
-    lots = _water_fill(rooms, pool)
+        is_add = bool(it.get("add"))
+        why_hit = ""
+        frac = 0.0
+        if remain_slots <= 0:
+            why_hit = "book_lot_cap"
+        elif is_add:
+            if _vacant_has_big(remain_vacant) and remain_slots <= 1:
+                why_hit = "scale_cap"
+            elif not _vacant_has_small(remain_vacant):
+                why_hit = "book_lot_cap"
+            else:
+                frac, remain_vacant = _take_vacant(remain_vacant, False)
+                frac = float(frac or 0)
+        else:
+            if _vacant_has_big(remain_vacant):
+                frac, remain_vacant = _take_vacant(remain_vacant, True)
+            elif _vacant_has_small(remain_vacant):
+                frac, remain_vacant = _take_vacant(remain_vacant, False)
+            else:
+                why_hit = "book_lot_cap"
+            frac = float(frac or 0)
+        lot = 0.0
+        last_slot = remain_slots <= 1
+        # 最后一槽：金额吃 cap-已占用-现金限制；book_frac 仍用本档 frac。
+        if frac > 0 and remain_free > 1e-6:
+            lim = scale_lim if is_add else name_lim
+            room = _name_room(lim, float(held.get(st) or 0) + float(lots.get(st) or 0))
+            if last_slot:
+                lot = min(remain_free, room)
+            else:
+                lot = min(frac * cap, remain_free, room)
+            if lot < 0:
+                lot = 0.0
+            if lot > 0:
+                lots[st] = float(lots.get(st) or 0) + lot
+                remain_free -= lot
+                remain_slots -= 1
+                # 金额可吃剩余；档位标签仍用空档 0.50/0.25，避免 snap 把第三笔收成大仓。
+                fracs_by[st] = frac
+            else:
+                why_hit = "scale_cap" if is_add else "buy_cap"
+                if frac:
+                    remain_vacant.insert(0, frac)
+                    remain_vacant.sort(key=lambda x: 0 if _frac_is_big(x) else 1)
+        elif frac > 0:
+            why_hit = "scale_cap" if is_add else "buy_cap"
+            remain_vacant.insert(0, frac)
+            remain_vacant.sort(key=lambda x: 0 if _frac_is_big(x) else 1)
+        if why_hit:
+            why_by[st] = why_hit
+    my_add = False
+    for it in intents:
+        if _norm_code(it.get("stock")) == stock and it.get("add"):
+            my_add = True
     my_lot = float(lots.get(stock) or 0)
-    my_room = float(rooms.get(stock) or 0)
-    n_buy = len(intents) if intents else 1
+    my_frac = float(fracs_by.get(stock) or 0)
+    my_why = str(why_by.get(stock) or "")
+    if my_lot > 1e-6:
+        my_why = "split"
+    elif not my_why:
+        if remain_slots <= 0 or n_held >= _cfg_book_lot_max():
+            my_why = "book_lot_cap"
+        elif my_add:
+            my_why = "scale_cap"
+        else:
+            my_why = "buy_cap" if intents else "split"
+    fill_cap = my_frac * cap if my_frac > 0 else 0.0
+    n_buy = len(intents) if intents else 0
     snap.update(
         {
             "E": float(equity),
             "cap": cap,
-            "acct_room": pool,
-            "name_room": my_room,
+            "acct_room": remain_free,
+            "name_room": _name_room(name_lim if not my_add else scale_lim, name_mv + my_lot),
+            "name_lim": name_lim,
+            "scale_lim": scale_lim,
+            "fill_cap": fill_cap,
             "lot": my_lot,
-            "split": (pool / float(n_buy)) if n_buy else 0.0,
-            "why": "split",
+            "split": (free / float(n_buy)) if n_buy else 0.0,
+            "n_buy": n_buy,
+            "why": my_why or "split",
             "src": str(broker.get("src") or "broker"),
+            "frac": my_frac,
+            "n_held": n_held,
+            "vacant": ",".join(["%.2f" % float(x) for x in vacant]),
         }
     )
     return lots, snap
@@ -770,9 +1300,23 @@ def _allocate_equal(cash, now_s):
 
 def _fill_budget_snapshot(cash, opening=None):
     snap = _empty_fill_snap()
+    if opening is None:
+        opening = not (
+            _has_position()
+            or (getattr(A, "is_backtest", False) and _bt_held_vol() >= 100)
+        )
+    opening = bool(opening)
     if not _dynamic_budget_on():
-        snap["lot"] = float(_buy_budget_fixed(cash) or 0)
-        snap["why"] = "fixed"
+        frac = _chart_next_frac(opening)
+        lot = float(_buy_budget_fixed(cash) or 0)
+        snap["lot"] = lot
+        snap["frac"] = frac
+        snap["opening"] = opening
+        try:
+            snap["n_held"] = int(_pos_lots() or 0)
+        except Exception:
+            snap["n_held"] = 0
+        snap["why"] = "fixed" if lot > 1e-6 else "book_lot_cap"
         return snap
     now = datetime.datetime.now()
     now_s = now.strftime("%H%M%S")
@@ -781,8 +1325,7 @@ def _fill_budget_snapshot(cash, opening=None):
             snap["why"] = "wait"
             return snap
         _lots, snap = _allocate_equal(cash, now_s)
-        if opening is not None:
-            snap["opening"] = bool(opening)
+        snap["opening"] = bool(opening)
         return snap
     book = _query_broker_book()
     if not book.get("ok"):
@@ -802,9 +1345,8 @@ def _fill_budget_snapshot(cash, opening=None):
     else:
         k_after = k
     n = _cfg_book_n()
-    min_lot = _cfg_min_lot()
     empty = max(0, n - k_after)
-    reserve = empty * min_lot
+    reserve = 0.0
     equity = _account_equity(cash, book_mv, other_mv)
     try:
         cash_v = float(cash) if cash is not None else 0.0
@@ -823,28 +1365,46 @@ def _fill_budget_snapshot(cash, opening=None):
             "name_mv": name_mv,
             "opening": opening,
             "cash": cash_v,
+            "rsv_empty": False,
+            "fill_res": False,
         }
     )
     if equity is None or equity <= 0:
         snap["why"] = "no_E"
         return snap
     ratio = _cfg_cash_ratio()
-    name_frac = _cfg_max_name_frac()
     cap = ratio * float(equity)
-    name_lim = _name_limit(equity, cap, n, min_lot, name_frac)
-    name_room = name_lim - name_mv
-    acct_room = cap - book_mv - reserve
-    lot = min(acct_room, name_room, cash_v)
+    name_lim = cap
+    scale_lim = cap
+    frac = _chart_next_frac(opening)
+    fill_cap = float(frac) * cap
+    if opening:
+        name_room = _name_room(name_lim, name_mv)
+        acct_room = cap - book_mv - reserve
+    else:
+        name_room = _name_room(scale_lim, name_mv)
+        acct_room = cap - book_mv
+    lot = min(acct_room, name_room, cash_v, fill_cap)
     if lot < 0:
         lot = 0.0
+    why = "fill"
+    if lot <= 1e-6:
+        if frac <= 1e-9:
+            why = "scale_cap" if not opening else "book_lot_cap"
+        else:
+            why = "buy_cap" if opening else "scale_cap"
     snap.update(
         {
             "E": float(equity),
             "cap": cap,
             "acct_room": acct_room,
             "name_room": name_room,
+            "name_lim": name_lim,
+            "scale_lim": scale_lim,
+            "fill_cap": fill_cap,
             "lot": lot,
-            "why": "fill",
+            "frac": frac,
+            "why": why,
             "src": str(book.get("src") or "broker"),
         }
     )
@@ -854,8 +1414,9 @@ def _fill_budget_snapshot(cash, opening=None):
 def _log_fill_budget(snap, tag=""):
     snap = snap or {}
     print(
-        "%s fill%s E=%.0f N=%s k=%s k_other=%s reserve=%.0f lot=%.0f book_mv=%.0f other_mv=%.0f name_mv=%.0f "
-        "n_buy=%s split=%.0f why=%s src=%s"
+        "%s fill%s E=%.0f N=%s k=%s k_other=%s reserve=%.0f lot=%.0f fill_cap=%.0f "
+        "name_lim=%.0f scale_lim=%.0f book_mv=%.0f other_mv=%.0f name_mv=%.0f "
+        "n_buy=%s n_held=%s frac=%.2f vacant=%s split=%.0f why=%s src=%s"
         % (
             STRATEGY_NAME,
             (" " + str(tag)) if tag else "",
@@ -865,10 +1426,16 @@ def _log_fill_budget(snap, tag=""):
             snap.get("k_other"),
             float(snap.get("reserve") or 0),
             float(snap.get("lot") or 0),
+            float(snap.get("fill_cap") or 0),
+            float(snap.get("name_lim") or 0),
+            float(snap.get("scale_lim") or 0),
             float(snap.get("book_mv") or 0),
             float(snap.get("other_mv") or 0),
             float(snap.get("name_mv") or 0),
             snap.get("n_buy"),
+            snap.get("n_held"),
+            float(snap.get("frac") or 0),
+            snap.get("vacant") or "-",
             float(snap.get("split") or 0),
             snap.get("why") or "-",
             snap.get("src") or "-",
@@ -891,6 +1458,12 @@ def _log_fill_budget(snap, tag=""):
         opening=snap.get("opening"),
         why=snap.get("why"),
         n_buy=snap.get("n_buy"),
+        n_held=snap.get("n_held"),
+        frac=snap.get("frac"),
+        vacant=snap.get("vacant"),
+        fill_cap=snap.get("fill_cap"),
+        name_lim=snap.get("name_lim"),
+        scale_lim=snap.get("scale_lim"),
         src=snap.get("src"),
     )
 
@@ -904,6 +1477,8 @@ def _fill_room_ok(price=None, opening=None):
         return False, why0, snap
     lot = float(snap.get("lot") or 0)
     is_open = bool(opening) if opening is not None else bool(snap.get("opening"))
+    if why0 in ("book_lot_cap", "scale_cap", "buy_cap") and lot <= 1e-6:
+        return False, why0, snap
     why = "buy_cap" if is_open else "scale_cap"
     if lot <= 0:
         return False, why, snap
@@ -918,7 +1493,7 @@ def _fill_room_ok(price=None, opening=None):
 
 
 def _buy_budget(cash):
-    """覆盖 common：实盘均分/填满；回测回落 TRADE_BUDGET。"""
+    """覆盖 common：实盘分档；回测回落 TRADE_BUDGET。"""
     if not _dynamic_budget_on():
         return _buy_budget_fixed(cash)
     snap = _fill_budget_snapshot(cash)
@@ -948,8 +1523,9 @@ def _heartbeat_extra():
             cash = _available_cash()
             snap = _fill_budget_snapshot(cash)
             parts.append(
-                "E=%.0f N=%s k=%s k_other=%s reserve=%.0f lot=%.0f book_mv=%.0f other_mv=%.0f name_mv=%.0f "
-                "n_buy=%s why=%s src=%s"
+                "E=%.0f N=%s k=%s k_other=%s reserve=%.0f lot=%.0f fill_cap=%.0f "
+                "name_lim=%.0f scale_lim=%.0f book_mv=%.0f other_mv=%.0f name_mv=%.0f "
+                "n_buy=%s n_held=%s frac=%.2f vacant=%s why=%s src=%s"
                 % (
                     float(snap.get("E") or 0),
                     snap.get("N"),
@@ -957,10 +1533,16 @@ def _heartbeat_extra():
                     snap.get("k_other"),
                     float(snap.get("reserve") or 0),
                     float(snap.get("lot") or 0),
+                    float(snap.get("fill_cap") or 0),
+                    float(snap.get("name_lim") or 0),
+                    float(snap.get("scale_lim") or 0),
                     float(snap.get("book_mv") or 0),
                     float(snap.get("other_mv") or 0),
                     float(snap.get("name_mv") or 0),
                     snap.get("n_buy"),
+                    snap.get("n_held"),
+                    float(snap.get("frac") or 0),
+                    snap.get("vacant") or "-",
                     snap.get("why") or "-",
                     snap.get("src") or "-",
                 )

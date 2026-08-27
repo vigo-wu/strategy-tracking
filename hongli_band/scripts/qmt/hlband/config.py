@@ -6,35 +6,37 @@ DRY_RUN = False
 ACCOUNT_ID = "39953913"
 ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 
-# 跟踪池仓位（实盘）。空仓不锁 1/N，只锁 MIN_LOT。当天多只买单先写入共享账本，冻结后均分可部署资金。
-# 单只硬顶 MAX_NAME_FRAC * E_s（默认 50%）。E_s = 账户总资产 - 非白名单股票市值（约等于现金+池内市值）。
-# k / book_mv 只统计 BOOK_STOCKS；其它持股不占名额、不进 50% 分母。N = 字典长度。
-# 约束：N * MIN_LOT <= CASH_RATIO * E_s。增减标的改本表后四图 re-deploy。
+# 跟踪池仓位（实盘）。全池最多 BOOK_LOT_MAX 笔（开仓+加仓合计）。
+# 第 1 笔开仓：大仓空则 LOT_OPEN_FRAC×cap。第 2 笔：LOT_ADD_FRAC×cap（加仓或其它标的开仓）。
+# 第 3 笔：金额吃剩余可部署资金；book_frac 仍记空档 0.50/0.25。
+# 同标的一轮只加一次；加过仓后该只须全平才能再开。卖掉大仓由其他空仓标的开仓补回。
+# cap = CASH_RATIO * E_s；E_s = 总资产 - 非白名单股票市值。
+# k / book_mv 只统计 BOOK_STOCKS。N = 字典长度。实盘共享账本；回测用 TRADE_BUDGET。
 # 形态：code → 配置字典。ma_type（EMA|SMA）；dividend_type 见下方复权注释。
 # 简写兼容：value 写成 "SMA" 视为 {"ma_type": "SMA"}；旧纯字符串 tuple 仍认作白名单。
 BOOK_STOCKS = {
     "600350.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
-    "601398.SH": {"ma_type": "SMA", "dividend_type": "front_ratio"},
+    "600028.SH": {"ma_type": "EMA", "dividend_type": "front"},
+    "601988.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
     "601939.SH": {"ma_type": "EMA", "dividend_type": "front"},
-    "513530.SH": {"ma_type": "SMA", "dividend_type": "front_ratio"},
 }
-BOOK_N = 4
-DYNAMIC_BUDGET = True
-EQUAL_SPLIT = True
 # 四图共享信号账本（不是 STATE_FILE；禁止按标的分文件）
 BOOK_FILE = r"D:\tradingStrategy\hlband_book.json"
-# 确认打卡截止：14:56 打卡，14:56:30 冻结，须在 14:57 集合竞价前完成均分下单
+# 确认打卡截止：14:56 打卡，14:56:30 冻结，须在 14:57 集合竞价前完成分档下单
 BOOK_FREEZE_CLOSE = "145630"
 BOOK_FREEZE_OPEN = "093200"
 # 可部署比例（相对 E_s = 总资产-其它股票市值）；其余留作 T+1 / 废单重试
 CASH_RATIO = 0.90
-# 每只空仓预留的最小进场金额（元）；不足 100 股则实际成交仍按 100 股市值
-MIN_LOT = 20000.0
-# 单标的市值上限占 E_s 的比例
-MAX_NAME_FRAC = 0.50
-# 回测无全账户账本时的单笔回落（元）；DYNAMIC_BUDGET=False 时也用此上限
-TRADE_BUDGET = 50000.0
-# 按标的覆盖预算（key 须与 A.stock 一致，如 513530.SH）；仅回测/关闭动态预算时生效
+# 全池同时最多几笔（开仓+加仓）。第 4 笔不下。
+BOOK_LOT_MAX = 3
+# 开仓：大仓空档用 50%；大仓已在且不是最后一槽则新开走 25%。
+LOT_OPEN_FRAC = 0.50
+# 第二笔（加仓或其它标的开仓）25%。全池最后一槽不锁此值，改吃剩余资金。
+# 大仓空且只剩 1 个槽时不加仓，留给开仓补大仓（该笔会吃剩余，约等于 50%）。
+LOT_ADD_FRAC = 0.25
+# 回测无全账户账本时的单笔回落（元）
+TRADE_BUDGET = 100000.0
+# 按标的覆盖预算（key 须与 A.stock 一致）；仅回测生效
 TRADE_BUDGET_BY_STOCK = {}
 
 # ---- 周线过滤（跨周期；主图仍是日线）----
@@ -119,7 +121,7 @@ W_BEAR_CONFIRM_DAYS = 2
 #   触发（任一）：缩量回踩 / 日线收盘突破前期平台 / 近两周周线 MACD 金叉且柱放大
 #   回踩加仓仍受 chase_skip；破平台/金叉不受（突破日允许较大涨幅）
 #   执行日若已触发卖点则取消加仓、让路出场
-# SCALE_ONCE_PER_ROUND：同一轮持仓只加一次。第一笔止盈后，空仓前不再用另一种信号再加
+# SCALE_ONCE_PER_ROUND：同一轮只加一次。加过仓后该只须全平才能再开，不能把剩余仓当新开
 # SCALE_W_HIST_MIN：周线 MACD 柱低于此值不加（过滤深空头里的冲高）；None 关闭
 # SCALE_LOTS=True：每笔独立成本/峰值/止盈；False：均价合并后整仓出
 # weekly_bear 仍一次出清剩余各笔；trail_stop / time_force / stop_loss 按笔
@@ -138,15 +140,13 @@ SCALE_PLAT_BREAK_BUF = 0.0           # 收盘超过平台高点的缓冲；0=收
 SCALE_W_HIST_EXPAND_RATIO = 1.2
 
 # 策略交易面板 bind → 模块常量。编辑器/回测无注入时用上面默认值。
-# 只上屏：开关 / 预算袖子 / 硬风控。买点窗口、时间成本、加仓细节、SCALE_LOTS、
-# BOOK_N、TRAIL_TIERS、均线周期、BOOK_STOCKS 子配置（ma_type / dividend_type）、
+# 只上屏：开关 / 可部署比例 / 硬风控。买点窗口、时间成本、加仓细节、SCALE_LOTS、
+# TRAIL_TIERS、均线周期、BOOK_STOCKS 子配置（ma_type / dividend_type）、
 # MA_TYPE、路径、账号仍只在 config（N 以 BOOK_STOCKS 长度为准）。
 PANEL_BINDS = (
     ("panel_dry_run", "DRY_RUN", "bool"),
     ("panel_budget", "TRADE_BUDGET", "float"),
     ("panel_cash_ratio", "CASH_RATIO", "float"),
-    ("panel_min_lot", "MIN_LOT", "float"),
-    ("panel_max_name_frac", "MAX_NAME_FRAC", "float"),
     ("panel_w_bias_hard", "W_BIAS_HARD", "float"),
     ("panel_chase_pct", "CHASE_MAX_PCT", "float"),
     ("panel_stop_loss", "STOP_LOSS", "float"),
@@ -215,7 +215,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.50"
+STRATEGY_VER = "v1.57"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
