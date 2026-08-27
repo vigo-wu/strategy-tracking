@@ -34,4 +34,5 @@ def run_one(payload: dict[str, Any]) -> dict[str, Any]:
         quiet=bool(payload.get("quiet", True)),
         log_name=str(payload.get("log_name") or ""),
         year=str(payload.get("year") or ""),
+        ma_type=str(payload.get("ma_type") or ""),
     )

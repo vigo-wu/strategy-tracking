@@ -11,6 +11,7 @@ import sys
 import traceback
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -37,13 +38,18 @@ from analyze import (  # noqa: E402
     list_daily_csvs,
     list_detail_csvs,
     load_detail_raw,
+    ma_compare_dataframe,
+    ma_compare_year_dataframe,
     ohlc_from_csv,
+    pair_ma_batch_rows,
     parse_budget_from_log,
     summarize_batch_row,
     trades_to_dataframe,
     union_date_range,
     write_batch_summary_csv,
     write_batch_year_summary_csv,
+    write_ma_compare_csv,
+    write_ma_compare_year_csv,
     ymd_to_date,
 )
 from run import run_backtest, run_batch  # noqa: E402
@@ -98,10 +104,10 @@ def _fmt_ymd(d: date) -> str:
     return d.strftime("%Y%m%d")
 
 
-def _plot_equity(eq: pd.DataFrame, budget: float, title: str) -> go.Figure:
+def _plot_equity(eq: pd.DataFrame, budget: float, title: str, *, name: str = "权益", color: str = "#1565c0") -> go.Figure:
     fig = go.Figure()
-    pts = eq.dropna(subset=["date"]) if "date" in eq.columns else eq
-    if pts.empty:
+    pts = eq.dropna(subset=["date"]) if eq is not None and "date" in eq.columns else eq
+    if pts is None or pts.empty:
         fig.add_annotation(text="无已平仓成交", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
     else:
         fig.add_trace(
@@ -109,8 +115,8 @@ def _plot_equity(eq: pd.DataFrame, budget: float, title: str) -> go.Figure:
                 x=pts["date"],
                 y=pts["equity"],
                 mode="lines+markers",
-                name="权益",
-                line=dict(color="#1565c0", width=2),
+                name=name,
+                line=dict(color=color, width=2),
                 marker=dict(size=6),
             )
         )
@@ -122,6 +128,70 @@ def _plot_equity(eq: pd.DataFrame, budget: float, title: str) -> go.Figure:
         height=360,
         margin=dict(l=40, r=20, t=50, b=40),
         legend=dict(orientation="h"),
+    )
+    return fig
+
+
+def _plot_equity_overlay(eq_sma: pd.DataFrame, eq_ema: pd.DataFrame, budget: float, title: str) -> go.Figure:
+    fig = go.Figure()
+    for eq, name, color in ((eq_sma, "SMA", "#1565c0"), (eq_ema, "EMA", "#e65100")):
+        if eq is None or eq.empty or "date" not in eq.columns:
+            continue
+        pts = eq.dropna(subset=["date"])
+        if pts.empty:
+            continue
+        fig.add_trace(
+            go.Scatter(
+                x=pts["date"],
+                y=pts["equity"],
+                mode="lines+markers",
+                name=name,
+                line=dict(color=color, width=2),
+                marker=dict(size=6),
+            )
+        )
+    fig.add_hline(y=budget, line_dash="dash", line_color="#9e9e9e", annotation_text="预算")
+    fig.update_layout(
+        title=title,
+        xaxis_title="日期",
+        yaxis_title="权益 (元)",
+        height=360,
+        margin=dict(l=40, r=20, t=50, b=40),
+        legend=dict(orientation="h"),
+    )
+    return fig
+
+
+def _plot_ma_delta_bar(pairs: list[dict], *, max_n: int = 40) -> go.Figure:
+    fig = go.Figure()
+    rows = [r for r in pairs if r.get("pnl_delta") is not None]
+    rows = sorted(rows, key=lambda r: abs(float(r.get("pnl_delta") or 0)), reverse=True)[:max_n]
+    if not rows:
+        fig.add_annotation(text="无对照盈亏", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
+        fig.update_layout(height=240, margin=dict(l=40, r=20, t=50, b=40))
+        return fig
+    labels = []
+    for r in rows:
+        year = str(r.get("year") or "").strip()
+        stock = str(r.get("stock") or "")
+        labels.append("%s · %s" % (stock, year) if year else stock)
+    deltas = [float(r.get("pnl_delta") or 0) for r in rows]
+    colors = ["#e65100" if d >= 0 else "#1565c0" for d in deltas]
+    fig.add_trace(
+        go.Bar(
+            x=deltas,
+            y=labels,
+            orientation="h",
+            marker_color=colors,
+            hovertemplate="%{y}<br>EMA−SMA %{x:,.0f} 元<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        title="Δ盈亏（EMA − SMA；|Δ| 最大 %s 条）" % len(rows),
+        xaxis_title="Δ盈亏 (元)",
+        height=max(280, 18 * len(rows) + 80),
+        margin=dict(l=120, r=20, t=50, b=40),
+        yaxis=dict(autorange="reversed"),
     )
     return fig
 
@@ -360,7 +430,11 @@ def _render_analysis(
     range_start: str,
     range_end: str,
     stock: str,
-) -> None:
+    *,
+    show_metrics: bool = True,
+    show_equity: bool = True,
+    title_prefix: str = "",
+) -> dict:
     result = analyze_detail(detail_path, budget=budget)
     trades = result["trades"]
     if range_start or range_end:
@@ -382,50 +456,55 @@ def _render_analysis(
             result["equity"] = mod.equity_curve(trades, budget)
 
     stats = result["stats"]
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.metric("轮次", int(stats.get("n_buy") or 0))
-    c2.metric("总盈亏", f"{float(stats.get('sum_pnl') or 0):,.2f}")
-    c3.metric("胜率", f"{float(stats.get('win_rate') or 0):.1f}%")
-    c4.metric("平均收益%", f"{float(stats.get('avg_ret') or 0):.2f}")
-    c5.metric("最大单笔%", f"{float(stats.get('max_win') or 0):.2f}")
-    c6.metric("最大亏损%", f"{float(stats.get('max_loss') or 0):.2f}")
+    if show_metrics:
+        c1, c2, c3, c4, c5, c6 = st.columns(6)
+        c1.metric("轮次", int(stats.get("n_buy") or 0))
+        c2.metric("总盈亏", f"{float(stats.get('sum_pnl') or 0):,.2f}")
+        c3.metric("胜率", f"{float(stats.get('win_rate') or 0):.1f}%")
+        c4.metric("平均收益%", f"{float(stats.get('avg_ret') or 0):.2f}")
+        c5.metric("最大单笔%", f"{float(stats.get('max_win') or 0):.2f}")
+        c6.metric("最大亏损%", f"{float(stats.get('max_loss') or 0):.2f}")
 
-    st.caption(f"明细真源：`{detail_path}` · 预算 {budget:,.0f} 元")
+        st.caption(f"明细真源：`{detail_path}` · 预算 {budget:,.0f} 元")
 
-    st.plotly_chart(
-        _plot_equity(result["equity"], budget, "权益曲线（预算 + 已实现盈亏累计）"),
-        use_container_width=True,
-    )
-
-    left, right = st.columns(2)
-    with left:
-        st.plotly_chart(_plot_pnl_hist(trades), use_container_width=True)
-    with right:
-        win_n = int(stats.get("win_n") or 0)
-        loss_n = int(stats.get("loss_n") or 0)
-        fig = go.Figure(
-            data=[
-                go.Bar(
-                    x=["盈利", "亏损"],
-                    y=[win_n, loss_n],
-                    marker_color=["#43a047", "#e53935"],
-                    name="笔数",
-                )
-            ]
+    if show_equity:
+        st.plotly_chart(
+            _plot_equity(result["equity"], budget, (title_prefix + "权益曲线（预算 + 已实现盈亏累计）").strip()),
+            use_container_width=True,
         )
-        fig.update_layout(
-            title="盈亏笔数",
-            yaxis_title="笔数",
-            height=320,
-            margin=dict(l=40, r=20, t=50, b=40),
-        )
-        st.plotly_chart(fig, use_container_width=True)
+
+        left, right = st.columns(2)
+        with left:
+            st.plotly_chart(_plot_pnl_hist(trades), use_container_width=True)
+        with right:
+            win_n = int(stats.get("win_n") or 0)
+            loss_n = int(stats.get("loss_n") or 0)
+            fig = go.Figure(
+                data=[
+                    go.Bar(
+                        x=["盈利", "亏损"],
+                        y=[win_n, loss_n],
+                        marker_color=["#43a047", "#e53935"],
+                        name="笔数",
+                    )
+                ]
+            )
+            fig.update_layout(
+                title="盈亏笔数",
+                yaxis_title="笔数",
+                height=320,
+                margin=dict(l=40, r=20, t=50, b=40),
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
     if ohlc_csv and ohlc_csv.is_file():
         ohlc = ohlc_from_csv(ohlc_csv, start=range_start, end=range_end, stock=stock)
         st.caption("K 线：滚轮缩放 · 拖拽左右平移 · 双击复位")
+        ktitle = "日线 + 买卖点 · %s" % (stock or ohlc_csv.name)
+        if title_prefix:
+            ktitle = "%s%s" % (title_prefix, ktitle)
         st.plotly_chart(
-            _plot_kline(ohlc, trades, f"日线 + 买卖点 · {stock or ohlc_csv.name}"),
+            _plot_kline(ohlc, trades, ktitle),
             use_container_width=True,
             config=_KLINE_PLOT_CONFIG,
         )
@@ -441,6 +520,118 @@ def _render_analysis(
         st.dataframe(raw, use_container_width=True, hide_index=True)
     except Exception as e:
         st.warning("无法读取原始明细：%s" % e)
+    return result
+
+
+def _render_ma_compare_panel(
+    sma_pack: dict,
+    ema_pack: dict,
+    ohlc_csv: Path | None,
+    range_start: str,
+    range_end: str,
+    stock: str,
+) -> None:
+    from analyze import pick_ma_winner
+
+    sma_path = Path(sma_pack["detail"])
+    ema_path = Path(ema_pack["detail"])
+    budget = float(sma_pack.get("budget") or ema_pack.get("budget") or 50000.0)
+    a_sma = analyze_detail(sma_path, budget=budget)
+    a_ema = analyze_detail(ema_path, budget=budget)
+    ss, es = a_sma["stats"] or {}, a_ema["stats"] or {}
+    pick = pick_ma_winner(
+        {"ok": True, "sum_pnl": ss.get("sum_pnl"), "win_rate": ss.get("win_rate")},
+        {"ok": True, "sum_pnl": es.get("sum_pnl"), "win_rate": es.get("win_rate")},
+    )
+    pair = {
+        "stock": stock,
+        "year": "",
+        "ok_sma": True,
+        "ok_ema": True,
+        "n_buy_sma": ss.get("n_buy"),
+        "n_buy_ema": es.get("n_buy"),
+        "sum_pnl_sma": ss.get("sum_pnl"),
+        "sum_pnl_ema": es.get("sum_pnl"),
+        "win_rate_sma": ss.get("win_rate"),
+        "win_rate_ema": es.get("win_rate"),
+        "avg_ret_sma": ss.get("avg_ret"),
+        "avg_ret_ema": es.get("avg_ret"),
+        "max_win_sma": ss.get("max_win"),
+        "max_win_ema": es.get("max_win"),
+        "max_loss_sma": ss.get("max_loss"),
+        "max_loss_ema": es.get("max_loss"),
+        "pnl_delta": pick.get("pnl_delta"),
+        "winner": pick.get("winner"),
+        "label": pick.get("label"),
+        "why": pick.get("why"),
+    }
+    st.dataframe(ma_compare_dataframe([pair]), use_container_width=True, hide_index=True)
+    st.caption("更优看总盈亏；接近时建议均线按胜率、再平 EMA。metric 为 EMA，delta 相对 SMA。")
+
+    def _num(v: Any, default: float = 0.0) -> float:
+        try:
+            return float(v if v is not None else default)
+        except (TypeError, ValueError):
+            return default
+
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric("轮次", int(_num(es.get("n_buy"))), delta=int(_num(es.get("n_buy")) - _num(ss.get("n_buy"))))
+    c2.metric(
+        "总盈亏",
+        f"{_num(es.get('sum_pnl')):,.2f}",
+        delta=f"{_num(es.get('sum_pnl')) - _num(ss.get('sum_pnl')):,.2f}",
+    )
+    c3.metric(
+        "胜率",
+        f"{_num(es.get('win_rate')):.1f}%",
+        delta=f"{_num(es.get('win_rate')) - _num(ss.get('win_rate')):.1f}pp",
+    )
+    c4.metric(
+        "平均收益%",
+        f"{_num(es.get('avg_ret')):.2f}",
+        delta=f"{_num(es.get('avg_ret')) - _num(ss.get('avg_ret')):.2f}",
+    )
+    c5.metric(
+        "最大单笔%",
+        f"{_num(es.get('max_win')):.2f}",
+        delta=f"{_num(es.get('max_win')) - _num(ss.get('max_win')):.2f}",
+    )
+    c6.metric(
+        "最大亏损%",
+        f"{_num(es.get('max_loss')):.2f}",
+        delta=f"{_num(es.get('max_loss')) - _num(ss.get('max_loss')):.2f}",
+    )
+
+    st.plotly_chart(
+        _plot_equity_overlay(a_sma["equity"], a_ema["equity"], budget, "权益曲线对照（SMA / EMA）"),
+        use_container_width=True,
+    )
+
+    tab_sma, tab_ema = st.tabs(["SMA", "EMA"])
+    with tab_sma:
+        _render_analysis(
+            sma_path,
+            budget=budget,
+            ohlc_csv=ohlc_csv,
+            range_start=range_start,
+            range_end=range_end,
+            stock=stock,
+            show_metrics=False,
+            show_equity=False,
+            title_prefix="SMA · ",
+        )
+    with tab_ema:
+        _render_analysis(
+            ema_path,
+            budget=float(ema_pack.get("budget") or budget),
+            ohlc_csv=ohlc_csv,
+            range_start=range_start,
+            range_end=range_end,
+            stock=stock,
+            show_metrics=False,
+            show_equity=False,
+            title_prefix="EMA · ",
+        )
 
 
 def _render_batch_run(csv_dir: str, *, workers: int = 0, quiet: bool = True) -> None:
@@ -476,6 +667,7 @@ def _render_batch_run(csv_dir: str, *, workers: int = 0, quiet: bool = True) -> 
     start_d = end_d = None
     run_btn = False
     split_label = "整段区间"
+    compare_ma = False
     if not picked:
         st.info("请至少选择一只标的")
     else:
@@ -496,6 +688,9 @@ def _render_batch_run(csv_dir: str, *, workers: int = 0, quiet: bool = True) -> 
         )
         if split_label == "按自然年分段":
             st.caption("每年独立账户、年初空仓；暖机仍用 walk 之前的历史 K 线。")
+        compare_ma = st.checkbox("SMA/EMA 对照", value=False, key="batch_compare_ma")
+        if compare_ma:
+            st.caption("每只（每年）各跑 SMA 与 EMA；任务数 ×2。选股建议均线要用「按自然年分段 + 对照」。")
         run_btn = st.button("开始批量回测", type="primary", disabled=start_d > end_d)
 
     split_mode = "year" if split_label == "按自然年分段" else "range"
@@ -511,7 +706,7 @@ def _render_batch_run(csv_dir: str, *, workers: int = 0, quiet: bool = True) -> 
             bar.progress(0.0 if n <= 0 else min(1.0, float(i) / float(n)))
             if n <= 0:
                 return
-            unit = "个任务" if split_mode == "year" else "只"
+            unit = "个任务" if (split_mode == "year" or compare_ma) else "只"
             if i < n:
                 status.info("正在回测 **%s**（%s/%s）…" % (stock, i + 1, n))
             else:
@@ -528,24 +723,33 @@ def _render_batch_run(csv_dir: str, *, workers: int = 0, quiet: bool = True) -> 
                 quiet=bool(quiet),
                 split=split_mode,
                 metas=picked,
+                compare_ma=bool(compare_ma),
             )
             if not raw:
                 st.warning("所选区间与行情无交集，未生成任务。")
             else:
                 rows = [summarize_batch_row(r) for r in raw]
                 write_batch_summary_csv(rows, out_dir / "local_bt_batch_summary.csv")
-                if split_mode == "year":
+                pairs = pair_ma_batch_rows(rows) if compare_ma else []
+                extra = ""
+                if compare_ma:
+                    write_ma_compare_csv(pairs, out_dir / "local_bt_ma_compare.csv")
+                    extra = " · 对照 `local_bt_ma_compare.csv`"
+                    if split_mode == "year":
+                        write_ma_compare_year_csv(pairs, out_dir / "local_bt_ma_compare_year.csv")
+                        extra += " · 年对照 `local_bt_ma_compare_year.csv`"
+                elif split_mode == "year":
                     write_batch_year_summary_csv(rows, out_dir / "local_bt_batch_year_summary.csv")
+                    extra = " · 年汇总 `local_bt_batch_year_summary.csv`"
                 st.session_state["batch_result"] = {
                     "start": start_s,
                     "end": end_s,
                     "rows": rows,
+                    "pairs": pairs,
                     "split": split_mode,
+                    "compare_ma": bool(compare_ma),
                 }
                 n_ok = sum(1 for r in rows if r.get("ok"))
-                extra = ""
-                if split_mode == "year":
-                    extra = " · 年汇总 `local_bt_batch_year_summary.csv`"
                 st.success(
                     "完成 · 成功 %s · 失败 %s · 汇总 `local_bt_batch_summary.csv`%s"
                     % (n_ok, len(rows) - n_ok, extra)
@@ -558,8 +762,17 @@ def _render_batch_run(csv_dir: str, *, workers: int = 0, quiet: bool = True) -> 
     if not batch:
         return
     split_saved = str(batch.get("split") or "range")
+    compare_saved = bool(batch.get("compare_ma"))
+    pairs = list(batch.get("pairs") or [])
     st.divider()
-    if split_saved == "year":
+    if compare_saved:
+        st.subheader("SMA / EMA 对照")
+        st.caption("Δ盈亏 = EMA − SMA。更优看总盈亏；接近时建议均线按胜率、再平 EMA。")
+        if split_saved == "year":
+            st.dataframe(ma_compare_year_dataframe(pairs), use_container_width=True, hide_index=True)
+        st.dataframe(ma_compare_dataframe(pairs), use_container_width=True, hide_index=True)
+        st.plotly_chart(_plot_ma_delta_bar(pairs), use_container_width=True)
+    elif split_saved == "year":
         st.subheader("按年汇总")
         st.caption("每年独立账户；胜率 / 平均收益% 按轮次加权。合计盈亏不是组合净值。")
         st.dataframe(
@@ -570,6 +783,46 @@ def _render_batch_run(csv_dir: str, *, workers: int = 0, quiet: bool = True) -> 
     st.subheader("按标的汇总")
     st.caption("各标的独立账户、独立预算；合计盈亏不是组合净值。")
     st.dataframe(batch_summary_dataframe(batch["rows"]), use_container_width=True, hide_index=True)
+
+    if compare_saved:
+        ok_pairs = [p for p in pairs if p.get("sma_detail") or p.get("ema_detail")]
+        if not ok_pairs:
+            st.warning("没有成功的对照，无法查看明细。")
+            return
+
+        def _pair_label(p: dict) -> str:
+            year = str(p.get("year") or "").strip()
+            stock = str(p.get("stock") or "")
+            if split_saved == "year" and year:
+                return "%s · %s" % (stock, year)
+            return stock
+
+        labels = [_pair_label(p) for p in ok_pairs]
+        pick = st.selectbox("查看标的对照明细", labels, key="batch_detail_stock")
+        pair = next(p for p in ok_pairs if _pair_label(p) == pick)
+        st.divider()
+        st.subheader("明细 · %s · 更优 %s" % (pick, pair.get("label") or pair.get("winner") or "-"))
+        ohlc = Path(pair.get("sma_csv") or pair.get("ema_csv") or "")
+        sma_pack = {
+            "detail": pair.get("sma_detail") or "",
+            "budget": pair.get("budget") or 50000.0,
+        }
+        ema_pack = {
+            "detail": pair.get("ema_detail") or "",
+            "budget": pair.get("budget") or 50000.0,
+        }
+        if not sma_pack["detail"] or not ema_pack["detail"]:
+            st.warning("对照两侧明细不齐。")
+            return
+        _render_ma_compare_panel(
+            sma_pack,
+            ema_pack,
+            ohlc if ohlc.is_file() else None,
+            range_start=str(pair.get("walk_start") or batch.get("start") or ""),
+            range_end=str(pair.get("walk_end") or batch.get("end") or ""),
+            stock=str(pair.get("stock") or ""),
+        )
+        return
 
     ok_rows = [r for r in batch["rows"] if r.get("ok") and r.get("detail")]
     if not ok_rows:
@@ -606,7 +859,11 @@ def _select_display_df(df: pd.DataFrame, *, passed_only: bool = False, score_yea
     out["名次"] = src["rank"]
     out["标的"] = src["stock"]
     out["得分"] = pd.to_numeric(src["score"], errors="coerce") * 100.0
-    out["建议均线"] = src["ma_type_suggest"]
+    out["建议均线"] = src["ma_type_suggest"].map(lambda x: x if str(x or "").strip() else "缺对照")
+    if "ma_type_why" in src.columns:
+        out["均线来源"] = src["ma_type_why"]
+    if "ma_pnl_delta" in src.columns:
+        out["Δ盈亏"] = src["ma_pnl_delta"]
     out["白名单"] = src["in_book"].map(lambda x: "是" if x else "")
     out["跨年轮次"] = src["n_buy"]
     out["成交年"] = src["n_years_traded"]
@@ -744,7 +1001,7 @@ def _render_select(csv_dir: str, filters: dict) -> None:
         st.warning("没有过线标的。放宽侧栏阈值，或先补齐分年批量回测。")
     else:
         st.dataframe(_select_display_df(rec, score_years=years), use_container_width=True, hide_index=True)
-        st.caption("`ma_type` 为启发式（贴线+低波→EMA，否则 SMA）；白名单已有配置优先。")
+        st.caption("建议均线来自分年 SMA/EMA 对照；缺对照的票不写入 snippet。不自动改 `BOOK_STOCKS`。")
         st.code(format_book_snippet(rec), language="python")
 
     st.subheader("打分总表")
@@ -908,25 +1165,60 @@ elif mode == "跑本地回测":
             end_d = st.date_input("结束时间", value=d1, min_value=d0, max_value=d1, key="bt_end")
         if start_d > end_d:
             st.error("开始时间不能晚于结束时间")
+        compare_ma = st.checkbox("SMA/EMA 对照", value=False, key="single_compare_ma")
         run_btn = st.button("开始回测", type="primary", disabled=start_d > end_d)
     else:
         start_d = end_d = None
         run_btn = False
+        compare_ma = False
 
     if run_btn and selected_csv and meta and start_d and end_d:
         start_s = _fmt_ymd(start_d)
         end_s = _fmt_ymd(end_d)
         out_dir = THEME / "report"
-        with st.spinner(f"回测 {meta['stock']} {start_s}–{end_s} …"):
-            try:
-                log_path = run_backtest(
-                    selected_csv,
-                    start=start_s,
-                    end=end_s,
-                    stock=meta["stock"],
-                    out_dir=out_dir,
-                    quiet=bool(quiet),
+        try:
+            if compare_ma:
+                packs = {}
+                for kind in ("SMA", "EMA"):
+                    with st.spinner("回测 %s %s %s–%s …" % (kind, meta["stock"], start_s, end_s)):
+                        log_path = run_backtest(
+                            selected_csv,
+                            start=start_s,
+                            end=end_s,
+                            stock=meta["stock"],
+                            out_dir=out_dir,
+                            quiet=bool(quiet),
+                            ma_type=kind,
+                        )
+                    detail = trades_csv_path(log_path)
+                    packs[kind] = {
+                        "log": str(log_path),
+                        "detail": str(detail),
+                        "budget": parse_budget_from_log(log_path),
+                    }
+                st.session_state["last_compare"] = {
+                    "sma": packs["SMA"],
+                    "ema": packs["EMA"],
+                    "ohlc_csv": str(selected_csv),
+                    "stock": meta["stock"],
+                    "start": start_s,
+                    "end": end_s,
+                }
+                st.session_state.pop("last_result", None)
+                st.success(
+                    "完成对照 · SMA `%s` · EMA `%s`"
+                    % (Path(packs["SMA"]["log"]).name, Path(packs["EMA"]["log"]).name)
                 )
+            else:
+                with st.spinner(f"回测 {meta['stock']} {start_s}–{end_s} …"):
+                    log_path = run_backtest(
+                        selected_csv,
+                        start=start_s,
+                        end=end_s,
+                        stock=meta["stock"],
+                        out_dir=out_dir,
+                        quiet=bool(quiet),
+                    )
                 detail = trades_csv_path(log_path)
                 budget = parse_budget_from_log(log_path)
                 st.session_state["last_result"] = {
@@ -938,22 +1230,36 @@ elif mode == "跑本地回测":
                     "start": start_s,
                     "end": end_s,
                 }
+                st.session_state.pop("last_compare", None)
                 st.success(f"完成 · log `{log_path.name}` · 明细 `{detail.name}`")
-            except Exception:
-                st.error("回测失败")
-                st.code(traceback.format_exc())
+        except Exception:
+            st.error("回测失败")
+            st.code(traceback.format_exc())
 
-    last = st.session_state.get("last_result")
-    if last:
+    cmp = st.session_state.get("last_compare")
+    if cmp:
         st.divider()
-        _render_analysis(
-            Path(last["detail"]),
-            budget=float(last["budget"]),
-            ohlc_csv=Path(last["ohlc_csv"]) if last.get("ohlc_csv") else None,
-            range_start=last.get("start") or "",
-            range_end=last.get("end") or "",
-            stock=last.get("stock") or "",
+        ohlc = Path(cmp["ohlc_csv"]) if cmp.get("ohlc_csv") else None
+        _render_ma_compare_panel(
+            cmp["sma"],
+            cmp["ema"],
+            ohlc if ohlc and ohlc.is_file() else None,
+            range_start=cmp.get("start") or "",
+            range_end=cmp.get("end") or "",
+            stock=cmp.get("stock") or "",
         )
+    else:
+        last = st.session_state.get("last_result")
+        if last:
+            st.divider()
+            _render_analysis(
+                Path(last["detail"]),
+                budget=float(last["budget"]),
+                ohlc_csv=Path(last["ohlc_csv"]) if last.get("ohlc_csv") else None,
+                range_start=last.get("start") or "",
+                range_end=last.get("end") or "",
+                stock=last.get("stock") or "",
+            )
 
 else:
     details = list_detail_csvs()

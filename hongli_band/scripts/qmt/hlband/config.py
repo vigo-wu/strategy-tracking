@@ -194,7 +194,7 @@ LIVE_HEARTBEAT_SEC = 300
 #   back         后复权（价差）
 #   front_ratio  等比前复权（池外/未写字段的缺省）
 #   back_ratio   等比后复权
-DIVIDEND_TYPE = "front_ratio"
+DIVIDEND_TYPE = "follow"
 
 # download_history_data 最长回溯（自然日）；回测暖机用
 HIST_MAX_LOOKBACK_DAYS = 800

@@ -41,6 +41,7 @@ from trades_csv import TradeLedger, trades_csv_path, wrap_fill_hooks  # noqa: E4
 from qmt_common._deploy_lib import build_bundle  # noqa: E402
 
 _BUNDLE_CODE = None
+MA_TYPES = ("SMA", "EMA")
 
 
 class _Tee:
@@ -121,6 +122,36 @@ def _stock_tag(stock: str) -> str:
     return str(stock).replace(".", "_")
 
 
+def normalize_ma_type(raw: Any) -> str:
+    s = str(raw or "").strip().upper()
+    return s if s in MA_TYPES else ""
+
+
+def default_log_name(stock: str, year: str = "", ma_type: str = "") -> str:
+    parts = ["local_bt", _stock_tag(stock)]
+    year_s = str(year or "").strip()
+    if year_s:
+        parts.append(year_s)
+    ma = normalize_ma_type(ma_type)
+    if ma:
+        parts.append(ma)
+    return "_".join(parts) + ".txt"
+
+
+def _apply_ma_type(ns: dict, kind: str) -> str:
+    k = normalize_ma_type(kind)
+    if not k:
+        return ""
+    ns["MA_TYPE"] = k
+    ns["_MA_TYPE_BAD"] = False
+
+    def _forced(_k=k):
+        return _k
+
+    ns["_ma_kind"] = _forced
+    return k
+
+
 def _bundle_code():
     global _BUNDLE_CODE
     if _BUNDLE_CODE is None:
@@ -144,10 +175,11 @@ def _patch_quiet_status(ns: dict) -> None:
     ns["_should_emit_bar_status"] = _should_emit_bar_status
 
 
-def _empty_row(csv_path: Path, stock: str, year: str = "") -> dict[str, Any]:
+def _empty_row(csv_path: Path, stock: str, year: str = "", ma_type: str = "") -> dict[str, Any]:
     return {
         "stock": stock,
         "year": str(year or ""),
+        "ma_type": normalize_ma_type(ma_type),
         "csv": str(csv_path),
         "log": "",
         "detail": "",
@@ -169,6 +201,7 @@ def run_backtest(
     log_name: str = "",
     weekly_csv: str | Path | None = None,
     quiet: bool = True,
+    ma_type: str = "",
 ) -> Path:
     code, bars = load_daily_csv(csv_path, stock=stock)
     walk = walk_days(bars, start=start, end=end)
@@ -191,19 +224,31 @@ def run_backtest(
 
     dest = Path(out_dir) if out_dir else THEME / "report"
     dest.mkdir(parents=True, exist_ok=True)
-    fname = log_name.strip() if log_name else ("local_bt_%s.txt" % _stock_tag(code))
+    ma = normalize_ma_type(ma_type)
+    fname = log_name.strip() if log_name else ""
+    if not fname:
+        fname = default_log_name(code, ma_type=ma)
+    elif ma:
+        stem = Path(fname).stem
+        suf = "_" + ma
+        if not stem.upper().endswith(suf):
+            fname = stem + suf + (Path(fname).suffix or ".txt")
     log_path = dest / fname
 
     n_w0 = len(store.frame("1w", walk[0].day, count=120, fields=["close"]))
-    banner = "local_bt %s csv= %s walk= %s %s n= %s hist_n= %s weekly= %s n_w_start= %s" % (
-        code,
-        csv_path,
-        walk[0].day,
-        walk[-1].day,
-        len(walk),
-        len(bars),
-        weekly_src,
-        n_w0,
+    banner = (
+        "local_bt %s csv= %s walk= %s %s n= %s hist_n= %s weekly= %s n_w_start= %s ma_type= %s"
+        % (
+            code,
+            csv_path,
+            walk[0].day,
+            walk[-1].day,
+            len(walk),
+            len(bars),
+            weekly_src,
+            n_w0,
+            ma or "config",
+        )
     )
     print(banner)
     if n_w0 < 60:
@@ -213,6 +258,8 @@ def run_backtest(
         )
 
     ns = _exec_bundle()
+    if ma:
+        _apply_ma_type(ns, ma)
     if quiet:
         _patch_quiet_status(ns)
     ledger = TradeLedger(code)
@@ -259,6 +306,7 @@ def backtest_one_result(
     quiet: bool = True,
     log_name: str = "",
     year: str = "",
+    ma_type: str = "",
 ) -> dict[str, Any]:
     """单只回测 → 批量行（失败不抛给调用方）。"""
     from analyze import parse_budget_from_log  # noqa: WPS433
@@ -268,7 +316,8 @@ def backtest_one_result(
     dest.mkdir(parents=True, exist_ok=True)
     stock = path.stem
     year_s = str(year or "").strip()
-    row = _empty_row(path, stock, year=year_s)
+    ma = normalize_ma_type(ma_type)
+    row = _empty_row(path, stock, year=year_s, ma_type=ma)
     try:
         code, bars = load_daily_csv(path)
         stock = code
@@ -281,8 +330,8 @@ def backtest_one_result(
         row["walk_end"] = walk[-1].day
         row["n_bars"] = len(walk)
         fname = str(log_name or "").strip()
-        if not fname and year_s:
-            fname = "local_bt_%s_%s.txt" % (_stock_tag(code), year_s)
+        if not fname:
+            fname = default_log_name(code, year=year_s, ma_type=ma)
         log_path = run_backtest(
             path,
             start=start,
@@ -291,19 +340,23 @@ def backtest_one_result(
             out_dir=dest,
             log_name=fname,
             quiet=quiet,
+            ma_type=ma,
         )
         detail = trades_csv_path(log_path)
         row["log"] = str(log_path)
         row["detail"] = str(detail)
         row["budget"] = parse_budget_from_log(log_path)
         row["ok"] = True
+        row["ma_type"] = ma
     except SystemExit as e:
         msg = str(e).strip()
         row["error"] = msg or ("exit %s" % e.code)
         row["stock"] = stock
+        row["ma_type"] = ma
     except Exception as e:
         row["error"] = "%s: %s" % (type(e).__name__, e)
         row["stock"] = stock
+        row["ma_type"] = ma
     return row
 
 
@@ -324,9 +377,13 @@ def _job_label(payload: dict[str, Any], row: dict[str, Any] | None = None) -> st
     if not stock:
         stock = str(payload.get("stock") or "") or Path(str(payload.get("csv") or "")).stem
     year = str((row or {}).get("year") or payload.get("year") or "").strip()
+    ma = normalize_ma_type((row or {}).get("ma_type") or payload.get("ma_type"))
+    bits = [stock]
     if year:
-        return "%s %s" % (stock, year)
-    return str(stock)
+        bits.append(year)
+    if ma:
+        bits.append(ma)
+    return " ".join(str(x) for x in bits if x)
 
 
 def _run_payloads(
@@ -354,6 +411,7 @@ def _run_payloads(
                     quiet=bool(payload.get("quiet", True)),
                     log_name=str(payload.get("log_name") or ""),
                     year=str(payload.get("year") or ""),
+                    ma_type=str(payload.get("ma_type") or ""),
                 )
             )
         if on_progress:
@@ -368,6 +426,7 @@ def _run_payloads(
             Path(str(p.get("csv") or "")),
             str(p.get("stock") or Path(str(p.get("csv") or "")).stem),
             year=str(p.get("year") or ""),
+            ma_type=str(p.get("ma_type") or ""),
         )
         for p in payloads
     ]
@@ -391,12 +450,34 @@ def _run_payloads(
                     Path(str(payloads[i].get("csv") or "")),
                     str(payloads[i].get("stock") or Path(str(payloads[i].get("csv") or "")).stem),
                     year=str(payloads[i].get("year") or ""),
+                    ma_type=str(payloads[i].get("ma_type") or ""),
                 )
                 rows[i]["error"] = "%s: %s" % (type(e).__name__, e)
             done += 1
             if on_progress:
                 on_progress(done, n, _job_label(payloads[i], rows[i]))
     return rows
+
+
+def _expand_ma_payloads(
+    payloads: list[dict[str, Any]],
+    *,
+    ma_type: str = "",
+    compare_ma: bool = False,
+) -> list[dict[str, Any]]:
+    kinds: list[str]
+    if compare_ma:
+        kinds = list(MA_TYPES)
+    else:
+        ma = normalize_ma_type(ma_type)
+        kinds = [ma] if ma else [""]
+    out: list[dict[str, Any]] = []
+    for p in payloads:
+        for k in kinds:
+            q = dict(p)
+            q["ma_type"] = k
+            out.append(q)
+    return out
 
 
 def run_batch(
@@ -409,6 +490,8 @@ def run_batch(
     quiet: bool = True,
     split: str = "range",
     metas: Sequence[dict[str, Any]] | None = None,
+    ma_type: str = "",
+    compare_ma: bool = False,
 ) -> list[dict[str, Any]]:
     """独立回测多标的；单只失败不中断。workers<=0 为自动。split=year 时按自然年分段。"""
     dest = Path(out_dir) if out_dir else THEME / "report"
@@ -453,9 +536,11 @@ def run_batch(
                 "out_dir": str(dest),
                 "quiet": bool(quiet),
                 "log_name": "",
+                "ma_type": "",
             }
             for j in jobs
         ]
+        payloads = _expand_ma_payloads(payloads, ma_type=ma_type, compare_ma=compare_ma)
         return _run_payloads(payloads, dest, on_progress, workers)
 
     payloads = [
@@ -468,9 +553,11 @@ def run_batch(
             "out_dir": str(dest),
             "quiet": bool(quiet),
             "log_name": "",
+            "ma_type": "",
         }
         for p in paths
     ]
+    payloads = _expand_ma_payloads(payloads, ma_type=ma_type, compare_ma=compare_ma)
     return _run_payloads(payloads, dest, on_progress, workers)
 
 
@@ -532,15 +619,34 @@ def main(argv: list[str] | None = None) -> None:
         default="range",
         help="批量切分：range=整段区间；year=按自然年分段独立回测",
     )
+    ap.add_argument(
+        "--ma-type",
+        default="",
+        metavar="SMA|EMA",
+        help="强制价格均线 SMA/EMA（盖过 BOOK_STOCKS）；缺省用 config",
+    )
+    ap.add_argument(
+        "--compare-ma",
+        action="store_true",
+        help="同一任务各跑 SMA 与 EMA，写 local_bt_ma_compare.csv",
+    )
     args = ap.parse_args(argv)
     quiet = not bool(args.verbose)
+    raw_ma = str(args.ma_type or "").strip()
+    ma_type = normalize_ma_type(raw_ma)
+    if raw_ma and not ma_type:
+        raise SystemExit("--ma-type must be SMA or EMA")
+    compare_ma = bool(args.compare_ma)
 
     if args.csv_dir:
         from analyze import (  # noqa: WPS433
             daily_csvs_by_stock,
+            pair_ma_batch_rows,
             summarize_batch_row,
             write_batch_summary_csv,
             write_batch_year_summary_csv,
+            write_ma_compare_csv,
+            write_ma_compare_year_csv,
         )
 
         metas = daily_csvs_by_stock(args.csv_dir)
@@ -561,11 +667,22 @@ def main(argv: list[str] | None = None) -> None:
             quiet=quiet,
             split=args.split,
             metas=metas,
+            ma_type=ma_type,
+            compare_ma=compare_ma,
         )
         rows = [summarize_batch_row(r) for r in raw]
         summary = write_batch_summary_csv(rows, Path(args.out) / "local_bt_batch_summary.csv")
         print("wrote batch summary", summary)
-        if args.split == "year":
+        if compare_ma:
+            pairs = pair_ma_batch_rows(rows)
+            cmp_path = write_ma_compare_csv(pairs, Path(args.out) / "local_bt_ma_compare.csv")
+            print("wrote ma compare", cmp_path)
+            if args.split == "year":
+                year_cmp = write_ma_compare_year_csv(
+                    pairs, Path(args.out) / "local_bt_ma_compare_year.csv"
+                )
+                print("wrote ma compare year", year_cmp)
+        elif args.split == "year":
             year_summary = write_batch_year_summary_csv(
                 rows, Path(args.out) / "local_bt_batch_year_summary.csv"
             )
@@ -574,11 +691,46 @@ def main(argv: list[str] | None = None) -> None:
             print(
                 r.get("stock"),
                 r.get("year") or "",
+                r.get("ma_type") or "",
                 r.get("status"),
                 "pnl=",
                 r.get("sum_pnl"),
                 r.get("error") or "",
             )
+        return
+
+    if compare_ma:
+        from analyze import parse_budget_from_log, pair_ma_batch_rows, summarize_batch_row, write_ma_compare_csv
+
+        rows = []
+        for kind in MA_TYPES:
+            log_path = run_backtest(
+                args.csv,
+                start=args.start,
+                end=args.end,
+                stock=args.stock,
+                out_dir=args.out,
+                log_name="",
+                weekly_csv=args.weekly_csv or None,
+                quiet=quiet,
+                ma_type=kind,
+            )
+            row = {
+                "stock": args.stock or Path(args.csv).stem,
+                "year": "",
+                "ma_type": kind,
+                "ok": True,
+                "log": str(log_path),
+                "detail": str(trades_csv_path(log_path)),
+                "csv": str(args.csv),
+            }
+            row["budget"] = parse_budget_from_log(log_path)
+            rows.append(summarize_batch_row(row))
+        pairs = pair_ma_batch_rows(rows)
+        cmp_path = write_ma_compare_csv(pairs, Path(args.out) / "local_bt_ma_compare.csv")
+        print("wrote ma compare", cmp_path)
+        if args.report and rows:
+            _run_report(Path(rows[0]["log"]), Path(args.out))
         return
 
     log_path = run_backtest(
@@ -590,6 +742,7 @@ def main(argv: list[str] | None = None) -> None:
         log_name=args.log_name,
         weekly_csv=args.weekly_csv or None,
         quiet=quiet,
+        ma_type=ma_type,
     )
     if args.report:
         _run_report(log_path, Path(args.out))

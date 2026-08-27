@@ -480,7 +480,206 @@ class YearSplitTests(unittest.TestCase):
             self.assertTrue(row.get("ok"), row.get("error"))
             self.assertEqual(row.get("year"), "2020")
             self.assertIn("2020", Path(row["log"]).name)
+            self.assertNotIn("SMA", Path(row["log"]).name)
+            self.assertNotIn("EMA", Path(row["log"]).name)
             self.assertTrue(Path(row["log"]).is_file())
+
+    def test_backtest_one_result_ma_type_in_log_and_banner(self):
+        from run import backtest_one_result
+
+        header = "stock,period,datetime,open,high,low,close,volume,amount"
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "600000_SH_1d_20200102_20200103.csv"
+            path.write_text(
+                header
+                + "\n600000.SH,1d,20200102,1,1,1,1,100,100\n"
+                + "600000.SH,1d,20200103,1,1,1,1,100,100\n",
+                encoding="utf-8",
+            )
+            out = Path(td) / "out"
+            row = backtest_one_result(
+                path,
+                start="20200102",
+                end="20200103",
+                out_dir=out,
+                year="2020",
+                ma_type="SMA",
+            )
+            self.assertTrue(row.get("ok"), row.get("error"))
+            self.assertEqual(row.get("ma_type"), "SMA")
+            name = Path(row["log"]).name
+            self.assertIn("2020", name)
+            self.assertIn("SMA", name)
+            text = Path(row["log"]).read_text(encoding="utf-8")
+            self.assertIn("ma_type= SMA", text)
+
+
+class MaCompareTests(unittest.TestCase):
+    def test_pick_ma_winner_higher_pnl(self):
+        from analyze import pick_ma_winner
+
+        r = pick_ma_winner(
+            {"ok": True, "sum_pnl": 10.0, "win_rate": 80.0},
+            {"ok": True, "sum_pnl": 20.0, "win_rate": 40.0},
+        )
+        self.assertEqual(r["winner"], "EMA")
+        self.assertEqual(r["label"], "EMA")
+        self.assertEqual(r["why"], "compare")
+        self.assertAlmostEqual(r["pnl_delta"], 10.0)
+
+    def test_pick_ma_winner_close_uses_win_rate(self):
+        from analyze import pick_ma_winner
+
+        r = pick_ma_winner(
+            {"ok": True, "sum_pnl": 10.0, "win_rate": 80.0},
+            {"ok": True, "sum_pnl": 10.4, "win_rate": 20.0},
+        )
+        self.assertEqual(r["label"], "接近")
+        self.assertEqual(r["why"], "compare_close")
+        self.assertEqual(r["winner"], "SMA")
+
+    def test_pick_ma_winner_close_tie_ema(self):
+        from analyze import pick_ma_winner
+
+        r = pick_ma_winner(
+            {"ok": True, "sum_pnl": 10.0, "win_rate": 50.0},
+            {"ok": True, "sum_pnl": 10.0, "win_rate": 50.0},
+        )
+        self.assertEqual(r["label"], "接近")
+        self.assertEqual(r["winner"], "EMA")
+
+    def test_pick_ma_winner_both_fail(self):
+        from analyze import pick_ma_winner
+
+        r = pick_ma_winner({"ok": False, "sum_pnl": None}, {"ok": False})
+        self.assertEqual(r["winner"], "")
+        self.assertEqual(r["label"], "")
+        self.assertEqual(r["why"], "")
+
+
+class DetailReTests(unittest.TestCase):
+    def test_parse_year_and_ma(self):
+        from stock_select import DETAIL_RE
+
+        m = DETAIL_RE.match("local_bt_600350_SH_2024_SMA_操作明细.csv")
+        self.assertIsNotNone(m)
+        self.assertEqual(m.group(1), "600350")
+        self.assertEqual(m.group(2).upper(), "SH")
+        self.assertEqual(m.group(3), "2024")
+        self.assertEqual(m.group(4).upper(), "SMA")
+
+    def test_parse_ma_without_year(self):
+        from stock_select import DETAIL_RE
+
+        m = DETAIL_RE.match("local_bt_600350_SH_EMA_操作明细.csv")
+        self.assertIsNotNone(m)
+        self.assertIsNone(m.group(3))
+        self.assertEqual(m.group(4).upper(), "EMA")
+
+    def test_parse_year_without_ma(self):
+        from stock_select import DETAIL_RE
+
+        m = DETAIL_RE.match("local_bt_600350_SH_2024_操作明细.csv")
+        self.assertIsNotNone(m)
+        self.assertEqual(m.group(3), "2024")
+        self.assertIsNone(m.group(4))
+
+
+class ResolveMaTests(unittest.TestCase):
+    def test_compare_winner_not_plain_file(self):
+        from stock_select import _resolve_stock_ma
+
+        rec = {
+            "by_ma": {
+                "SMA": {
+                    "years": {"2024": {"sum_pnl": 100.0, "n_buy": 2, "win_rate": 50.0}},
+                    "recent": None,
+                },
+                "EMA": {
+                    "years": {"2024": {"sum_pnl": 10.0, "n_buy": 2, "win_rate": 50.0}},
+                    "recent": None,
+                },
+                "": {
+                    "years": {"2024": {"sum_pnl": 999.0, "n_buy": 1, "win_rate": 10.0}},
+                    "recent": None,
+                },
+            }
+        }
+        _resolve_stock_ma(rec)
+        self.assertEqual(rec["ma_type_suggest"], "SMA")
+        self.assertEqual(rec["ma_type_why"], "compare")
+        self.assertEqual(rec["years"]["2024"]["sum_pnl"], 100.0)
+
+    def test_no_compare_empty_suggest(self):
+        from stock_select import _resolve_stock_ma
+
+        rec = {
+            "by_ma": {
+                "": {
+                    "years": {"2024": {"sum_pnl": 1.0, "n_buy": 1, "win_rate": 50.0}},
+                    "recent": None,
+                }
+            }
+        }
+        _resolve_stock_ma(rec)
+        self.assertEqual(rec["ma_type_suggest"], "")
+        self.assertEqual(rec["ma_type_why"], "no_compare")
+
+    def test_score_universe_uses_compare_not_book(self):
+        from stock_select import score_universe
+
+        year_kpi = {
+            "n_buy": 10,
+            "sum_pnl": 100.0,
+            "win_rate": 60.0,
+            "avg_ret": 1.0,
+            "max_win": 2.0,
+            "max_loss": -1.0,
+            "gross_profit": 120.0,
+            "gross_loss": -20.0,
+            "profit_factor": 6.0,
+            "max_dd": -0.1,
+            "avg_hold_days": 5.0,
+            "max_win_pnl": 50.0,
+            "sell": {"trail_stop": 3},
+            "buy": {},
+            "skip": {},
+            "n_bars": 200,
+        }
+        scanned = {
+            "book": {"600000.SH": "EMA"},
+            "score_years": ("2024",),
+            "coverage": {"n_stock": 1, "2024": 1},
+            "stocks": {
+                "600000.SH": {
+                    "years": {"2024": year_kpi},
+                    "recent": None,
+                    "style": {"vol_ann": 0.1, "touch_ma20": 0.9},
+                    "error": "",
+                    "ma_type_suggest": "SMA",
+                    "ma_type_why": "compare",
+                    "ma_pnl_sma": 100.0,
+                    "ma_pnl_ema": 10.0,
+                    "ma_pnl_delta": -90.0,
+                }
+            },
+        }
+        scored = score_universe(
+            scanned,
+            filters={
+                "min_n_buy": 0,
+                "min_years_traded": 0,
+                "min_pos_years": 0,
+                "min_pos_ratio": 0.0,
+                "max_win_pnl_share": 1.0,
+                "vol_drop_top": 0.0,
+                "top_n": 6,
+            },
+        )
+        row = scored["df"].iloc[0]
+        self.assertEqual(row["ma_type_suggest"], "SMA")
+        self.assertEqual(row["ma_type_why"], "compare")
+        self.assertAlmostEqual(float(row["ma_pnl_delta"]), -90.0)
 
 
 class TestScoreYears(unittest.TestCase):

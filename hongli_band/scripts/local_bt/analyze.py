@@ -23,6 +23,341 @@ if str(HERE) not in sys.path:
 
 from market_csv import compact_day, load_daily_csv, peek_daily_csv_meta  # noqa: E402
 
+MA_TYPES = ("SMA", "EMA")
+MA_PNL_CLOSE = 1.0
+
+
+def normalize_ma_type(raw: Any) -> str:
+    s = str(raw or "").strip().upper()
+    return s if s in MA_TYPES else ""
+
+
+def _usable_pnl(row: dict[str, Any] | None) -> float | None:
+    if not row:
+        return None
+    if row.get("ok") is False:
+        return None
+    v = row.get("sum_pnl")
+    if v is None or v == "":
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _usable_win_rate(row: dict[str, Any] | None) -> float:
+    if not row:
+        return 0.0
+    v = row.get("win_rate")
+    if v is None or v == "":
+        return 0.0
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def agg_kpi_pnl(kpis: list[dict[str, Any]]) -> dict[str, Any]:
+    """多段 KPI → 对照用的盈亏/胜率（胜率按轮次加权）。"""
+    n_buy = 0.0
+    sum_pnl = 0.0
+    win_n = 0.0
+    for k in kpis:
+        nb = float(k.get("n_buy") or 0)
+        n_buy += nb
+        sum_pnl += float(k.get("sum_pnl") or 0)
+        win_n += float(k.get("win_rate") or 0) / 100.0 * nb
+    return {
+        "ok": True,
+        "n_buy": int(n_buy) if n_buy == int(n_buy) else n_buy,
+        "sum_pnl": sum_pnl,
+        "win_rate": (100.0 * win_n / n_buy) if n_buy else 0.0,
+    }
+
+
+def pick_ma_winner(
+    sma: dict[str, Any] | None,
+    ema: dict[str, Any] | None,
+    *,
+    close_eps: float = MA_PNL_CLOSE,
+) -> dict[str, Any]:
+    """SMA vs EMA：盈亏高者胜出；|Δ|≤close_eps 为接近，落地时胜率高者、再平 EMA。"""
+    sp = _usable_pnl(sma)
+    ep = _usable_pnl(ema)
+    out = {
+        "winner": "",
+        "label": "",
+        "why": "",
+        "pnl_sma": sp,
+        "pnl_ema": ep,
+        "pnl_delta": None,
+    }
+    if sp is None and ep is None:
+        return out
+    if sp is None:
+        out.update({"winner": "EMA", "label": "EMA", "why": "single_ma"})
+        return out
+    if ep is None:
+        out.update({"winner": "SMA", "label": "SMA", "why": "single_ma"})
+        return out
+    delta = ep - sp
+    out["pnl_delta"] = delta
+    if abs(sp - ep) <= float(close_eps):
+        sw = _usable_win_rate(sma)
+        ew = _usable_win_rate(ema)
+        if ew > sw:
+            winner = "EMA"
+        elif sw > ew:
+            winner = "SMA"
+        else:
+            winner = "EMA"
+        out.update({"winner": winner, "label": "接近", "why": "compare_close"})
+        return out
+    winner = "EMA" if ep > sp else "SMA"
+    out.update({"winner": winner, "label": winner, "why": "compare"})
+    return out
+
+
+def pair_ma_batch_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """批量行按 (stock, year) 配对 SMA/EMA。"""
+    groups: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
+    for r in rows:
+        ma = normalize_ma_type(r.get("ma_type"))
+        if not ma:
+            continue
+        key = (str(r.get("stock") or ""), str(r.get("year") or ""))
+        groups.setdefault(key, {})[ma] = r
+    out: list[dict[str, Any]] = []
+    for stock, year in sorted(groups):
+        mas = groups[(stock, year)]
+        sma = mas.get("SMA")
+        ema = mas.get("EMA")
+        pick = pick_ma_winner(sma, ema)
+
+        def _g(row: dict[str, Any] | None, field: str) -> Any:
+            return None if not row else row.get(field)
+
+        out.append(
+            {
+                "stock": stock,
+                "year": year,
+                "ok_sma": bool(sma and sma.get("ok")),
+                "ok_ema": bool(ema and ema.get("ok")),
+                "n_buy_sma": _g(sma, "n_buy"),
+                "n_buy_ema": _g(ema, "n_buy"),
+                "sum_pnl_sma": _g(sma, "sum_pnl"),
+                "sum_pnl_ema": _g(ema, "sum_pnl"),
+                "win_rate_sma": _g(sma, "win_rate"),
+                "win_rate_ema": _g(ema, "win_rate"),
+                "avg_ret_sma": _g(sma, "avg_ret"),
+                "avg_ret_ema": _g(ema, "avg_ret"),
+                "max_win_sma": _g(sma, "max_win"),
+                "max_win_ema": _g(ema, "max_win"),
+                "max_loss_sma": _g(sma, "max_loss"),
+                "max_loss_ema": _g(ema, "max_loss"),
+                "pnl_delta": pick["pnl_delta"],
+                "winner": pick["winner"],
+                "label": pick["label"],
+                "why": pick["why"],
+                "sma_log": _g(sma, "log"),
+                "ema_log": _g(ema, "log"),
+                "sma_detail": _g(sma, "detail"),
+                "ema_detail": _g(ema, "detail"),
+                "sma_csv": _g(sma, "csv"),
+                "ema_csv": _g(ema, "csv"),
+                "budget": _g(sma, "budget") or _g(ema, "budget"),
+                "walk_start": _g(sma, "walk_start") or _g(ema, "walk_start"),
+                "walk_end": _g(sma, "walk_end") or _g(ema, "walk_end"),
+                "error_sma": _g(sma, "error"),
+                "error_ema": _g(ema, "error"),
+            }
+        )
+    return out
+
+
+def ma_compare_dataframe(pairs: list[dict[str, Any]]) -> pd.DataFrame:
+    recs = []
+    has_year = any(str(r.get("year") or "").strip() for r in pairs)
+    for r in pairs:
+        rec: dict[str, Any] = {"标的": r.get("stock") or ""}
+        if has_year:
+            rec["年份"] = str(r.get("year") or "")
+        rec.update(
+            {
+                "轮次SMA": r.get("n_buy_sma"),
+                "轮次EMA": r.get("n_buy_ema"),
+                "盈亏SMA": r.get("sum_pnl_sma"),
+                "盈亏EMA": r.get("sum_pnl_ema"),
+                "Δ盈亏": r.get("pnl_delta"),
+                "胜率SMA": r.get("win_rate_sma"),
+                "胜率EMA": r.get("win_rate_ema"),
+                "平均%SMA": r.get("avg_ret_sma"),
+                "平均%EMA": r.get("avg_ret_ema"),
+                "更优": r.get("label") or "",
+                "建议": r.get("winner") or "",
+            }
+        )
+        recs.append(rec)
+    cols = [
+        "标的",
+        "轮次SMA",
+        "轮次EMA",
+        "盈亏SMA",
+        "盈亏EMA",
+        "Δ盈亏",
+        "胜率SMA",
+        "胜率EMA",
+        "平均%SMA",
+        "平均%EMA",
+        "更优",
+        "建议",
+    ]
+    if has_year:
+        cols = ["标的", "年份"] + [c for c in cols if c != "标的"]
+    df = pd.DataFrame(recs, columns=cols)
+    for col in ("轮次SMA", "轮次EMA"):
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
+    for col in ("盈亏SMA", "盈亏EMA", "Δ盈亏", "胜率SMA", "胜率EMA", "平均%SMA", "平均%EMA"):
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df
+
+
+def summarize_ma_compare_by_year(pairs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_year: dict[str, list[dict[str, Any]]] = {}
+    for r in pairs:
+        y = str(r.get("year") or "").strip() or "?"
+        by_year.setdefault(y, []).append(r)
+    out: list[dict[str, Any]] = []
+    for y in sorted(by_year):
+        xs = by_year[y]
+        sma_pnl = 0.0
+        ema_pnl = 0.0
+        n_sma_ok = 0
+        n_ema_ok = 0
+        for r in xs:
+            if r.get("ok_sma") and r.get("sum_pnl_sma") is not None:
+                sma_pnl += float(r["sum_pnl_sma"] or 0)
+                n_sma_ok += 1
+            if r.get("ok_ema") and r.get("sum_pnl_ema") is not None:
+                ema_pnl += float(r["sum_pnl_ema"] or 0)
+                n_ema_ok += 1
+        out.append(
+            {
+                "year": y,
+                "n_stock": len(xs),
+                "n_ok_sma": n_sma_ok,
+                "n_ok_ema": n_ema_ok,
+                "sum_pnl_sma": sma_pnl,
+                "sum_pnl_ema": ema_pnl,
+                "pnl_delta": ema_pnl - sma_pnl,
+                "n_sma_win": sum(1 for r in xs if r.get("label") == "SMA"),
+                "n_ema_win": sum(1 for r in xs if r.get("label") == "EMA"),
+                "n_close": sum(1 for r in xs if r.get("label") == "接近"),
+            }
+        )
+    return out
+
+
+def ma_compare_year_dataframe(pairs: list[dict[str, Any]]) -> pd.DataFrame:
+    recs = []
+    for r in summarize_ma_compare_by_year(pairs):
+        recs.append(
+            {
+                "年份": r.get("year") or "",
+                "标的数": r.get("n_stock"),
+                "SMA成功": r.get("n_ok_sma"),
+                "EMA成功": r.get("n_ok_ema"),
+                "盈亏SMA": r.get("sum_pnl_sma"),
+                "盈亏EMA": r.get("sum_pnl_ema"),
+                "Δ盈亏": r.get("pnl_delta"),
+                "SMA更优": r.get("n_sma_win"),
+                "EMA更优": r.get("n_ema_win"),
+                "接近": r.get("n_close"),
+            }
+        )
+    cols = [
+        "年份",
+        "标的数",
+        "SMA成功",
+        "EMA成功",
+        "盈亏SMA",
+        "盈亏EMA",
+        "Δ盈亏",
+        "SMA更优",
+        "EMA更优",
+        "接近",
+    ]
+    df = pd.DataFrame(recs, columns=cols)
+    for col in ("标的数", "SMA成功", "EMA成功", "SMA更优", "EMA更优", "接近"):
+        df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
+    for col in ("盈亏SMA", "盈亏EMA", "Δ盈亏"):
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df
+
+
+def write_ma_compare_csv(pairs: list[dict[str, Any]], path: str | Path) -> Path:
+    dest = Path(path)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    fields = [
+        "stock",
+        "year",
+        "ok_sma",
+        "ok_ema",
+        "n_buy_sma",
+        "n_buy_ema",
+        "sum_pnl_sma",
+        "sum_pnl_ema",
+        "pnl_delta",
+        "win_rate_sma",
+        "win_rate_ema",
+        "avg_ret_sma",
+        "avg_ret_ema",
+        "max_win_sma",
+        "max_win_ema",
+        "max_loss_sma",
+        "max_loss_ema",
+        "winner",
+        "label",
+        "why",
+        "walk_start",
+        "walk_end",
+        "budget",
+        "error_sma",
+        "error_ema",
+        "sma_log",
+        "ema_log",
+        "sma_detail",
+        "ema_detail",
+        "sma_csv",
+        "ema_csv",
+    ]
+    recs = [{k: r.get(k) for k in fields} for r in pairs]
+    pd.DataFrame(recs, columns=fields).to_csv(dest, index=False, encoding="utf-8-sig")
+    return dest
+
+
+def write_ma_compare_year_csv(pairs: list[dict[str, Any]], path: str | Path) -> Path:
+    dest = Path(path)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    fields = [
+        "year",
+        "n_stock",
+        "n_ok_sma",
+        "n_ok_ema",
+        "sum_pnl_sma",
+        "sum_pnl_ema",
+        "pnl_delta",
+        "n_sma_win",
+        "n_ema_win",
+        "n_close",
+    ]
+    recs = [{k: r.get(k) for k in fields} for r in summarize_ma_compare_by_year(pairs)]
+    pd.DataFrame(recs, columns=fields).to_csv(dest, index=False, encoding="utf-8-sig")
+    return dest
+
 
 def _load_report_mod():
     spec = importlib.util.spec_from_file_location("qmt_generate_report", REPORT_PY)
@@ -429,6 +764,9 @@ def batch_summary_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
         rec: dict[str, Any] = {"标的": r.get("stock") or ""}
         if has_year:
             rec["年份"] = str(r.get("year") or "")
+        ma = normalize_ma_type(r.get("ma_type"))
+        if ma:
+            rec["均线"] = ma
         rec.update(
             {
                 "状态": r.get("status") or ("成功" if r.get("ok") else "失败"),
@@ -455,8 +793,11 @@ def batch_summary_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
         "最大亏损%",
         "说明",
     ]
+    if any(normalize_ma_type(r.get("ma_type")) for r in rows):
+        cols = ["标的", "均线"] + [c for c in cols if c != "标的"]
     if has_year:
-        cols = ["标的", "年份"] + [c for c in cols if c != "标的"]
+        rest = [c for c in cols if c != "标的"]
+        cols = ["标的", "年份"] + [c for c in rest if c != "年份"]
     df = pd.DataFrame(recs, columns=cols)
     for col in ("轮次",):
         df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
@@ -559,6 +900,7 @@ def write_batch_summary_csv(rows: list[dict[str, Any]], path: str | Path) -> Pat
     fields = [
         "stock",
         "year",
+        "ma_type",
         "ok",
         "status",
         "walk_start",
