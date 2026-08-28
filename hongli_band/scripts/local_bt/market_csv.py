@@ -143,6 +143,17 @@ class _ColPack:
                 cols[field] = self.close[lo:hi]
         return BarFrame(fields=fields, index=idx, cols=cols)
 
+    def as_ohlcv(self, lo: int, hi: int):
+        if hi <= lo:
+            return None
+        return (
+            self.open[lo:hi],
+            self.high[lo:hi],
+            self.low[lo:hi],
+            self.close[lo:hi],
+            self.volume[lo:hi],
+        )
+
 
 def digits_only(s: str) -> str:
     return "".join(ch for ch in str(s or "") if ch.isdigit())
@@ -587,3 +598,20 @@ class MarketStore:
             return self._weekly.as_frame(lo, hi, cols)
         lo, hi = self._daily.bounds(end_time, start_time, count)
         return self._daily.as_frame(lo, hi, cols)
+
+    def ohlcv(
+        self,
+        period: str,
+        end_day: str,
+        count: int | None = None,
+        start_day: str = "",
+    ):
+        """与 frame() 相同切片，返回 (open, high, low, close, volume) 的 numpy 视图。"""
+        if _is_weekly_period(period):
+            lo, hi = self._weekly.bounds(end_day, start_day, count=None)
+            hi = self._weekly.drop_forming_hi(lo, hi, end_day)
+            if count is not None and int(count) > 0 and hi - lo > int(count):
+                lo = hi - int(count)
+            return self._weekly.as_ohlcv(lo, hi)
+        lo, hi = self._daily.bounds(end_day, start_day, count)
+        return self._daily.as_ohlcv(lo, hi)

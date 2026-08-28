@@ -34,7 +34,6 @@ from analyze import (  # noqa: E402
     analyze_detail,
     batch_summary_dataframe,
     batch_year_summary_dataframe,
-    csv_date_range,
     daily_csvs_by_stock,
     date_to_ymd,
     daily_csv_for_stock,
@@ -48,23 +47,27 @@ from analyze import (  # noqa: E402
     ohlc_from_csv,
     pair_ma_batch_rows,
     parse_budget_from_log,
+    peek_daily_csv_meta,
     resolve_typed_dir,
     summarize_batch_row,
     trades_to_dataframe,
     union_date_range,
-    write_batch_summary_csv,
-    write_batch_year_summary_csv,
-    write_ma_compare_csv,
-    write_ma_compare_year_csv,
     ymd_to_date,
 )
-from run import run_backtest, run_batch  # noqa: E402
+from run import (  # noqa: E402
+    _run_payloads,
+    build_batch_payloads,
+    run_backtest,
+    write_typed_summaries,
+)
 from stock_select import (  # noqa: E402
     DEFAULT_FILTERS,
     SCORE_YEARS,
     coverage_notes,
     csv_dir_fingerprint,
     format_book_snippet,
+    glob_fingerprint,
+    infer_score_years,
     report_fingerprint,
     scan_reports,
     score_universe,
@@ -80,17 +83,7 @@ st.title("HlBand Backtesting")
 
 
 def _daily_dir_fingerprint(csv_dir: str) -> tuple:
-    root = Path(csv_dir)
-    if not root.is_dir():
-        return ()
-    out = []
-    for p in sorted(root.glob("*_1d_*.csv")):
-        try:
-            st_ = p.stat()
-        except OSError:
-            continue
-        out.append((p.name, int(st_.st_mtime_ns), int(st_.st_size)))
-    return tuple(out)
+    return glob_fingerprint(Path(csv_dir), "*_1d_*.csv")
 
 
 @st.cache_data(show_spinner="扫描行情目录…")
@@ -757,10 +750,9 @@ def _render_batch_run(
         status = st.empty()
         all_rows: list[dict] = []
         all_pairs: list[dict] = []
-        n_types = max(1, len(divs))
         try:
-            for ti, div in enumerate(divs):
-                csv_dir = str(resolve_typed_dir(csv_root, div))
+            payloads: list[dict] = []
+            for div in divs:
                 out_dir = Path(resolve_typed_dir(DEFAULT_REPORT_ROOT, div))
                 type_metas = []
                 for p in picked:
@@ -768,56 +760,44 @@ def _render_batch_run(
                     if m:
                         type_metas.append(m)
                 if not type_metas:
-                    status.warning("%s 无对应行情，跳过" % dividend_label(div))
                     continue
-
-                def on_progress(i: int, n: int, stock: str, _ti=ti, _div=div) -> None:
-                    frac = (float(_ti) + (0.0 if n <= 0 else float(i) / float(n))) / float(n_types)
-                    bar.progress(min(1.0, frac))
-                    unit = "个任务" if (split_mode == "year" or compare_ma) else "只"
-                    if i < n:
-                        status.info(
-                            "复权 **%s**（%s/%s）正在 **%s**（%s/%s）…"
-                            % (dividend_label(_div), _ti + 1, n_types, stock, i + 1, n)
-                        )
-                    else:
-                        status.success("完成 %s · %s %s" % (dividend_label(_div), n, unit))
-
-                raw = run_batch(
-                    [Path(m["path"]) for m in type_metas],
-                    start=start_s,
-                    end=end_s,
-                    out_dir=out_dir,
-                    on_progress=on_progress,
-                    workers=int(workers),
-                    quiet=bool(quiet),
-                    split=split_mode,
-                    metas=type_metas,
-                    compare_ma=bool(compare_ma),
+                payloads.extend(
+                    build_batch_payloads(
+                        [Path(m["path"]) for m in type_metas],
+                        start=start_s,
+                        end=end_s,
+                        out_dir=out_dir,
+                        quiet=bool(quiet),
+                        split=split_mode,
+                        metas=type_metas,
+                        compare_ma=bool(compare_ma),
+                        dividend_type=div,
+                    )
                 )
-                if not raw:
-                    continue
-                rows = [summarize_batch_row(r) for r in raw]
-                for r in rows:
-                    r["dividend_type"] = div
-                write_batch_summary_csv(rows, out_dir / "local_bt_batch_summary.csv")
-                extra = ""
-                if compare_ma:
-                    pairs = pair_ma_batch_rows(rows)
-                    write_ma_compare_csv(pairs, out_dir / "local_bt_ma_compare.csv")
-                    extra = " · 对照"
-                    if split_mode == "year":
-                        write_ma_compare_year_csv(pairs, out_dir / "local_bt_ma_compare_year.csv")
-                    all_pairs.extend(pairs)
-                elif split_mode == "year":
-                    write_batch_year_summary_csv(rows, out_dir / "local_bt_batch_year_summary.csv")
-                    extra = " · 年汇总"
-                all_rows.extend(rows)
-                _ = extra
-            bar.progress(1.0)
-            if not all_rows:
+            if not payloads:
                 st.warning("所选区间与行情无交集，未生成任务。")
             else:
+
+                def on_progress(i: int, n: int, stock: str) -> None:
+                    bar.progress(min(1.0, 0.0 if n <= 0 else float(i) / float(n)))
+                    if i < n:
+                        status.info("正在 **%s**（%s/%s）…" % (stock, i + 1, n))
+                    else:
+                        status.success("完成 %s 个任务" % n)
+
+                raw = _run_payloads(
+                    payloads,
+                    Path(DEFAULT_REPORT_ROOT),
+                    on_progress,
+                    int(workers),
+                )
+                rows = [summarize_batch_row(r) for r in raw]
+                write_typed_summaries(rows, split=split_mode, compare_ma=bool(compare_ma))
+                all_rows = rows
+                if compare_ma:
+                    all_pairs = pair_ma_batch_rows(rows)
+                bar.progress(1.0)
+                n_ok = sum(1 for r in all_rows if r.get("ok"))
                 st.session_state["batch_result"] = {
                     "start": start_s,
                     "end": end_s,
@@ -826,7 +806,6 @@ def _render_batch_run(
                     "split": split_mode,
                     "compare_ma": bool(compare_ma),
                 }
-                n_ok = sum(1 for r in all_rows if r.get("ok"))
                 st.success(
                     "完成 · 成功 %s · 失败 %s · 各复权目录已写 `local_bt_batch_summary.csv`"
                     % (n_ok, len(all_rows) - n_ok)
@@ -949,6 +928,8 @@ def _select_display_df(df: pd.DataFrame, *, passed_only: bool = False, score_yea
         out["Δ盈亏"] = src["ma_pnl_delta"]
     out["白名单"] = src["in_book"].map(lambda x: "是" if x else "")
     out["跨年轮次"] = src["n_buy"]
+    if "n_buy_year_min" in src.columns:
+        out["年最少轮次"] = src["n_buy_year_min"]
     out["成交年"] = src["n_years_traded"]
     out["盈利年"] = src["n_years_pos"]
     out["稳定性"] = pd.to_numeric(src["stability"], errors="coerce") * 100.0
@@ -1033,20 +1014,27 @@ def _plot_sell_pie(counts: dict) -> go.Figure:
     return fig
 
 
-def _render_select(csv_dir: str, report_dir: str, filters: dict) -> None:
-    try:
-        scanned = _cached_select_scan(
-            report_dir,
-            csv_dir,
-            report_fingerprint(report_dir),
-            csv_dir_fingerprint(csv_dir),
-        )
-    except Exception:
-        st.error("扫描回测报告失败")
-        st.code(traceback.format_exc())
-        return
+def _render_select(
+    csv_dir: str,
+    report_dir: str,
+    filters: dict,
+    score_years: tuple[str, ...] | None = None,
+    scanned: dict | None = None,
+) -> None:
+    if scanned is None:
+        try:
+            scanned = _cached_select_scan(
+                report_dir,
+                csv_dir,
+                report_fingerprint(report_dir),
+                csv_dir_fingerprint(csv_dir),
+            )
+        except Exception:
+            st.error("扫描回测报告失败")
+            st.code(traceback.format_exc())
+            return
 
-    scored = score_universe(scanned, filters=filters)
+    scored = score_universe(scanned, filters=filters, score_years=score_years)
     df = scored["df"]
     passed = scored["passed"]
     rec = scored["recommend"]
@@ -1083,7 +1071,7 @@ def _render_select(csv_dir: str, report_dir: str, filters: dict) -> None:
         st.warning("没有过线标的。放宽侧栏阈值，或先补齐分年批量回测。")
     else:
         st.dataframe(_select_display_df(rec, score_years=years), use_container_width=True, hide_index=True)
-        st.caption("建议均线/复权来自分年对照；缺对照的票不写入 snippet。不自动改 `BOOK_STOCKS`。")
+        st.caption("建议均线/复权按侧栏选定年重算；缺对照的票不写入 snippet。不自动改 `BOOK_STOCKS`。")
         st.code(format_book_snippet(rec), language="python")
 
     st.subheader("打分总表")
@@ -1203,16 +1191,66 @@ with st.sidebar:
                 st.number_input("进程数（0=自动）", min_value=0, max_value=16, value=0, step=1, key="bt_workers")
             )
     select_filters = dict(DEFAULT_FILTERS)
+    select_years: tuple[str, ...] | None = None
+    select_scanned: dict | None = None
     if mode == "选股方案":
+        st.subheader("打分年份")
+        try:
+            select_scanned = _cached_select_scan(
+                str(DEFAULT_REPORT_ROOT),
+                str(DEFAULT_CSV_ROOT),
+                report_fingerprint(str(DEFAULT_REPORT_ROOT)),
+                csv_dir_fingerprint(str(DEFAULT_CSV_ROOT)),
+            )
+        except Exception:
+            select_scanned = {"stocks": {}, "book": {}, "score_years": ()}
+            st.error("扫描回测报告失败")
+            st.code(traceback.format_exc())
+        avail = infer_score_years((select_scanned or {}).get("stocks") or {}) or tuple(SCORE_YEARS)
+        start = st.selectbox("起始年", list(avail), index=0, key="select_year_start")
+        end_opts = [y for y in avail if str(y) >= str(start)] or list(avail)
+        if st.session_state.get("select_year_end") not in end_opts:
+            st.session_state["select_year_end"] = end_opts[-1]
+        end = st.selectbox("结束年", end_opts, key="select_year_end")
+        if str(end) < str(start):
+            start, end = end, start
+        select_years = tuple(y for y in avail if str(start) <= str(y) <= str(end))
+        if not select_years:
+            select_years = avail
+        st.caption("建议均线/复权与硬过滤都在 %s–%s 内重算；改年不重新扫描。" % (select_years[0], select_years[-1]))
+        n_win = max(len(select_years), 1)
+        year_max = max(5, n_win)
         st.subheader("硬过滤")
         select_filters["min_n_buy"] = int(
             st.number_input("最少跨年轮次", min_value=0, max_value=50, value=int(DEFAULT_FILTERS["min_n_buy"]), step=1)
         )
+        select_filters["min_n_buy_per_year"] = int(
+            st.number_input(
+                "每年最少轮次",
+                min_value=0,
+                max_value=20,
+                value=int(DEFAULT_FILTERS["min_n_buy_per_year"]),
+                step=1,
+            )
+        )
+        st.caption("窗口内每一年都要达标，缺文件按 0；0 表示不启用。")
         select_filters["min_years_traded"] = int(
-            st.number_input("最少成交年数", min_value=1, max_value=5, value=int(DEFAULT_FILTERS["min_years_traded"]), step=1)
+            st.number_input(
+                "最少成交年数",
+                min_value=1,
+                max_value=year_max,
+                value=min(int(DEFAULT_FILTERS["min_years_traded"]), year_max),
+                step=1,
+            )
         )
         select_filters["min_pos_years"] = int(
-            st.number_input("最少盈利年数", min_value=0, max_value=5, value=int(DEFAULT_FILTERS["min_pos_years"]), step=1)
+            st.number_input(
+                "最少盈利年数",
+                min_value=0,
+                max_value=year_max,
+                value=min(int(DEFAULT_FILTERS["min_pos_years"]), year_max),
+                step=1,
+            )
         )
         select_filters["min_pos_ratio"] = float(
             st.slider("或盈利年占比 ≥", min_value=0.0, max_value=1.0, value=float(DEFAULT_FILTERS["min_pos_ratio"]), step=0.05)
@@ -1231,7 +1269,13 @@ with st.sidebar:
             st.rerun()
 
 if mode == "选股方案":
-    _render_select(str(DEFAULT_CSV_ROOT), str(DEFAULT_REPORT_ROOT), select_filters)
+    _render_select(
+        str(DEFAULT_CSV_ROOT),
+        str(DEFAULT_REPORT_ROOT),
+        select_filters,
+        score_years=select_years,
+        scanned=select_scanned,
+    )
 elif mode == "跑本地回测" and scope == "批量（按标的汇总）":
     _render_batch_run(csv_root, list(divs), workers=workers, quiet=quiet)
 elif mode == "跑本地回测":
@@ -1277,18 +1321,21 @@ elif mode == "跑本地回测":
             st.warning("所选复权目录无 `*_1d_*.csv`")
 
     meta = None
-    if selected_csv and selected_csv.is_file():
+    if uploaded is not None and selected_csv and selected_csv.is_file():
         try:
-            meta = csv_date_range(selected_csv)
-            if pick_stock and pick_stock in union_by:
-                meta = dict(meta)
-                meta["start"] = union_by[pick_stock]["start"]
-                meta["end"] = union_by[pick_stock]["end"]
-                meta["stock"] = pick_stock or meta["stock"]
-                meta["n"] = union_by[pick_stock]["n"]
+            meta = peek_daily_csv_meta(selected_csv)
         except Exception as e:
             st.error(f"读取行情失败：{e}")
             meta = None
+    elif pick_stock and pick_stock in union_by:
+        u = union_by[pick_stock]
+        meta = {
+            "stock": pick_stock,
+            "start": u["start"],
+            "end": u["end"],
+            "n": u["n"],
+            "path": str(selected_csv) if selected_csv else "",
+        }
 
     if meta:
         d0 = ymd_to_date(meta["start"])
@@ -1464,7 +1511,7 @@ else:
             ohlc_csv = next((p for p in daily_all if p.name == ohlc_opt), None)
             if ohlc_csv is not None:
                 try:
-                    meta = csv_date_range(ohlc_csv)
+                    meta = peek_daily_csv_meta(ohlc_csv)
                     stock = meta["stock"]
                     d0, d1 = ymd_to_date(meta["start"]), ymd_to_date(meta["end"])
                 except Exception as e:

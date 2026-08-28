@@ -288,16 +288,20 @@ def pick_ma_winner(
 
 def pair_ma_batch_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """批量行按 (stock, year) 配对 SMA/EMA。"""
-    groups: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
+    groups: dict[tuple[str, str, str], dict[str, dict[str, Any]]] = {}
     for r in rows:
         ma = normalize_ma_type(r.get("ma_type"))
         if not ma:
             continue
-        key = (str(r.get("stock") or ""), str(r.get("year") or ""))
+        key = (
+            str(r.get("stock") or ""),
+            str(r.get("year") or ""),
+            str(r.get("dividend_type") or ""),
+        )
         groups.setdefault(key, {})[ma] = r
     out: list[dict[str, Any]] = []
-    for stock, year in sorted(groups):
-        mas = groups[(stock, year)]
+    for stock, year, _div in sorted(groups):
+        mas = groups[(stock, year, _div)]
         sma = mas.get("SMA")
         ema = mas.get("EMA")
         pick = pick_ma_winner(sma, ema)
@@ -698,16 +702,9 @@ def list_detail_csvs(
 
 
 def csv_date_range(csv_path: str | Path, stock: str = "") -> dict[str, Any]:
-    code, bars = load_daily_csv(csv_path, stock=stock)
-    if not bars:
-        raise ValueError("empty bars: %s" % csv_path)
-    return {
-        "stock": code,
-        "start": bars[0].day,
-        "end": bars[-1].day,
-        "n": len(bars),
-        "path": str(Path(csv_path).resolve()),
-    }
+    """头尾 peek，不物化 OHLCV。stock 参数保留兼容，peek 以文件内代码为准。"""
+    _ = stock
+    return peek_daily_csv_meta(csv_path)
 
 
 def ohlc_from_csv(

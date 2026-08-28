@@ -108,16 +108,16 @@ hongli_band/回测记录/      ← 旧终端导出；「仅分析」会一并列
 
 ### 选股方案
 
-扫描 **`report/` 下已经存在的全部复权子目录**，不受本次侧栏勾选限制。侧栏只调硬过滤（最少轮次、成交年、盈利年、单笔盈利占比、波动分位、Top N）。
+扫描 **`report/` 下已经存在的全部复权子目录**，不受本次侧栏勾选限制。侧栏先选 **起始年 / 结束年**，再调硬过滤（最少轮次、成交年、盈利年、单笔盈利占比、波动分位、Top N）。改年只重打分，不重新扫描。
 
 流程：
 
-1. 每个复权目录内，先按分年文件做 SMA/EMA 择优（成对年份总盈亏；接近再比胜率；再平落 EMA）。
-2. 再在「仍有分年 KPI」的复权之间，取 **year 键交集**，比总盈亏；与最高者 `|Δ|≤1` 元视为接近，再比胜率；仍平优先 `front_ratio`。
-3. 用胜出复权的分年 KPI 打分；股性（年化波动、贴 MA20）读 **胜出复权** 的 `csv/<type>/`。
+1. 每个复权目录内，在**选定年**上做 SMA/EMA 择优（成对年份总盈亏；接近再比胜率；再平落 EMA）。
+2. 再在「窗口内仍有分年 KPI」的复权之间，取 **year 键交集**，比总盈亏；与最高者 `|Δ|≤1` 元视为接近，再比胜率；仍平优先 `front_ratio`。
+3. 用胜出复权的窗口内分年 KPI 打分；股性（年化波动、贴 MA20）读 **该窗口建议复权** 的 `csv/<type>/`。
 4. 过线后按得分取 Top N。页面给出 `BOOK_STOCKS` 草稿：有建议均线才出行动；有建议复权则带上 `"dividend_type"`。
 
-默认硬过滤（可在侧栏改）：跨年轮次 ≥ 6、成交年 ≥ 2、盈利年 ≥ 2 或盈利年占比 ≥ 50%、单笔盈利占毛利 ≤ 70%、剔除波动最高 10%、推荐池 6 只。
+默认硬过滤（可在侧栏改）：跨年轮次 ≥ 6、每年最少轮次默认不启用（0；>0 时窗口内每一年含缺文件/未走完年都要达标）、成交年 ≥ 2、盈利年 ≥ 2 或盈利年占比 ≥ 50%、单笔盈利占毛利 ≤ 70%、剔除波动最高 10%、推荐池 6 只。成交年 / 盈利年 / 每年轮次按选定窗口计。
 
 打分权重（过线之后）：年等权盈亏 30%、胜率 20%、稳定性 20%、利润因子 15%、卖出质量 15%。**不要把得分当分真实夏普**；全池 Top N 有多重选择偏差。
 
@@ -135,15 +135,16 @@ hongli_band/回测记录/      ← 旧终端导出；「仅分析」会一并列
 python hongli_band/scripts/local_bt/run.py --csv-dir tools/csv --start 20210101 --end 20251231 --split year --compare-ma --dividend-type front,front_ratio
 ```
 
-`--dividend-type` 逗号分隔；未给默认 `front_ratio`。`--split year` 按自然年；`--compare-ma` 各跑 SMA/EMA。`--workers 0` 为自动进程数。
+`--dividend-type` 逗号分隔；未给默认 `front_ratio`。`--split year` 按自然年；`--compare-ma` 各跑 SMA/EMA。`--workers 0` 为自动进程数。多种复权一次进同一个进程池；同一标的 CSV 的年分段 / SMA·EMA 对照在同一 worker 内顺序跑、复用已加载的行情。
 
 选股（同样扫兄弟复权目录）：
 
 ```bash
 python hongli_band/scripts/local_bt/stock_select.py --report-dir hongli_band/report --csv-dir tools/csv
+python hongli_band/scripts/local_bt/stock_select.py --report-dir hongli_band/report --csv-dir tools/csv --year-start 2024 --year-end 2025
 ```
 
-默认写出 `hongli_band/report/local_bt_stock_select.csv`。
+默认写出 `hongli_band/report/local_bt_stock_select.csv`。`--year-start` / `--year-end` 含端点；不传则用扫描到的全部自然年。建议均线、建议复权与硬过滤都在该窗口内重算。`--min-n-buy-year` 为每年最少轮次（0 不启用）。
 
 单测（在 `hongli_band/scripts/local_bt/` 下）：
 

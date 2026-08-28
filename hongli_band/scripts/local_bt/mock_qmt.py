@@ -111,6 +111,18 @@ class MockContext:
             return 0
         return int(self._walk_tags[i])
 
+    def walk_end_day(self) -> str:
+        i = int(self.barpos)
+        if i < 0 or i >= len(self._walk_tags):
+            return ""
+        return compact_day(str(self._walk_tags[i]))
+
+    def ohlcv(self, period: str, count: int | None = None):
+        end = self.walk_end_day()
+        if not end:
+            return None
+        return self._store.ohlcv(period, end, count)
+
     def get_market_data_ex(self, *args: Any, **kwargs: Any):
         return self._md(*args, **kwargs)
 

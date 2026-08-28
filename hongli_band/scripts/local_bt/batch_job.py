@@ -21,18 +21,41 @@ def init_worker(local_bt_dir: str = "") -> None:
     scripts = str(Path(d).resolve().parents[2] / "scripts")
     if scripts not in sys.path:
         sys.path.insert(0, scripts)
+    from run import _bundle_code
+
+    _bundle_code()
 
 
 def run_one(payload: dict[str, Any]) -> dict[str, Any]:
-    from run import backtest_one_result
+    rows = run_group([payload])
+    return rows[0] if rows else {}
 
-    return backtest_one_result(
-        payload["csv"],
-        start=str(payload.get("start") or ""),
-        end=str(payload.get("end") or ""),
-        out_dir=payload.get("out_dir"),
-        quiet=bool(payload.get("quiet", True)),
-        log_name=str(payload.get("log_name") or ""),
-        year=str(payload.get("year") or ""),
-        ma_type=str(payload.get("ma_type") or ""),
-    )
+
+def run_group(payloads: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    from run import backtest_one_result, get_market_store
+
+    if not payloads:
+        return []
+    store = None
+    csv_path = payloads[0].get("csv")
+    try:
+        store = get_market_store(csv_path, stock=str(payloads[0].get("stock") or ""))
+    except Exception:
+        store = None
+    rows = []
+    for payload in payloads:
+        rows.append(
+            backtest_one_result(
+                payload["csv"],
+                start=str(payload.get("start") or ""),
+                end=str(payload.get("end") or ""),
+                out_dir=payload.get("out_dir"),
+                quiet=bool(payload.get("quiet", True)),
+                log_name=str(payload.get("log_name") or ""),
+                year=str(payload.get("year") or ""),
+                ma_type=str(payload.get("ma_type") or ""),
+                dividend_type=str(payload.get("dividend_type") or ""),
+                store=store,
+            )
+        )
+    return rows

@@ -8,7 +8,9 @@ CLI（模块名避开标准库 select）::
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import importlib.util
+import os
 import re
 import sys
 from collections import Counter
@@ -67,6 +69,7 @@ RECENT_KEY = "recent"
 
 DEFAULT_FILTERS: dict[str, Any] = {
     "min_n_buy": 6,
+    "min_n_buy_per_year": 0,
     "min_years_traded": 2,
     "min_pos_years": 2,
     "min_pos_ratio": 0.50,
@@ -87,21 +90,39 @@ VOL_MIN_BARS = 40
 TOUCH_TOL = 0.025
 
 
-def _glob_fingerprint(root: Path, pattern: str) -> tuple[int, int, int]:
+def glob_fingerprint(root: Path, pattern: str) -> tuple[int, int, int]:
+    """目录聚合指纹：(匹配文件数, 最大 mtime_ns, 总 size)。scandir，不作逐文件键。"""
     n = 0
     mx = 0
     sz = 0
+    root = Path(root)
     if not root.is_dir():
         return (0, 0, 0)
-    for p in root.glob(pattern):
-        n += 1
-        try:
-            st = p.stat()
-        except OSError:
-            continue
-        mx = max(mx, int(st.st_mtime_ns))
-        sz += int(st.st_size)
+    try:
+        entries = os.scandir(root)
+    except OSError:
+        return (0, 0, 0)
+    with entries:
+        for e in entries:
+            try:
+                if not e.is_file():
+                    continue
+            except OSError:
+                continue
+            if not fnmatch.fnmatch(e.name, pattern):
+                continue
+            n += 1
+            try:
+                st = e.stat()
+            except OSError:
+                continue
+            mx = max(mx, int(st.st_mtime_ns))
+            sz += int(st.st_size)
     return (n, mx, sz)
+
+
+def _glob_fingerprint(root: Path, pattern: str) -> tuple[int, int, int]:
+    return glob_fingerprint(root, pattern)
 
 
 def _merge_fingerprints(parts: list[tuple[int, int, int]]) -> tuple[int, int, int]:
@@ -344,12 +365,44 @@ def _ma_bucket(rec: dict[str, Any], ma: str) -> dict[str, Any]:
     return rec["by_ma"][ma]
 
 
-def _resolve_stock_ma(rec: dict[str, Any]) -> None:
-    """按成对分年对照选定建议均线，并把 years/recent 换成胜出一侧。"""
+def _clip_year_map(
+    years: dict[str, Any] | None,
+    years_keep: tuple[str, ...] | list[str] | set[str] | None,
+) -> dict[str, Any]:
+    src = dict(years or {})
+    if years_keep is None:
+        return src
+    keep = {str(y) for y in years_keep}
+    return {str(y): v for y, v in src.items() if str(y) in keep}
+
+
+def _empty_style() -> dict[str, Any]:
+    return {"vol_ann": None, "touch_ma20": None, "n_close": 0}
+
+
+def _style_from_csv_meta(meta: dict[str, Any] | None, stock: str) -> tuple[dict[str, Any], str, str]:
+    if not meta or not meta.get("path"):
+        return _empty_style(), "", ""
+    try:
+        _code, bars = load_daily_csv(meta["path"], stock=stock)
+        closes = [float(b.close) for b in bars if float(b.close) > 0]
+        return style_from_closes(closes), str(meta["path"]), ""
+    except Exception as e:
+        return _empty_style(), "", "ohlc: %s; " % e
+
+
+def _resolve_stock_ma(
+    rec: dict[str, Any],
+    years_keep: tuple[str, ...] | list[str] | set[str] | None = None,
+) -> None:
+    """按成对分年对照选定建议均线，并把 years/recent 换成胜出一侧。
+
+    years_keep 非空时只在这些年内择优，不回写 by_ma 原始分年 KPI。
+    """
     by_ma = rec.get("by_ma") or {}
-    sma_years = dict((by_ma.get("SMA") or {}).get("years") or {})
-    ema_years = dict((by_ma.get("EMA") or {}).get("years") or {})
-    plain_years = dict((by_ma.get("") or {}).get("years") or {})
+    sma_years = _clip_year_map((by_ma.get("SMA") or {}).get("years"), years_keep)
+    ema_years = _clip_year_map((by_ma.get("EMA") or {}).get("years"), years_keep)
+    plain_years = _clip_year_map((by_ma.get("") or {}).get("years"), years_keep)
     paired = sorted(set(sma_years) & set(ema_years), key=str)
 
     rec["ma_type_suggest"] = ""
@@ -363,7 +416,7 @@ def _resolve_stock_ma(rec: dict[str, Any]) -> None:
         pick = pick_ma_winner(agg_kpi_pnl([sma_years[y] for y in paired]), agg_kpi_pnl([ema_years[y] for y in paired]))
         winner = str(pick.get("winner") or "")
         src = by_ma.get(winner) or {}
-        rec["years"] = dict(src.get("years") or {})
+        rec["years"] = _clip_year_map(src.get("years"), years_keep)
         rec["recent"] = src.get("recent") or (by_ma.get("") or {}).get("recent")
         rec["ma_type_suggest"] = winner
         rec["ma_type_why"] = pick.get("why") or "compare"
@@ -404,8 +457,9 @@ def _copy_div_to_rec(
     *,
     why: str,
     pick: dict[str, Any] | None = None,
+    years_keep: tuple[str, ...] | list[str] | set[str] | None = None,
 ) -> None:
-    rec["years"] = dict(drec.get("years") or {})
+    rec["years"] = _clip_year_map(drec.get("years"), years_keep)
     rec["recent"] = drec.get("recent")
     rec["ma_type_suggest"] = drec.get("ma_type_suggest") or ""
     rec["ma_type_why"] = drec.get("ma_type_why") or ""
@@ -418,7 +472,10 @@ def _copy_div_to_rec(
     rec["div_pnl"] = dict((pick or {}).get("pnl_by_type") or {})
 
 
-def _resolve_stock_div(rec: dict[str, Any]) -> None:
+def _resolve_stock_div(
+    rec: dict[str, Any],
+    years_keep: tuple[str, ...] | list[str] | set[str] | None = None,
+) -> None:
     """各复权先完成 MA 择优后，在分年交集上选定建议复权。"""
     by_div = rec.get("by_div") or {}
     rec["div_type_suggest"] = ""
@@ -426,14 +483,14 @@ def _resolve_stock_div(rec: dict[str, Any]) -> None:
     rec["div_pnl"] = {}
     year_maps: dict[str, dict[str, Any]] = {}
     for div, drec in by_div.items():
-        years = dict(drec.get("years") or {})
+        years = _clip_year_map(drec.get("years"), years_keep)
         if years:
             year_maps[str(div)] = years
     if not year_maps:
         return
     if len(year_maps) == 1:
         div = next(iter(year_maps))
-        _copy_div_to_rec(rec, by_div[div], div, why="single_div")
+        _copy_div_to_rec(rec, by_div[div], div, why="single_div", years_keep=years_keep)
         return
     common = set(year_maps[next(iter(year_maps))])
     for years in year_maps.values():
@@ -449,7 +506,57 @@ def _resolve_stock_div(rec: dict[str, Any]) -> None:
         rec["div_type_why"] = str(pick.get("why") or "no_compare")
         rec["div_pnl"] = dict(pick.get("pnl_by_type") or {})
         return
-    _copy_div_to_rec(rec, by_div[winner], winner, why=str(pick.get("why") or "compare"), pick=pick)
+    _copy_div_to_rec(
+        rec, by_div[winner], winner, why=str(pick.get("why") or "compare"), pick=pick, years_keep=years_keep,
+    )
+
+
+def _apply_year_window(rec: dict[str, Any], score_years: tuple[str, ...]) -> dict[str, Any]:
+    """拷贝后按选定年重跑均线/复权择优，不改扫描缓存。"""
+    keep = tuple(str(y) for y in score_years)
+    by_div = rec.get("by_div") or {}
+    by_ma = rec.get("by_ma") or {}
+    if not by_div and not by_ma:
+        work = dict(rec)
+        years = rec.get("years") or {}
+        work["years"] = {str(y): years[y] for y in keep if y in years}
+        return work
+    work: dict[str, Any] = {
+        "stock": rec.get("stock"),
+        "style": dict(rec.get("style") or {}),
+        "error": rec.get("error") or "",
+        "csv": rec.get("csv"),
+        "by_ma": by_ma,
+        "by_div": {},
+        "years": {},
+        "recent": rec.get("recent"),
+    }
+    if by_div:
+        by_div_work: dict[str, Any] = {}
+        for div, drec in by_div.items():
+            dcopy = {
+                "by_ma": drec.get("by_ma") or {},
+                "years": {},
+                "recent": drec.get("recent"),
+                "style": dict(drec.get("style") or {}),
+                "csv": drec.get("csv"),
+            }
+            _resolve_stock_ma(dcopy, years_keep=keep)
+            by_div_work[str(div)] = dcopy
+        work["by_div"] = by_div_work
+        _resolve_stock_div(work, years_keep=keep)
+        winner = str(work.get("div_type_suggest") or "")
+        if winner and winner in by_div_work:
+            stl = by_div_work[winner].get("style")
+            if stl:
+                work["style"] = dict(stl)
+            if by_div_work[winner].get("csv"):
+                work["csv"] = by_div_work[winner].get("csv")
+        return work
+    _resolve_stock_ma(work, years_keep=keep)
+    work["div_type_suggest"] = rec.get("div_type_suggest") or ""
+    work["div_type_why"] = rec.get("div_type_why") or "no_compare"
+    return work
 
 
 def scan_reports(
@@ -514,17 +621,126 @@ def scan_reports(
         else:
             bucket["years"][year] = kpi
 
-    for rec in stocks.values():
-        if rec.get("by_div"):
-            for drec in rec["by_div"].values():
-                _resolve_stock_ma(drec)
-            _resolve_stock_div(rec)
-        else:
-            _resolve_stock_ma(rec)
-            rec["div_type_suggest"] = rec.get("div_type_suggest") or ""
-            rec["div_type_why"] = rec.get("div_type_why") or "no_compare"
+    ohlc_by_div: dict[str, dict[str, dict[str, Any]]] = {}
+    csv_sibs = typed_sibling_dirs(data_dir)
+    if not csv_sibs:
+        csv_sibs = [("", data_dir)]
+    for div, cdir in csv_sibs:
+        try:
+            ohlc_by_div[div] = {
+                str(m.get("stock") or "").strip().upper(): m for m in daily_csvs_by_stock(cdir)
+            }
+        except Exception:
+            ohlc_by_div[div] = {}
 
-    cov: dict[str, int] = {}
+    def _pool_for(div: str) -> dict[str, dict[str, Any]]:
+        pool = ohlc_by_div.get(div) if div else None
+        if pool:
+            return pool
+        if div and csv_root.is_dir():
+            try:
+                return {
+                    str(m.get("stock") or "").strip().upper(): m
+                    for m in daily_csvs_by_stock(resolve_typed_dir(csv_root, div))
+                }
+            except Exception:
+                pass
+        if csv_root.is_dir() and not div:
+            try:
+                return {
+                    str(m.get("stock") or "").strip().upper(): m
+                    for m in daily_csvs_by_stock(resolve_typed_dir(csv_root, DEFAULT_DIVIDEND_TYPE))
+                }
+            except Exception:
+                pass
+        return ohlc_by_div.get("") or {}
+
+    for stock, rec in stocks.items():
+        if rec.get("by_div"):
+            rec["style"] = _empty_style()
+            for div, drec in rec["by_div"].items():
+                pool = _pool_for(str(div))
+                style, path, err = _style_from_csv_meta((pool or {}).get(stock), stock)
+                drec["style"] = style
+                if path:
+                    drec["csv"] = path
+                if err:
+                    rec["error"] = (rec.get("error") or "") + err
+                if (style.get("n_close") or 0) and not (rec.get("style") or {}).get("n_close"):
+                    rec["style"] = style
+                    rec["csv"] = path
+            continue
+        pool = _pool_for("")
+        if not pool:
+            for extra in ohlc_by_div.values():
+                if extra:
+                    pool = extra
+                    break
+        style, path, err = _style_from_csv_meta((pool or {}).get(stock), stock)
+        rec["style"] = style
+        if path:
+            rec["csv"] = path
+        if err:
+            rec["error"] = (rec.get("error") or "") + err
+
+    book = load_book_stocks()
+    score_years = infer_score_years(stocks)
+    return {
+        "stocks": stocks,
+        "coverage": {
+            "n_stock": len(stocks),
+            "n_detail": n_files,
+            "score_years": list(score_years),
+        },
+        "book": book,
+        "score_years": score_years,
+        "report_dir": str(report.resolve()),
+        "csv_dir": str(data_dir.resolve()),
+    }
+
+
+def infer_score_years(stocks: dict[str, Any]) -> tuple[str, ...]:
+    """打分用自然年：扫描到的分年文件全部纳入（含尚未走完的最大年）。"""
+    found: set[str] = set()
+
+    def add_years(years: dict | None) -> None:
+        for y in years or {}:
+            if str(y).isdigit():
+                found.add(str(y))
+
+    for rec in stocks.values():
+        add_years(rec.get("years"))
+        for mrec in (rec.get("by_ma") or {}).values():
+            add_years(mrec.get("years"))
+        for drec in (rec.get("by_div") or {}).values():
+            add_years(drec.get("years"))
+            for mrec in (drec.get("by_ma") or {}).values():
+                add_years(mrec.get("years"))
+    return tuple(sorted(found))
+
+
+def years_in_range(
+    available: tuple[str, ...],
+    year_start: str = "",
+    year_end: str = "",
+) -> tuple[str, ...]:
+    years = tuple(str(y) for y in available if str(y).isdigit())
+    start = str(year_start or "").strip()
+    end = str(year_end or "").strip()
+    if start:
+        years = tuple(y for y in years if y >= start)
+    if end:
+        years = tuple(y for y in years if y <= end)
+    return years
+
+
+def _coverage_from_stocks(
+    stocks: dict[str, Any],
+    *,
+    n_detail: int | None = None,
+    score_years: tuple[str, ...] | None = None,
+) -> dict[str, Any]:
+    cov: dict[str, Any] = {}
     n_compare = 0
     n_no_compare = 0
     n_single = 0
@@ -547,79 +763,27 @@ def scan_reports(
         else:
             n_div_miss += 1
         for y in rec.get("years") or {}:
-            cov[y] = cov.get(y, 0) + 1
+            if str(y).isdigit():
+                key = str(y)
+                cov[key] = int(cov.get(key) or 0) + 1
         if rec.get("recent"):
-            cov[RECENT_KEY] = cov.get(RECENT_KEY, 0) + 1
-
-    ohlc_by_div: dict[str, dict[str, dict[str, Any]]] = {}
-    csv_sibs = typed_sibling_dirs(data_dir)
-    if not csv_sibs:
-        csv_sibs = [("", data_dir)]
-    for div, cdir in csv_sibs:
-        try:
-            ohlc_by_div[div] = {
-                str(m.get("stock") or "").strip().upper(): m for m in daily_csvs_by_stock(cdir)
-            }
-        except Exception:
-            ohlc_by_div[div] = {}
-
-    for stock, rec in stocks.items():
-        div = str(rec.get("div_type_suggest") or "")
-        pool = ohlc_by_div.get(div) if div else None
-        if not pool:
-            pool = ohlc_by_div.get("") or {}
-            if not pool and csv_root.is_dir():
-                try:
-                    pool = {
-                        str(m.get("stock") or "").strip().upper(): m
-                        for m in daily_csvs_by_stock(resolve_typed_dir(csv_root, div or DEFAULT_DIVIDEND_TYPE))
-                    }
-                except Exception:
-                    pool = {}
-        meta = (pool or {}).get(stock)
-        if not meta or not meta.get("path"):
-            rec["style"] = {"vol_ann": None, "touch_ma20": None, "n_close": 0}
-            continue
-        try:
-            _code, bars = load_daily_csv(meta["path"], stock=stock)
-            closes = [float(b.close) for b in bars if float(b.close) > 0]
-            rec["style"] = style_from_closes(closes)
-            rec["csv"] = str(meta["path"])
-        except Exception as e:
-            rec["style"] = {"vol_ann": None, "touch_ma20": None, "n_close": 0}
-            rec["error"] = (rec.get("error") or "") + "ohlc: %s; " % e
-
-    book = load_book_stocks()
-    score_years = infer_score_years(stocks)
-    return {
-        "stocks": stocks,
-        "coverage": {
-            **cov,
+            cov[RECENT_KEY] = int(cov.get(RECENT_KEY) or 0) + 1
+    years = score_years if score_years is not None else infer_score_years(stocks)
+    cov.update(
+        {
             "n_stock": len(stocks),
-            "n_detail": n_files,
             "n_compare": n_compare,
             "n_no_compare": n_no_compare,
             "n_single_ma": n_single,
             "n_div_compare": n_div_compare,
             "n_div_single": n_div_single,
             "n_div_no_compare": n_div_miss,
-            "score_years": list(score_years),
-        },
-        "book": book,
-        "score_years": score_years,
-        "report_dir": str(report.resolve()),
-        "csv_dir": str(data_dir.resolve()),
-    }
-
-
-def infer_score_years(stocks: dict[str, Any]) -> tuple[str, ...]:
-    """打分用自然年：扫描到的分年文件全部纳入（含尚未走完的最大年）。"""
-    found: set[str] = set()
-    for rec in stocks.values():
-        for y in rec.get("years") or {}:
-            if str(y).isdigit():
-                found.add(str(y))
-    return tuple(sorted(found))
+            "score_years": list(years),
+        }
+    )
+    if n_detail is not None:
+        cov["n_detail"] = int(n_detail)
+    return cov
 
 
 def _year_kpis(rec: dict[str, Any], score_years: tuple[str, ...]) -> list[dict[str, Any]]:
@@ -731,21 +895,36 @@ def _pct_rank(s: pd.Series) -> pd.Series:
 def score_universe(
     scanned: dict[str, Any],
     filters: dict[str, Any] | None = None,
+    score_years: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
-    """硬过滤 + 百分位加权打分。"""
+    """硬过滤 + 百分位加权打分。score_years 内重跑建议均线/复权，不改扫描缓存。"""
     flt = dict(DEFAULT_FILTERS)
     if filters:
         flt.update(filters)
     book: dict[str, str] = dict(scanned.get("book") or {})
-    score_years = tuple(scanned.get("score_years") or infer_score_years(scanned.get("stocks") or {}))
-    if not score_years:
-        score_years = SCORE_YEARS
+    raw_stocks: dict[str, Any] = dict(scanned.get("stocks") or {})
+    available = infer_score_years(raw_stocks)
+    requested = score_years
+    if requested is None:
+        requested = tuple(scanned.get("score_years") or available)
+    requested = tuple(str(y) for y in requested)
+    if available:
+        keep = set(available)
+        requested = tuple(y for y in requested if y in keep)
+    score_years = requested if requested else (available or SCORE_YEARS)
+
+    resolved: dict[str, Any] = {}
+    for stock, rec in raw_stocks.items():
+        resolved[stock] = _apply_year_window(rec, score_years)
+    n_detail = (scanned.get("coverage") or {}).get("n_detail")
+    cov = _coverage_from_stocks(resolved, n_detail=n_detail, score_years=score_years)
+
     rows: list[dict[str, Any]] = []
     details: dict[str, Any] = {}
     vols: list[float] = []
     touches: list[float] = []
     aggs: dict[str, dict[str, Any]] = {}
-    for stock, rec in (scanned.get("stocks") or {}).items():
+    for stock, rec in resolved.items():
         agg = _agg_from_years(rec, score_years)
         aggs[stock] = agg
         style = rec.get("style") or {}
@@ -765,19 +944,24 @@ def score_universe(
     vol_med = float(np.median(vols)) if vols else None
 
     min_n_buy = int(flt.get("min_n_buy") or 0)
+    min_per_year = int(flt.get("min_n_buy_per_year") or 0)
     min_years = int(flt.get("min_years_traded") or 0)
     min_pos = int(flt.get("min_pos_years") or 0)
     min_ratio = float(flt.get("min_pos_ratio") or 0.0)
     max_win_share = float(flt.get("max_win_pnl_share") or 1.0)
 
-    for stock, rec in (scanned.get("stocks") or {}).items():
+    for stock, rec in resolved.items():
         agg = aggs[stock]
         style = rec.get("style") or {}
         vol = style.get("vol_ann")
         touch = style.get("touch_ma20")
         reasons: list[str] = []
+        year_n = agg.get("year_n") or {}
+        n_buy_year_min = min(int(year_n.get(y) or 0) for y in score_years) if score_years else 0
         if int(agg["n_buy"] or 0) < min_n_buy:
             reasons.append("轮次不足")
+        if min_per_year > 0 and n_buy_year_min < min_per_year:
+            reasons.append("每年轮次不足")
         if int(agg["n_years_traded"] or 0) < min_years:
             reasons.append("成交年数不足")
         n_pos = int(agg["n_years_pos"] or 0)
@@ -815,6 +999,7 @@ def score_universe(
             "div_type_suggest": rec.get("div_type_suggest") or "",
             "div_type_why": rec.get("div_type_why") or "no_compare",
             "n_buy": agg["n_buy"],
+            "n_buy_year_min": n_buy_year_min,
             "n_years_traded": agg["n_years_traded"],
             "n_years_pos": agg["n_years_pos"],
             "n_years_files": agg["n_years_files"],
@@ -858,7 +1043,7 @@ def score_universe(
             "passed": df,
             "heatmap": pd.DataFrame(),
             "details": details,
-            "coverage": scanned.get("coverage") or {},
+            "coverage": cov,
             "filters": flt,
             "book": book,
             "book_rank": pd.DataFrame(),
@@ -916,7 +1101,7 @@ def score_universe(
         "passed": passed,
         "heatmap": heatmap,
         "details": details,
-        "coverage": scanned.get("coverage") or {},
+        "coverage": cov,
         "filters": flt,
         "book": book,
         "book_rank": book_rank,
@@ -965,7 +1150,10 @@ def coverage_notes(coverage: dict[str, Any], scanned: dict[str, Any] | None = No
         last, prev = years[-1], years[-2]
         if int(coverage.get(prev) or 0) and int(coverage.get(last) or 0) < int(0.9 * int(coverage.get(prev) or 0)):
             notes.append("%s 年批明显少于 %s，覆盖不齐。" % (last, prev))
-    notes.append("建议均线来自分年 SMA/EMA 对照（成对年份总盈亏择优）；白名单不覆盖建议。")
+    notes.append(
+        "建议均线/复权按选定年 **%s** 重算（成对年份总盈亏择优）；白名单不覆盖建议。"
+        % "、".join(str(y) for y in score_years)
+    )
     n_cmp = int(coverage.get("n_compare") or 0)
     n_miss = int(coverage.get("n_no_compare") or 0)
     n_single = int(coverage.get("n_single_ma") or 0)
@@ -1011,6 +1199,7 @@ def select_csv_columns(score_years: tuple[str, ...] | None = None) -> list[str]:
         "div_type_suggest",
         "div_type_why",
         "n_buy",
+        "n_buy_year_min",
         "n_years_traded",
         "n_years_pos",
         "stability",
@@ -1063,9 +1252,19 @@ def run_select(
     filters: dict[str, Any] | None = None,
     scanned: dict[str, Any] | None = None,
     progress: bool = False,
+    score_years: tuple[str, ...] | None = None,
+    year_start: str = "",
+    year_end: str = "",
 ) -> dict[str, Any]:
     packed = scanned if scanned is not None else scan_reports(report_dir, csv_dir, progress=progress)
-    scored = score_universe(packed, filters=filters)
+    years = score_years
+    if years is None and (year_start or year_end):
+        years = years_in_range(
+            infer_score_years(packed.get("stocks") or {}),
+            year_start,
+            year_end,
+        )
+    scored = score_universe(packed, filters=filters, score_years=years)
     dest = Path(out) if out else (
         Path(report_dir)
         if report_dir
@@ -1092,12 +1291,20 @@ def main(argv: list[str] | None = None) -> None:
         help="输出 CSV（默认 report 根目录 local_bt_stock_select.csv）",
     )
     ap.add_argument("--min-n-buy", type=int, default=DEFAULT_FILTERS["min_n_buy"])
+    ap.add_argument(
+        "--min-n-buy-year",
+        type=int,
+        default=DEFAULT_FILTERS["min_n_buy_per_year"],
+        help="窗口内每一年最少买入轮次（缺文件按 0；0 表示不启用）",
+    )
     ap.add_argument("--min-years", type=int, default=DEFAULT_FILTERS["min_years_traded"])
     ap.add_argument("--min-pos-years", type=int, default=DEFAULT_FILTERS["min_pos_years"])
     ap.add_argument("--min-pos-ratio", type=float, default=DEFAULT_FILTERS["min_pos_ratio"])
     ap.add_argument("--max-win-share", type=float, default=DEFAULT_FILTERS["max_win_pnl_share"])
     ap.add_argument("--vol-drop-top", type=float, default=DEFAULT_FILTERS["vol_drop_top"])
     ap.add_argument("--top-n", type=int, default=DEFAULT_FILTERS["top_n"])
+    ap.add_argument("--year-start", default="", help="打分起始年（含），默认扫描到的最早年")
+    ap.add_argument("--year-end", default="", help="打分结束年（含），默认扫描到的最晚年")
     args = ap.parse_args(argv)
     div_raw = str(args.dividend_type or "").strip()
     div = normalize_dividend_type(div_raw) if div_raw else DEFAULT_DIVIDEND_TYPE
@@ -1107,6 +1314,7 @@ def main(argv: list[str] | None = None) -> None:
     report_dir = str(resolve_typed_dir(args.report_dir or DEFAULT_REPORT, div))
     filters = {
         "min_n_buy": args.min_n_buy,
+        "min_n_buy_per_year": args.min_n_buy_year,
         "min_years_traded": args.min_years,
         "min_pos_years": args.min_pos_years,
         "min_pos_ratio": args.min_pos_ratio,
@@ -1122,6 +1330,8 @@ def main(argv: list[str] | None = None) -> None:
         out=out,
         filters=filters,
         progress=True,
+        year_start=str(args.year_start or ""),
+        year_end=str(args.year_end or ""),
     )
     cov = scored.get("coverage") or {}
     for line in coverage_notes(cov, scored.get("scanned")):

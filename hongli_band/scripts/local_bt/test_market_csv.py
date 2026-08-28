@@ -205,6 +205,30 @@ class IndexedSliceTests(unittest.TestCase):
         self.assertEqual(len(frame), len(weeks))
         self.assertEqual(float(frame["close"][-1]), float(weeks[-1].close))
 
+    def test_ohlcv_matches_frame_daily_and_weekly(self):
+        dailies = [
+            _bar("20251229", 9.0),
+            _bar("20251230", 9.5),
+            _bar("20251231", 9.2),
+            _bar("20260105", 10.0),
+            _bar("20260106", 11.0),
+            _bar("20260107", 12.5),
+            _bar("20260108", 13.0),
+            _bar("20260109", 14.0),
+        ]
+        store = MarketStore(dailies, "600350.SH")
+        frame = store.frame("1d", "20260107", count=3, fields=["open", "high", "low", "close", "volume"])
+        tup = store.ohlcv("1d", "20260107", count=3)
+        self.assertIsNotNone(tup)
+        self.assertEqual(len(tup[3]), len(frame))
+        self.assertEqual(float(tup[3][-1]), float(frame["close"][-1]))
+        wframe = store.frame("1w", "20260107", count=8, fields=["close"])
+        wtup = store.ohlcv("1w", "20260107", count=8)
+        self.assertIsNotNone(wtup)
+        self.assertEqual(len(wtup[3]), len(wframe))
+        self.assertEqual(float(wtup[3][-1]), float(wframe["close"][-1]))
+        self.assertEqual(float(wtup[3][-1]), 9.2)
+
 
 class QuietLogTests(unittest.TestCase):
     def test_drop_status_keep_trades(self):
@@ -627,6 +651,39 @@ class ResolveMaTests(unittest.TestCase):
         self.assertEqual(rec["ma_type_suggest"], "")
         self.assertEqual(rec["ma_type_why"], "no_compare")
 
+    def test_window_flips_ma_winner_without_mutating_buckets(self):
+        from stock_select import _resolve_stock_ma
+
+        rec = {
+            "by_ma": {
+                "SMA": {
+                    "years": {
+                        "2021": {"sum_pnl": 1000.0, "n_buy": 2, "win_rate": 50.0},
+                        "2024": {"sum_pnl": 1.0, "n_buy": 2, "win_rate": 50.0},
+                        "2025": {"sum_pnl": 1.0, "n_buy": 2, "win_rate": 50.0},
+                    },
+                    "recent": None,
+                },
+                "EMA": {
+                    "years": {
+                        "2021": {"sum_pnl": 1.0, "n_buy": 2, "win_rate": 50.0},
+                        "2024": {"sum_pnl": 100.0, "n_buy": 2, "win_rate": 50.0},
+                        "2025": {"sum_pnl": 100.0, "n_buy": 2, "win_rate": 50.0},
+                    },
+                    "recent": None,
+                },
+            }
+        }
+        raw_sma = dict(rec["by_ma"]["SMA"]["years"])
+        _resolve_stock_ma(rec)
+        self.assertEqual(rec["ma_type_suggest"], "SMA")
+        windowed = {"by_ma": rec["by_ma"]}
+        _resolve_stock_ma(windowed, years_keep=("2024", "2025"))
+        self.assertEqual(windowed["ma_type_suggest"], "EMA")
+        self.assertEqual(set(windowed["years"]), {"2024", "2025"})
+        self.assertEqual(rec["by_ma"]["SMA"]["years"], raw_sma)
+        self.assertIn("2021", rec["by_ma"]["EMA"]["years"])
+
     def test_score_universe_uses_compare_not_book(self):
         from stock_select import score_universe
 
@@ -694,10 +751,277 @@ class TestScoreYears(unittest.TestCase):
         }
         self.assertEqual(infer_score_years(stocks), ("2024", "2025", "2026"))
 
+    def test_infer_score_years_unions_nested_buckets(self):
+        from stock_select import infer_score_years
+
+        stocks = {
+            "600000.SH": {
+                "years": {},
+                "by_ma": {},
+                "by_div": {
+                    "front": {
+                        "years": {},
+                        "by_ma": {
+                            "SMA": {"years": {"2021": {}, "2024": {}}},
+                            "EMA": {"years": {"2025": {}}},
+                        },
+                    }
+                },
+            }
+        }
+        self.assertEqual(infer_score_years(stocks), ("2021", "2024", "2025"))
+
     def test_infer_score_years_empty(self):
         from stock_select import infer_score_years
 
         self.assertEqual(infer_score_years({}), ())
+
+
+class ScoreWindowTests(unittest.TestCase):
+    def _kpi(self, pnl: float) -> dict:
+        return {
+            "n_buy": 10,
+            "sum_pnl": pnl,
+            "win_rate": 60.0,
+            "avg_ret": 1.0,
+            "max_win": 2.0,
+            "max_loss": -1.0,
+            "gross_profit": max(pnl, 1.0),
+            "gross_loss": -1.0,
+            "profit_factor": 6.0,
+            "max_dd": -0.1,
+            "avg_hold_days": 5.0,
+            "max_win_pnl": 1.0,
+            "sell": {"trail_stop": 3},
+            "buy": {},
+            "skip": {},
+            "n_bars": 200,
+        }
+
+    def _loose(self) -> dict:
+        return {
+            "min_n_buy": 0,
+            "min_years_traded": 0,
+            "min_pos_years": 0,
+            "min_pos_ratio": 0.0,
+            "max_win_pnl_share": 1.0,
+            "vol_drop_top": 0.0,
+            "top_n": 6,
+        }
+
+    def test_score_universe_window_flips_ma_and_keeps_cache(self):
+        from stock_select import score_universe
+
+        scanned = {
+            "book": {},
+            "stocks": {
+                "600000.SH": {
+                    "by_ma": {
+                        "SMA": {
+                            "years": {
+                                "2021": self._kpi(1000.0),
+                                "2024": self._kpi(1.0),
+                                "2025": self._kpi(1.0),
+                            },
+                            "recent": None,
+                        },
+                        "EMA": {
+                            "years": {
+                                "2021": self._kpi(1.0),
+                                "2024": self._kpi(100.0),
+                                "2025": self._kpi(100.0),
+                            },
+                            "recent": None,
+                        },
+                    },
+                    "style": {"vol_ann": 0.1, "touch_ma20": 0.9},
+                    "error": "",
+                }
+            },
+        }
+        full = score_universe(scanned, filters=self._loose(), score_years=("2021", "2024", "2025"))
+        late = score_universe(scanned, filters=self._loose(), score_years=("2024", "2025"))
+        self.assertEqual(full["df"].iloc[0]["ma_type_suggest"], "SMA")
+        self.assertEqual(late["df"].iloc[0]["ma_type_suggest"], "EMA")
+        rec = scanned["stocks"]["600000.SH"]
+        self.assertNotIn("ma_type_suggest", rec)
+        self.assertIn("2021", rec["by_ma"]["SMA"]["years"])
+        self.assertEqual(set(late["score_years"]), {"2024", "2025"})
+
+    def test_score_universe_window_flips_div_and_style(self):
+        from stock_select import score_universe
+
+        scanned = {
+            "book": {},
+            "stocks": {
+                "600000.SH": {
+                    "by_div": {
+                        "front": {
+                            "by_ma": {
+                                "SMA": {
+                                    "years": {
+                                        "2023": self._kpi(1000.0),
+                                        "2024": self._kpi(10.0),
+                                    },
+                                    "recent": None,
+                                },
+                                "EMA": {
+                                    "years": {
+                                        "2023": self._kpi(1.0),
+                                        "2024": self._kpi(1.0),
+                                    },
+                                    "recent": None,
+                                },
+                            },
+                            "style": {"vol_ann": 0.2, "touch_ma20": 0.5, "n_close": 80},
+                        },
+                        "front_ratio": {
+                            "by_ma": {
+                                "SMA": {
+                                    "years": {
+                                        "2023": self._kpi(10.0),
+                                        "2024": self._kpi(100.0),
+                                    },
+                                    "recent": None,
+                                },
+                                "EMA": {
+                                    "years": {
+                                        "2023": self._kpi(1.0),
+                                        "2024": self._kpi(1.0),
+                                    },
+                                    "recent": None,
+                                },
+                            },
+                            "style": {"vol_ann": 0.11, "touch_ma20": 0.8, "n_close": 80},
+                        },
+                    },
+                    "style": {"vol_ann": 0.2, "touch_ma20": 0.5, "n_close": 80},
+                    "error": "",
+                }
+            },
+        }
+        full = score_universe(scanned, filters=self._loose(), score_years=("2023", "2024"))
+        late = score_universe(scanned, filters=self._loose(), score_years=("2024",))
+        self.assertEqual(full["df"].iloc[0]["div_type_suggest"], "front")
+        self.assertAlmostEqual(float(full["df"].iloc[0]["vol_ann"]), 0.2)
+        self.assertEqual(late["df"].iloc[0]["div_type_suggest"], "front_ratio")
+        self.assertAlmostEqual(float(late["df"].iloc[0]["vol_ann"]), 0.11)
+        self.assertEqual(scanned["stocks"]["600000.SH"]["style"]["vol_ann"], 0.2)
+
+    def test_years_in_range(self):
+        from stock_select import years_in_range
+
+        avail = ("2021", "2022", "2023", "2024")
+        self.assertEqual(years_in_range(avail, "2023", "2024"), ("2023", "2024"))
+        self.assertEqual(years_in_range(avail, "2022", ""), ("2022", "2023", "2024"))
+
+
+class PerYearBuyFilterTests(unittest.TestCase):
+    def _kpi(self, n_buy: int, pnl: float = 10.0) -> dict:
+        return {
+            "n_buy": n_buy,
+            "sum_pnl": pnl,
+            "win_rate": 60.0,
+            "avg_ret": 1.0,
+            "max_win": 2.0,
+            "max_loss": -1.0,
+            "gross_profit": 20.0,
+            "gross_loss": -1.0,
+            "profit_factor": 6.0,
+            "max_dd": -0.1,
+            "avg_hold_days": 5.0,
+            "max_win_pnl": 1.0,
+            "sell": {"trail_stop": 3},
+            "buy": {},
+            "skip": {},
+            "n_bars": 200,
+        }
+
+    def _loose(self, **extra) -> dict:
+        flt = {
+            "min_n_buy": 0,
+            "min_n_buy_per_year": 0,
+            "min_years_traded": 0,
+            "min_pos_years": 0,
+            "min_pos_ratio": 0.0,
+            "max_win_pnl_share": 1.0,
+            "vol_drop_top": 0.0,
+            "top_n": 6,
+        }
+        flt.update(extra)
+        return flt
+
+    def _scanned(self, years: dict) -> dict:
+        return {
+            "book": {},
+            "stocks": {
+                "600000.SH": {
+                    "years": years,
+                    "recent": None,
+                    "style": {"vol_ann": 0.1, "touch_ma20": 0.9},
+                    "error": "",
+                    "ma_type_suggest": "SMA",
+                    "ma_type_why": "compare",
+                }
+            },
+        }
+
+    def test_thin_year_fails_when_threshold_set(self):
+        from stock_select import score_universe
+
+        scanned = self._scanned({"2023": self._kpi(5), "2024": self._kpi(1)})
+        fail = score_universe(
+            scanned,
+            filters=self._loose(min_n_buy_per_year=2),
+            score_years=("2023", "2024"),
+        )
+        row = fail["df"].iloc[0]
+        self.assertFalse(bool(row["passed"]))
+        self.assertIn("每年轮次不足", str(row["fail_reason"]))
+        self.assertEqual(int(row["n_buy_year_min"]), 1)
+
+        ok = score_universe(
+            scanned,
+            filters=self._loose(min_n_buy_per_year=0),
+            score_years=("2023", "2024"),
+        )
+        self.assertTrue(bool(ok["df"].iloc[0]["passed"]))
+
+    def test_missing_year_counts_as_zero(self):
+        from stock_select import score_universe
+
+        scanned = {
+            "book": {},
+            "stocks": {
+                "600000.SH": {
+                    "years": {"2023": self._kpi(5)},
+                    "recent": None,
+                    "style": {"vol_ann": 0.1, "touch_ma20": 0.9},
+                    "error": "",
+                    "ma_type_suggest": "SMA",
+                    "ma_type_why": "compare",
+                },
+                "000001.SZ": {
+                    "years": {"2023": self._kpi(5), "2024": self._kpi(5)},
+                    "recent": None,
+                    "style": {"vol_ann": 0.1, "touch_ma20": 0.9},
+                    "error": "",
+                    "ma_type_suggest": "SMA",
+                    "ma_type_why": "compare",
+                },
+            },
+        }
+        scored = score_universe(
+            scanned,
+            filters=self._loose(min_n_buy_per_year=2),
+            score_years=("2023", "2024"),
+        )
+        row = scored["df"][scored["df"]["stock"] == "600000.SH"].iloc[0]
+        self.assertFalse(bool(row["passed"]))
+        self.assertIn("每年轮次不足", str(row["fail_reason"]))
+        self.assertEqual(int(row["n_buy_year_min"]), 0)
+        peer = scored["df"][scored["df"]["stock"] == "000001.SZ"].iloc[0]
+        self.assertTrue(bool(peer["passed"]))
 
 
 class TypedDirTests(unittest.TestCase):
@@ -892,6 +1216,40 @@ class ResolveDivTests(unittest.TestCase):
         self.assertEqual(rec["div_type_suggest"], "")
         self.assertEqual(rec["div_type_why"], "no_compare")
 
+    def test_window_flips_div_winner(self):
+        from stock_select import _resolve_stock_div
+
+        rec = {
+            "by_div": {
+                "front": {
+                    "years": {
+                        "2023": {"sum_pnl": 1000.0, "n_buy": 2, "win_rate": 50.0},
+                        "2024": {"sum_pnl": 10.0, "n_buy": 2, "win_rate": 50.0},
+                    },
+                    "recent": None,
+                    "ma_type_suggest": "SMA",
+                    "ma_type_why": "compare",
+                },
+                "front_ratio": {
+                    "years": {
+                        "2023": {"sum_pnl": 10.0, "n_buy": 2, "win_rate": 50.0},
+                        "2024": {"sum_pnl": 100.0, "n_buy": 2, "win_rate": 50.0},
+                    },
+                    "recent": None,
+                    "ma_type_suggest": "EMA",
+                    "ma_type_why": "compare",
+                },
+            }
+        }
+        _resolve_stock_div(rec)
+        self.assertEqual(rec["div_type_suggest"], "front")
+        self.assertIn("2023", rec["years"])
+        windowed = {"by_div": rec["by_div"]}
+        _resolve_stock_div(windowed, years_keep=("2024",))
+        self.assertEqual(windowed["div_type_suggest"], "front_ratio")
+        self.assertEqual(set(windowed["years"]), {"2024"})
+        self.assertIn("2023", rec["by_div"]["front"]["years"])
+
 
 class FingerprintUnionTests(unittest.TestCase):
     def test_report_fingerprint_unions_siblings(self):
@@ -940,6 +1298,123 @@ class BookSnippetTests(unittest.TestCase):
             ]
         )
         self.assertEqual(format_book_snippet(df), "BOOK_STOCKS = {}")
+
+
+class PayloadGroupTests(unittest.TestCase):
+    def test_same_csv_years_and_ma_one_group(self):
+        from run import group_payloads_by_csv
+
+        with tempfile.TemporaryDirectory() as td:
+            a = Path(td) / "a.csv"
+            b = Path(td) / "b.csv"
+            a.write_text("x", encoding="utf-8")
+            b.write_text("y", encoding="utf-8")
+            payloads = [
+                {"csv": str(a), "year": "2021", "ma_type": "SMA"},
+                {"csv": str(a), "year": "2021", "ma_type": "EMA"},
+                {"csv": str(a), "year": "2022", "ma_type": "SMA"},
+                {"csv": str(b), "year": "2021", "ma_type": "SMA"},
+            ]
+            groups = group_payloads_by_csv(payloads)
+            self.assertEqual(len(groups), 2)
+            self.assertEqual(groups[0], [0, 1, 2])
+            self.assertEqual(groups[1], [3])
+
+    def test_typed_dirs_are_different_groups(self):
+        from run import group_payloads_by_csv
+
+        with tempfile.TemporaryDirectory() as td:
+            front = Path(td) / "front"
+            ratio = Path(td) / "front_ratio"
+            front.mkdir()
+            ratio.mkdir()
+            a = front / "600000_SH_1d.csv"
+            b = ratio / "600000_SH_1d.csv"
+            a.write_text("x", encoding="utf-8")
+            b.write_text("y", encoding="utf-8")
+            payloads = [{"csv": str(a)}, {"csv": str(b)}]
+            groups = group_payloads_by_csv(payloads)
+            self.assertEqual(len(groups), 2)
+
+
+class StoreCacheTests(unittest.TestCase):
+    def test_backtest_one_result_loads_csv_once(self):
+        from unittest.mock import patch
+
+        from market_csv import load_daily_csv as real_load
+        from run import backtest_one_result, clear_market_store_cache
+
+        header = "stock,period,datetime,open,high,low,close,volume,amount"
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "600000_SH_1d_20200102_20200103.csv"
+            path.write_text(
+                header
+                + "\n600000.SH,1d,20200102,1,1,1,1,100,100\n"
+                + "600000.SH,1d,20200103,1,1,1,1,100,100\n",
+                encoding="utf-8",
+            )
+            clear_market_store_cache()
+            with patch("run.load_daily_csv", wraps=real_load) as mocked:
+                row = backtest_one_result(
+                    path,
+                    start="20200102",
+                    end="20200103",
+                    out_dir=Path(td) / "out",
+                    year="2020",
+                )
+                self.assertTrue(row.get("ok"), row.get("error"))
+                self.assertEqual(mocked.call_count, 1)
+
+
+class FastOhlcvPatchTests(unittest.TestCase):
+    def test_patched_ohlcv_matches_period_path(self):
+        import numpy as np
+        from mock_qmt import MockContext, _as_tag
+        from run import _exec_bundle, _patch_fast_ohlcv
+
+        d = datetime(2018, 1, 2)
+        bars = []
+        while len(bars) < 400:
+            if d.weekday() < 5:
+                px = 10.0 + 0.01 * len(bars)
+                bars.append(_bar(d.strftime("%Y%m%d"), px))
+            d += timedelta(days=1)
+        store = MarketStore(bars, "600350.SH")
+        walk = bars[-30:]
+        ctx = MockContext(store, [_as_tag(b.dt) for b in walk], "600350.SH")
+        ctx.barpos = len(walk) - 1
+        ns = _exec_bundle()
+        ns["A"].period = "1d"
+        ns["A"].stock = "600350.SH"
+        ns["A"].is_backtest = True
+        orig_d = ns["_get_ohlcv_1d"](ctx, "600350.SH")
+        orig_w = ns["_get_ohlcv_1w"](ctx, "600350.SH")
+        self.assertIsNotNone(orig_d)
+        self.assertIsNotNone(orig_w)
+        _patch_fast_ohlcv(ns)
+        fast_d = ns["_get_ohlcv_1d"](ctx, "600350.SH")
+        fast_w = ns["_get_ohlcv_1w"](ctx, "600350.SH")
+        self.assertIsNotNone(fast_d)
+        self.assertIsNotNone(fast_w)
+        self.assertEqual(len(fast_d[3]), len(orig_d[3]))
+        self.assertEqual(len(fast_w[3]), len(orig_w[3]))
+        self.assertTrue(np.allclose(np.asarray(fast_d[3], dtype=float), np.asarray(orig_d[3], dtype=float)))
+        self.assertTrue(np.allclose(np.asarray(fast_w[3], dtype=float), np.asarray(orig_w[3], dtype=float)))
+        self.assertAlmostEqual(float(fast_d[3][-1]), float(orig_d[3][-1]))
+        self.assertAlmostEqual(float(fast_w[3][-1]), float(orig_w[3][-1]))
+
+
+class FingerprintAggTests(unittest.TestCase):
+    def test_glob_fingerprint_is_triple(self):
+        from stock_select import glob_fingerprint
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "600000_SH_1d_a.csv").write_text("x", encoding="utf-8")
+            fp = glob_fingerprint(root, "*_1d_*.csv")
+            self.assertEqual(len(fp), 3)
+            self.assertEqual(fp[0], 1)
+            self.assertGreater(fp[2], 0)
 
 
 if __name__ == "__main__":
