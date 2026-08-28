@@ -19,8 +19,6 @@ from plotly.subplots import make_subplots
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
-THEME = REPO / "hongli_band"
-DEFAULT_CSV_DIR = REPO / "tools" / "csv"
 
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
@@ -28,6 +26,11 @@ if str(REPO / "scripts") not in sys.path:
     sys.path.insert(0, str(REPO / "scripts"))
 
 from analyze import (  # noqa: E402
+    DEFAULT_CSV_ROOT,
+    DEFAULT_DIVIDEND_TYPE,
+    DEFAULT_REPORT_ROOT,
+    DIVIDEND_LABELS,
+    DIVIDEND_TYPES,
     analyze_detail,
     batch_summary_dataframe,
     batch_year_summary_dataframe,
@@ -43,6 +46,7 @@ from analyze import (  # noqa: E402
     ohlc_from_csv,
     pair_ma_batch_rows,
     parse_budget_from_log,
+    resolve_typed_dir,
     summarize_batch_row,
     trades_to_dataframe,
     union_date_range,
@@ -634,7 +638,7 @@ def _render_ma_compare_panel(
         )
 
 
-def _render_batch_run(csv_dir: str, *, workers: int = 0, quiet: bool = True) -> None:
+def _render_batch_run(csv_dir: str, report_dir: str, *, workers: int = 0, quiet: bool = True) -> None:
     metas = _cached_daily_metas(csv_dir, _daily_dir_fingerprint(csv_dir))
     if not metas:
         st.warning("目录无可用 `*_1d_*.csv`：%s" % csv_dir)
@@ -698,7 +702,7 @@ def _render_batch_run(csv_dir: str, *, workers: int = 0, quiet: bool = True) -> 
     if run_btn and picked and start_d and end_d and start_d <= end_d:
         start_s = _fmt_ymd(start_d)
         end_s = _fmt_ymd(end_d)
-        out_dir = THEME / "report"
+        out_dir = Path(report_dir)
         bar = st.progress(0.0)
         status = st.empty()
 
@@ -950,8 +954,7 @@ def _plot_sell_pie(counts: dict) -> go.Figure:
     return fig
 
 
-def _render_select(csv_dir: str, filters: dict) -> None:
-    report_dir = str(THEME / "report")
+def _render_select(csv_dir: str, report_dir: str, filters: dict) -> None:
     try:
         scanned = _cached_select_scan(
             report_dir,
@@ -970,7 +973,7 @@ def _render_select(csv_dir: str, filters: dict) -> None:
     rec = scored["recommend"]
     cov = scored.get("coverage") or {}
     years = tuple(scored.get("score_years") or SCORE_YEARS)
-    out_path = THEME / "report" / "local_bt_stock_select.csv"
+    out_path = Path(report_dir) / "local_bt_stock_select.csv"
     try:
         write_select_csv(df, out_path)
     except Exception as e:
@@ -987,7 +990,7 @@ def _render_select(csv_dir: str, filters: dict) -> None:
     c3.metric("推荐池", 0 if rec is None or rec.empty else len(rec))
     cut = scored.get("vol_cut")
     c4.metric("波动上限", "-" if cut is None else "%.1f%%" % (float(cut) * 100.0))
-    st.caption("产物：`hongli_band/report/local_bt_stock_select.csv` · 不自动改 `BOOK_STOCKS`")
+    st.caption("产物：`%s` · 不自动改 `BOOK_STOCKS`" % out_path)
 
     st.subheader("现白名单对照")
     book_rank = scored.get("book_rank")
@@ -1085,7 +1088,17 @@ if mode == "跑本地回测":
 
 with st.sidebar:
     st.header("参数")
-    csv_dir = st.text_input("行情目录", value=str(DEFAULT_CSV_DIR))
+    csv_root = st.text_input("行情根目录", value=str(DEFAULT_CSV_ROOT))
+    div = st.selectbox(
+        "复权类型",
+        options=list(DIVIDEND_TYPES),
+        index=list(DIVIDEND_TYPES).index(DEFAULT_DIVIDEND_TYPE),
+        format_func=lambda k: "%s（%s）" % (DIVIDEND_LABELS.get(k, k), k),
+        key="bt_dividend_type",
+    )
+    csv_dir = str(resolve_typed_dir(csv_root, div))
+    report_dir = str(resolve_typed_dir(DEFAULT_REPORT_ROOT, div))
+    st.caption("行情 `%s` · 产物 `%s`" % (csv_dir, report_dir))
     daily_files = list_daily_csvs(csv_dir)
     daily_labels = [p.name for p in daily_files]
     uploaded = None
@@ -1128,9 +1141,9 @@ with st.sidebar:
             st.rerun()
 
 if mode == "选股方案":
-    _render_select(csv_dir, select_filters)
+    _render_select(csv_dir, report_dir, select_filters)
 elif mode == "跑本地回测" and scope == "批量（按标的汇总）":
-    _render_batch_run(csv_dir, workers=workers, quiet=quiet)
+    _render_batch_run(csv_dir, report_dir, workers=workers, quiet=quiet)
 elif mode == "跑本地回测":
     col_a, col_b = st.columns([2, 1])
     with col_a:
@@ -1175,7 +1188,7 @@ elif mode == "跑本地回测":
     if run_btn and selected_csv and meta and start_d and end_d:
         start_s = _fmt_ymd(start_d)
         end_s = _fmt_ymd(end_d)
-        out_dir = THEME / "report"
+        out_dir = Path(report_dir)
         try:
             if compare_ma:
                 packs = {}
@@ -1262,10 +1275,10 @@ elif mode == "跑本地回测":
             )
 
 else:
-    details = list_detail_csvs()
+    details = list_detail_csvs(report_dir)
     labels = [str(p.relative_to(REPO)) if str(p).startswith(str(REPO)) else p.name for p in details]
     if not labels:
-        st.warning("未找到操作明细（hongli_band/回测记录 或 report/*操作明细*）")
+        st.warning("未找到操作明细（`hongli_band/回测记录` 或 `%s/*操作明细*`）" % report_dir)
     else:
         idx = st.selectbox("已有明细", range(len(labels)), format_func=lambda i: labels[i])
         detail_path = details[idx]

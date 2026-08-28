@@ -3,7 +3,7 @@
 # QMT 模型无 __file__，OUT_DIR 必须是绝对路径
 
 STRATEGY_NAME = "KlineDump"
-STRATEGY_VER = "v1.4"
+STRATEGY_VER = "v1.5"
 
 # 跟随主图；填 1d/15m 等则覆盖 C.period
 PERIOD = "follow"
@@ -23,13 +23,14 @@ BAR_COUNT = 5000
 HIST_START = "20180101"
 HIST_MAX_LOOKBACK_DAYS = 0
 
-# 复权，传给 get_market_data_ex 的 dividend_type。改完须 re-deploy 再编译
+# 复权，传给 get_market_data_ex 的 dividend_type。每种写到 OUT_DIR/<type>/
 #   none         不复权
 #   front        前复权（价差）
 #   back         后复权（价差）
-#   front_ratio  等比前复权（默认；最新价贴近市价，与红利波段取数一致）
+#   front_ratio  等比前复权（最新价贴近市价）
 #   back_ratio   等比后复权
-DIVIDEND_TYPE = "follow"
+# 可改成子集以缩短导出；改完须 re-deploy 再编译
+DIVIDEND_TYPES = ("none", "front", "back", "front_ratio", "back_ratio")
 DOWNLOAD_HIST = True
 
 # 额外周期。本地回测优先读同目录 {code}_1w_*.csv，对齐 QMT 原生周线

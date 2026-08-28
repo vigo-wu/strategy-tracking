@@ -590,14 +590,24 @@ def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description="HlBand local backtest from KlineDump daily CSV")
     src = ap.add_mutually_exclusive_group(required=True)
     src.add_argument("--csv", default="", help="KlineDump 日线 CSV（单标的）")
-    src.add_argument("--csv-dir", default="", help="批量：目录下按标的去重后的 *_1d_*.csv")
+    src.add_argument(
+        "--csv-dir",
+        default="",
+        help="批量：行情根目录或已解析的 <type> 子目录（*_1d_*.csv）",
+    )
     ap.add_argument("--start", default="", help="回测起点 yyyymmdd（CSV 须含更早暖机）")
     ap.add_argument("--end", default="", help="回测终点 yyyymmdd")
     ap.add_argument("--stock", default="", help="覆盖 CSV 中的代码，如 600350.SH")
     ap.add_argument(
         "--out",
-        default=str(THEME / "report"),
-        help="日志输出目录（默认 hongli_band/report）",
+        default="",
+        help="日志输出根目录（默认 hongli_band/report/<dividend-type>）",
+    )
+    ap.add_argument(
+        "--dividend-type",
+        default="front_ratio",
+        metavar="TYPE",
+        help="复权类型 none|front|back|front_ratio|back_ratio（默认 front_ratio）",
     )
     ap.add_argument("--log-name", default="", help="日志文件名，默认 local_bt_{stock}.txt")
     ap.add_argument(
@@ -631,28 +641,39 @@ def main(argv: list[str] | None = None) -> None:
         help="同一任务各跑 SMA 与 EMA，写 local_bt_ma_compare.csv",
     )
     args = ap.parse_args(argv)
+    from analyze import (  # noqa: WPS433
+        DEFAULT_CSV_ROOT,
+        DEFAULT_DIVIDEND_TYPE,
+        DEFAULT_REPORT_ROOT,
+        daily_csvs_by_stock,
+        normalize_dividend_type,
+        pair_ma_batch_rows,
+        resolve_typed_dir,
+        summarize_batch_row,
+        write_batch_summary_csv,
+        write_batch_year_summary_csv,
+        write_ma_compare_csv,
+        write_ma_compare_year_csv,
+    )
+
     quiet = not bool(args.verbose)
     raw_ma = str(args.ma_type or "").strip()
     ma_type = normalize_ma_type(raw_ma)
     if raw_ma and not ma_type:
         raise SystemExit("--ma-type must be SMA or EMA")
     compare_ma = bool(args.compare_ma)
+    div_raw = str(args.dividend_type or "").strip()
+    div = normalize_dividend_type(div_raw) if div_raw else DEFAULT_DIVIDEND_TYPE
+    if div_raw and not normalize_dividend_type(div_raw):
+        raise SystemExit("--dividend-type must be none|front|back|front_ratio|back_ratio")
+    out_dir = str(resolve_typed_dir(args.out or DEFAULT_REPORT_ROOT, div))
 
     if args.csv_dir:
-        from analyze import (  # noqa: WPS433
-            daily_csvs_by_stock,
-            pair_ma_batch_rows,
-            summarize_batch_row,
-            write_batch_summary_csv,
-            write_batch_year_summary_csv,
-            write_ma_compare_csv,
-            write_ma_compare_year_csv,
-        )
-
-        metas = daily_csvs_by_stock(args.csv_dir)
+        csv_dir = str(resolve_typed_dir(args.csv_dir or DEFAULT_CSV_ROOT, div))
+        metas = daily_csvs_by_stock(csv_dir)
         paths = [Path(m["path"]) for m in metas]
         if not paths:
-            raise SystemExit("no *_1d_*.csv in %s" % args.csv_dir)
+            raise SystemExit("no *_1d_*.csv in %s" % csv_dir)
 
         def _prog(i: int, n: int, stock: str) -> None:
             print("batch [%s/%s] %s" % (min(i + 1, n), n, stock), flush=True)
@@ -661,7 +682,7 @@ def main(argv: list[str] | None = None) -> None:
             paths,
             start=args.start,
             end=args.end,
-            out_dir=args.out,
+            out_dir=out_dir,
             on_progress=_prog,
             workers=args.workers,
             quiet=quiet,
@@ -671,20 +692,20 @@ def main(argv: list[str] | None = None) -> None:
             compare_ma=compare_ma,
         )
         rows = [summarize_batch_row(r) for r in raw]
-        summary = write_batch_summary_csv(rows, Path(args.out) / "local_bt_batch_summary.csv")
+        summary = write_batch_summary_csv(rows, Path(out_dir) / "local_bt_batch_summary.csv")
         print("wrote batch summary", summary)
         if compare_ma:
             pairs = pair_ma_batch_rows(rows)
-            cmp_path = write_ma_compare_csv(pairs, Path(args.out) / "local_bt_ma_compare.csv")
+            cmp_path = write_ma_compare_csv(pairs, Path(out_dir) / "local_bt_ma_compare.csv")
             print("wrote ma compare", cmp_path)
             if args.split == "year":
                 year_cmp = write_ma_compare_year_csv(
-                    pairs, Path(args.out) / "local_bt_ma_compare_year.csv"
+                    pairs, Path(out_dir) / "local_bt_ma_compare_year.csv"
                 )
                 print("wrote ma compare year", year_cmp)
         elif args.split == "year":
             year_summary = write_batch_year_summary_csv(
-                rows, Path(args.out) / "local_bt_batch_year_summary.csv"
+                rows, Path(out_dir) / "local_bt_batch_year_summary.csv"
             )
             print("wrote year summary", year_summary)
         for r in rows:
@@ -709,7 +730,7 @@ def main(argv: list[str] | None = None) -> None:
                 start=args.start,
                 end=args.end,
                 stock=args.stock,
-                out_dir=args.out,
+                out_dir=out_dir,
                 log_name="",
                 weekly_csv=args.weekly_csv or None,
                 quiet=quiet,
@@ -727,10 +748,10 @@ def main(argv: list[str] | None = None) -> None:
             row["budget"] = parse_budget_from_log(log_path)
             rows.append(summarize_batch_row(row))
         pairs = pair_ma_batch_rows(rows)
-        cmp_path = write_ma_compare_csv(pairs, Path(args.out) / "local_bt_ma_compare.csv")
+        cmp_path = write_ma_compare_csv(pairs, Path(out_dir) / "local_bt_ma_compare.csv")
         print("wrote ma compare", cmp_path)
         if args.report and rows:
-            _run_report(Path(rows[0]["log"]), Path(args.out))
+            _run_report(Path(rows[0]["log"]), Path(out_dir))
         return
 
     log_path = run_backtest(
@@ -738,14 +759,14 @@ def main(argv: list[str] | None = None) -> None:
         start=args.start,
         end=args.end,
         stock=args.stock,
-        out_dir=args.out,
+        out_dir=out_dir,
         log_name=args.log_name,
         weekly_csv=args.weekly_csv or None,
         quiet=quiet,
         ma_type=ma_type,
     )
     if args.report:
-        _run_report(log_path, Path(args.out))
+        _run_report(log_path, Path(out_dir))
 
 
 if __name__ == "__main__":

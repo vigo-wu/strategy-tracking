@@ -26,6 +26,37 @@ from market_csv import compact_day, load_daily_csv, peek_daily_csv_meta  # noqa:
 MA_TYPES = ("SMA", "EMA")
 MA_PNL_CLOSE = 1.0
 
+DIVIDEND_TYPES = ("none", "front", "back", "front_ratio", "back_ratio")
+DIVIDEND_LABELS = {
+    "none": "不复权",
+    "front": "前复权",
+    "back": "后复权",
+    "front_ratio": "等比前复权",
+    "back_ratio": "等比后复权",
+}
+DEFAULT_DIVIDEND_TYPE = "front_ratio"
+DEFAULT_CSV_ROOT = REPO / "tools" / "csv"
+DEFAULT_REPORT_ROOT = THEME / "report"
+
+
+def normalize_dividend_type(raw: Any) -> str:
+    s = str(raw or "").strip().lower()
+    return s if s in DIVIDEND_TYPES else ""
+
+
+def dividend_label(dividend_type: Any) -> str:
+    div = normalize_dividend_type(dividend_type) or DEFAULT_DIVIDEND_TYPE
+    return DIVIDEND_LABELS.get(div, div)
+
+
+def resolve_typed_dir(root: str | Path, dividend_type: Any = "") -> Path:
+    """root/<type>；root 已是该 type 目录名则不再拼接。非法 type 回落默认。"""
+    base = Path(root)
+    div = normalize_dividend_type(dividend_type) or DEFAULT_DIVIDEND_TYPE
+    if base.name == div:
+        return base
+    return base / div
+
 
 def normalize_ma_type(raw: Any) -> str:
     s = str(raw or "").strip().upper()
@@ -497,13 +528,20 @@ def build_year_jobs(
     return jobs
 
 
-def list_detail_csvs() -> list[Path]:
-    """已有操作明细：回测记录 + report 下 *_操作明细.csv。"""
+def list_detail_csvs(
+    report_dir: str | Path | None = None,
+    *,
+    include_hist: bool = True,
+) -> list[Path]:
+    """已有操作明细：可选回测记录 + report_dir 下 *_操作明细.csv。"""
     out: list[Path] = []
-    hist = THEME / "回测记录"
-    if hist.is_dir():
-        out.extend(sorted(hist.glob("*.csv")))
-    report = THEME / "report"
+    if include_hist:
+        hist = THEME / "回测记录"
+        if hist.is_dir():
+            out.extend(sorted(hist.glob("*.csv")))
+    report = Path(report_dir) if report_dir else resolve_typed_dir(
+        DEFAULT_REPORT_ROOT, DEFAULT_DIVIDEND_TYPE
+    )
     if report.is_dir():
         out.extend(sorted(report.glob("*操作明细*.csv")))
         out.extend(sorted(report.glob("*_trades.csv")))

@@ -349,7 +349,62 @@ def _col_keep(md, stock, field):
     return out
 
 
-def _fetch_md(C, stock, period):
+_VALID_DIVIDEND = (
+    "none",
+    "front",
+    "back",
+    "front_ratio",
+    "back_ratio",
+)
+
+
+def _norm_dump_dividend(raw):
+    s = str(raw or "").strip().lower()
+    if s in _VALID_DIVIDEND:
+        return s
+    return ""
+
+
+def _iter_dump_dividend_raw():
+    raw = globals().get("DIVIDEND_TYPES")
+    if raw is None:
+        raw = globals().get("DIVIDEND_TYPE")
+    if raw is None or raw is False:
+        return []
+    if isinstance(raw, (str, bytes)):
+        s = str(raw or "").strip()
+        if not s:
+            return []
+        parts = []
+        for chunk in s.replace(",", " ").split():
+            if chunk:
+                parts.append(chunk)
+        return parts
+    try:
+        return list(raw)
+    except Exception:
+        return []
+
+
+def _resolve_dividend_types():
+    types = []
+    seen = set()
+    for x in _iter_dump_dividend_raw():
+        div = _norm_dump_dividend(x)
+        if not div:
+            if str(x or "").strip():
+                print(_strategy_tag(), "dump skip bad dividend=", x)
+            continue
+        if div in seen:
+            continue
+        seen.add(div)
+        types.append(div)
+    if types:
+        return types
+    return list(_VALID_DIVIDEND)
+
+
+def _fetch_md(C, stock, period, dividend_type):
     fields = ["open", "high", "low", "close", "volume", "amount"]
     start_raw = str(getattr(A, "dump_start", "") or "")
     end_raw = str(getattr(A, "dump_end", "") or "")
@@ -366,9 +421,10 @@ def _fetch_md(C, stock, period):
             end = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
             if not _is_intraday(period):
                 end = end[:8]
-    div = str(globals().get("DIVIDEND_TYPE") or "front_ratio")
+    div = _norm_dump_dividend(dividend_type) or "front_ratio"
     md = None
     source = None
+    tag = str(period) + "_" + str(div)
     try:
         md = C.get_market_data_ex(
             fields=fields,
@@ -395,10 +451,10 @@ def _fetch_md(C, stock, period):
             )
             source = "get_market_data_ex/pos"
         except Exception as e:
-            _diag_once("ex_fail_" + str(period), e)
+            _diag_once("ex_fail_" + tag, e)
             md = None
     except Exception as e:
-        _diag_once("ex_fail_" + str(period), e)
+        _diag_once("ex_fail_" + tag, e)
         md = None
     if md is None:
         try:
@@ -413,9 +469,9 @@ def _fetch_md(C, stock, period):
             )
             source = "get_market_data"
         except Exception as e:
-            _diag_once("gmd_fail_" + str(period), e)
+            _diag_once("gmd_fail_" + tag, e)
             md = None
-    return md, source, start, end
+    return md, source, start, end, div
 
 
 def _align_cols(times, open_, high, low, close, volume, amount):
@@ -459,10 +515,10 @@ def _write_csv(path, rows):
         f.close()
 
 
-def _dump_period(C, stock, period):
-    md, source, q_start, q_end = _fetch_md(C, stock, period)
+def _dump_period(C, stock, period, dividend_type):
+    md, source, q_start, q_end, div = _fetch_md(C, stock, period, dividend_type)
     if md is None:
-        print(_strategy_tag(), "dump empty period=", period, "source=", source)
+        print(_strategy_tag(), "dump empty period=", period, "div=", div, "source=", source)
         return None
     times = _times_from_ex(md, stock)
     open_ = _col_keep(md, stock, "open")
@@ -473,7 +529,7 @@ def _dump_period(C, stock, period):
     amount = _col_keep(md, stock, "amount")
     aligned = _align_cols(times, open_, high, low, close, volume, amount)
     if aligned is None:
-        print(_strategy_tag(), "dump empty period=", period, "source=", source)
+        print(_strategy_tag(), "dump empty period=", period, "div=", div, "source=", source)
         return None
     times, open_, high, low, close, volume, amount = aligned
     clip_start = str(getattr(A, "dump_start", "") or q_start or "")
@@ -505,6 +561,8 @@ def _dump_period(C, stock, period):
             _strategy_tag(),
             "dump empty after clip period=",
             period,
+            "div=",
+            div,
             "query=",
             q_start,
             q_end,
@@ -518,7 +576,7 @@ def _dump_period(C, stock, period):
         last_day = _digits_only(clip_end)[:8] or datetime.datetime.now().strftime("%Y%m%d")
     fname = "%s_%s_%s_%s.csv" % (_stock_tag(stock), period, first_day, last_day)
     out_dir = str(globals().get("OUT_DIR") or "")
-    path = os.path.join(out_dir, fname)
+    path = os.path.join(out_dir, div, fname)
     _write_csv(path, rows)
     print(
         _strategy_tag(),
@@ -526,6 +584,8 @@ def _dump_period(C, stock, period):
         len(rows),
         "period=",
         period,
+        "div=",
+        div,
         "range=",
         q_start,
         q_end,
@@ -631,7 +691,8 @@ def _dump_periods(C):
         n = _norm_period(p)
         if n and n not in periods:
             periods.append(n)
-    print(_strategy_tag(), "batch stocks=", stocks, "periods=", periods)
+    divs = _resolve_dividend_types()
+    print(_strategy_tag(), "batch stocks=", stocks, "periods=", periods, "divs=", divs)
     do_dl = bool(globals().get("DOWNLOAD_HIST", True))
     for stock in stocks:
         for period in periods:
@@ -640,10 +701,11 @@ def _dump_periods(C):
                     _download_hist(stock, period)
                 except Exception as e:
                     print(_strategy_tag(), "download_hist abort-safe", stock, period, e)
-            try:
-                _dump_period(C, stock, period)
-            except Exception as e:
-                print(_strategy_tag(), "dump abort-safe", stock, period, e)
+            for div in divs:
+                try:
+                    _dump_period(C, stock, period, div)
+                except Exception as e:
+                    print(_strategy_tag(), "dump abort-safe", stock, period, div, e)
     A._dumped = True
 
 
@@ -671,6 +733,8 @@ def _dump_init(C):
         end,
         "DUMP_STOCKS=",
         dump_stocks,
+        "DIVIDEND_TYPES=",
+        _resolve_dividend_types(),
         "OUT_DIR=",
         globals().get("OUT_DIR") or "",
     )

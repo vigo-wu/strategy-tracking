@@ -40,6 +40,7 @@ def main() -> None:
     print("OK: 打开国金 QMT -> 模型交易 -> 新建策略交易 -> KlineDump / 行情导出")
     print("主图=运行载体（DUMP_STOCKS 空时才导主图）| 周期=要导出的K线周期 | 勿勾独立/简易运行")
     print("DUMP_STOCKS 非空则按名单批量导出；空则只导主图")
+    print("每种 DIVIDEND_TYPES 写入 OUT_DIR/<type>/（none/front/back/front_ratio/back_ratio）")
     print("导出区间跟随主图回测起止（C.start/C.end）；读不到时才用 HIST_START/BAR_COUNT")
     print("编辑 kldump/*.py 后重新本脚本部署，终端再编译")
 

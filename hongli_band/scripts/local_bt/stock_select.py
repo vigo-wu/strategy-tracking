@@ -21,21 +21,27 @@ import pandas as pd
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
 THEME = REPO / "hongli_band"
-DEFAULT_REPORT = THEME / "report"
-DEFAULT_CSV_DIR = REPO / "tools" / "csv"
 CONFIG_PY = THEME / "scripts" / "qmt" / "hlband" / "config.py"
 
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 from analyze import (  # noqa: E402
+    DEFAULT_CSV_ROOT,
+    DEFAULT_DIVIDEND_TYPE,
+    DEFAULT_REPORT_ROOT,
     agg_kpi_pnl,
     analyze_detail,
     daily_csvs_by_stock,
+    normalize_dividend_type,
     parse_budget_from_log,
     pick_ma_winner,
+    resolve_typed_dir,
 )
 from market_csv import load_daily_csv  # noqa: E402
+
+DEFAULT_REPORT = DEFAULT_REPORT_ROOT
+DEFAULT_CSV_DIR = DEFAULT_CSV_ROOT
 
 DETAIL_RE = re.compile(
     r"^local_bt_(\d{6})_(SZ|SH)(?:_(\d{4}))?(?:_(SMA|EMA))?_操作明细\.csv$",
@@ -382,8 +388,12 @@ def scan_reports(
     progress: bool = False,
 ) -> dict[str, Any]:
     """扫描 local_bt 明细/日志 + 日线股性。结果可供 score_universe 反复打分。"""
-    report = Path(report_dir) if report_dir else DEFAULT_REPORT
-    data_dir = Path(csv_dir) if csv_dir else DEFAULT_CSV_DIR
+    report = Path(report_dir) if report_dir else resolve_typed_dir(
+        DEFAULT_REPORT, DEFAULT_DIVIDEND_TYPE
+    )
+    data_dir = Path(csv_dir) if csv_dir else resolve_typed_dir(
+        DEFAULT_CSV_DIR, DEFAULT_DIVIDEND_TYPE
+    )
     files = list_detail_files(report)
     stocks: dict[str, dict[str, Any]] = {}
     n_files = len(files)
@@ -911,7 +921,11 @@ def run_select(
 ) -> dict[str, Any]:
     packed = scanned if scanned is not None else scan_reports(report_dir, csv_dir, progress=progress)
     scored = score_universe(packed, filters=filters)
-    dest = Path(out) if out else (Path(report_dir) if report_dir else DEFAULT_REPORT) / "local_bt_stock_select.csv"
+    dest = Path(out) if out else (
+        Path(report_dir)
+        if report_dir
+        else resolve_typed_dir(DEFAULT_REPORT, DEFAULT_DIVIDEND_TYPE)
+    ) / "local_bt_stock_select.csv"
     scored["out_csv"] = str(write_select_csv(scored["df"], dest))
     scored["scanned"] = packed
     return scored
@@ -919,8 +933,14 @@ def run_select(
 
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description="HlBand 批量回测选股打分")
-    ap.add_argument("--report-dir", default=str(DEFAULT_REPORT), help="local_bt 报告目录")
-    ap.add_argument("--csv-dir", default=str(DEFAULT_CSV_DIR), help="日线 CSV 目录（股性）")
+    ap.add_argument(
+        "--dividend-type",
+        default=DEFAULT_DIVIDEND_TYPE,
+        metavar="TYPE",
+        help="复权类型 none|front|back|front_ratio|back_ratio（默认 front_ratio）",
+    )
+    ap.add_argument("--report-dir", default="", help="local_bt 报告根目录或已解析的 <type> 子目录")
+    ap.add_argument("--csv-dir", default="", help="日线 CSV 根目录或已解析的 <type> 子目录")
     ap.add_argument(
         "--out",
         default="",
@@ -934,6 +954,12 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--vol-drop-top", type=float, default=DEFAULT_FILTERS["vol_drop_top"])
     ap.add_argument("--top-n", type=int, default=DEFAULT_FILTERS["top_n"])
     args = ap.parse_args(argv)
+    div_raw = str(args.dividend_type or "").strip()
+    div = normalize_dividend_type(div_raw) if div_raw else DEFAULT_DIVIDEND_TYPE
+    if div_raw and not normalize_dividend_type(div_raw):
+        raise SystemExit("--dividend-type must be none|front|back|front_ratio|back_ratio")
+    csv_dir = str(resolve_typed_dir(args.csv_dir or DEFAULT_CSV_DIR, div))
+    report_dir = str(resolve_typed_dir(args.report_dir or DEFAULT_REPORT, div))
     filters = {
         "min_n_buy": args.min_n_buy,
         "min_years_traded": args.min_years,
@@ -943,11 +969,11 @@ def main(argv: list[str] | None = None) -> None:
         "vol_drop_top": args.vol_drop_top,
         "top_n": args.top_n,
     }
-    out = args.out or str(Path(args.report_dir) / "local_bt_stock_select.csv")
-    print("scanning", args.report_dir, flush=True)
+    out = args.out or str(Path(report_dir) / "local_bt_stock_select.csv")
+    print("scanning", report_dir, csv_dir, flush=True)
     scored = run_select(
-        report_dir=args.report_dir,
-        csv_dir=args.csv_dir,
+        report_dir=report_dir,
+        csv_dir=csv_dir,
         out=out,
         filters=filters,
         progress=True,

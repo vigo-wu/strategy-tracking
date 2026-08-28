@@ -698,5 +698,43 @@ class TestScoreYears(unittest.TestCase):
         self.assertEqual(infer_score_years({}), ())
 
 
+class TypedDirTests(unittest.TestCase):
+    def test_resolve_typed_dir_appends(self):
+        from analyze import DEFAULT_DIVIDEND_TYPE, resolve_typed_dir
+
+        root = Path("D:/data/csv")
+        self.assertEqual(resolve_typed_dir(root, "front"), root / "front")
+        self.assertEqual(resolve_typed_dir(root, ""), root / DEFAULT_DIVIDEND_TYPE)
+
+    def test_resolve_typed_dir_no_double_append(self):
+        from analyze import resolve_typed_dir
+
+        leaf = Path("D:/data/csv/front")
+        self.assertEqual(resolve_typed_dir(leaf, "front"), leaf)
+
+    def test_resolve_typed_dir_invalid_falls_back(self):
+        from analyze import DEFAULT_DIVIDEND_TYPE, resolve_typed_dir
+
+        root = Path("D:/data/report")
+        self.assertEqual(resolve_typed_dir(root, "nope"), root / DEFAULT_DIVIDEND_TYPE)
+        self.assertEqual(resolve_typed_dir(root, "FOLLOW"), root / DEFAULT_DIVIDEND_TYPE)
+
+    def test_list_detail_csvs_stays_in_typed_dir(self):
+        from analyze import list_detail_csvs
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            front = root / "front"
+            back = root / "back"
+            front.mkdir()
+            back.mkdir()
+            keep = front / "local_bt_600000_SH_操作明细.csv"
+            skip = back / "local_bt_600001_SH_操作明细.csv"
+            keep.write_text("x", encoding="utf-8")
+            skip.write_text("y", encoding="utf-8")
+            found = list_detail_csvs(front, include_hist=False)
+            self.assertEqual([p.name for p in found], [keep.name])
+
+
 if __name__ == "__main__":
     unittest.main()
