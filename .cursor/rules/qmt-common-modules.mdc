@@ -33,4 +33,4 @@ alwaysApply: true
 | 下单/T+1/暖机/行情解析 | `scripts/qmt_common/` 后**全策略** re-deploy |
 | 同标的多仓分笔 | `qmt_common/single/lots.py` + config `SCALE_LOTS` |
 
-单仓范本：`波段3-5天策略/scripts/qmt/`。多仓：同一单仓模板，`SCALE_LOTS=True`（如 `strategy/scripts/qmt/ma15/`）。双浮仓范本：`红利T策略/scripts/qmt/hongli/`。
+单仓范本：`波段3-5天策略/scripts/qmt/`。多仓：同一单仓模板，`SCALE_LOTS=True`（如 `hongli_band/scripts/qmt/hlband/`）。双浮仓范本：`红利T策略/scripts/qmt/hongli/`。

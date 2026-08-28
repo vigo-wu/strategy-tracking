@@ -65,7 +65,7 @@ description: >-
 **只写策略特有逻辑**；买卖/pending/T+1/经纪查询一律 `common:` / `common:single:`。  
 同标的多仓：config 设 `SCALE_LOTS=True`，买卖仍走 `single/orders`（`add=True` 加一笔，`_order_sell(..., lot_ids=)` 按笔平）；禁止为此去接双浮仓 `orders.py`。
 
-范本：`波段3-5天策略/scripts/qmt/band35/` + `_deploy_qmt_gbk.py`。
+范本：`波段3-5天策略/scripts/qmt/band35/` + `_deploy_qmt_gbk.py`。同标的多仓：`hongli_band/scripts/qmt/hlband/`（`SCALE_LOTS=True`）。
 
 ---
 

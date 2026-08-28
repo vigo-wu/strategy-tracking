@@ -134,4 +134,4 @@ xtquant 骨架见 [reference-template.md](reference-template.md)。
 - [reference-pitfalls.md](reference-pitfalls.md) — **国金终端联调踩坑（优先读，含 T+1）**
 - [reference-xtquant.md](reference-xtquant.md) — 外部 xtquant 要点  
 - [reference-template.md](reference-template.md) — xtquant / 历史骨架说明  
-- 范本：`波段3-5天策略/scripts/qmt/`（单仓）、`strategy/scripts/qmt/ma15/`（单仓+多仓）、`红利T策略/scripts/qmt/hongli/`（双浮仓）
+- 范本：`波段3-5天策略/scripts/qmt/`（单仓）、`hongli_band/scripts/qmt/hlband/`（单仓+多仓）、`红利T策略/scripts/qmt/hongli/`（双浮仓）
