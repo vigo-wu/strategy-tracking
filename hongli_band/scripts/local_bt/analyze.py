@@ -58,6 +58,142 @@ def resolve_typed_dir(root: str | Path, dividend_type: Any = "") -> Path:
     return base / div
 
 
+def parse_dividend_types(raw: Any) -> list[str]:
+    """逗号/空白分隔的复权列表，按 DIVIDEND_TYPES 去重保序。空输入 → 默认一种。"""
+    parts: list[str] = []
+    if raw is None or raw is False:
+        parts = []
+    elif isinstance(raw, (list, tuple, set)):
+        parts = [str(x) for x in raw]
+    else:
+        s = str(raw or "").strip()
+        if s:
+            for chunk in s.replace(",", " ").split():
+                if chunk:
+                    parts.append(chunk)
+    seen: set[str] = set()
+    for p in parts:
+        d = normalize_dividend_type(p)
+        if d:
+            seen.add(d)
+    if not parts:
+        return [DEFAULT_DIVIDEND_TYPE]
+    return [d for d in DIVIDEND_TYPES if d in seen]
+
+
+def typed_dir_root(path: str | Path) -> Path:
+    p = Path(path)
+    if p.name in DIVIDEND_TYPES:
+        return p.parent
+    return p
+
+
+def typed_sibling_dirs(path: str | Path) -> list[tuple[str, Path]]:
+    """path 所属根下已存在的复权子目录；没有则只返回 path 自身（旧扁平目录）。"""
+    p = Path(path)
+    root = typed_dir_root(p)
+    found: list[tuple[str, Path]] = []
+    for div in DIVIDEND_TYPES:
+        d = root / div
+        if d.is_dir():
+            found.append((div, d))
+    if found:
+        return found
+    if p.is_dir():
+        return [("", p)]
+    if root.is_dir():
+        return [("", root)]
+    return []
+
+
+typed_report_dirs = typed_sibling_dirs
+
+
+def daily_csv_for_stock(csv_dir: str | Path, stock: str) -> Path | None:
+    want = str(stock or "").strip().upper()
+    if not want:
+        return None
+    for meta in daily_csvs_by_stock(csv_dir):
+        if str(meta.get("stock") or "").strip().upper() == want:
+            return Path(str(meta.get("path") or ""))
+    return None
+
+
+_DIV_TIE_ORDER = (DEFAULT_DIVIDEND_TYPE,) + tuple(
+    d for d in DIVIDEND_TYPES if d != DEFAULT_DIVIDEND_TYPE
+)
+
+
+def pick_div_winner(
+    kpis_by_type: dict[str, dict[str, Any] | None],
+    *,
+    close_eps: float = MA_PNL_CLOSE,
+) -> dict[str, Any]:
+    """多种复权：总盈亏高者胜；与最高者 |Δ|≤close_eps 再比胜率；仍平按 front_ratio 优先。"""
+    scored: list[tuple[str, float, float]] = []
+    pnl_by: dict[str, float] = {}
+    wr_by: dict[str, float] = {}
+    for div in DIVIDEND_TYPES:
+        if div not in kpis_by_type:
+            continue
+        kpi = kpis_by_type.get(div)
+        pnl = _usable_pnl(kpi)
+        if pnl is None:
+            continue
+        wr = _usable_win_rate(kpi)
+        scored.append((div, pnl, wr))
+        pnl_by[div] = pnl
+        wr_by[div] = wr
+    out: dict[str, Any] = {
+        "winner": "",
+        "label": "",
+        "why": "",
+        "pnl_by_type": pnl_by,
+        "win_rate_by_type": wr_by,
+    }
+    if not scored:
+        return out
+    if len(scored) == 1:
+        div = scored[0][0]
+        out.update(
+            {
+                "winner": div,
+                "label": DIVIDEND_LABELS.get(div, div),
+                "why": "single_div",
+            }
+        )
+        return out
+    best_pnl = max(p for _d, p, _w in scored)
+    close = [(d, p, w) for d, p, w in scored if abs(p - best_pnl) <= float(close_eps)]
+    if len(close) == 1:
+        div = close[0][0]
+        out.update(
+            {
+                "winner": div,
+                "label": DIVIDEND_LABELS.get(div, div),
+                "why": "compare",
+            }
+        )
+        return out
+    best_wr = max(w for _d, _p, w in close)
+    wr_winners = [d for d, _p, w in close if w == best_wr]
+    winner = ""
+    for d in _DIV_TIE_ORDER:
+        if d in wr_winners:
+            winner = d
+            break
+    if not winner:
+        winner = wr_winners[0]
+    out.update(
+        {
+            "winner": winner,
+            "label": "接近",
+            "why": "compare_close",
+        }
+    )
+    return out
+
+
 def normalize_ma_type(raw: Any) -> str:
     s = str(raw or "").strip().upper()
     return s if s in MA_TYPES else ""
@@ -529,22 +665,26 @@ def build_year_jobs(
 
 
 def list_detail_csvs(
-    report_dir: str | Path | None = None,
+    report_dir: str | Path | list[str | Path] | tuple[str | Path, ...] | None = None,
     *,
     include_hist: bool = True,
 ) -> list[Path]:
-    """已有操作明细：可选回测记录 + report_dir 下 *_操作明细.csv。"""
+    """已有操作明细：可选回测记录 + 一个或多个 report_dir 下 *_操作明细.csv。"""
     out: list[Path] = []
     if include_hist:
         hist = THEME / "回测记录"
         if hist.is_dir():
             out.extend(sorted(hist.glob("*.csv")))
-    report = Path(report_dir) if report_dir else resolve_typed_dir(
-        DEFAULT_REPORT_ROOT, DEFAULT_DIVIDEND_TYPE
-    )
-    if report.is_dir():
-        out.extend(sorted(report.glob("*操作明细*.csv")))
-        out.extend(sorted(report.glob("*_trades.csv")))
+    if report_dir is None:
+        reports = [resolve_typed_dir(DEFAULT_REPORT_ROOT, DEFAULT_DIVIDEND_TYPE)]
+    elif isinstance(report_dir, (list, tuple)):
+        reports = [Path(x) for x in report_dir]
+    else:
+        reports = [Path(report_dir)]
+    for report in reports:
+        if report.is_dir():
+            out.extend(sorted(report.glob("*操作明细*.csv")))
+            out.extend(sorted(report.glob("*_trades.csv")))
     # 去重保序
     seen: set[Path] = set()
     uniq: list[Path] = []

@@ -30,13 +30,17 @@ from analyze import (  # noqa: E402
     DEFAULT_CSV_ROOT,
     DEFAULT_DIVIDEND_TYPE,
     DEFAULT_REPORT_ROOT,
+    DIVIDEND_TYPES,
     agg_kpi_pnl,
     analyze_detail,
     daily_csvs_by_stock,
     normalize_dividend_type,
     parse_budget_from_log,
+    pick_div_winner,
     pick_ma_winner,
     resolve_typed_dir,
+    typed_dir_root,
+    typed_sibling_dirs,
 )
 from market_csv import load_daily_csv  # noqa: E402
 
@@ -83,15 +87,13 @@ VOL_MIN_BARS = 40
 TOUCH_TOL = 0.025
 
 
-def report_fingerprint(report_dir: str | Path) -> tuple[int, int, int]:
-    """报告目录指纹：明细文件数 / 最新 mtime / 体积和。"""
-    root = Path(report_dir)
+def _glob_fingerprint(root: Path, pattern: str) -> tuple[int, int, int]:
     n = 0
     mx = 0
     sz = 0
     if not root.is_dir():
         return (0, 0, 0)
-    for p in root.glob("local_bt_*操作明细.csv"):
+    for p in root.glob(pattern):
         n += 1
         try:
             st = p.stat()
@@ -100,24 +102,38 @@ def report_fingerprint(report_dir: str | Path) -> tuple[int, int, int]:
         mx = max(mx, int(st.st_mtime_ns))
         sz += int(st.st_size)
     return (n, mx, sz)
+
+
+def _merge_fingerprints(parts: list[tuple[int, int, int]]) -> tuple[int, int, int]:
+    n = 0
+    mx = 0
+    sz = 0
+    for a, b, c in parts:
+        n += a
+        mx = max(mx, b)
+        sz += c
+    return (n, mx, sz)
+
+
+def report_fingerprint(report_dir: str | Path) -> tuple[int, int, int]:
+    """报告目录指纹：含全部复权兄弟目录。"""
+    parts = []
+    sibs = typed_sibling_dirs(report_dir)
+    if not sibs:
+        return _glob_fingerprint(Path(report_dir), "local_bt_*操作明细.csv")
+    for _div, d in sibs:
+        parts.append(_glob_fingerprint(d, "local_bt_*操作明细.csv"))
+    return _merge_fingerprints(parts)
 
 
 def csv_dir_fingerprint(csv_dir: str | Path) -> tuple[int, int, int]:
-    root = Path(csv_dir)
-    n = 0
-    mx = 0
-    sz = 0
-    if not root.is_dir():
-        return (0, 0, 0)
-    for p in root.glob("*_1d_*.csv"):
-        n += 1
-        try:
-            st = p.stat()
-        except OSError:
-            continue
-        mx = max(mx, int(st.st_mtime_ns))
-        sz += int(st.st_size)
-    return (n, mx, sz)
+    parts = []
+    sibs = typed_sibling_dirs(csv_dir)
+    if not sibs:
+        return _glob_fingerprint(Path(csv_dir), "*_1d_*.csv")
+    for _div, d in sibs:
+        parts.append(_glob_fingerprint(d, "*_1d_*.csv"))
+    return _merge_fingerprints(parts)
 
 
 def load_book_stocks(config_path: str | Path | None = None) -> dict[str, str]:
@@ -381,6 +397,61 @@ def _resolve_stock_ma(rec: dict[str, Any]) -> None:
     rec["ma_type_why"] = "no_compare"
 
 
+def _copy_div_to_rec(
+    rec: dict[str, Any],
+    drec: dict[str, Any],
+    div: str,
+    *,
+    why: str,
+    pick: dict[str, Any] | None = None,
+) -> None:
+    rec["years"] = dict(drec.get("years") or {})
+    rec["recent"] = drec.get("recent")
+    rec["ma_type_suggest"] = drec.get("ma_type_suggest") or ""
+    rec["ma_type_why"] = drec.get("ma_type_why") or ""
+    rec["ma_pnl_sma"] = drec.get("ma_pnl_sma")
+    rec["ma_pnl_ema"] = drec.get("ma_pnl_ema")
+    rec["ma_pnl_delta"] = drec.get("ma_pnl_delta")
+    rec["ma_label"] = drec.get("ma_label") or ""
+    rec["div_type_suggest"] = div
+    rec["div_type_why"] = why
+    rec["div_pnl"] = dict((pick or {}).get("pnl_by_type") or {})
+
+
+def _resolve_stock_div(rec: dict[str, Any]) -> None:
+    """各复权先完成 MA 择优后，在分年交集上选定建议复权。"""
+    by_div = rec.get("by_div") or {}
+    rec["div_type_suggest"] = ""
+    rec["div_type_why"] = "no_compare"
+    rec["div_pnl"] = {}
+    year_maps: dict[str, dict[str, Any]] = {}
+    for div, drec in by_div.items():
+        years = dict(drec.get("years") or {})
+        if years:
+            year_maps[str(div)] = years
+    if not year_maps:
+        return
+    if len(year_maps) == 1:
+        div = next(iter(year_maps))
+        _copy_div_to_rec(rec, by_div[div], div, why="single_div")
+        return
+    common = set(year_maps[next(iter(year_maps))])
+    for years in year_maps.values():
+        common &= set(years)
+    if not common:
+        return
+    kpis_by_type: dict[str, dict[str, Any] | None] = {}
+    for div, years in year_maps.items():
+        kpis_by_type[div] = agg_kpi_pnl([years[y] for y in sorted(common)])
+    pick = pick_div_winner(kpis_by_type)
+    winner = str(pick.get("winner") or "")
+    if not winner or winner not in by_div:
+        rec["div_type_why"] = str(pick.get("why") or "no_compare")
+        rec["div_pnl"] = dict(pick.get("pnl_by_type") or {})
+        return
+    _copy_div_to_rec(rec, by_div[winner], winner, why=str(pick.get("why") or "compare"), pick=pick)
+
+
 def scan_reports(
     report_dir: str | Path | None = None,
     csv_dir: str | Path | None = None,
@@ -394,15 +465,27 @@ def scan_reports(
     data_dir = Path(csv_dir) if csv_dir else resolve_typed_dir(
         DEFAULT_CSV_DIR, DEFAULT_DIVIDEND_TYPE
     )
-    files = list_detail_files(report)
+    report_dirs = typed_sibling_dirs(report)
+    csv_root = typed_dir_root(data_dir)
     stocks: dict[str, dict[str, Any]] = {}
-    n_files = len(files)
-    for i, item in enumerate(files):
+    packed: list[dict[str, Any]] = []
+    for div, rdir in report_dirs:
+        for item in list_detail_files(rdir):
+            row = dict(item)
+            row["dividend_type"] = div or normalize_dividend_type(rdir.name)
+            packed.append(row)
+    n_files = len(packed)
+    for i, item in enumerate(packed):
         stock = item["stock"]
         year = item["year"]
         ma = str(item.get("ma_type") or "")
+        div = str(item.get("dividend_type") or "")
         if progress and (i == 0 or (i + 1) % 100 == 0 or (i + 1) == n_files):
-            print("scan detail %s/%s %s %s %s" % (i + 1, n_files, stock, year, ma or "-"), flush=True)
+            print(
+                "scan detail %s/%s %s %s %s %s"
+                % (i + 1, n_files, stock, year, div or "-", ma or "-"),
+                flush=True,
+            )
         rec = stocks.setdefault(
             stock,
             {
@@ -412,6 +495,7 @@ def scan_reports(
                 "style": {},
                 "error": "",
                 "by_ma": {},
+                "by_div": {},
             },
         )
         log = item["log"] if item["log"].is_file() else None
@@ -420,19 +504,33 @@ def scan_reports(
         except Exception as e:
             rec["error"] = (rec.get("error") or "") + ("%s: %s; " % (year, e))
             continue
-        bucket = _ma_bucket(rec, ma)
+        if div:
+            drec = rec["by_div"].setdefault(div, {"by_ma": {}, "years": {}, "recent": None})
+            bucket = _ma_bucket(drec, ma)
+        else:
+            bucket = _ma_bucket(rec, ma)
         if year == RECENT_KEY:
             bucket["recent"] = kpi
         else:
             bucket["years"][year] = kpi
 
     for rec in stocks.values():
-        _resolve_stock_ma(rec)
+        if rec.get("by_div"):
+            for drec in rec["by_div"].values():
+                _resolve_stock_ma(drec)
+            _resolve_stock_div(rec)
+        else:
+            _resolve_stock_ma(rec)
+            rec["div_type_suggest"] = rec.get("div_type_suggest") or ""
+            rec["div_type_why"] = rec.get("div_type_why") or "no_compare"
 
     cov: dict[str, int] = {}
     n_compare = 0
     n_no_compare = 0
     n_single = 0
+    n_div_compare = 0
+    n_div_single = 0
+    n_div_miss = 0
     for rec in stocks.values():
         why = str(rec.get("ma_type_why") or "")
         if why in ("compare", "compare_close"):
@@ -441,20 +539,44 @@ def scan_reports(
             n_single += 1
         else:
             n_no_compare += 1
+        dwhy = str(rec.get("div_type_why") or "")
+        if dwhy in ("compare", "compare_close"):
+            n_div_compare += 1
+        elif dwhy == "single_div":
+            n_div_single += 1
+        else:
+            n_div_miss += 1
         for y in rec.get("years") or {}:
             cov[y] = cov.get(y, 0) + 1
         if rec.get("recent"):
             cov[RECENT_KEY] = cov.get(RECENT_KEY, 0) + 1
 
-    ohlc_by = {}
-    try:
-        for meta in daily_csvs_by_stock(data_dir):
-            ohlc_by[str(meta.get("stock") or "").strip().upper()] = meta
-    except Exception:
-        ohlc_by = {}
+    ohlc_by_div: dict[str, dict[str, dict[str, Any]]] = {}
+    csv_sibs = typed_sibling_dirs(data_dir)
+    if not csv_sibs:
+        csv_sibs = [("", data_dir)]
+    for div, cdir in csv_sibs:
+        try:
+            ohlc_by_div[div] = {
+                str(m.get("stock") or "").strip().upper(): m for m in daily_csvs_by_stock(cdir)
+            }
+        except Exception:
+            ohlc_by_div[div] = {}
 
     for stock, rec in stocks.items():
-        meta = ohlc_by.get(stock)
+        div = str(rec.get("div_type_suggest") or "")
+        pool = ohlc_by_div.get(div) if div else None
+        if not pool:
+            pool = ohlc_by_div.get("") or {}
+            if not pool and csv_root.is_dir():
+                try:
+                    pool = {
+                        str(m.get("stock") or "").strip().upper(): m
+                        for m in daily_csvs_by_stock(resolve_typed_dir(csv_root, div or DEFAULT_DIVIDEND_TYPE))
+                    }
+                except Exception:
+                    pool = {}
+        meta = (pool or {}).get(stock)
         if not meta or not meta.get("path"):
             rec["style"] = {"vol_ann": None, "touch_ma20": None, "n_close": 0}
             continue
@@ -474,10 +596,13 @@ def scan_reports(
         "coverage": {
             **cov,
             "n_stock": len(stocks),
-            "n_detail": len(files),
+            "n_detail": n_files,
             "n_compare": n_compare,
             "n_no_compare": n_no_compare,
             "n_single_ma": n_single,
+            "n_div_compare": n_div_compare,
+            "n_div_single": n_div_single,
+            "n_div_no_compare": n_div_miss,
             "score_years": list(score_years),
         },
         "book": book,
@@ -687,6 +812,8 @@ def score_universe(
             "ma_pnl_sma": rec.get("ma_pnl_sma"),
             "ma_pnl_ema": rec.get("ma_pnl_ema"),
             "ma_pnl_delta": rec.get("ma_pnl_delta"),
+            "div_type_suggest": rec.get("div_type_suggest") or "",
+            "div_type_why": rec.get("div_type_why") or "no_compare",
             "n_buy": agg["n_buy"],
             "n_years_traded": agg["n_years_traded"],
             "n_years_pos": agg["n_years_pos"],
@@ -809,7 +936,11 @@ def format_book_snippet(recommend: pd.DataFrame) -> str:
         kind = str(r.get("ma_type_suggest") or "").strip().upper()
         if kind not in ("SMA", "EMA"):
             continue
-        lines.append('    "%s": {"ma_type": "%s"},' % (r["stock"], kind))
+        fields = ['"ma_type": "%s"' % kind]
+        div = str(r.get("div_type_suggest") or "").strip().lower()
+        if div in DIVIDEND_TYPES:
+            fields.append('"dividend_type": "%s"' % div)
+        lines.append('    "%s": {%s},' % (r["stock"], ", ".join(fields)))
         n += 1
     lines.append("}")
     if n == 0:
@@ -839,11 +970,23 @@ def coverage_notes(coverage: dict[str, Any], scanned: dict[str, Any] | None = No
     n_miss = int(coverage.get("n_no_compare") or 0)
     n_single = int(coverage.get("n_single_ma") or 0)
     notes.append(
-        "对照覆盖：成对 **%s** 只 · 单边 %s 只 · 缺对照 %s 只。"
+        "均线对照：成对 **%s** 只 · 单边 %s 只 · 缺对照 %s 只。"
         % (n_cmp, n_single, n_miss)
     )
     if n_cmp == 0:
-        notes.append("没有成对对照文件。请先跑「批量 + 按自然年分段 + SMA/EMA 对照」。")
+        notes.append("没有成对均线对照文件。请先跑「批量 + 按自然年分段 + SMA/EMA 对照」。")
+    n_dc = int(coverage.get("n_div_compare") or 0)
+    n_ds = int(coverage.get("n_div_single") or 0)
+    n_dm = int(coverage.get("n_div_no_compare") or 0)
+    notes.append(
+        "复权对照：成对 **%s** 只 · 单边 %s 只 · 缺对照 %s 只。"
+        % (n_dc, n_ds, n_dm)
+    )
+    if n_dc == 0:
+        notes.append(
+            "没有多种复权的分年对照。请先多选复权跑「批量 + 按自然年分段」（建议同时勾 SMA/EMA 对照）。"
+        )
+    notes.append("选股扫描 `report/` 下全部复权子目录，不限于侧栏勾选。")
     notes.append("在全池里取 Top N 有多重选择偏差，不要把得分当分真实夏普。")
     book = (scanned or {}).get("book") or {}
     if book:
@@ -865,6 +1008,8 @@ def select_csv_columns(score_years: tuple[str, ...] | None = None) -> list[str]:
         "ma_pnl_sma",
         "ma_pnl_ema",
         "ma_pnl_delta",
+        "div_type_suggest",
+        "div_type_why",
         "n_buy",
         "n_years_traded",
         "n_years_pos",
@@ -944,7 +1089,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument(
         "--out",
         default="",
-        help="输出 CSV（默认 <report-dir>/local_bt_stock_select.csv）",
+        help="输出 CSV（默认 report 根目录 local_bt_stock_select.csv）",
     )
     ap.add_argument("--min-n-buy", type=int, default=DEFAULT_FILTERS["min_n_buy"])
     ap.add_argument("--min-years", type=int, default=DEFAULT_FILTERS["min_years_traded"])
@@ -969,7 +1114,7 @@ def main(argv: list[str] | None = None) -> None:
         "vol_drop_top": args.vol_drop_top,
         "top_n": args.top_n,
     }
-    out = args.out or str(Path(report_dir) / "local_bt_stock_select.csv")
+    out = args.out or str(typed_dir_root(report_dir) / "local_bt_stock_select.csv")
     print("scanning", report_dir, csv_dir, flush=True)
     scored = run_select(
         report_dir=report_dir,
@@ -987,7 +1132,10 @@ def main(argv: list[str] | None = None) -> None:
     rec = scored.get("recommend")
     if rec is not None and not rec.empty:
         print("recommend")
-        show = rec[["rank", "stock", "score", "pnl_year_mean", "win_rate", "stability", "ma_type_suggest"]]
+        cols = ["rank", "stock", "score", "pnl_year_mean", "win_rate", "stability", "ma_type_suggest"]
+        if "div_type_suggest" in rec.columns:
+            cols.append("div_type_suggest")
+        show = rec[cols]
         print(show.to_string(index=False))
         print(scored.get("snippet") or "")
 

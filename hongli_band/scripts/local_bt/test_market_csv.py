@@ -7,6 +7,8 @@ import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import pandas as pd
+
 HERE = Path(__file__).resolve().parent
 import sys
 
@@ -734,6 +736,210 @@ class TypedDirTests(unittest.TestCase):
             skip.write_text("y", encoding="utf-8")
             found = list_detail_csvs(front, include_hist=False)
             self.assertEqual([p.name for p in found], [keep.name])
+
+    def test_list_detail_csvs_union_of_dirs(self):
+        from analyze import list_detail_csvs
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            front = root / "front"
+            ratio = root / "front_ratio"
+            front.mkdir()
+            ratio.mkdir()
+            a = front / "local_bt_600000_SH_操作明细.csv"
+            b = ratio / "local_bt_600001_SH_操作明细.csv"
+            a.write_text("x", encoding="utf-8")
+            b.write_text("y", encoding="utf-8")
+            found = list_detail_csvs([front, ratio], include_hist=False)
+            self.assertEqual(sorted(p.name for p in found), sorted([a.name, b.name]))
+
+    def test_typed_report_dirs_scans_siblings(self):
+        from analyze import typed_report_dirs, typed_sibling_dirs
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "front").mkdir()
+            (root / "front_ratio").mkdir()
+            leaf = root / "front_ratio"
+            sibs = typed_report_dirs(leaf)
+            self.assertEqual(typed_sibling_dirs(leaf), sibs)
+            self.assertEqual([d for d, _p in sibs], ["front", "front_ratio"])
+
+
+class ParseDividendTypesTests(unittest.TestCase):
+    def test_comma_and_space(self):
+        from analyze import parse_dividend_types
+
+        self.assertEqual(parse_dividend_types("front,front_ratio"), ["front", "front_ratio"])
+        self.assertEqual(parse_dividend_types("front_ratio front"), ["front", "front_ratio"])
+        self.assertEqual(parse_dividend_types(["back", "front", "front"]), ["front", "back"])
+
+    def test_empty_defaults(self):
+        from analyze import DEFAULT_DIVIDEND_TYPE, parse_dividend_types
+
+        self.assertEqual(parse_dividend_types(""), [DEFAULT_DIVIDEND_TYPE])
+        self.assertEqual(parse_dividend_types(None), [DEFAULT_DIVIDEND_TYPE])
+
+    def test_all_invalid_empty(self):
+        from analyze import parse_dividend_types
+
+        self.assertEqual(parse_dividend_types("nope,FOLLOW"), [])
+
+
+class PickDivWinnerTests(unittest.TestCase):
+    def test_higher_pnl_wins(self):
+        from analyze import pick_div_winner
+
+        r = pick_div_winner(
+            {
+                "front": {"ok": True, "sum_pnl": 80.0, "win_rate": 40.0},
+                "front_ratio": {"ok": True, "sum_pnl": 20.0, "win_rate": 90.0},
+            }
+        )
+        self.assertEqual(r["winner"], "front")
+        self.assertEqual(r["why"], "compare")
+
+    def test_close_uses_win_rate(self):
+        from analyze import pick_div_winner
+
+        r = pick_div_winner(
+            {
+                "front": {"ok": True, "sum_pnl": 10.0, "win_rate": 80.0},
+                "front_ratio": {"ok": True, "sum_pnl": 10.4, "win_rate": 20.0},
+            }
+        )
+        self.assertEqual(r["why"], "compare_close")
+        self.assertEqual(r["winner"], "front")
+
+    def test_tie_prefers_front_ratio(self):
+        from analyze import pick_div_winner
+
+        r = pick_div_winner(
+            {
+                "front": {"ok": True, "sum_pnl": 10.0, "win_rate": 50.0},
+                "none": {"ok": True, "sum_pnl": 10.0, "win_rate": 50.0},
+                "front_ratio": {"ok": True, "sum_pnl": 10.0, "win_rate": 50.0},
+            }
+        )
+        self.assertEqual(r["why"], "compare_close")
+        self.assertEqual(r["winner"], "front_ratio")
+
+    def test_single_div(self):
+        from analyze import pick_div_winner
+
+        r = pick_div_winner({"back": {"ok": True, "sum_pnl": 1.0, "win_rate": 10.0}})
+        self.assertEqual(r["winner"], "back")
+        self.assertEqual(r["why"], "single_div")
+
+
+class ResolveDivTests(unittest.TestCase):
+    def test_compare_uses_year_intersection(self):
+        from stock_select import _resolve_stock_div
+
+        rec = {
+            "by_div": {
+                "front": {
+                    "years": {
+                        "2023": {"sum_pnl": 1000.0, "n_buy": 2, "win_rate": 50.0},
+                        "2024": {"sum_pnl": 10.0, "n_buy": 2, "win_rate": 50.0},
+                    },
+                    "recent": None,
+                    "ma_type_suggest": "SMA",
+                    "ma_type_why": "compare",
+                },
+                "front_ratio": {
+                    "years": {
+                        "2024": {"sum_pnl": 100.0, "n_buy": 2, "win_rate": 50.0},
+                        "2025": {"sum_pnl": 5.0, "n_buy": 1, "win_rate": 50.0},
+                    },
+                    "recent": {"sum_pnl": 1.0},
+                    "ma_type_suggest": "EMA",
+                    "ma_type_why": "compare",
+                },
+            }
+        }
+        _resolve_stock_div(rec)
+        self.assertEqual(rec["div_type_suggest"], "front_ratio")
+        self.assertEqual(rec["div_type_why"], "compare")
+        self.assertEqual(rec["ma_type_suggest"], "EMA")
+        self.assertIn("2024", rec["years"])
+        self.assertIn("2025", rec["years"])
+        self.assertNotIn("2023", rec["years"])
+
+    def test_single_div(self):
+        from stock_select import _resolve_stock_div
+
+        rec = {
+            "by_div": {
+                "none": {
+                    "years": {"2024": {"sum_pnl": 1.0, "n_buy": 1, "win_rate": 50.0}},
+                    "recent": None,
+                    "ma_type_suggest": "EMA",
+                    "ma_type_why": "single_ma",
+                }
+            }
+        }
+        _resolve_stock_div(rec)
+        self.assertEqual(rec["div_type_suggest"], "none")
+        self.assertEqual(rec["div_type_why"], "single_div")
+        self.assertEqual(rec["ma_type_suggest"], "EMA")
+
+    def test_no_years_no_suggest(self):
+        from stock_select import _resolve_stock_div
+
+        rec = {"by_div": {"front": {"years": {}, "recent": None}}}
+        _resolve_stock_div(rec)
+        self.assertEqual(rec["div_type_suggest"], "")
+        self.assertEqual(rec["div_type_why"], "no_compare")
+
+
+class FingerprintUnionTests(unittest.TestCase):
+    def test_report_fingerprint_unions_siblings(self):
+        from stock_select import report_fingerprint
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            front = root / "front"
+            ratio = root / "front_ratio"
+            front.mkdir()
+            ratio.mkdir()
+            (front / "local_bt_600000_SH_操作明细.csv").write_text("a", encoding="utf-8")
+            (ratio / "local_bt_600001_SH_操作明细.csv").write_text("bb", encoding="utf-8")
+            self.assertEqual(report_fingerprint(front), report_fingerprint(root))
+            self.assertEqual(report_fingerprint(front)[0], 2)
+
+
+class BookSnippetTests(unittest.TestCase):
+    def test_includes_dividend_type(self):
+        from stock_select import format_book_snippet
+
+        df = pd.DataFrame(
+            [
+                {
+                    "stock": "600350.SH",
+                    "ma_type_suggest": "EMA",
+                    "div_type_suggest": "front",
+                }
+            ]
+        )
+        text = format_book_snippet(df)
+        self.assertIn('"ma_type": "EMA"', text)
+        self.assertIn('"dividend_type": "front"', text)
+        self.assertIn("600350.SH", text)
+
+    def test_skips_without_ma(self):
+        from stock_select import format_book_snippet
+
+        df = pd.DataFrame(
+            [
+                {
+                    "stock": "600350.SH",
+                    "ma_type_suggest": "",
+                    "div_type_suggest": "front",
+                }
+            ]
+        )
+        self.assertEqual(format_book_snippet(df), "BOOK_STOCKS = {}")
 
 
 if __name__ == "__main__":
