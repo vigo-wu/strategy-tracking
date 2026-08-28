@@ -1156,6 +1156,165 @@ class PickDivWinnerTests(unittest.TestCase):
         self.assertEqual(r["why"], "single_div")
 
 
+class DivCompareViewTests(unittest.TestCase):
+    def test_div_compare_dataframe_marks_winner(self):
+        from analyze import div_compare_dataframe
+
+        df = div_compare_dataframe(
+            {
+                "front": {"ok": True, "n_buy": 2, "sum_pnl": 80.0, "win_rate": 40.0, "avg_ret": 1.0},
+                "front_ratio": {"ok": True, "n_buy": 3, "sum_pnl": 20.0, "win_rate": 90.0, "avg_ret": 0.5},
+            },
+            stock="600000.SH",
+        )
+        self.assertEqual(list(df.columns), ["标的", "复权", "轮次", "总盈亏", "胜率", "平均收益%", "更优"])
+        self.assertEqual(list(df["复权"]), ["前复权", "等比前复权"])
+        self.assertEqual(list(df["更优"]), ["是", ""])
+
+    def test_pair_ma_keeps_dividend_type(self):
+        from analyze import pair_ma_batch_rows
+
+        rows = [
+            {
+                "stock": "600000.SH",
+                "year": "2024",
+                "dividend_type": "front",
+                "ma_type": "SMA",
+                "ok": True,
+                "n_buy": 1,
+                "sum_pnl": 10.0,
+                "win_rate": 100.0,
+            },
+            {
+                "stock": "600000.SH",
+                "year": "2024",
+                "dividend_type": "front",
+                "ma_type": "EMA",
+                "ok": True,
+                "n_buy": 1,
+                "sum_pnl": 12.0,
+                "win_rate": 100.0,
+            },
+            {
+                "stock": "600000.SH",
+                "year": "2024",
+                "dividend_type": "front_ratio",
+                "ma_type": "SMA",
+                "ok": True,
+                "n_buy": 1,
+                "sum_pnl": 1.0,
+                "win_rate": 0.0,
+            },
+            {
+                "stock": "600000.SH",
+                "year": "2024",
+                "dividend_type": "front_ratio",
+                "ma_type": "EMA",
+                "ok": True,
+                "n_buy": 1,
+                "sum_pnl": 2.0,
+                "win_rate": 0.0,
+            },
+        ]
+        pairs = pair_ma_batch_rows(rows)
+        self.assertEqual(len(pairs), 2)
+        self.assertEqual({p["dividend_type"] for p in pairs}, {"front", "front_ratio"})
+
+    def test_ma_compare_dataframe_adds_div_col(self):
+        from analyze import ma_compare_dataframe, pair_ma_batch_rows
+
+        rows = [
+            {
+                "stock": "A",
+                "year": "",
+                "dividend_type": "front",
+                "ma_type": "SMA",
+                "ok": True,
+                "n_buy": 1,
+                "sum_pnl": 1.0,
+                "win_rate": 50.0,
+            },
+            {
+                "stock": "A",
+                "year": "",
+                "dividend_type": "front",
+                "ma_type": "EMA",
+                "ok": True,
+                "n_buy": 1,
+                "sum_pnl": 2.0,
+                "win_rate": 50.0,
+            },
+            {
+                "stock": "A",
+                "year": "",
+                "dividend_type": "none",
+                "ma_type": "SMA",
+                "ok": True,
+                "n_buy": 1,
+                "sum_pnl": 3.0,
+                "win_rate": 50.0,
+            },
+            {
+                "stock": "A",
+                "year": "",
+                "dividend_type": "none",
+                "ma_type": "EMA",
+                "ok": True,
+                "n_buy": 1,
+                "sum_pnl": 4.0,
+                "win_rate": 50.0,
+            },
+        ]
+        df = ma_compare_dataframe(pair_ma_batch_rows(rows))
+        self.assertIn("复权", df.columns)
+        self.assertEqual(sorted(df["复权"].tolist()), ["不复权", "前复权"])
+
+    def test_batch_summary_adds_div_col(self):
+        from analyze import batch_summary_dataframe
+
+        df = batch_summary_dataframe(
+            [
+                {"stock": "A", "ok": True, "status": "成功", "dividend_type": "front", "n_buy": 1, "sum_pnl": 1},
+                {"stock": "A", "ok": True, "status": "成功", "dividend_type": "front_ratio", "n_buy": 1, "sum_pnl": 2},
+            ]
+        )
+        self.assertIn("复权", df.columns)
+        self.assertEqual(sorted(df["复权"].tolist()), ["前复权", "等比前复权"])
+
+    def test_year_summary_splits_by_div(self):
+        from analyze import batch_year_summary_dataframe, summarize_batch_by_year
+
+        rows = [
+            {
+                "year": "2020",
+                "ok": True,
+                "dividend_type": "front",
+                "n_buy": 1,
+                "win_rate": 100.0,
+                "avg_ret": 10.0,
+                "sum_pnl": 1.0,
+            },
+            {
+                "year": "2020",
+                "ok": True,
+                "dividend_type": "front_ratio",
+                "n_buy": 3,
+                "win_rate": 0.0,
+                "avg_ret": -2.0,
+                "sum_pnl": -1.0,
+            },
+        ]
+        agg = summarize_batch_by_year(rows)
+        self.assertEqual(len(agg), 2)
+        by_div = {r["dividend_type"]: r for r in agg}
+        self.assertEqual(by_div["front"]["n_buy"], 1)
+        self.assertAlmostEqual(by_div["front"]["sum_pnl"], 1.0)
+        self.assertEqual(by_div["front_ratio"]["n_buy"], 3)
+        df = batch_year_summary_dataframe(rows)
+        self.assertIn("复权", df.columns)
+        self.assertEqual(len(df), 2)
+
+
 class ResolveDivTests(unittest.TestCase):
     def test_compare_uses_year_intersection(self):
         from stock_select import _resolve_stock_div

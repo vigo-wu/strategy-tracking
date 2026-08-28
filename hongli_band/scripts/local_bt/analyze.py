@@ -49,6 +49,16 @@ def dividend_label(dividend_type: Any) -> str:
     return DIVIDEND_LABELS.get(div, div)
 
 
+def unique_dividend_types(rows: list[dict[str, Any]]) -> list[str]:
+    """出现过的合法复权，按 DIVIDEND_TYPES 保序。"""
+    seen: set[str] = set()
+    for r in rows:
+        d = normalize_dividend_type(r.get("dividend_type"))
+        if d:
+            seen.add(d)
+    return [d for d in DIVIDEND_TYPES if d in seen]
+
+
 def resolve_typed_dir(root: str | Path, dividend_type: Any = "") -> Path:
     """root/<type>；root 已是该 type 目录名则不再拼接。非法 type 回落默认。"""
     base = Path(root)
@@ -194,6 +204,46 @@ def pick_div_winner(
     return out
 
 
+def div_compare_dataframe(
+    kpis_by_type: dict[str, dict[str, Any] | None],
+    *,
+    stock: str = "",
+    year: str = "",
+) -> pd.DataFrame:
+    """每种复权一行：轮次 / 盈亏 / 胜率 / 平均收益%；胜出者「更优」为「是」。"""
+    pick = pick_div_winner(kpis_by_type)
+    winner = str(pick.get("winner") or "")
+    recs: list[dict[str, Any]] = []
+    for div in DIVIDEND_TYPES:
+        if div not in kpis_by_type:
+            continue
+        kpi = kpis_by_type.get(div) or {}
+        rec: dict[str, Any] = {}
+        if stock:
+            rec["标的"] = stock
+        if year:
+            rec["年份"] = year
+        rec["复权"] = DIVIDEND_LABELS.get(div, div)
+        rec["轮次"] = kpi.get("n_buy")
+        rec["总盈亏"] = kpi.get("sum_pnl")
+        rec["胜率"] = kpi.get("win_rate")
+        rec["平均收益%"] = kpi.get("avg_ret")
+        rec["更优"] = "是" if div == winner else ""
+        recs.append(rec)
+    cols = ["复权", "轮次", "总盈亏", "胜率", "平均收益%", "更优"]
+    if year:
+        cols = ["年份"] + cols
+    if stock:
+        cols = ["标的"] + cols
+    df = pd.DataFrame(recs, columns=cols)
+    if "轮次" in df.columns:
+        df["轮次"] = pd.to_numeric(df["轮次"], errors="coerce").astype("Int64")
+    for col in ("总盈亏", "胜率", "平均收益%"):
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df
+
+
 def normalize_ma_type(raw: Any) -> str:
     s = str(raw or "").strip().upper()
     return s if s in MA_TYPES else ""
@@ -287,7 +337,7 @@ def pick_ma_winner(
 
 
 def pair_ma_batch_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """批量行按 (stock, year) 配对 SMA/EMA。"""
+    """批量行按 (stock, year, dividend_type) 配对 SMA/EMA。"""
     groups: dict[tuple[str, str, str], dict[str, dict[str, Any]]] = {}
     for r in rows:
         ma = normalize_ma_type(r.get("ma_type"))
@@ -313,6 +363,7 @@ def pair_ma_batch_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             {
                 "stock": stock,
                 "year": year,
+                "dividend_type": _div,
                 "ok_sma": bool(sma and sma.get("ok")),
                 "ok_ema": bool(ema and ema.get("ok")),
                 "n_buy_sma": _g(sma, "n_buy"),
@@ -350,10 +401,13 @@ def pair_ma_batch_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def ma_compare_dataframe(pairs: list[dict[str, Any]]) -> pd.DataFrame:
     recs = []
     has_year = any(str(r.get("year") or "").strip() for r in pairs)
+    has_div = len(unique_dividend_types(pairs)) >= 2
     for r in pairs:
         rec: dict[str, Any] = {"标的": r.get("stock") or ""}
         if has_year:
             rec["年份"] = str(r.get("year") or "")
+        if has_div:
+            rec["复权"] = dividend_label(r.get("dividend_type")) if r.get("dividend_type") else ""
         rec.update(
             {
                 "轮次SMA": r.get("n_buy_sma"),
@@ -384,8 +438,11 @@ def ma_compare_dataframe(pairs: list[dict[str, Any]]) -> pd.DataFrame:
         "更优",
         "建议",
     ]
+    if has_div:
+        cols = ["标的", "复权"] + [c for c in cols if c != "标的"]
     if has_year:
-        cols = ["标的", "年份"] + [c for c in cols if c != "标的"]
+        rest = [c for c in cols if c != "标的"]
+        cols = ["标的", "年份"] + [c for c in rest if c != "年份"]
     df = pd.DataFrame(recs, columns=cols)
     for col in ("轮次SMA", "轮次EMA"):
         if col in df.columns:
@@ -397,13 +454,14 @@ def ma_compare_dataframe(pairs: list[dict[str, Any]]) -> pd.DataFrame:
 
 
 def summarize_ma_compare_by_year(pairs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    by_year: dict[str, list[dict[str, Any]]] = {}
+    by_key: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for r in pairs:
         y = str(r.get("year") or "").strip() or "?"
-        by_year.setdefault(y, []).append(r)
+        div = normalize_dividend_type(r.get("dividend_type"))
+        by_key.setdefault((y, div), []).append(r)
     out: list[dict[str, Any]] = []
-    for y in sorted(by_year):
-        xs = by_year[y]
+    for y, div in sorted(by_key):
+        xs = by_key[(y, div)]
         sma_pnl = 0.0
         ema_pnl = 0.0
         n_sma_ok = 0
@@ -418,6 +476,7 @@ def summarize_ma_compare_by_year(pairs: list[dict[str, Any]]) -> list[dict[str, 
         out.append(
             {
                 "year": y,
+                "dividend_type": div,
                 "n_stock": len(xs),
                 "n_ok_sma": n_sma_ok,
                 "n_ok_ema": n_ema_ok,
@@ -434,10 +493,14 @@ def summarize_ma_compare_by_year(pairs: list[dict[str, Any]]) -> list[dict[str, 
 
 def ma_compare_year_dataframe(pairs: list[dict[str, Any]]) -> pd.DataFrame:
     recs = []
-    for r in summarize_ma_compare_by_year(pairs):
-        recs.append(
+    agg = summarize_ma_compare_by_year(pairs)
+    has_div = len(unique_dividend_types(agg)) >= 2
+    for r in agg:
+        rec: dict[str, Any] = {"年份": r.get("year") or ""}
+        if has_div:
+            rec["复权"] = dividend_label(r.get("dividend_type")) if r.get("dividend_type") else ""
+        rec.update(
             {
-                "年份": r.get("year") or "",
                 "标的数": r.get("n_stock"),
                 "SMA成功": r.get("n_ok_sma"),
                 "EMA成功": r.get("n_ok_ema"),
@@ -449,6 +512,7 @@ def ma_compare_year_dataframe(pairs: list[dict[str, Any]]) -> pd.DataFrame:
                 "接近": r.get("n_close"),
             }
         )
+        recs.append(rec)
     cols = [
         "年份",
         "标的数",
@@ -461,6 +525,8 @@ def ma_compare_year_dataframe(pairs: list[dict[str, Any]]) -> pd.DataFrame:
         "EMA更优",
         "接近",
     ]
+    if has_div:
+        cols = ["年份", "复权"] + [c for c in cols if c != "年份"]
     df = pd.DataFrame(recs, columns=cols)
     for col in ("标的数", "SMA成功", "EMA成功", "SMA更优", "EMA更优", "接近"):
         df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
@@ -475,6 +541,7 @@ def write_ma_compare_csv(pairs: list[dict[str, Any]], path: str | Path) -> Path:
     fields = [
         "stock",
         "year",
+        "dividend_type",
         "ok_sma",
         "ok_ema",
         "n_buy_sma",
@@ -515,6 +582,7 @@ def write_ma_compare_year_csv(pairs: list[dict[str, Any]], path: str | Path) -> 
     dest.parent.mkdir(parents=True, exist_ok=True)
     fields = [
         "year",
+        "dividend_type",
         "n_stock",
         "n_ok_sma",
         "n_ok_ema",
@@ -930,6 +998,8 @@ def summarize_batch_row(row: dict[str, Any]) -> dict[str, Any]:
 def batch_summary_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
     recs = []
     has_year = any(str(r.get("year") or "").strip() for r in rows)
+    has_div = len(unique_dividend_types(rows)) >= 2
+    has_ma = any(normalize_ma_type(r.get("ma_type")) for r in rows)
     for r in rows:
         walk_s = compact_day(str(r.get("walk_start") or ""))
         walk_e = compact_day(str(r.get("walk_end") or ""))
@@ -939,9 +1009,11 @@ def batch_summary_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
         rec: dict[str, Any] = {"标的": r.get("stock") or ""}
         if has_year:
             rec["年份"] = str(r.get("year") or "")
+        if has_div:
+            rec["复权"] = dividend_label(r.get("dividend_type")) if r.get("dividend_type") else ""
         ma = normalize_ma_type(r.get("ma_type"))
-        if ma:
-            rec["均线"] = ma
+        if has_ma:
+            rec["均线"] = ma or ""
         rec.update(
             {
                 "状态": r.get("status") or ("成功" if r.get("ok") else "失败"),
@@ -956,8 +1028,14 @@ def batch_summary_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
             }
         )
         recs.append(rec)
-    cols = [
-        "标的",
+    cols = ["标的"]
+    if has_year:
+        cols.append("年份")
+    if has_div:
+        cols.append("复权")
+    if has_ma:
+        cols.append("均线")
+    cols += [
         "状态",
         "walk 区间",
         "轮次",
@@ -968,11 +1046,6 @@ def batch_summary_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
         "最大亏损%",
         "说明",
     ]
-    if any(normalize_ma_type(r.get("ma_type")) for r in rows):
-        cols = ["标的", "均线"] + [c for c in cols if c != "标的"]
-    if has_year:
-        rest = [c for c in cols if c != "标的"]
-        cols = ["标的", "年份"] + [c for c in rest if c != "年份"]
     df = pd.DataFrame(recs, columns=cols)
     for col in ("轮次",):
         df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
@@ -982,8 +1055,8 @@ def batch_summary_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
 
 
 def summarize_batch_by_year(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """按年汇总：胜率 / 平均收益% 按轮次加权。"""
-    by_year: dict[str, list[dict[str, Any]]] = {}
+    """按年汇总：胜率 / 平均收益% 按轮次加权。多种复权时按 年×复权 拆开。"""
+    by_key: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for r in rows:
         y = str(r.get("year") or "").strip()
         if not y:
@@ -991,10 +1064,11 @@ def summarize_batch_by_year(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             y = walk[:4] if len(walk) >= 4 else ""
         if not y:
             y = "?"
-        by_year.setdefault(y, []).append(r)
+        div = normalize_dividend_type(r.get("dividend_type"))
+        by_key.setdefault((y, div), []).append(r)
     out: list[dict[str, Any]] = []
-    for y in sorted(by_year):
-        xs = by_year[y]
+    for y, div in sorted(by_key):
+        xs = by_key[(y, div)]
         n_ok = sum(1 for r in xs if r.get("ok"))
         n_buy = 0.0
         sum_pnl = 0.0
@@ -1021,6 +1095,7 @@ def summarize_batch_by_year(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         out.append(
             {
                 "year": y,
+                "dividend_type": div,
                 "n_stock": len(xs),
                 "n_ok": n_ok,
                 "n_buy": int(n_buy) if n_buy == int(n_buy) else n_buy,
@@ -1036,10 +1111,14 @@ def summarize_batch_by_year(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def batch_year_summary_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
     recs = []
-    for r in summarize_batch_by_year(rows):
-        recs.append(
+    yearly = summarize_batch_by_year(rows)
+    has_div = len(unique_dividend_types(yearly)) >= 2
+    for r in yearly:
+        rec: dict[str, Any] = {"年份": r.get("year") or ""}
+        if has_div:
+            rec["复权"] = dividend_label(r.get("dividend_type")) if r.get("dividend_type") else ""
+        rec.update(
             {
-                "年份": r.get("year") or "",
                 "标的数": r.get("n_stock"),
                 "成功数": r.get("n_ok"),
                 "轮次": r.get("n_buy"),
@@ -1050,6 +1129,7 @@ def batch_year_summary_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
                 "最大亏损%": r.get("max_loss"),
             }
         )
+        recs.append(rec)
     cols = [
         "年份",
         "标的数",
@@ -1061,6 +1141,8 @@ def batch_year_summary_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
         "最大单笔%",
         "最大亏损%",
     ]
+    if has_div:
+        cols = ["年份", "复权"] + [c for c in cols if c != "年份"]
     df = pd.DataFrame(recs, columns=cols)
     for col in ("标的数", "成功数", "轮次"):
         df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
@@ -1076,6 +1158,7 @@ def write_batch_summary_csv(rows: list[dict[str, Any]], path: str | Path) -> Pat
         "stock",
         "year",
         "ma_type",
+        "dividend_type",
         "ok",
         "status",
         "walk_start",
@@ -1103,6 +1186,7 @@ def write_batch_year_summary_csv(rows: list[dict[str, Any]], path: str | Path) -
     dest.parent.mkdir(parents=True, exist_ok=True)
     fields = [
         "year",
+        "dividend_type",
         "n_stock",
         "n_ok",
         "n_buy",
