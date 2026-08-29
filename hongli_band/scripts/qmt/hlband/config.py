@@ -18,6 +18,7 @@ BOOK_STOCKS = {
     "600350.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
     "600028.SH": {"ma_type": "EMA", "dividend_type": "front"},
     "601939.SH": {"ma_type": "EMA", "dividend_type": "front"},
+    "600958.SH": {"ma_type": "EMA", "dividend_type": "front"},
 }
 # 三图共享信号账本（不是 STATE_FILE；禁止按标的分文件）
 BOOK_FILE = r"D:\tradingStrategy\hlband_book.json"
