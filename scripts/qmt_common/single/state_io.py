@@ -45,6 +45,8 @@ def _state_load_path():
 
 
 def _load_state():
+    if "{stock}" in str(STATE_FILE or "") and (not _state_stock_tag()):
+        return
     A.position = None
     A.lots = []
     A.acted_day = ""
@@ -111,6 +113,8 @@ def _load_state():
 
 def _save_state():
     if getattr(A, "is_backtest", False):
+        return
+    if "{stock}" in str(STATE_FILE or "") and (not _state_stock_tag()):
         return
     path = _state_path()
     if not path:

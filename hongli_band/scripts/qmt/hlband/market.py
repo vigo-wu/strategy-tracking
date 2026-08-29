@@ -206,6 +206,46 @@ def _drop_unclosed_week_ohlcv(open_, high, low, close, volume, days, end_day):
     return _take(open_), _take(high), _take(low), _take(close), _take(volume)
 
 
+def _bar_end_str(C):
+    """覆盖 period.py：实盘 end_time 跟墙钟，15:00 后仍能拉到今日 K。"""
+    period = getattr(A, "period", "1d")
+    if getattr(A, "is_backtest", False):
+        dt = _bar_datetime(C)
+        if _is_intraday(period):
+            return dt.strftime("%Y%m%d%H%M%S")
+        return dt.strftime("%Y%m%d")
+    now = datetime.datetime.now()
+    today = now.strftime("%Y%m%d")
+    chart_day = ""
+    try:
+        tag = C.get_bar_timetag(C.barpos)
+        if "timetag_to_datetime" in globals():
+            s = timetag_to_datetime(tag, "%Y%m%d%H%M%S")
+            chart_day = str(s)[:8]
+        elif tag is not None:
+            if tag > 10 ** 12:
+                chart_day = datetime.datetime.fromtimestamp(tag / 1000.0).strftime(
+                    "%Y%m%d"
+                )
+            else:
+                chart_day = datetime.datetime.fromtimestamp(tag).strftime("%Y%m%d")
+    except Exception:
+        chart_day = ""
+    end_day = today
+    if chart_day and len(str(chart_day)) >= 8:
+        end_day = max(str(chart_day)[:8], today)
+    if _is_intraday(period):
+        return now.strftime("%Y%m%d%H%M%S")
+    return end_day
+
+
+def _ohlcv_diag_key(base):
+    st = str(getattr(A, "stock", "") or "").replace(".", "_")
+    if st:
+        return "%s_%s" % (base, st)
+    return base
+
+
 def _get_ohlcv_period(C, stock, period, count, need, diag_key):
     end = _bar_end_str(C)
     if period in ("1d", "1w", "1mon", "1q", "1hy", "1y"):
@@ -360,12 +400,12 @@ def _get_ohlcv_1d(C, stock):
         plat_n + 2,
     ) + 10
     return _get_ohlcv_period(
-        C, stock, getattr(A, "period", "1d"), int(OHLC_COUNT), need, "d1"
+        C, stock, getattr(A, "period", "1d"), int(OHLC_COUNT), need, _ohlcv_diag_key("d1")
     )
 
 
 def _get_ohlcv_1w(C, stock):
     need = max(int(W_MA_SLOW), int(MACD_SLOW) + int(MACD_SIGNAL)) + 5
     return _get_ohlcv_period(
-        C, stock, "1w", int(WEEKLY_OHLC_COUNT), need, "w1"
+        C, stock, "1w", int(WEEKLY_OHLC_COUNT), need, _ohlcv_diag_key("w1")
     )

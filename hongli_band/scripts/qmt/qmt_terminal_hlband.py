@@ -21,7 +21,7 @@ ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 # 第 3 笔：金额吃剩余可部署资金；book_frac 仍记空档（0.50 / 0.30 / 剩余档）。
 # 同标的一轮只加一次；加过仓后该只须全平才能再开。卖掉大仓由其他空仓标的开仓补回。
 # cap = CASH_RATIO * E_s；E_s = 总资产 - 非白名单股票市值。
-# k / book_mv 只统计 BOOK_STOCKS。N = 字典长度。实盘共享账本；回测用 TRADE_BUDGET。
+# k / book_mv 只统计 BOOK_STOCKS。N = 字典长度。实盘单实例监视全池并写账本；回测用 TRADE_BUDGET。
 # 形态：code → 配置字典。ma_type（EMA|SMA）；dividend_type 见下方复权注释。
 # 简写兼容：value 写成 "SMA" 视为 {"ma_type": "SMA"}；旧纯字符串 tuple 仍认作白名单。
 BOOK_STOCKS = {
@@ -29,9 +29,8 @@ BOOK_STOCKS = {
     "600028.SH": {"ma_type": "EMA", "dividend_type": "front"},
     "601939.SH": {"ma_type": "EMA", "dividend_type": "front"},
     "600958.SH": {"ma_type": "EMA", "dividend_type": "front"},
-    "600188.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
 }
-# 三图共享信号账本（不是 STATE_FILE；禁止按标的分文件）
+# 单实例共享信号账本（不是 STATE_FILE；禁止按标的分文件）
 BOOK_FILE = r"D:\tradingStrategy\hlband_book.json"
 # 确认打卡截止：14:56 打卡，14:56:30 冻结，须在 14:57 集合竞价前完成分档下单
 BOOK_FREEZE_CLOSE = "145630"
@@ -196,6 +195,8 @@ SIGNAL_CONFIRM_START = "145600"
 SIGNAL_CONFIRM_END = "160000"
 # 实盘心跳/状态行间隔（秒）；空仓与持仓无新信号沿时均按此节流
 LIVE_HEARTBEAT_SEC = 300
+# 实盘取数：window=确认窗/开盘兜底才拉日+周，盘中只 pending；always=决策窗内每次当确认窗
+LIVE_OHLCV_POLICY = "window"
 
 # 行情复权（传给 get_market_data_ex 的 dividend_type）
 # 优先 BOOK_STOCKS[code].dividend_type；缺键/非法回落本常量。不上屏。
@@ -216,7 +217,7 @@ DOWNLOAD_HIST_BACKTEST = True
 PENDING_TIMEOUT_SEC = 180
 PENDING_ORPHAN_SEC = 60
 
-# QMT 模型无 __file__；状态绝对路径（含 {stock}，多实例不同主图互不覆盖）
+# QMT 模型无 __file__；状态绝对路径（含 {stock}，宇宙循环按票分文件）
 #   513530.SH → ...\hlband_513530_SH.json
 STATE_FILE = r"D:\tradingStrategy\hlband_{stock}.json"
 # 实盘结构化日志根目录；落盘为 LOG_DIR/<stock_tag>/{tag}_events.jsonl 等
@@ -226,7 +227,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.58"
+STRATEGY_VER = "v1.59"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
@@ -607,6 +608,38 @@ def _state_extra_load(raw):
     A._last_add_signal = str(raw.get("last_add_signal", "") or "")
 
 
+def _reset_stock_ctx():
+    """切票前清空单票字段。_load_state 无文件时不清 extra，必须先 reset 防串票。"""
+    A.position = None
+    A.lots = []
+    A.acted_day = ""
+    A.acted = set()
+    A.pending = None
+    A.pending_entry = None
+    A.pending_exit = None
+    A.hold_peak = None
+    A.hold_bars = 0
+    A._hold_count_day = ""
+    A.time_force_grace_until = None
+    A.time_force_trend_skip = False
+    A.round_scaled = False
+    A._confirmed_eval_day = ""
+    A._fallback_done_day = ""
+    A._w_bear_streak = 0
+    A._w_bear_last_day = ""
+    A._skip_sell_eval_day = ""
+    A._last_add_day = ""
+    A._last_add_signal = ""
+    A.ready_logged = False
+    A._bar_status_at = None
+    A._bar_sig_prev = None
+    A._skip_sell_eval_logged = ""
+    A._defer_log_entry_day = ""
+    A._defer_log_exit_day = ""
+    A._defer_log_book_day = ""
+    A._defer_log_wait_day = ""
+
+
 def _state_extra_save(data):
     data["pending_entry"] = getattr(A, "pending_entry", None)
     data["pending_exit"] = getattr(A, "pending_exit", None)
@@ -673,6 +706,8 @@ def _state_load_path():
 
 
 def _load_state():
+    if "{stock}" in str(STATE_FILE or "") and (not _state_stock_tag()):
+        return
     A.position = None
     A.lots = []
     A.acted_day = ""
@@ -739,6 +774,8 @@ def _load_state():
 
 def _save_state():
     if getattr(A, "is_backtest", False):
+        return
+    if "{stock}" in str(STATE_FILE or "") and (not _state_stock_tag()):
         return
     path = _state_path()
     if not path:
@@ -1686,6 +1723,46 @@ def _drop_unclosed_week_ohlcv(open_, high, low, close, volume, days, end_day):
     return _take(open_), _take(high), _take(low), _take(close), _take(volume)
 
 
+def _bar_end_str(C):
+    """覆盖 period.py：实盘 end_time 跟墙钟，15:00 后仍能拉到今日 K。"""
+    period = getattr(A, "period", "1d")
+    if getattr(A, "is_backtest", False):
+        dt = _bar_datetime(C)
+        if _is_intraday(period):
+            return dt.strftime("%Y%m%d%H%M%S")
+        return dt.strftime("%Y%m%d")
+    now = datetime.datetime.now()
+    today = now.strftime("%Y%m%d")
+    chart_day = ""
+    try:
+        tag = C.get_bar_timetag(C.barpos)
+        if "timetag_to_datetime" in globals():
+            s = timetag_to_datetime(tag, "%Y%m%d%H%M%S")
+            chart_day = str(s)[:8]
+        elif tag is not None:
+            if tag > 10 ** 12:
+                chart_day = datetime.datetime.fromtimestamp(tag / 1000.0).strftime(
+                    "%Y%m%d"
+                )
+            else:
+                chart_day = datetime.datetime.fromtimestamp(tag).strftime("%Y%m%d")
+    except Exception:
+        chart_day = ""
+    end_day = today
+    if chart_day and len(str(chart_day)) >= 8:
+        end_day = max(str(chart_day)[:8], today)
+    if _is_intraday(period):
+        return now.strftime("%Y%m%d%H%M%S")
+    return end_day
+
+
+def _ohlcv_diag_key(base):
+    st = str(getattr(A, "stock", "") or "").replace(".", "_")
+    if st:
+        return "%s_%s" % (base, st)
+    return base
+
+
 def _get_ohlcv_period(C, stock, period, count, need, diag_key):
     end = _bar_end_str(C)
     if period in ("1d", "1w", "1mon", "1q", "1hy", "1y"):
@@ -1840,14 +1917,14 @@ def _get_ohlcv_1d(C, stock):
         plat_n + 2,
     ) + 10
     return _get_ohlcv_period(
-        C, stock, getattr(A, "period", "1d"), int(OHLC_COUNT), need, "d1"
+        C, stock, getattr(A, "period", "1d"), int(OHLC_COUNT), need, _ohlcv_diag_key("d1")
     )
 
 
 def _get_ohlcv_1w(C, stock):
     need = max(int(W_MA_SLOW), int(MACD_SLOW) + int(MACD_SIGNAL)) + 5
     return _get_ohlcv_period(
-        C, stock, "1w", int(WEEKLY_OHLC_COUNT), need, "w1"
+        C, stock, "1w", int(WEEKLY_OHLC_COUNT), need, _ohlcv_diag_key("w1")
     )
 
 # === qmt_common/mode.py ===
@@ -2621,7 +2698,14 @@ def _passorder_live(C, side, vol, last_px, msg, now):
             passorder(code, 1101, A.acct, A.stock, 11, px, vol, _strategy_tag(), 2, msg, C)
             return px
     code = A.buy_code if str(side) == "buy" else A.sell_code
-    passorder(code, 1101, A.acct, A.stock, 14, -1, vol, _strategy_tag(), 1, msg, C)
+    qt = 1
+    force_qt = getattr(A, "_force_quicktrade", None)
+    if force_qt is not None:
+        try:
+            qt = int(force_qt)
+        except Exception:
+            qt = 1
+    passorder(code, 1101, A.acct, A.stock, 14, -1, vol, _strategy_tag(), qt, msg, C)
     return last_px
 
 
@@ -4412,6 +4496,12 @@ def _buy_budget(cash):
 
 def _heartbeat_extra():
     parts = []
+    watch = getattr(A, "watch", None)
+    if watch:
+        parts.append("watch=%s" % len(watch))
+        parts.append("chart=%s" % (getattr(A, "chart_stock", "") or "-"))
+        parts.append("drive=%s" % (getattr(A, "_drive", "") or "timer"))
+        parts.append("work=%s" % (getattr(A, "_live_work", "") or "-"))
     lots = getattr(A, "lots", None) or []
     if lots:
         bits = []
@@ -5190,6 +5280,9 @@ def _calendar_prev_weekday(yyyymmdd):
 def _last_closed_bar_day(C, today):
     """上一根已收盘日线交易日；优先行情时间轴，否则跳过周末的自然日。"""
     today = str(today)
+    clock = str(getattr(A, "clock_prev_closed_day", "") or "")
+    if clock and (not getattr(A, "is_backtest", False)):
+        return clock
     days = None
     try:
         days = _get_daily_bar_days(C, A.stock, count=8)
@@ -5788,6 +5881,8 @@ def _try_exec_pending_entry(
     time_force_hit,
 ):
     """成交就绪的 pending_entry。'done'=return；'force_eval'=让路卖点；None=继续。"""
+    if str(getattr(A, "_universe_pass", "") or "") == "eval":
+        return None
     pe_entry = getattr(A, "pending_entry", None)
     pe_is_add = isinstance(pe_entry, dict) and bool(pe_entry.get("add"))
     if not (
@@ -5920,7 +6015,109 @@ def _try_exec_pending_entry(
     return "done"
 
 
-def _handle(C):
+def _need_open_fallback(day, prev_closed, live_cc, phase):
+    if not (live_cc and phase == "exec"):
+        return False
+    confirmed_day = str(getattr(A, "_confirmed_eval_day", "") or "")
+    return (
+        confirmed_day < str(prev_closed or "")
+        and str(getattr(A, "_fallback_done_day", "") or "") != str(day)
+        and (not isinstance(getattr(A, "pending_entry", None), dict))
+        and (not isinstance(getattr(A, "pending_exit", None), dict))
+    )
+
+
+def _live_tick_open_last(C):
+    """开盘成交价：优先 tick open/last；没有则该票补 2 根日 K。"""
+    stock = str(getattr(A, "stock", "") or "")
+    t = None
+    try:
+        t = _get_stock_tick(C, stock)
+    except Exception:
+        t = None
+    last = _tick_field(t, ("lastPrice", "last", "price", "close"))
+    open_px = _tick_field(
+        t, ("open", "openPrice", "lastOpen", "openPx", "open_price")
+    )
+    if last > 0 and open_px > 0:
+        return float(open_px), float(last), "tick"
+    ohlcv = None
+    try:
+        key = "d1open"
+        st = stock.replace(".", "_")
+        if st:
+            key = "d1open_%s" % st
+        ohlcv = _get_ohlcv_period(C, stock, "1d", 2, 1, key)
+    except Exception:
+        ohlcv = None
+    if ohlcv:
+        opens_d, _h, _l, closes_d, _v = ohlcv
+        op = float(opens_d[-1]) if opens_d else 0.0
+        cl = float(closes_d[-1]) if closes_d else 0.0
+        if op > 0 or cl > 0:
+            return op if op > 0 else cl, cl if cl > 0 else op, "bar2"
+    return 0.0, 0.0, "none"
+
+
+def _handle_open_exec_no_fallback(C, ctx):
+    """开盘无兜底：打卡 + tick 成交。True=结束该票；False=exec 轮买入需拉日+周。"""
+    now = ctx["now"]
+    now_s = ctx["now_s"]
+    day = ctx["day"]
+    tag = ctx["tag"]
+    upass = str(getattr(A, "_universe_pass", "") or "")
+    pe = getattr(A, "pending_entry", None)
+    px = getattr(A, "pending_exit", None)
+    holding = _has_position()
+    if upass != "exec":
+        if isinstance(pe, dict):
+            return False
+        buy_sig = False
+        scale_sig = isinstance(pe, dict) and bool(pe.get("add"))
+        sell_ok = isinstance(px, dict)
+        force_empty = False
+        if isinstance(px, dict):
+            reasons = px.get("reasons") or []
+            if str(px.get("reason") or "") == "weekly_bear" or "weekly_bear" in reasons:
+                force_empty = True
+        _sync_signal_book(
+            day, now_s, buy_sig, scale_sig, holding, sell_ok, force_empty
+        )
+        if isinstance(px, dict):
+            t_open, t_last, _src = _live_tick_open_last(C)
+            if t_last > 0:
+                _try_exec_pending_exit(
+                    C,
+                    now,
+                    now_s,
+                    day,
+                    tag,
+                    t_open if t_open > 0 else t_last,
+                    t_last,
+                    holding,
+                )
+        return True
+    if isinstance(pe, dict):
+        return False
+    if isinstance(px, dict):
+        t_open, t_last, _src = _live_tick_open_last(C)
+        if t_last > 0:
+            _try_exec_pending_exit(
+                C,
+                now,
+                now_s,
+                day,
+                tag,
+                t_open if t_open > 0 else t_last,
+                t_last,
+                holding,
+            )
+        return True
+    return True
+
+
+def _handle_clock_gate(C, from_timer=False):
+    """实例门禁。from_timer 用墙钟、不算 is_last_bar。None=本轮跳过。"""
     bt = getattr(A, "is_backtest", False)
     bar_dt = _bar_datetime(C)
     now = bar_dt if bt else datetime.datetime.now()
@@ -5933,44 +6130,145 @@ def _handle(C):
     conf_end = str(globals().get("SIGNAL_CONFIRM_END", "160000") or "160000")
     in_exec = (not bt) and (DECISION_START <= now_s < conf_start)
     in_confirm = (not bt) and (conf_start <= now_s <= conf_end)
+    phase = "bt" if bt else "live"
+    live_work = ""
+    if bt:
+        _bt_roll_t1(day)
+        _bt_recover_position(now=now)
+        return {
+            "bt": True,
+            "now": now,
+            "now_s": now_s,
+            "day": day,
+            "tag": tag,
+            "hhmm": hhmm,
+            "live_cc": live_cc,
+            "phase": "bt",
+            "live_work": "",
+            "bar_dt": bar_dt,
+        }
+    if from_timer:
+        fn = globals().get("_compute_live_work")
+        if callable(fn):
+            live_work = str(fn(now_s, day) or "")
+        if not live_work:
+            if not getattr(A, "_universe_loop", False):
+                _live_heartbeat("outside_session")
+            return None
+        if live_work == "signal":
+            phase = "confirm"
+        elif live_work == "open_exec":
+            phase = "exec"
+        else:
+            phase = "pending"
+        return {
+            "bt": False,
+            "now": now,
+            "now_s": now_s,
+            "day": day,
+            "tag": tag,
+            "hhmm": hhmm,
+            "live_cc": live_cc,
+            "phase": phase,
+            "live_work": live_work,
+            "bar_dt": bar_dt,
+        }
+    if live_cc:
+        if (not in_exec) and (not in_confirm):
+            _live_heartbeat("outside_session")
+            return None
+        phase = "confirm" if in_confirm else "exec"
+    else:
+        if now_s < DECISION_START or now_s > DECISION_END:
+            _live_heartbeat("outside_session")
+            return None
+        phase = "session"
+    if LIVE_ONLY_LAST_BAR:
+        try:
+            if hasattr(C, "is_last_bar") and (not C.is_last_bar()):
+                return None
+        except Exception:
+            pass
+    _live_heartbeat(phase)
+    return {
+        "bt": False,
+        "now": now,
+        "now_s": now_s,
+        "day": day,
+        "tag": tag,
+        "hhmm": hhmm,
+        "live_cc": live_cc,
+        "phase": phase,
+        "live_work": "",
+        "bar_dt": bar_dt,
+    }
+
+
+def _handle_stock(C, ctx):
+    bt = ctx["bt"]
+    now = ctx["now"]
+    now_s = ctx["now_s"]
+    day = ctx["day"]
+    tag = ctx["tag"]
+    hhmm = ctx["hhmm"]
+    live_cc = ctx["live_cc"]
+    phase = ctx["phase"]
+    live_work = str(ctx.get("live_work") or "")
+    upass = str(getattr(A, "_universe_pass", "") or "")
     # 收盘确认：用当日完整日 K；周 K 不含未收盘周（与回测 0000 原生 1w 一致）
     # 开盘：日 K 去未收盘根；周 K 同样不含未收盘周
     prev_d = False
     prev_w = False
-    phase = "bt" if bt else "live"
 
     if not bt:
         if getattr(A, "pending", None):
             if _process_pending(C, now):
-                _live_heartbeat("pending")
+                if not getattr(A, "_universe_loop", False):
+                    _live_heartbeat("pending")
                 return
-        if live_cc:
-            if (not in_exec) and (not in_confirm):
-                _live_heartbeat("outside_session")
-                return
-            phase = "confirm" if in_confirm else "exec"
-        else:
-            if now_s < DECISION_START or now_s > DECISION_END:
-                _live_heartbeat("outside_session")
-                return
-            phase = "session"
-        if LIVE_ONLY_LAST_BAR:
-            try:
-                if hasattr(C, "is_last_bar") and (not C.is_last_bar()):
-                    return
-            except Exception:
-                pass
-        _live_heartbeat(phase)
-    else:
-        _bt_roll_t1(day)
-        _bt_recover_position(now=now)
+        if live_work == "pending":
+            return
 
     _reset_day(day)
 
+    if (not bt) and live_work == "open_exec":
+        prev_closed = str(
+            ctx.get("prev_closed")
+            or getattr(A, "clock_prev_closed_day", "")
+            or ""
+        )
+        need_fb_early = _need_open_fallback(day, prev_closed, live_cc, phase)
+        if (not need_fb_early) and _handle_open_exec_no_fallback(C, ctx):
+            return
+
+    if (not bt) and live_work == "signal" and upass == "exec":
+        pe_only = getattr(A, "pending_entry", None)
+        px_only = getattr(A, "pending_exit", None)
+        if not isinstance(pe_only, dict) and not isinstance(px_only, dict):
+            return
+        if (not isinstance(pe_only, dict)) and isinstance(px_only, dict):
+            holding_x = _has_position()
+            t_open, t_last, _src = _live_tick_open_last(C)
+            if t_last > 0:
+                _try_exec_pending_exit(
+                    C,
+                    now,
+                    now_s,
+                    day,
+                    tag,
+                    t_open if t_open > 0 else t_last,
+                    t_last,
+                    holding_x,
+                )
+            return
+
     cash = _available_cash()
     if cash is None:
-        _live_heartbeat("no_cash_or_login")
-        return
+        if live_work:
+            cash = 0.0
+        else:
+            _live_heartbeat("no_cash_or_login")
+            return
 
     ohlcv_d = _get_ohlcv_1d(C, A.stock)
     if ohlcv_d is None:
@@ -6039,6 +6337,13 @@ def _handle(C):
 
     price = float(closes_s[-1])
     high_px = float(highs_s[-1])
+    exec_open_px = open_px
+    exec_last_px = price
+    if (not bt) and live_work == "open_exec" and (not need_fallback):
+        t_open, t_last, _src = _live_tick_open_last(C)
+        if t_last > 0:
+            exec_open_px = t_open if t_open > 0 else t_last
+            exec_last_px = t_last
     if bt:
         _bt_recover_position(now=now, last=float(closes_d[-1]))
 
@@ -6193,7 +6498,7 @@ def _handle(C):
         and (not vol_dry_block)
     )
 
-    if not bt:
+    if not bt and upass != "exec":
         _sync_signal_book(
             day,
             now_s,
@@ -6209,7 +6514,7 @@ def _handle(C):
     # 信号上升沿强制打；实盘其余按 LIVE_HEARTBEAT_SEC；回测 idle 用 status_idle
     force_bar_log = _bar_signal_rising_edge(buy_sig or scale_sig, sell_ok, force_empty)
     status_idle = (bool(holding) or pe_now or px_now) and (not force_bar_log)
-    if _should_emit_bar_status(C, now, force_bar_log, status_idle):
+    if upass != "exec" and _should_emit_bar_status(C, now, force_bar_log, status_idle):
         A.ready_logged = True
         if not getattr(A, "is_backtest", False):
             A._bar_status_at = now
@@ -6292,7 +6597,7 @@ def _handle(C):
         )
 
     # ---- 先执行挂起的卖/买（尾盘按收盘价；隔夜残留开盘按开盘价）----
-    if _try_exec_pending_exit(C, now, now_s, day, tag, open_px, price, holding):
+    if _try_exec_pending_exit(C, now, now_s, day, tag, exec_open_px, exec_last_px, holding):
         return
     force_eval = False
     entry_act = _try_exec_pending_entry(
@@ -6301,8 +6606,8 @@ def _handle(C):
         now_s,
         day,
         tag,
-        open_px,
-        price,
+        exec_open_px,
+        exec_last_px,
         holding,
         cash,
         weekly_bear,
@@ -6320,6 +6625,8 @@ def _handle(C):
         return
     if entry_act == "force_eval":
         force_eval = True
+    if upass == "exec" and (not force_eval):
+        return
 
     # ---- 新信号：回测当根；实盘仅收盘确认或开盘兜底 ----
     allow_new = True
@@ -6406,7 +6713,7 @@ def _handle(C):
                 lot_ids=exit_ids or None,
                 shares=exit_shares or None,
             )
-            _try_exec_pending_exit(C, now, now_s, day, tag, open_px, price, holding)
+            _try_exec_pending_exit(C, now, now_s, day, tag, exec_open_px, exec_last_px, holding)
         elif scale_sig:
             if isinstance(getattr(A, "pending_entry", None), dict):
                 if live_cc:
@@ -6454,8 +6761,8 @@ def _handle(C):
                 now_s,
                 day,
                 tag,
-                open_px,
-                price,
+                exec_open_px,
+                exec_last_px,
                 holding,
                 cash,
                 weekly_bear,
@@ -6523,8 +6830,8 @@ def _handle(C):
             now_s,
             day,
             tag,
-            open_px,
-            price,
+            exec_open_px,
+            exec_last_px,
             holding,
             cash,
             weekly_bear,
@@ -6540,6 +6847,380 @@ def _handle(C):
         )
     elif live_cc:
         _mark_signal_eval_done(day, is_confirm)
+
+
+def _handle(C):
+    ctx = _handle_clock_gate(C, from_timer=False)
+    if ctx is None:
+        return
+    _handle_stock(C, ctx)
+
+# === hlband/universe.py ===
+# 单实例监视 BOOK_STOCKS：切票上下文、run_time 扫池、账本 eval/exec 两轮。
+_UNIVERSE_UI_KEYS = (
+    "ready_logged",
+    "_bar_status_at",
+    "_bar_sig_prev",
+    "_skip_sell_eval_logged",
+    "_defer_log_entry_day",
+    "_defer_log_exit_day",
+    "_defer_log_book_day",
+    "_defer_log_wait_day",
+)
+
+
+def _watch_stocks():
+    """BOOK_STOCKS 代码列表（保持配置键原样）。"""
+    mp = _book_stock_map()
+    if not mp:
+        return []
+    return sorted(list(mp.keys()))
+
+
+def _watch_universe_codes():
+    """交易池 + 时钟主图（不在池内时）。暖机 init 也是 do_back_test，不能只订主图。"""
+    codes = []
+    seen = set()
+    for x in list(getattr(A, "watch", None) or []) or _watch_stocks():
+        s = str(x or "").strip()
+        if (not s) or (s in seen):
+            continue
+        seen.add(s)
+        codes.append(s)
+    chart = str(getattr(A, "chart_stock", "") or "").strip()
+    if chart and chart not in seen:
+        codes.append(chart)
+    return codes
+
+
+def _apply_watch_universe(C):
+    codes = _watch_universe_codes()
+    if not codes:
+        return
+    try:
+        C.set_universe(codes)
+        print(
+            _strategy_tag(),
+            "set_universe n=%s" % len(codes),
+            ",".join(codes),
+        )
+        _event_log("set_universe", n=len(codes), stocks=codes)
+    except Exception as e:
+        print("%s set_universe fail" % STRATEGY_NAME, e)
+        _event_log("set_universe_fail", error=str(e))
+
+
+def _chart_in_watch():
+    chart = str(getattr(A, "chart_stock", "") or "").strip()
+    watch = getattr(A, "watch", None) or []
+    if (not chart) or (not watch):
+        return False
+    return chart in watch
+    d = getattr(A, "_per_stock", None)
+    if not isinstance(d, dict):
+        d = {}
+        A._per_stock = d
+    return d
+
+
+def _stash_stock_ui(code):
+    code = str(code or "").strip()
+    if not code:
+        return
+    rec = dict(_per_stock_map().get(code) or {})
+    for k in _UNIVERSE_UI_KEYS:
+        rec[k] = getattr(A, k, None)
+    _per_stock_map()[code] = rec
+
+
+def _restore_stock_ui(code):
+    code = str(code or "").strip()
+    rec = _per_stock_map().get(code) if code else None
+    if not isinstance(rec, dict):
+        A.ready_logged = False
+        A._bar_status_at = None
+        A._bar_sig_prev = None
+        return
+    for k in _UNIVERSE_UI_KEYS:
+        if k in rec:
+            setattr(A, k, rec[k])
+
+
+def _activate_stock(code):
+    """保存当前票 → reset extra → 切 A.stock → load 该票 STATE。"""
+    code = str(code or "").strip()
+    if not code:
+        return ""
+    cur = str(getattr(A, "stock", "") or "").strip()
+    if cur == code:
+        return code
+    if cur:
+        _stash_stock_ui(cur)
+        if not getattr(A, "is_backtest", False):
+            _save_state()
+    _reset_stock_ctx()
+    A.stock = code
+    _restore_stock_ui(code)
+    if not getattr(A, "is_backtest", False):
+        _load_state()
+        _restore_stock_ui(code)
+    return code
+
+
+def _timer_session_idle(now_s):
+    s = str(now_s or "")
+    if "113000" <= s < "130000":
+        return True
+    if s >= "160000" or s < "093000":
+        return True
+    return False
+
+
+def _compute_live_work(now_s, day):
+    policy = str(globals().get("LIVE_OHLCV_POLICY") or "window").strip().lower()
+    open_s = _cfg_hhmmss("OPEN_EXEC_START", "093000")
+    open_e = _cfg_hhmmss("OPEN_EXEC_END", "094500")
+    conf_s = _cfg_hhmmss("SIGNAL_CONFIRM_START", "145600")
+    conf_e = _cfg_hhmmss("SIGNAL_CONFIRM_END", "160000")
+    dec_s = str(globals().get("DECISION_START") or "093000")
+    s = str(now_s or "")
+    if s < dec_s or s > conf_e:
+        return ""
+    if policy == "always":
+        return "signal"
+    if open_s <= s < open_e:
+        return "open_exec"
+    if conf_s <= s <= conf_e:
+        if str(getattr(A, "_universe_signal_done_day", "") or "") == str(day):
+            return "pending"
+        return "signal"
+    return "pending"
+
+
+def _ensure_clock_prev_closed(C, today):
+    """时钟图上一根已收盘日，全池共用，避免每票再拉 8 根日 K。"""
+    today = str(today or "")
+    if (
+        str(getattr(A, "_clock_prev_for", "") or "") == today
+        and str(getattr(A, "clock_prev_closed_day", "") or "")
+    ):
+        return A.clock_prev_closed_day
+    chart = str(getattr(A, "chart_stock", "") or "") or str(
+        getattr(A, "stock", "") or ""
+    )
+    days = None
+    try:
+        if chart:
+            days = _get_daily_bar_days(C, chart, count=8)
+    except Exception:
+        days = None
+    prev = ""
+    if days:
+        last = str(days[-1])
+        if last >= today and len(days) >= 2:
+            prev = str(days[-2])
+        elif last and last < today:
+            prev = last
+    if not prev:
+        prev = _calendar_prev_weekday(today)
+    A.clock_prev_closed_day = prev
+    A._clock_prev_for = today
+    return prev
+
+
+def _log_book_checkin_missing(now_s):
+    window = _book_window_id(now_s)
+    if not window:
+        return
+    now = datetime.datetime.now()
+    last = getattr(A, "_checkin_missing_at", None)
+    if last is not None:
+        try:
+            if (now - last).total_seconds() < 30:
+                return
+        except Exception:
+            pass
+    data = _book_load()
+    if str(data.get("window") or "") != window:
+        names = {}
+    else:
+        names = data.get("names") if isinstance(data.get("names"), dict) else {}
+    missing = []
+    for code in getattr(A, "watch", None) or _watch_stocks():
+        rec = names.get(code)
+        if rec is None:
+            rec = names.get(str(code).upper())
+        if not (isinstance(rec, dict) and rec.get("checkin")):
+            missing.append(code)
+    if not missing:
+        return
+    A._checkin_missing_at = now
+    print(
+        "%s checkin missing=%s window=%s"
+        % (STRATEGY_NAME, ",".join(missing), window)
+    )
+    _event_log("checkin_missing", missing=missing, window=window)
+
+
+def _on_mode_switch_to_live(C):
+    """覆盖 common:mode。宇宙模式禁止按时钟品种 load_state。"""
+    print(
+        _strategy_tag(),
+        "mode switch backtest -> live",
+        "raw_do_back_test=",
+        getattr(A, "do_back_test_raw", None),
+        "barpos=",
+        getattr(C, "barpos", None),
+    )
+    _event_log(
+        "mode_switch",
+        direction="backtest_to_live",
+        raw_do_back_test=getattr(A, "do_back_test_raw", None),
+        barpos=getattr(C, "barpos", None),
+    )
+    A.ready_logged = False
+    A._hb_at = None
+    watch = list(getattr(A, "watch", None) or [])
+    chart = str(getattr(A, "chart_stock", "") or "").strip()
+    if watch and chart and (chart not in watch):
+        print(
+            _strategy_tag(),
+            "live switch skip clock load chart=",
+            chart,
+        )
+        _event_log("live_switch_skip_clock_load", chart=chart)
+        _reset_stock_ctx()
+        A.stock = ""
+        A.pending = None
+        _apply_watch_universe(C)
+        return
+    try:
+        if str(getattr(A, "stock", "") or "").strip():
+            _load_state()
+        else:
+            _reset_stock_ctx()
+    except Exception as e:
+        print(_strategy_tag(), "live switch load_state fail", e)
+        _event_log("live_switch_load_state_fail", error=str(e))
+    if not hasattr(A, "pending"):
+        A.pending = None
+    recon = globals().get("_reconcile_with_broker")
+    if callable(recon) and str(getattr(A, "stock", "") or "").strip():
+        try:
+            recon()
+        except Exception as e:
+            print(_strategy_tag(), "live switch reconcile fail", e)
+            _event_log("live_switch_reconcile_fail", error=str(e))
+    _apply_watch_universe(C)
+
+
+def _handle_universe(C):
+    """实盘定时扫池。不依赖 is_last_bar。"""
+    A._universe_loop = True
+    A._drive = "timer"
+    ctx = _handle_clock_gate(C, from_timer=True)
+    if ctx is None:
+        A._universe_loop = False
+        A._live_work = ""
+        return
+    live_work = str(ctx.get("live_work") or "")
+    A._live_work = live_work
+    day = ctx.get("day")
+    _ensure_clock_prev_closed(C, day)
+    ctx["prev_closed"] = getattr(A, "clock_prev_closed_day", "")
+    stocks = list(getattr(A, "watch", None) or _watch_stocks())
+    if not stocks:
+        _live_heartbeat("no_watch")
+        A._universe_loop = False
+        return
+    _live_heartbeat(live_work)
+
+    def _run_one(code, upass):
+        try:
+            _activate_stock(code)
+            A._universe_pass = upass
+            A._live_work = live_work
+            _handle_stock(C, ctx)
+            rec = _per_stock_map().get(code) or {}
+            rec["_confirmed_eval_day"] = str(
+                getattr(A, "_confirmed_eval_day", "") or ""
+            )
+            rec["_has_pend"] = bool(
+                getattr(A, "pending_entry", None)
+                or getattr(A, "pending_exit", None)
+                or getattr(A, "pending", None)
+            )
+            _per_stock_map()[code] = rec
+            _stash_stock_ui(code)
+        except Exception as e:
+            print("%s universe stock error" % STRATEGY_NAME, code, e)
+            _event_log("universe_stock_error", stock=code, error=str(e))
+            try:
+                traceback.print_exc()
+            except Exception:
+                pass
+        finally:
+            A._universe_pass = ""
+
+    if live_work == "pending":
+        for code in stocks:
+            _run_one(code, "")
+    else:
+        for code in stocks:
+            _run_one(code, "eval")
+        _log_book_checkin_missing(ctx.get("now_s"))
+        for code in stocks:
+            _run_one(code, "exec")
+        if live_work == "signal":
+            all_ok = True
+            any_pend = False
+            for code in stocks:
+                rec = _per_stock_map().get(code) or {}
+                if str(rec.get("_confirmed_eval_day", "") or "") != str(day):
+                    all_ok = False
+                if rec.get("_has_pend"):
+                    any_pend = True
+            if all_ok and (not any_pend):
+                A._universe_signal_done_day = str(day)
+
+    cur = str(getattr(A, "stock", "") or "").strip()
+    if cur and (not getattr(A, "is_backtest", False)):
+        _stash_stock_ui(cur)
+        _save_state()
+    A._universe_loop = False
+    A._live_work = ""
+    A._universe_pass = ""
+
+
+def _universe_on_timer(C):
+    """C.run_time 回调。起始空串立即跑；此处用墙钟过滤时段。"""
+    if getattr(A, "busy", False):
+        return
+    if not _chart_in_watch():
+        try:
+            _refresh_mode(C)
+        except Exception:
+            pass
+    if getattr(A, "is_backtest", False):
+        return
+    now = datetime.datetime.now()
+    now_s = _bar_hhmmss(now)
+    if _timer_session_idle(now_s):
+        return
+    A.busy = True
+    A._force_quicktrade = 2
+    try:
+        _handle_universe(C)
+    except Exception as e:
+        print("%s universe timer error" % STRATEGY_NAME, e)
+        _event_log("universe_timer_error", error=str(e))
+        try:
+            traceback.print_exc()
+        except Exception:
+            pass
+    finally:
+        A._force_quicktrade = None
+        A.busy = False
 
 # === hlband/runtime.py ===
 def _as_bool(val):
@@ -6604,7 +7285,11 @@ def init(C):
 
 
 def _init_impl(C):
-    A.stock = C.stockcode + "." + C.market
+    A.chart_stock = C.stockcode + "." + C.market
+    A.watch = _watch_stocks()
+    if not A.watch:
+        A.watch = [A.chart_stock]
+    A.stock = A.chart_stock
     A.period = _resolve_period(C, default="1d")
     if "account" in globals() and account:
         A.acct = str(account)
@@ -6631,14 +7316,28 @@ def _init_impl(C):
     A._diag = set()
 
     do_dl = DOWNLOAD_HIST_BACKTEST if A.is_backtest else DOWNLOAD_HIST_LIVE
-    if do_dl:
-        try:
-            _download_hist(A.stock, A.period)
-            _download_hist(A.stock, "1w")
-        except Exception as e:
-            print("%s download_hist abort-safe" % STRATEGY_NAME, e)
+    if A.is_backtest:
+        if do_dl:
+            try:
+                _download_hist(A.stock, A.period)
+                _download_hist(A.stock, "1w")
+            except Exception as e:
+                print("%s download_hist abort-safe" % STRATEGY_NAME, e)
+        else:
+            print("%s skip download_history (live)" % STRATEGY_NAME, A.period, "+1w")
+    elif do_dl:
+        for code in A.watch:
+            try:
+                _download_hist(code, A.period)
+                _download_hist(code, "1w")
+            except Exception as e:
+                print("%s download_hist abort-safe" % STRATEGY_NAME, code, e)
     else:
-        print("%s skip download_history (live)" % STRATEGY_NAME, A.period, "+1w")
+        print(
+            "%s skip download_history (live) n=%s" % (STRATEGY_NAME, len(A.watch)),
+            A.period,
+            "+1w",
+        )
 
     if A.is_backtest:
         barpos = 0
@@ -6724,57 +7423,48 @@ def _init_impl(C):
                 _bt_held_vol(),
             )
     else:
-        _load_state()
+        # 实盘宇宙：不按主图/时钟 load；第一轮定时回调再 _activate_stock
+        _reset_stock_ctx()
+        A.stock = ""
         A.ready_logged = False
-        if not hasattr(A, "pending"):
-            A.pending = None
-        if not hasattr(A, "pending_entry"):
-            A.pending_entry = None
-        if not hasattr(A, "pending_exit"):
-            A.pending_exit = None
-        if not hasattr(A, "hold_peak"):
-            A.hold_peak = None
-        if not hasattr(A, "hold_bars"):
-            A.hold_bars = 0
-        if not hasattr(A, "_hold_count_day"):
-            A._hold_count_day = ""
-        if not hasattr(A, "time_force_grace_until"):
-            A.time_force_grace_until = None
-        if not hasattr(A, "time_force_trend_skip"):
-            A.time_force_trend_skip = False
-        if not hasattr(A, "lots") or A.lots is None:
-            A.lots = []
-        if not hasattr(A, "round_scaled"):
-            A.round_scaled = False
-        if not hasattr(A, "_confirmed_eval_day"):
-            A._confirmed_eval_day = ""
-        if not hasattr(A, "_fallback_done_day"):
-            A._fallback_done_day = ""
-        if not hasattr(A, "_w_bear_streak"):
-            A._w_bear_streak = 0
-        if not hasattr(A, "_w_bear_last_day"):
-            A._w_bear_last_day = ""
-        if not hasattr(A, "_skip_sell_eval_day"):
-            A._skip_sell_eval_day = ""
-        if not hasattr(A, "_last_add_day"):
-            A._last_add_day = ""
-        if not hasattr(A, "_last_add_signal"):
-            A._last_add_signal = ""
+
+    _apply_watch_universe(C)
 
     try:
-        C.set_universe([A.stock])
+        C.run_time("_universe_on_timer", "1nSecond", "")
+        print(
+            "%s run_time _universe_on_timer 1nSecond start=" % STRATEGY_NAME,
+            "(immediate)",
+        )
     except Exception as e:
-        print("%s set_universe fail" % STRATEGY_NAME, e)
+        print("%s run_time register fail" % STRATEGY_NAME, e)
+        _event_log("run_time_fail", error=str(e))
+
+    uni = list(getattr(A, "watch", None) or [])
+    print(
+        "%s UNIVERSE n=%s stocks=%s chart=%s drive=timer 只保留一个 HlBand 实例"
+        % (
+            STRATEGY_NAME,
+            len(uni),
+            ",".join(uni) or "-",
+            getattr(A, "chart_stock", "") or "-",
+        )
+    )
 
     print(
         "%s %s init" % (STRATEGY_NAME, STRATEGY_VER),
-        A.stock,
+        "chart=",
+        getattr(A, "chart_stock", "") or "-",
+        "stock=",
+        getattr(A, "stock", "") or "-",
         A.acct,
         A.acct_type,
         "PERIOD=",
         A.period,
+        "ohlcv_policy=",
+        str(globals().get("LIVE_OHLCV_POLICY") or "window"),
         "DIVIDEND=",
-        _dividend_type(),
+        _dividend_type() if getattr(A, "stock", "") else "per-stock",
         "chart_div=",
         _chart_dividend(C) or "-",
         "BACKTEST=",
@@ -6869,6 +7559,9 @@ def _init_impl(C):
         budget=_trade_budget_cap(),
         book_n=_cfg_book_n(),
         book_stocks=len(_book_stock_set()),
+        watch=len(getattr(A, "watch", None) or []),
+        chart=getattr(A, "chart_stock", "") or "",
+        ohlcv_policy=str(globals().get("LIVE_OHLCV_POLICY") or ""),
         cash_ratio=CASH_RATIO,
         lot_open_frac=LOT_OPEN_FRAC,
         lot_add_frac=LOT_ADD_FRAC,
@@ -6884,7 +7577,13 @@ def handlebar(C):
         if getattr(A, "busy", False):
             return
         A.busy = True
-        _handle(C)
+        bt = getattr(A, "is_backtest", False)
+        watch = getattr(A, "watch", None) or []
+        chart = str(getattr(A, "chart_stock", "") or "")
+        if bt:
+            if (not watch) or (chart in watch):
+                _handle(C)
+        # 实盘暖机（主图不在池）：只 _refresh_mode。live 扫池只走 run_time。
     except Exception as e:
         print("%s handlebar error" % STRATEGY_NAME, e)
         _event_log("handlebar_error", error=str(e))

@@ -33,6 +33,38 @@ def _state_extra_load(raw):
     A._last_add_signal = str(raw.get("last_add_signal", "") or "")
 
 
+def _reset_stock_ctx():
+    """切票前清空单票字段。_load_state 无文件时不清 extra，必须先 reset 防串票。"""
+    A.position = None
+    A.lots = []
+    A.acted_day = ""
+    A.acted = set()
+    A.pending = None
+    A.pending_entry = None
+    A.pending_exit = None
+    A.hold_peak = None
+    A.hold_bars = 0
+    A._hold_count_day = ""
+    A.time_force_grace_until = None
+    A.time_force_trend_skip = False
+    A.round_scaled = False
+    A._confirmed_eval_day = ""
+    A._fallback_done_day = ""
+    A._w_bear_streak = 0
+    A._w_bear_last_day = ""
+    A._skip_sell_eval_day = ""
+    A._last_add_day = ""
+    A._last_add_signal = ""
+    A.ready_logged = False
+    A._bar_status_at = None
+    A._bar_sig_prev = None
+    A._skip_sell_eval_logged = ""
+    A._defer_log_entry_day = ""
+    A._defer_log_exit_day = ""
+    A._defer_log_book_day = ""
+    A._defer_log_wait_day = ""
+
+
 def _state_extra_save(data):
     data["pending_entry"] = getattr(A, "pending_entry", None)
     data["pending_exit"] = getattr(A, "pending_exit", None)

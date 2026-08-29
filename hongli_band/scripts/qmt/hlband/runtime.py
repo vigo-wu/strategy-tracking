@@ -62,7 +62,11 @@ def init(C):
 
 
 def _init_impl(C):
-    A.stock = C.stockcode + "." + C.market
+    A.chart_stock = C.stockcode + "." + C.market
+    A.watch = _watch_stocks()
+    if not A.watch:
+        A.watch = [A.chart_stock]
+    A.stock = A.chart_stock
     A.period = _resolve_period(C, default="1d")
     if "account" in globals() and account:
         A.acct = str(account)
@@ -89,14 +93,28 @@ def _init_impl(C):
     A._diag = set()
 
     do_dl = DOWNLOAD_HIST_BACKTEST if A.is_backtest else DOWNLOAD_HIST_LIVE
-    if do_dl:
-        try:
-            _download_hist(A.stock, A.period)
-            _download_hist(A.stock, "1w")
-        except Exception as e:
-            print("%s download_hist abort-safe" % STRATEGY_NAME, e)
+    if A.is_backtest:
+        if do_dl:
+            try:
+                _download_hist(A.stock, A.period)
+                _download_hist(A.stock, "1w")
+            except Exception as e:
+                print("%s download_hist abort-safe" % STRATEGY_NAME, e)
+        else:
+            print("%s skip download_history (live)" % STRATEGY_NAME, A.period, "+1w")
+    elif do_dl:
+        for code in A.watch:
+            try:
+                _download_hist(code, A.period)
+                _download_hist(code, "1w")
+            except Exception as e:
+                print("%s download_hist abort-safe" % STRATEGY_NAME, code, e)
     else:
-        print("%s skip download_history (live)" % STRATEGY_NAME, A.period, "+1w")
+        print(
+            "%s skip download_history (live) n=%s" % (STRATEGY_NAME, len(A.watch)),
+            A.period,
+            "+1w",
+        )
 
     if A.is_backtest:
         barpos = 0
@@ -182,57 +200,48 @@ def _init_impl(C):
                 _bt_held_vol(),
             )
     else:
-        _load_state()
+        # 实盘宇宙：不按主图/时钟 load；第一轮定时回调再 _activate_stock
+        _reset_stock_ctx()
+        A.stock = ""
         A.ready_logged = False
-        if not hasattr(A, "pending"):
-            A.pending = None
-        if not hasattr(A, "pending_entry"):
-            A.pending_entry = None
-        if not hasattr(A, "pending_exit"):
-            A.pending_exit = None
-        if not hasattr(A, "hold_peak"):
-            A.hold_peak = None
-        if not hasattr(A, "hold_bars"):
-            A.hold_bars = 0
-        if not hasattr(A, "_hold_count_day"):
-            A._hold_count_day = ""
-        if not hasattr(A, "time_force_grace_until"):
-            A.time_force_grace_until = None
-        if not hasattr(A, "time_force_trend_skip"):
-            A.time_force_trend_skip = False
-        if not hasattr(A, "lots") or A.lots is None:
-            A.lots = []
-        if not hasattr(A, "round_scaled"):
-            A.round_scaled = False
-        if not hasattr(A, "_confirmed_eval_day"):
-            A._confirmed_eval_day = ""
-        if not hasattr(A, "_fallback_done_day"):
-            A._fallback_done_day = ""
-        if not hasattr(A, "_w_bear_streak"):
-            A._w_bear_streak = 0
-        if not hasattr(A, "_w_bear_last_day"):
-            A._w_bear_last_day = ""
-        if not hasattr(A, "_skip_sell_eval_day"):
-            A._skip_sell_eval_day = ""
-        if not hasattr(A, "_last_add_day"):
-            A._last_add_day = ""
-        if not hasattr(A, "_last_add_signal"):
-            A._last_add_signal = ""
+
+    _apply_watch_universe(C)
 
     try:
-        C.set_universe([A.stock])
+        C.run_time("_universe_on_timer", "1nSecond", "")
+        print(
+            "%s run_time _universe_on_timer 1nSecond start=" % STRATEGY_NAME,
+            "(immediate)",
+        )
     except Exception as e:
-        print("%s set_universe fail" % STRATEGY_NAME, e)
+        print("%s run_time register fail" % STRATEGY_NAME, e)
+        _event_log("run_time_fail", error=str(e))
+
+    uni = list(getattr(A, "watch", None) or [])
+    print(
+        "%s UNIVERSE n=%s stocks=%s chart=%s drive=timer 只保留一个 HlBand 实例"
+        % (
+            STRATEGY_NAME,
+            len(uni),
+            ",".join(uni) or "-",
+            getattr(A, "chart_stock", "") or "-",
+        )
+    )
 
     print(
         "%s %s init" % (STRATEGY_NAME, STRATEGY_VER),
-        A.stock,
+        "chart=",
+        getattr(A, "chart_stock", "") or "-",
+        "stock=",
+        getattr(A, "stock", "") or "-",
         A.acct,
         A.acct_type,
         "PERIOD=",
         A.period,
+        "ohlcv_policy=",
+        str(globals().get("LIVE_OHLCV_POLICY") or "window"),
         "DIVIDEND=",
-        _dividend_type(),
+        _dividend_type() if getattr(A, "stock", "") else "per-stock",
         "chart_div=",
         _chart_dividend(C) or "-",
         "BACKTEST=",
@@ -327,6 +336,9 @@ def _init_impl(C):
         budget=_trade_budget_cap(),
         book_n=_cfg_book_n(),
         book_stocks=len(_book_stock_set()),
+        watch=len(getattr(A, "watch", None) or []),
+        chart=getattr(A, "chart_stock", "") or "",
+        ohlcv_policy=str(globals().get("LIVE_OHLCV_POLICY") or ""),
         cash_ratio=CASH_RATIO,
         lot_open_frac=LOT_OPEN_FRAC,
         lot_add_frac=LOT_ADD_FRAC,
@@ -342,7 +354,13 @@ def handlebar(C):
         if getattr(A, "busy", False):
             return
         A.busy = True
-        _handle(C)
+        bt = getattr(A, "is_backtest", False)
+        watch = getattr(A, "watch", None) or []
+        chart = str(getattr(A, "chart_stock", "") or "")
+        if bt:
+            if (not watch) or (chart in watch):
+                _handle(C)
+        # 实盘暖机（主图不在池）：只 _refresh_mode。live 扫池只走 run_time。
     except Exception as e:
         print("%s handlebar error" % STRATEGY_NAME, e)
         _event_log("handlebar_error", error=str(e))

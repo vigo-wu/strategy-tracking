@@ -332,7 +332,14 @@ def _passorder_live(C, side, vol, last_px, msg, now):
             passorder(code, 1101, A.acct, A.stock, 11, px, vol, _strategy_tag(), 2, msg, C)
             return px
     code = A.buy_code if str(side) == "buy" else A.sell_code
-    passorder(code, 1101, A.acct, A.stock, 14, -1, vol, _strategy_tag(), 1, msg, C)
+    qt = 1
+    force_qt = getattr(A, "_force_quicktrade", None)
+    if force_qt is not None:
+        try:
+            qt = int(force_qt)
+        except Exception:
+            qt = 1
+    passorder(code, 1101, A.acct, A.stock, 14, -1, vol, _strategy_tag(), qt, msg, C)
     return last_px
 
 

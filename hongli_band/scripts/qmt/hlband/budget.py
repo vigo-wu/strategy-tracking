@@ -1571,6 +1571,12 @@ def _buy_budget(cash):
 
 def _heartbeat_extra():
     parts = []
+    watch = getattr(A, "watch", None)
+    if watch:
+        parts.append("watch=%s" % len(watch))
+        parts.append("chart=%s" % (getattr(A, "chart_stock", "") or "-"))
+        parts.append("drive=%s" % (getattr(A, "_drive", "") or "timer"))
+        parts.append("work=%s" % (getattr(A, "_live_work", "") or "-"))
     lots = getattr(A, "lots", None) or []
     if lots:
         bits = []

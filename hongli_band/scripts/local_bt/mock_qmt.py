@@ -102,6 +102,9 @@ class MockContext:
     def set_universe(self, *_args: Any, **_kwargs: Any) -> None:
         return None
 
+    def run_time(self, *_args: Any, **_kwargs: Any) -> None:
+        return None
+
     def is_last_bar(self) -> bool:
         return False
 

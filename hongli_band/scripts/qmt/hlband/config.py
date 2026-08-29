@@ -11,7 +11,7 @@ ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 # 第 3 笔：金额吃剩余可部署资金；book_frac 仍记空档（0.50 / 0.30 / 剩余档）。
 # 同标的一轮只加一次；加过仓后该只须全平才能再开。卖掉大仓由其他空仓标的开仓补回。
 # cap = CASH_RATIO * E_s；E_s = 总资产 - 非白名单股票市值。
-# k / book_mv 只统计 BOOK_STOCKS。N = 字典长度。实盘共享账本；回测用 TRADE_BUDGET。
+# k / book_mv 只统计 BOOK_STOCKS。N = 字典长度。实盘单实例监视全池并写账本；回测用 TRADE_BUDGET。
 # 形态：code → 配置字典。ma_type（EMA|SMA）；dividend_type 见下方复权注释。
 # 简写兼容：value 写成 "SMA" 视为 {"ma_type": "SMA"}；旧纯字符串 tuple 仍认作白名单。
 BOOK_STOCKS = {
@@ -20,7 +20,7 @@ BOOK_STOCKS = {
     "601939.SH": {"ma_type": "EMA", "dividend_type": "front"},
     "600958.SH": {"ma_type": "EMA", "dividend_type": "front"},
 }
-# 三图共享信号账本（不是 STATE_FILE；禁止按标的分文件）
+# 单实例共享信号账本（不是 STATE_FILE；禁止按标的分文件）
 BOOK_FILE = r"D:\tradingStrategy\hlband_book.json"
 # 确认打卡截止：14:56 打卡，14:56:30 冻结，须在 14:57 集合竞价前完成分档下单
 BOOK_FREEZE_CLOSE = "145630"
@@ -185,6 +185,8 @@ SIGNAL_CONFIRM_START = "145600"
 SIGNAL_CONFIRM_END = "160000"
 # 实盘心跳/状态行间隔（秒）；空仓与持仓无新信号沿时均按此节流
 LIVE_HEARTBEAT_SEC = 300
+# 实盘取数：window=确认窗/开盘兜底才拉日+周，盘中只 pending；always=决策窗内每次当确认窗
+LIVE_OHLCV_POLICY = "window"
 
 # 行情复权（传给 get_market_data_ex 的 dividend_type）
 # 优先 BOOK_STOCKS[code].dividend_type；缺键/非法回落本常量。不上屏。
@@ -205,7 +207,7 @@ DOWNLOAD_HIST_BACKTEST = True
 PENDING_TIMEOUT_SEC = 180
 PENDING_ORPHAN_SEC = 60
 
-# QMT 模型无 __file__；状态绝对路径（含 {stock}，多实例不同主图互不覆盖）
+# QMT 模型无 __file__；状态绝对路径（含 {stock}，宇宙循环按票分文件）
 #   513530.SH → ...\hlband_513530_SH.json
 STATE_FILE = r"D:\tradingStrategy\hlband_{stock}.json"
 # 实盘结构化日志根目录；落盘为 LOG_DIR/<stock_tag>/{tag}_events.jsonl 等
@@ -215,7 +217,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.58"
+STRATEGY_VER = "v1.59"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
