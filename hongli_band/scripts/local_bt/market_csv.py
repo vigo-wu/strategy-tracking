@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import bisect
 import csv
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -13,6 +14,7 @@ import numpy as np
 
 
 OHLC_FIELDS = ("open", "high", "low", "close", "volume")
+_DAILY_NAME_RE = re.compile(r"(?i)(\d{6})[._](SZ|SH)")
 
 
 @dataclass(frozen=True)
@@ -304,7 +306,6 @@ def _csv_missing_hint(p: Path) -> str:
 
 _PEEK_HEAD = 8192
 _PEEK_TAIL = 2048
-_PEEK_CHUNK = 1 << 20
 
 
 def _try_decode_bytes(data: bytes, encodings: tuple[str, ...], trim: str) -> str:
@@ -360,31 +361,75 @@ def _peek_daily_row(line: str, keys: dict[str, int]) -> tuple[str, str] | None:
     return code, dt.strftime("%Y%m%d")
 
 
+def stock_code_from_csv_name(path: str | Path) -> str:
+    """`000166_SZ_1d_....csv` → `000166.SZ`。"""
+    m = _DAILY_NAME_RE.search(Path(path).name)
+    if not m:
+        return ""
+    return "%s.%s" % (m.group(1), m.group(2).upper())
+
+
+def _data_line_starts(data: bytes) -> list[int]:
+    """不含表头的数据行起始偏移。"""
+    first_nl = data.find(b"\n")
+    if first_nl < 0:
+        return []
+    starts: list[int] = []
+    i = first_nl + 1
+    n = len(data)
+    while i < n:
+        starts.append(i)
+        j = data.find(b"\n", i)
+        if j < 0:
+            break
+        i = j + 1
+    return starts
+
+
+def _data_line_text(data: bytes, starts: list[int], index: int) -> str:
+    a = starts[index]
+    b = starts[index + 1] if index + 1 < len(starts) else len(data)
+    piece = data[a:b]
+    text = _try_decode_bytes(piece, ("utf-8-sig", "utf-8", "gbk"), trim="end")
+    return text.strip("\r\n")
+
+
+def _first_valid_from_start(
+    data: bytes, keys: dict[str, int], starts: list[int]
+) -> tuple[str, str] | None:
+    """从头跳过上市前 close=0，碰到第一根有效日 K 即停。"""
+    for i in range(len(starts)):
+        parsed = _peek_daily_row(_data_line_text(data, starts, i), keys)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _last_valid_from_end(
+    data: bytes, keys: dict[str, int], starts: list[int]
+) -> tuple[str, str] | None:
+    """从末尾跳过退市后 close=0，碰到最后一根有效日 K 即停。"""
+    for i in range(len(starts) - 1, -1, -1):
+        parsed = _peek_daily_row(_data_line_text(data, starts, i), keys)
+        if parsed is not None:
+            return parsed
+    return None
+
+
 def peek_daily_csv_meta(path: str | Path) -> dict[str, Any]:
-    """只读头尾 + 换行计数，得到 stock / start / end / n。不物化 OHLCV。"""
+    """头尾窗取区间；头窗全是占位 0 时从头扫到第一根有效日 K。不物化 OHLCV。"""
     p = Path(path)
     if not p.is_file():
         raise FileNotFoundError(str(p) + _csv_missing_hint(p))
-    head = b""
-    tail = b""
-    n_nl = 0
-    last_byte = b""
-    with p.open("rb") as f:
-        while True:
-            chunk = f.read(_PEEK_CHUNK)
-            if not chunk:
-                break
-            if len(head) < _PEEK_HEAD:
-                need = _PEEK_HEAD - len(head)
-                head += chunk[:need]
-            n_nl += chunk.count(b"\n")
-            last_byte = chunk[-1:]
-            tail = (tail + chunk)[-_PEEK_TAIL:]
-    if not head:
+    data = p.read_bytes()
+    if not data:
         raise ValueError("empty csv: %s" % p)
-    if last_byte and last_byte not in (b"\n", b"\r"):
+    n_nl = data.count(b"\n")
+    if data[-1:] not in (b"\n", b"\r"):
         n_nl += 1
     n = max(0, n_nl - 1)
+    head = data[:_PEEK_HEAD]
+    tail = data[-_PEEK_TAIL:] if len(data) > _PEEK_TAIL else data
 
     head_text = _try_decode_bytes(head, ("utf-8-sig", "utf-8", "gbk"), trim="end")
     head_lines = head_text.splitlines()
@@ -403,7 +448,7 @@ def peek_daily_csv_meta(path: str | Path) -> dict[str, Any]:
             first = parsed
             break
     last: tuple[str, str] | None = None
-    if len(head) < _PEEK_HEAD:
+    if len(data) <= _PEEK_HEAD:
         body = head_lines[1:]
     else:
         # 滑动尾窗不一定落在行首，丢掉首段残缺行；只要最后一行完整即可
@@ -416,9 +461,15 @@ def peek_daily_csv_meta(path: str | Path) -> dict[str, Any]:
         if parsed is not None:
             last = parsed
             break
+    if first is None or last is None:
+        starts = _data_line_starts(data)
+        if first is None:
+            first = _first_valid_from_start(data, keys, starts)
+        if last is None:
+            last = _last_valid_from_end(data, keys, starts)
     if first is None or last is None or n <= 0:
         raise ValueError("no daily bars in %s" % p)
-    code = first[0] or last[0]
+    code = first[0] or last[0] or stock_code_from_csv_name(p)
     if not code:
         raise ValueError("stock code missing in %s" % p)
     return {

@@ -349,6 +349,51 @@ class PeekDailyMetaTests(unittest.TestCase):
             self.assertEqual(meta["end"], days[-1])
             self.assertEqual(meta["n"], len(days))
 
+    def test_peek_skips_leading_zero_close_beyond_head(self):
+        zeros: list[str] = []
+        d = datetime.strptime("20070104", "%Y%m%d")
+        while len(zeros) < 250:
+            if d.weekday() < 5:
+                zeros.append(d.strftime("%Y-%m-%d"))
+            d += timedelta(days=1)
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "000166_SZ_1d_20070104_20150127.csv"
+            lines = [self._HEADER]
+            for day in zeros:
+                lines.append("000166.SZ,1d,%s,0.0,0.0,0.0,0.0,0.0,0.0" % day)
+            lines.append("000166.SZ,1d,2015-01-26,11,13,10,12,100,100")
+            lines.append("000166.SZ,1d,2015-01-27,11,12,10,11,100,100")
+            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            self.assertGreater(path.stat().st_size, 8192)
+            meta = peek_daily_csv_meta(path)
+            self.assertEqual(meta["stock"], "000166.SZ")
+            self.assertEqual(meta["start"], "20150126")
+            self.assertEqual(meta["end"], "20150127")
+            self.assertEqual(meta["n"], len(zeros) + 2)
+
+    def test_peek_skips_trailing_zeros(self):
+        zeros: list[str] = []
+        d = datetime.strptime("20070104", "%Y%m%d")
+        while len(zeros) < 250:
+            if d.weekday() < 5:
+                zeros.append(d.strftime("%Y-%m-%d"))
+            d += timedelta(days=1)
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "000166_SZ_1d_20070104_20150129.csv"
+            lines = [self._HEADER]
+            for day in zeros:
+                lines.append("000166.SZ,1d,%s,0.0,0.0,0.0,0.0,0.0,0.0" % day)
+            lines.append("000166.SZ,1d,2015-01-26,11,13,10,12,100,100")
+            lines.append("000166.SZ,1d,2015-01-27,11,12,10,11,100,100")
+            lines.append("000166.SZ,1d,2015-01-28,0.0,0.0,0.0,0.0,0.0,0.0")
+            lines.append("000166.SZ,1d,2015-01-29,0.0,0.0,0.0,0.0,0.0,0.0")
+            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            self.assertGreater(path.stat().st_size, 8192)
+            meta = peek_daily_csv_meta(path)
+            self.assertEqual(meta["stock"], "000166.SZ")
+            self.assertEqual(meta["start"], "20150126")
+            self.assertEqual(meta["end"], "20150127")
+
 
 class DailyByStockTests(unittest.TestCase):
     def test_group_keeps_latest_end(self):

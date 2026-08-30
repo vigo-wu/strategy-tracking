@@ -103,8 +103,12 @@ DIVIDEND_COLORS = {
 }
 
 
+# 与 peek 行为绑定：头窗 0 行时从头扫到第一根有效 K，改 peek 后必须换键
+_DAILY_METAS_VER = 4
+
+
 def _daily_dir_fingerprint(csv_dir: str) -> tuple:
-    return glob_fingerprint(Path(csv_dir), "*_1d_*.csv")
+    return glob_fingerprint(Path(csv_dir), "*_1d_*.csv") + (_DAILY_METAS_VER,)
 
 
 @st.cache_data(show_spinner="扫描行情目录…")
@@ -925,9 +929,17 @@ def _render_batch_run(
         return
     union_by: dict[str, dict] = {}
     empty_types = []
+    skip_notes: list[str] = []
     for div in divs:
         csv_dir = str(resolve_typed_dir(csv_root, div))
-        metas = _cached_daily_metas(csv_dir, _daily_dir_fingerprint(csv_dir))
+        fp = _daily_dir_fingerprint(csv_dir)
+        metas = _cached_daily_metas(csv_dir, fp)
+        n_files = int(fp[0]) if fp else 0
+        if n_files > len(metas):
+            skip_notes.append(
+                "%s：%s 个日线文件，解析 %s 只"
+                % (dividend_label(div), n_files, len(metas))
+            )
         if not metas:
             empty_types.append(div)
             continue
@@ -995,6 +1007,8 @@ def _render_batch_run(
         picked = [by_stock[s] for s in selected if s in by_stock]
         if options and not picked:
             st.caption("过滤后 %s 只，尚未勾选" % len(options))
+    if skip_notes:
+        st.caption("未计入：" + "；".join(skip_notes) + "（日线文件无法解析）")
     start_d = end_d = None
     run_btn = False
     split_label = "整段区间"
