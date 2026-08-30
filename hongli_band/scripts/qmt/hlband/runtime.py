@@ -153,6 +153,8 @@ def _init_impl(C):
             A.bt_opened_at = ""
             A._bt_alive = True
             A.ready_logged = False
+            A._bt_hb_logged = False
+            A._bt_hb_skip_logged = False
             print("%s backtest session start barpos=" % STRATEGY_NAME, barpos)
         else:
             if not hasattr(A, "bt_held"):
@@ -210,24 +212,33 @@ def _init_impl(C):
 
     _apply_watch_universe(C)
 
-    try:
-        C.run_time("_universe_on_timer", "1nSecond", "")
-        print(
-            "%s run_time _universe_on_timer 1nSecond start=" % STRATEGY_NAME,
-            "(immediate)",
-        )
-    except Exception as e:
-        print("%s run_time register fail" % STRATEGY_NAME, e)
-        _event_log("run_time_fail", error=str(e))
+    drive = "handlebar"
+    if A.is_backtest:
+        # 编辑器回测必须靠 handlebar 扫历史 K。注册 1nSecond 后终端可能改走墙钟
+        # 定时、不再推进 barpos；而 _universe_on_timer 在 is_backtest 下直接 return，
+        # 表现为 init 之后没有任何 close=/diag。
+        print("%s backtest skip run_time drive=handlebar" % STRATEGY_NAME)
+    else:
+        drive = "timer"
+        try:
+            C.run_time("_universe_on_timer", "1nSecond", "")
+            print(
+                "%s run_time _universe_on_timer 1nSecond start=" % STRATEGY_NAME,
+                "(immediate)",
+            )
+        except Exception as e:
+            print("%s run_time register fail" % STRATEGY_NAME, e)
+            _event_log("run_time_fail", error=str(e))
 
     uni = list(getattr(A, "watch", None) or [])
     print(
-        "%s UNIVERSE n=%s stocks=%s chart=%s drive=timer 只保留一个 HlBand 实例"
+        "%s UNIVERSE n=%s stocks=%s chart=%s drive=%s 只保留一个 HlBand 实例"
         % (
             STRATEGY_NAME,
             len(uni),
             ",".join(uni) or "-",
             getattr(A, "chart_stock", "") or "-",
+            drive,
         )
     )
 
@@ -354,13 +365,31 @@ def _init_impl(C):
 def handlebar(C):
     try:
         _refresh_mode(C)
+        bt = getattr(A, "is_backtest", False)
+        if bt and (not getattr(A, "_bt_hb_logged", False)):
+            A._bt_hb_logged = True
+            print(
+                "%s backtest handlebar start barpos=" % STRATEGY_NAME,
+                getattr(C, "barpos", None),
+                "busy=",
+                getattr(A, "busy", False),
+                "chart_in_watch=",
+                _chart_in_watch(),
+            )
         if getattr(A, "busy", False):
             return
         A.busy = True
-        bt = getattr(A, "is_backtest", False)
         if bt:
             if _is_local_bt(C) or (not (getattr(A, "watch", None) or [])) or _chart_in_watch():
                 _handle(C)
+            elif not getattr(A, "_bt_hb_skip_logged", False):
+                A._bt_hb_skip_logged = True
+                print(
+                    "%s backtest handlebar skip chart not in watch" % STRATEGY_NAME,
+                    getattr(A, "chart_stock", ""),
+                    "watch=",
+                    ",".join(getattr(A, "watch", None) or []) or "-",
+                )
         # 实盘暖机（主图不在池）：只 _refresh_mode。live 扫池只走 run_time。
     except Exception as e:
         print("%s handlebar error" % STRATEGY_NAME, e)

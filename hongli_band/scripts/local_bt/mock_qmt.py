@@ -96,6 +96,7 @@ class MockContext:
         self.end = ""
         self._store = store
         self._walk_tags = list(walk_tags)
+        self.run_time_calls = []
 
     def set_account(self, *_args: Any, **_kwargs: Any) -> None:
         return None
@@ -103,7 +104,8 @@ class MockContext:
     def set_universe(self, *_args: Any, **_kwargs: Any) -> None:
         return None
 
-    def run_time(self, *_args: Any, **_kwargs: Any) -> None:
+    def run_time(self, *args: Any, **kwargs: Any) -> None:
+        self.run_time_calls.append((args, kwargs))
         return None
 
     def is_last_bar(self) -> bool:

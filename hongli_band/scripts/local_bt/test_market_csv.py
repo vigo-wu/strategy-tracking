@@ -1820,6 +1820,34 @@ class LocalBtUniverseHandlebarTests(unittest.TestCase):
         ns["handlebar"](ctx)
         self.assertEqual(len(called), 0)
 
+    def test_qmt_editor_backtest_skips_run_time_and_scans_chart(self):
+        from mock_qmt import MockContext, _as_tag
+        from run import _exec_bundle
+
+        bars = self._bars(stock="600350.SH")
+        store = MarketStore(bars, "600350.SH")
+        walk = bars[-5:]
+        ctx = MockContext(store, [_as_tag(b.dt) for b in walk], "600350.SH")
+        ctx._local_bt = False
+        ctx.do_back_test = True
+        ns = _exec_bundle()
+        ns["_LOCAL_BT"] = False
+        called = []
+        orig = ns["_handle"]
+
+        def wrapped(C):
+            called.append(1)
+            return orig(C)
+
+        ns["_handle"] = wrapped
+        ns["init"](ctx)
+        self.assertEqual(ctx.run_time_calls, [])
+        self.assertIn("600350.SH", list(ns["A"].watch))
+        self.assertTrue(ns["_chart_in_watch"]())
+        ctx.barpos = 0
+        ns["handlebar"](ctx)
+        self.assertEqual(len(called), 1)
+
 
 class FingerprintAggTests(unittest.TestCase):
     def test_glob_fingerprint_is_triple(self):
