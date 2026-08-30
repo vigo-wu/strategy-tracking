@@ -89,6 +89,7 @@ class MockContext:
         self.market = market
         self.period = "1d"
         self.do_back_test = True
+        self._local_bt = True
         self.barpos = 0
         self.accountid = ""
         self.start = ""
@@ -154,3 +155,4 @@ def inject_qmt_globals(ns: dict) -> None:
     ns["download_history_data"] = download_history_data
     ns["down_history_data"] = download_history_data
     ns["timetag_to_datetime"] = timetag_to_datetime
+    ns["_LOCAL_BT"] = True

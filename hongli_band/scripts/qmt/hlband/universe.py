@@ -53,12 +53,25 @@ def _apply_watch_universe(C):
         _event_log("set_universe_fail", error=str(e))
 
 
+def _is_local_bt(C=None):
+    """CSV 无头回放：必须一图一票走 _handle，不能当成指数暖机 skip。"""
+    if C is not None and bool(getattr(C, "_local_bt", False)):
+        return True
+    return bool(globals().get("_LOCAL_BT"))
+
+
 def _chart_in_watch():
-    chart = str(getattr(A, "chart_stock", "") or "").strip()
+    chart = _norm_code(getattr(A, "chart_stock", ""))
     watch = getattr(A, "watch", None) or []
     if (not chart) or (not watch):
         return False
-    return chart in watch
+    for x in watch:
+        if _norm_code(x) == chart:
+            return True
+    return False
+
+
+def _per_stock_map():
     d = getattr(A, "_per_stock", None)
     if not isinstance(d, dict):
         d = {}
@@ -225,7 +238,7 @@ def _on_mode_switch_to_live(C):
     A._hb_at = None
     watch = list(getattr(A, "watch", None) or [])
     chart = str(getattr(A, "chart_stock", "") or "").strip()
-    if watch and chart and (chart not in watch):
+    if watch and chart and (not _chart_in_watch()):
         print(
             _strategy_tag(),
             "live switch skip clock load chart=",

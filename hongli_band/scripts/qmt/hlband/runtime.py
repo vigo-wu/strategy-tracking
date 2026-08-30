@@ -63,9 +63,12 @@ def init(C):
 
 def _init_impl(C):
     A.chart_stock = C.stockcode + "." + C.market
-    A.watch = _watch_stocks()
-    if not A.watch:
+    if _is_local_bt(C):
         A.watch = [A.chart_stock]
+    else:
+        A.watch = _watch_stocks()
+        if not A.watch:
+            A.watch = [A.chart_stock]
     A.stock = A.chart_stock
     A.period = _resolve_period(C, default="1d")
     if "account" in globals() and account:
@@ -355,10 +358,8 @@ def handlebar(C):
             return
         A.busy = True
         bt = getattr(A, "is_backtest", False)
-        watch = getattr(A, "watch", None) or []
-        chart = str(getattr(A, "chart_stock", "") or "")
         if bt:
-            if (not watch) or (chart in watch):
+            if _is_local_bt(C) or (not (getattr(A, "watch", None) or [])) or _chart_in_watch():
                 _handle(C)
         # 实盘暖机（主图不在池）：只 _refresh_mode。live 扫池只走 run_time。
     except Exception as e:

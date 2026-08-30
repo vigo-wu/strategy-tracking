@@ -6910,12 +6910,25 @@ def _apply_watch_universe(C):
         _event_log("set_universe_fail", error=str(e))
 
 
+def _is_local_bt(C=None):
+    """CSV 无头回放：必须一图一票走 _handle，不能当成指数暖机 skip。"""
+    if C is not None and bool(getattr(C, "_local_bt", False)):
+        return True
+    return bool(globals().get("_LOCAL_BT"))
+
+
 def _chart_in_watch():
-    chart = str(getattr(A, "chart_stock", "") or "").strip()
+    chart = _norm_code(getattr(A, "chart_stock", ""))
     watch = getattr(A, "watch", None) or []
     if (not chart) or (not watch):
         return False
-    return chart in watch
+    for x in watch:
+        if _norm_code(x) == chart:
+            return True
+    return False
+
+
+def _per_stock_map():
     d = getattr(A, "_per_stock", None)
     if not isinstance(d, dict):
         d = {}
@@ -7082,7 +7095,7 @@ def _on_mode_switch_to_live(C):
     A._hb_at = None
     watch = list(getattr(A, "watch", None) or [])
     chart = str(getattr(A, "chart_stock", "") or "").strip()
-    if watch and chart and (chart not in watch):
+    if watch and chart and (not _chart_in_watch()):
         print(
             _strategy_tag(),
             "live switch skip clock load chart=",
@@ -7286,9 +7299,12 @@ def init(C):
 
 def _init_impl(C):
     A.chart_stock = C.stockcode + "." + C.market
-    A.watch = _watch_stocks()
-    if not A.watch:
+    if _is_local_bt(C):
         A.watch = [A.chart_stock]
+    else:
+        A.watch = _watch_stocks()
+        if not A.watch:
+            A.watch = [A.chart_stock]
     A.stock = A.chart_stock
     A.period = _resolve_period(C, default="1d")
     if "account" in globals() and account:
@@ -7578,10 +7594,8 @@ def handlebar(C):
             return
         A.busy = True
         bt = getattr(A, "is_backtest", False)
-        watch = getattr(A, "watch", None) or []
-        chart = str(getattr(A, "chart_stock", "") or "")
         if bt:
-            if (not watch) or (chart in watch):
+            if _is_local_bt(C) or (not (getattr(A, "watch", None) or [])) or _chart_in_watch():
                 _handle(C)
         # 实盘暖机（主图不在池）：只 _refresh_mode。live 扫池只走 run_time。
     except Exception as e:

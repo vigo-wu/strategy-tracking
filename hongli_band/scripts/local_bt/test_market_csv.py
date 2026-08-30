@@ -1563,6 +1563,82 @@ class FastOhlcvPatchTests(unittest.TestCase):
         self.assertAlmostEqual(float(fast_w[3][-1]), float(orig_w[3][-1]))
 
 
+class LocalBtUniverseHandlebarTests(unittest.TestCase):
+    def _bars(self, n=400, stock="600000.SH"):
+        d = datetime(2018, 1, 2)
+        bars = []
+        while len(bars) < n:
+            if d.weekday() < 5:
+                px = 10.0 + 0.01 * len(bars)
+                b = _bar(d.strftime("%Y%m%d"), px)
+                bars.append(
+                    DailyBar(
+                        day=b.day,
+                        dt=b.dt,
+                        open=b.open,
+                        high=b.high,
+                        low=b.low,
+                        close=b.close,
+                        volume=b.volume,
+                        stock=stock,
+                    )
+                )
+            d += timedelta(days=1)
+        return bars
+
+    def test_out_of_book_local_bt_still_calls_handle(self):
+        from mock_qmt import MockContext, _as_tag
+        from run import _exec_bundle, _patch_fast_ohlcv
+
+        bars = self._bars(stock="600000.SH")
+        store = MarketStore(bars, "600000.SH")
+        walk = bars[-5:]
+        ctx = MockContext(store, [_as_tag(b.dt) for b in walk], "600000.SH")
+        ns = _exec_bundle()
+        _patch_fast_ohlcv(ns)
+        called = []
+        orig = ns["_handle"]
+
+        def wrapped(C):
+            called.append(1)
+            return orig(C)
+
+        ns["_handle"] = wrapped
+        ns["init"](ctx)
+        self.assertEqual(list(ns["A"].watch), ["600000.SH"])
+        ctx.barpos = 0
+        ns["handlebar"](ctx)
+        self.assertEqual(len(called), 1)
+        rec = ns["_per_stock_map"]()
+        self.assertIsInstance(rec, dict)
+
+    def test_qmt_warmup_index_skips_handle(self):
+        from mock_qmt import MockContext, _as_tag
+        from run import _exec_bundle
+
+        bars = self._bars(stock="000001.SH")
+        store = MarketStore(bars, "000001.SH")
+        walk = bars[-3:]
+        ctx = MockContext(store, [_as_tag(b.dt) for b in walk], "000001.SH")
+        ctx._local_bt = False
+        ns = _exec_bundle()
+        ns["_LOCAL_BT"] = False
+        called = []
+        orig = ns["_handle"]
+
+        def wrapped(C):
+            called.append(1)
+            return orig(C)
+
+        ns["_handle"] = wrapped
+        ns["init"](ctx)
+        self.assertIn("600350.SH", list(ns["A"].watch))
+        self.assertFalse(ns["_chart_in_watch"]())
+        ctx.barpos = 0
+        ns["handlebar"](ctx)
+        self.assertEqual(len(called), 0)
+
+
 class FingerprintAggTests(unittest.TestCase):
     def test_glob_fingerprint_is_triple(self):
         from stock_select import glob_fingerprint
