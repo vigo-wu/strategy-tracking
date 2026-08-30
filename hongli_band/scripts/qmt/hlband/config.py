@@ -14,11 +14,12 @@ ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 # k / book_mv 只统计 BOOK_STOCKS。N = 字典长度。实盘单实例监视全池并写账本；回测用 TRADE_BUDGET。
 # 形态：code → 配置字典。ma_type（EMA|SMA）；dividend_type 见下方复权注释。
 # 简写兼容：value 写成 "SMA" 视为 {"ma_type": "SMA"}；旧纯字符串 tuple 仍认作白名单。
-BOOK_STOCKS = {
-    "600350.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
-    "600028.SH": {"ma_type": "EMA", "dividend_type": "front"},
-    "601939.SH": {"ma_type": "EMA", "dividend_type": "front"},
-    "600958.SH": {"ma_type": "EMA", "dividend_type": "front"},
+BOOK_STOCKS = BOOK_STOCKS = {
+    "600350.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"}, # 山东高速
+    "601939.SH": {"ma_type": "SMA", "dividend_type": "front"}, # 建设银行
+    "600028.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 中国石油
+    "600188.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 兖矿能源
+    "603259.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 药名康德
 }
 # 单实例共享信号账本（不是 STATE_FILE；禁止按标的分文件）
 BOOK_FILE = r"D:\tradingStrategy\hlband_book.json"
