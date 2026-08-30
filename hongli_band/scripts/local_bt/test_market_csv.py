@@ -1191,6 +1191,87 @@ class MatchDailyForDetailTests(unittest.TestCase):
             self.assertEqual(stock_from_detail_path(p), "600350")
 
 
+class ChartMaFrameTests(unittest.TestCase):
+    def test_ema_matches_strategy_seed(self):
+        import numpy as np
+        from analyze import price_ma
+
+        c = np.arange(1.0, 11.0)
+        ema = price_ma(c, 3, "EMA")
+        self.assertIsNotNone(ema)
+        self.assertTrue(np.isnan(ema[0]) and np.isnan(ema[1]))
+        self.assertAlmostEqual(float(ema[2]), 2.0)
+        self.assertAlmostEqual(float(ema[3]), 3.0)
+        self.assertAlmostEqual(float(ema[4]), 4.0)
+        sma = price_ma(c, 3, "SMA")
+        self.assertAlmostEqual(float(sma[2]), 2.0)
+        self.assertAlmostEqual(float(sma[3]), 3.0)
+
+    def test_filename_ma_kind(self):
+        from analyze import resolve_chart_ma_kind
+
+        p = Path("local_bt_600350_SH_2024_SMA_操作明细.csv")
+        self.assertEqual(resolve_chart_ma_kind(detail_path=p), "SMA")
+        self.assertEqual(resolve_chart_ma_kind(ma_kind="EMA", detail_path=p), "EMA")
+
+    def test_daily_and_weekly_ma_columns(self):
+        from analyze import ohlc_frame_for_chart
+
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "600350_SH_1d_20180102_20181231.csv"
+            d = datetime(2018, 1, 2)
+            rows = ["stock,period,datetime,open,high,low,close,volume,amount"]
+            days = []
+            while len(days) < 250:
+                if d.weekday() < 5:
+                    px = 10.0 + 0.01 * len(days)
+                    day = d.strftime("%Y%m%d")
+                    rows.append(
+                        "600350.SH,1d,%s,%.4f,%.4f,%.4f,%.4f,100,100" % (day, px, px, px, px)
+                    )
+                    days.append(day)
+                d += timedelta(days=1)
+            path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+            start, end = days[80], days[-1]
+            daily = ohlc_frame_for_chart(
+                path,
+                start=start,
+                end=end,
+                stock="600350.SH",
+                period="1d",
+                ma_kind="EMA",
+            )
+            self.assertIn("MA20", daily.columns)
+            self.assertIn("MA60", daily.columns)
+            self.assertFalse(pd.isna(daily["MA20"].iloc[0]))
+            self.assertFalse(pd.isna(daily["MA60"].iloc[0]))
+            weekly = ohlc_frame_for_chart(
+                path,
+                start=start,
+                end=end,
+                stock="600350.SH",
+                period="1w",
+                ma_kind="EMA",
+            )
+            self.assertIn("MA5", weekly.columns)
+            self.assertIn("MA13", weekly.columns)
+            self.assertIn("MA34", weekly.columns)
+            self.assertGreater(len(weekly), 5)
+
+    def test_weekly_maps_midweek_buy(self):
+        from analyze import map_day_to_bar
+
+        idx = pd.to_datetime(["20260102", "20260109"])
+        df = pd.DataFrame(
+            {"Open": [1.0, 2.0], "High": [1.0, 2.0], "Low": [1.0, 2.0], "Close": [1.0, 2.0]},
+            index=idx,
+        )
+        hit = map_day_to_bar(df, "20260107", "1w")
+        self.assertEqual(pd.Timestamp(hit).normalize(), pd.Timestamp("20260109"))
+        miss = map_day_to_bar(df, "20251220", "1w")
+        self.assertIsNone(miss)
+
+
 class ParseDividendTypesTests(unittest.TestCase):
     def test_comma_and_space(self):
         from analyze import parse_dividend_types

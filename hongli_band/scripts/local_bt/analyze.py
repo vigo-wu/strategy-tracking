@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import numpy as np
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
@@ -21,7 +22,15 @@ REPORT_PY = (
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
-from market_csv import compact_day, load_daily_csv, peek_daily_csv_meta  # noqa: E402
+from market_csv import (  # noqa: E402
+    aggregate_weekly,
+    compact_day,
+    find_weekly_csv,
+    load_daily_csv,
+    load_weekly_csv,
+    peek_daily_csv_meta,
+    week_monday,
+)
 
 MA_TYPES = ("SMA", "EMA")
 MA_PNL_CLOSE = 1.0
@@ -37,6 +46,7 @@ DIVIDEND_LABELS = {
 DEFAULT_DIVIDEND_TYPE = "front_ratio"
 DEFAULT_CSV_ROOT = REPO / "tools" / "csv"
 DEFAULT_REPORT_ROOT = THEME / "report"
+HLBAND_CONFIG = THEME / "scripts" / "qmt" / "hlband" / "config.py"
 
 
 def normalize_dividend_type(raw: Any) -> str:
@@ -953,6 +963,236 @@ def ohlc_from_csv(
     if df.empty:
         return df
     return df.set_index("Date").sort_index()
+
+
+_CHART_MA_CFG: dict[str, Any] | None = None
+
+
+def load_chart_ma_config(
+    config_path: str | Path | None = None,
+    *,
+    force: bool = False,
+) -> dict[str, Any]:
+    """读 hlband config 的均线周期 / 缺省 MA_TYPE / BOOK_STOCKS。不 import 拼接脚本。"""
+    global _CHART_MA_CFG
+    if _CHART_MA_CFG is not None and config_path is None and (not force):
+        return _CHART_MA_CFG
+    out: dict[str, Any] = {
+        "ma_type": "EMA",
+        "book": {},
+        "d_mid": 20,
+        "d_slow": 60,
+        "w_fast": 5,
+        "w_mid": 13,
+        "w_life": 34,
+    }
+    path = Path(config_path) if config_path else HLBAND_CONFIG
+    if path.is_file():
+        spec = importlib.util.spec_from_file_location("hlband_config_chart", path)
+        if spec is not None and spec.loader is not None:
+            mod = importlib.util.module_from_spec(spec)
+            try:
+                spec.loader.exec_module(mod)
+                raw_ma = normalize_ma_type(getattr(mod, "MA_TYPE", "EMA"))
+                if raw_ma:
+                    out["ma_type"] = raw_ma
+                for key, attr, default in (
+                    ("d_mid", "D_MA_MID", 20),
+                    ("d_slow", "D_MA_SLOW", 60),
+                    ("w_fast", "W_MA_FAST", 5),
+                    ("w_mid", "W_MA_MID", 13),
+                    ("w_life", "W_MA_LIFE", 34),
+                ):
+                    try:
+                        out[key] = int(getattr(mod, attr, default) or default)
+                    except (TypeError, ValueError):
+                        out[key] = default
+                book: dict[str, str] = {}
+                raw = getattr(mod, "BOOK_STOCKS", None)
+                items = []
+                if isinstance(raw, dict):
+                    items = list(raw.items())
+                elif isinstance(raw, (list, tuple)):
+                    items = [(str(x), {}) for x in raw]
+                for k, v in items:
+                    code = str(k or "").strip().upper()
+                    if not code:
+                        continue
+                    if isinstance(v, dict):
+                        kind = normalize_ma_type(v.get("ma_type")) or "EMA"
+                    elif isinstance(v, str):
+                        kind = normalize_ma_type(v) or "EMA"
+                    else:
+                        kind = "EMA"
+                    book[code] = kind
+                out["book"] = book
+            except Exception:
+                pass
+    if config_path is None:
+        _CHART_MA_CFG = out
+    return out
+
+
+def chart_ma_periods(period: str = "1d") -> list[int]:
+    cfg = load_chart_ma_config()
+    p = str(period or "1d").strip().lower()
+    if p in ("1w", "week", "weekly", "w"):
+        return [int(cfg["w_fast"]), int(cfg["w_mid"]), int(cfg["w_life"])]
+    return [int(cfg["d_mid"]), int(cfg["d_slow"])]
+
+
+def ma_kind_from_detail_path(path: str | Path) -> str:
+    m = _DETAIL_NAME_RE.match(Path(path).name)
+    if m and m.group(4):
+        return str(m.group(4)).upper()
+    return ""
+
+
+def resolve_chart_ma_kind(
+    stock: str = "",
+    detail_path: str | Path | None = None,
+    ma_kind: str = "",
+) -> str:
+    """明细文件名 _(SMA|EMA) → BOOK_STOCKS → 全局 MA_TYPE。"""
+    forced = normalize_ma_type(ma_kind)
+    if forced:
+        return forced
+    if detail_path is not None:
+        from_name = ma_kind_from_detail_path(detail_path)
+        if from_name:
+            return from_name
+    cfg = load_chart_ma_config()
+    code = str(stock or "").strip().upper()
+    book = cfg.get("book") or {}
+    if code:
+        if code in book:
+            return str(book[code])
+        compact = code.replace("_", ".")
+        for k, v in book.items():
+            if str(k).strip().upper().replace("_", ".") == compact:
+                return str(v)
+    return str(cfg.get("ma_type") or "EMA")
+
+
+def price_ma(closes, n, kind: str = "EMA"):
+    """与 hlband/indicators._sma/_ema 相同：EMA 前 n 根用 SMA 播种。"""
+    c = np.asarray(closes, dtype=float)
+    n = int(n)
+    if n <= 0 or len(c) < n:
+        return None
+    algo = normalize_ma_type(kind) or "EMA"
+    out = np.full(len(c), np.nan, dtype=float)
+    if algo == "SMA":
+        cs = np.cumsum(c)
+        out[n - 1] = cs[n - 1] / float(n)
+        if len(c) > n:
+            out[n:] = (cs[n:] - cs[:-n]) / float(n)
+        return out
+    alpha = 2.0 / (n + 1.0)
+    out[n - 1] = float(np.mean(c[:n]))
+    for i in range(n, len(c)):
+        out[i] = alpha * c[i] + (1.0 - alpha) * out[i - 1]
+    return out
+
+
+def _bars_to_ohlc(bars) -> pd.DataFrame:
+    rows = []
+    for b in bars:
+        rows.append(
+            {
+                "Date": pd.Timestamp(b.day),
+                "Open": b.open,
+                "High": b.high,
+                "Low": b.low,
+                "Close": b.close,
+                "Volume": b.volume,
+            }
+        )
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+    return df.set_index("Date").sort_index()
+
+
+def _is_weekly_period(period: str) -> bool:
+    return str(period or "1d").strip().lower() in ("1w", "week", "weekly", "w")
+
+
+def map_day_to_bar(
+    ohlc: pd.DataFrame,
+    day_raw: Any,
+    period: str = "1d",
+):
+    """日线：最近一根；周线：同一自然周（周一为一周）的那根周 K。区间外 None。"""
+    digits = "".join(ch for ch in str(day_raw or "") if ch.isdigit())
+    if len(digits) < 8 or ohlc is None or ohlc.empty:
+        return None
+    d = pd.Timestamp(digits[:8])
+    idx = pd.DatetimeIndex(pd.to_datetime(ohlc.index).normalize())
+    if _is_weekly_period(period):
+        want = week_monday(digits[:8])
+        for ts in ohlc.index:
+            bar_d = pd.Timestamp(ts).strftime("%Y%m%d")
+            if week_monday(bar_d) == want:
+                return ts
+        return None
+    if d < idx[0] or d > idx[-1]:
+        return None
+    if d in idx:
+        loc = idx.get_loc(d)
+        return ohlc.index[int(loc) if not isinstance(loc, slice) else loc.start]
+    pos = int(idx.searchsorted(d))
+    if pos >= len(idx):
+        return None
+    if pos == 0:
+        return ohlc.index[0]
+    a, b = idx[pos - 1], idx[pos]
+    pick = a if abs((a - d).days) <= abs((b - d).days) else b
+    loc = idx.get_loc(pick)
+    return ohlc.index[int(loc) if not isinstance(loc, slice) else loc.start]
+
+
+def ohlc_frame_for_chart(
+    csv_path: str | Path,
+    start: str = "",
+    end: str = "",
+    stock: str = "",
+    period: str = "1d",
+    ma_kind: str = "",
+    detail_path: str | Path | None = None,
+) -> pd.DataFrame:
+    """日/周 OHLC + MA 列。均线在切可见区间前用历史暖机。"""
+    code, dailies = load_daily_csv(csv_path, stock=stock)
+    kind = resolve_chart_ma_kind(stock=code or stock, detail_path=detail_path, ma_kind=ma_kind)
+    start_d = compact_day(start)
+    end_d = compact_day(end)
+    weekly = _is_weekly_period(period)
+    if weekly:
+        wpath = find_weekly_csv(csv_path, stock=code or stock)
+        if wpath is not None:
+            _c, bars = load_weekly_csv(wpath, stock=code or stock)
+        else:
+            bars = aggregate_weekly(dailies, drop_forming=False)
+    else:
+        bars = dailies
+    if end_d:
+        bars = [b for b in bars if b.day <= end_d]
+    df = _bars_to_ohlc(bars)
+    if df.empty:
+        return df
+    closes = df["Close"].to_numpy(dtype=float)
+    for n in chart_ma_periods("1w" if weekly else "1d"):
+        arr = price_ma(closes, n, kind)
+        col = "MA%d" % int(n)
+        if arr is None:
+            df[col] = np.nan
+        else:
+            df[col] = arr
+    if start_d:
+        df = df[df.index >= pd.Timestamp(start_d)].copy()
+    df.attrs["ma_kind"] = kind
+    df.attrs["period"] = "1w" if weekly else "1d"
+    return df
 
 
 def _normalize_trades(rounds: list[dict]) -> list[dict]:

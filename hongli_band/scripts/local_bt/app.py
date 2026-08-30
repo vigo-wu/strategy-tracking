@@ -34,6 +34,7 @@ from analyze import (  # noqa: E402
     analyze_detail,
     batch_summary_dataframe,
     batch_year_summary_dataframe,
+    chart_ma_periods,
     daily_csvs_by_stock,
     date_to_ymd,
     daily_csv_for_stock,
@@ -43,17 +44,20 @@ from analyze import (  # noqa: E402
     filter_trades_by_range,
     list_daily_csvs,
     list_detail_csvs,
+    load_chart_ma_config,
     load_detail_raw,
     ma_compare_dataframe,
     ma_compare_year_dataframe,
+    map_day_to_bar,
     match_daily_csv_for_detail,
     normalize_dividend_type,
     normalize_ma_type,
-    ohlc_from_csv,
+    ohlc_frame_for_chart,
     pair_ma_batch_rows,
     parse_budget_from_log,
     parse_stock_filter_tokens,
     peek_daily_csv_meta,
+    resolve_chart_ma_kind,
     resolve_typed_dir,
     stock_from_detail_path,
     stock_matches_filter,
@@ -237,29 +241,6 @@ def _plot_pnl_hist(trades: list[dict]) -> go.Figure:
     return fig
 
 
-def _nearest_ohlc_idx(ohlc: pd.DataFrame, day_raw) -> pd.Timestamp | None:
-    """把成交日对齐到日线索引上最近的一根 K；落在可见区间外则不画。"""
-    digits = "".join(ch for ch in str(day_raw or "") if ch.isdigit())
-    if len(digits) < 8 or ohlc.empty:
-        return None
-    d = pd.Timestamp(digits[:8])
-    idx = pd.DatetimeIndex(pd.to_datetime(ohlc.index).normalize())
-    if d < idx[0] or d > idx[-1]:
-        return None
-    if d in idx:
-        loc = idx.get_loc(d)
-        return ohlc.index[int(loc) if not isinstance(loc, slice) else loc.start]
-    pos = int(idx.searchsorted(d))
-    if pos >= len(idx):
-        return None
-    if pos == 0:
-        return ohlc.index[0]
-    a, b = idx[pos - 1], idx[pos]
-    pick = a if abs((a - d).days) <= abs((b - d).days) else b
-    loc = idx.get_loc(pick)
-    return ohlc.index[int(loc) if not isinstance(loc, slice) else loc.start]
-
-
 def _ohlc_x_pos(ohlc: pd.DataFrame, ts: pd.Timestamp) -> int:
     loc = ohlc.index.get_loc(ts)
     return int(loc) if not isinstance(loc, slice) else int(loc.start)
@@ -279,6 +260,9 @@ def _plot_kline(
     ohlc: pd.DataFrame,
     trades: list[dict],
     title: str,
+    *,
+    period: str = "1d",
+    ma_life: int = 34,
 ) -> go.Figure:
     fig = make_subplots(
         rows=2,
@@ -290,6 +274,9 @@ def _plot_kline(
     if ohlc.empty:
         fig.add_annotation(text="无 OHLC", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
         return fig
+
+    weekly = str(period or "1d").strip().lower() in ("1w", "week", "weekly", "w")
+    candle_name = "周线" if weekly else "日线"
 
     # 按交易日等间距排布，周末/节假日不占轴（日历空隙不画）
     ohlc = ohlc.copy()
@@ -305,7 +292,7 @@ def _plot_kline(
             high=ohlc["High"],
             low=ohlc["Low"],
             close=ohlc["Close"],
-            name="日线",
+            name=candle_name,
             increasing_line_color="#e53935",
             decreasing_line_color="#43a047",
             customdata=x_dates,
@@ -318,6 +305,35 @@ def _plot_kline(
         row=1,
         col=1,
     )
+    ma_colors = {
+        "MA20": "#1565c0",
+        "MA60": "#ef6c00",
+        "MA5": "#6a1b9a",
+        "MA13": "#00838f",
+        "MA34": "#c62828",
+    }
+    ma_cols = [
+        c
+        for c in ohlc.columns
+        if str(c).startswith("MA") and str(c)[2:].isdigit()
+    ]
+    for col in ma_cols:
+        n = int(str(col)[2:])
+        width = 2.4 if weekly and n == int(ma_life) else 1.5
+        fig.add_trace(
+            go.Scatter(
+                x=x_pos,
+                y=ohlc[col],
+                name=col,
+                mode="lines",
+                line=dict(width=width, color=ma_colors.get(col, "#546e7a")),
+                connectgaps=False,
+                customdata=x_dates,
+                hovertemplate="%{customdata}<br>" + col + " %{y:.4g}<extra></extra>",
+            ),
+            row=1,
+            col=1,
+        )
     if "Volume" in ohlc.columns:
         fig.add_trace(
             go.Bar(
@@ -342,8 +358,8 @@ def _plot_kline(
     sell_x, sell_y, sell_hover = [], [], []
 
     for t in trades:
-        bd = _nearest_ohlc_idx(ohlc, t.get("buy_open_day"))
-        sd = _nearest_ohlc_idx(ohlc, t.get("sell_exec_day") or t.get("sell_signal_day"))
+        bd = map_day_to_bar(ohlc, t.get("buy_open_day"), period)
+        sd = map_day_to_bar(ohlc, t.get("sell_exec_day") or t.get("sell_signal_day"), period)
         ti = t.get("i", "")
         if bd is not None:
             xi = _ohlc_x_pos(ohlc, bd)
@@ -524,13 +540,38 @@ def _render_analysis(
             st.plotly_chart(fig, use_container_width=True)
 
     if ohlc_csv and ohlc_csv.is_file():
-        ohlc = ohlc_from_csv(ohlc_csv, start=range_start, end=range_end, stock=stock)
+        period_label = st.radio(
+            "K线周期",
+            ["日线", "周线"],
+            horizontal=True,
+            key="kline_period_%s_%s" % (detail_path.name, str(title_prefix).replace(" ", "_")),
+        )
+        period = "1w" if period_label == "周线" else "1d"
+        ma_kind = resolve_chart_ma_kind(stock=stock, detail_path=detail_path)
+        ohlc = ohlc_frame_for_chart(
+            ohlc_csv,
+            start=range_start,
+            end=range_end,
+            stock=stock,
+            period=period,
+            ma_kind=ma_kind,
+            detail_path=detail_path,
+        )
+        periods = chart_ma_periods(period)
+        ma_label = "MA" + "/".join(str(n) for n in periods)
         st.caption("K 线：滚轮缩放 · 拖拽左右平移 · 双击复位")
-        ktitle = "日线 + 买卖点 · %s" % (stock or ohlc_csv.name)
+        ktitle = "%s %s · %s + 买卖点 · %s" % (
+            period_label,
+            ma_kind,
+            ma_label,
+            stock or ohlc_csv.name,
+        )
         if title_prefix:
             ktitle = "%s%s" % (title_prefix, ktitle)
+        cfg = load_chart_ma_config()
+        ma_life = int((cfg or {}).get("w_life") or 34)
         st.plotly_chart(
-            _plot_kline(ohlc, trades, ktitle),
+            _plot_kline(ohlc, trades, ktitle, period=period, ma_life=ma_life),
             use_container_width=True,
             config=_KLINE_PLOT_CONFIG,
         )
