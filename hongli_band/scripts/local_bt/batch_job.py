@@ -56,6 +56,7 @@ def run_group(payloads: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 ma_type=str(payload.get("ma_type") or ""),
                 dividend_type=str(payload.get("dividend_type") or ""),
                 store=store,
+                overrides=payload.get("overrides") or None,
             )
         )
     return rows

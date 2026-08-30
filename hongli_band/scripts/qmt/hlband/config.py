@@ -96,6 +96,7 @@ TRAIL_TIERS = (
 )
 # 卖② time_force：智能时间成本（防长期磨人，不砍还在趋势里的仓）
 #   BARS = 日线慢均线一半：满此日后才把 MA60 当出场地板，不是最长持仓
+#   BARS<=0：关闭整条 time_force（不是 MIN_RET=0）
 #   收盘破日线 MA60 → 立即强制平仓
 #   仍站上 MA60 且峰值浮盈 < MIN_RET → 豁免一次，再观察 GRACE_BARS 日，期满强平（回收死钱）
 #   仍站上 MA60 且峰值 >= MIN_RET → 不按日历强平，交给 trail / 破 MA60 / 周线空

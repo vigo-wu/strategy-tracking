@@ -16,6 +16,7 @@ alwaysApply: true
 | Sharpe 是否真实、过拟合、DSR、PBO、Haircut、MinTRL | `.cursor/skills/skill-backtest-overfit/SKILL.md` |
 | 因子正交化/中性化、剥离行业市值风格、残差因子 | `.cursor/skills/skill-factor-orthogonalize/SKILL.md` |
 | 批量把 OHLCV alpha 做成 QuantSkills 因子 Skill 并验证 | `.cursor/skills/skill-quant-factor-skill-factory/SKILL.md` |
+| 网格回测、最优参数、实跑扫参、STOP_LOSS/TRAIL/TIME_FORCE 确认 | `.cursor/skills/qmt-local-bt-grid/SKILL.md` |
 
 ## 叠加（不是二选一）
 
@@ -28,3 +29,4 @@ alwaysApply: true
 - 改 `qmt_terminal_*.py` / 终端 GBK / `formulaLayout` XML → 禁止；走片段 + deploy
 - 「回测报告」= 解析 QMT log 画图；「过拟合检验」= 对收益序列做 DSR/PBO，不是同一条路
 - `qmt-backtest-report` 只读日志画图，不改策略、不 deploy
+- 「网格 / 最优参数 / 实跑扫参」= 真实 local_bt 重跑（`qmt-local-bt-grid`），不是 MAE 反事实，也不是 DSR/PBO

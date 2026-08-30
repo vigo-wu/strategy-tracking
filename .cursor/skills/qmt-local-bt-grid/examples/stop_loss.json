@@ -1,0 +1,25 @@
+{
+  "theme": "hongli_band",
+  "sweep": "stop_loss_confirm",
+  "compare_div": "front_ratio",
+  "cells": [
+    {
+      "id": "base",
+      "label": "现行 8%",
+      "kind": "base",
+      "overrides": {}
+    },
+    {
+      "id": "sl06",
+      "label": "止损 6%",
+      "kind": "tighten",
+      "overrides": {"STOP_LOSS": 0.06}
+    },
+    {
+      "id": "sl10",
+      "label": "止损 10%",
+      "kind": "loosen",
+      "overrides": {"STOP_LOSS": 0.10}
+    }
+  ]
+}

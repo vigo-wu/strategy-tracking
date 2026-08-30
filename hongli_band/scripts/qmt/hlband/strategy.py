@@ -365,9 +365,16 @@ def _time_force_mark_skip(lot, peak_ret, hold_bars, m60):
 
 def _time_force_hit(price, closes, hold_bars, lot=None):
     """智能时间成本：持仓 > TIME_FORCE_BARS 后，破日线 MA60 强制平仓。
+    BARS<=0 关闭整条规则（MIN_RET=0 只关掉让路，不是关闭）。
     仍站上 MA60 时：峰值已达 TIME_FORCE_MIN_RET（阶梯止盈起步档）则不按日历强平；
     从未武装的死钱仓豁免 GRACE 日后强平。"""
-    if hold_bars is None or int(hold_bars) <= int(TIME_FORCE_BARS):
+    try:
+        bars_lim = int(TIME_FORCE_BARS)
+    except (TypeError, ValueError):
+        bars_lim = 0
+    if bars_lim <= 0:
+        return False
+    if hold_bars is None or int(hold_bars) <= bars_lim:
         return False
     ma60_arr = _price_ma(closes, D_MA_SLOW)
     if ma60_arr is None:

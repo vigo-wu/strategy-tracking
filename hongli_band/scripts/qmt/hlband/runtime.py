@@ -46,6 +46,15 @@ def _apply_panel():
         print(_strategy_tag(), "panel applied", ",".join(applied))
 
 
+def _trail_arm():
+    """档 1 起步 peak_lo；网格扫 TRAIL 时写进 init 指纹。"""
+    tiers = globals().get("TRAIL_TIERS") or ()
+    try:
+        return float(tiers[0][0])
+    except (IndexError, TypeError, ValueError):
+        return None
+
+
 def init(C):
     A.busy = False
     A._hb_at = None
@@ -286,6 +295,8 @@ def _init_impl(C):
         _ma_kind(),
         "stop=",
         STOP_LOSS,
+        "trail_arm=",
+        _trail_arm(),
         "chase<",
         CHASE_MAX_PCT,
         "scale=",
@@ -335,6 +346,8 @@ def _init_impl(C):
         scale_plat_lookback=SCALE_PLAT_LOOKBACK,
         scale_plat_max_range=SCALE_PLAT_MAX_RANGE,
         scale_w_hist_expand=SCALE_W_HIST_EXPAND_RATIO,
+        stop=STOP_LOSS,
+        trail_arm=_trail_arm(),
         time_force_bars=TIME_FORCE_BARS,
         time_force_min_ret=TIME_FORCE_MIN_RET,
         close_exec="%s-%s"

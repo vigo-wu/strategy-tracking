@@ -10,7 +10,7 @@ import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import get_context
 from pathlib import Path
-from typing import Any, Callable, Sequence, TextIO
+from typing import Any, Callable, Mapping, Sequence, TextIO
 
 
 HERE = Path(__file__).resolve().parent
@@ -140,6 +140,55 @@ def default_log_name(stock: str, year: str = "", ma_type: str = "") -> str:
     if ma:
         parts.append(ma)
     return "_".join(parts) + ".txt"
+
+
+def _as_trail_tiers(raw: Any) -> tuple:
+    if not raw:
+        return ()
+    out = []
+    for row in raw:
+        if row is None:
+            continue
+        seq = list(row)
+        while len(seq) < 4:
+            seq.append(None)
+        lo, hi, gb, fl = seq[0], seq[1], seq[2], seq[3]
+        out.append(
+            (
+                float(lo),
+                None if hi is None else float(hi),
+                float(gb),
+                None if fl is None else float(fl),
+            )
+        )
+    return tuple(out)
+
+
+def apply_config_overrides(ns: dict[str, Any], overrides: Mapping[str, Any] | None) -> None:
+    """把命名格子的覆盖写进拼接脚本命名空间（运行时全局）。"""
+    if not overrides:
+        return
+    for raw_k, val in overrides.items():
+        key = str(raw_k)
+        if key == "TRAIL_TIERS":
+            ns[key] = _as_trail_tiers(val)
+        else:
+            ns[key] = val
+
+
+def install_config_overrides(ns: dict[str, Any], overrides: Mapping[str, Any] | None) -> None:
+    """exec 之后立刻覆盖；并包一层 _apply_panel，避免面板把 STOP_LOSS 打回默认。"""
+    if not overrides:
+        return
+    apply_config_overrides(ns, overrides)
+    orig = ns.get("_apply_panel")
+
+    def _apply_panel_then_overrides():
+        if callable(orig):
+            orig()
+        apply_config_overrides(ns, overrides)
+
+    ns["_apply_panel"] = _apply_panel_then_overrides
 
 
 def _apply_ma_type(ns: dict, kind: str) -> str:
@@ -349,6 +398,7 @@ def run_backtest(
     quiet: bool = True,
     ma_type: str = "",
     store: MarketStore | None = None,
+    overrides: Mapping[str, Any] | None = None,
 ) -> Path:
     path = Path(csv_path)
     if store is None:
@@ -408,6 +458,7 @@ def run_backtest(
     _patch_fast_ohlcv(ns)
     if ma:
         _apply_ma_type(ns, ma)
+    install_config_overrides(ns, overrides)
     if quiet:
         _patch_quiet_status(ns)
     ledger = TradeLedger(code)
@@ -429,6 +480,7 @@ def run_backtest(
         sys.stderr = _Tee(old_err, sink)
     try:
         ns["init"](ctx)
+        apply_config_overrides(ns, overrides)
         for i, _bar in enumerate(walk):
             ctx.barpos = i
             ns["handlebar"](ctx)
@@ -457,6 +509,7 @@ def backtest_one_result(
     ma_type: str = "",
     dividend_type: str = "",
     store: MarketStore | None = None,
+    overrides: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """单只回测 → 批量行（失败不抛给调用方）。"""
     from analyze import parse_budget_from_log  # noqa: WPS433
@@ -495,6 +548,7 @@ def backtest_one_result(
             quiet=quiet,
             ma_type=ma,
             store=store,
+            overrides=overrides,
         )
         detail = trades_csv_path(log_path)
         row["log"] = str(log_path)
@@ -590,6 +644,7 @@ def _result_from_payload(
         ma_type=str(payload.get("ma_type") or ""),
         dividend_type=str(payload.get("dividend_type") or ""),
         store=store,
+        overrides=payload.get("overrides") or None,
     )
 
 

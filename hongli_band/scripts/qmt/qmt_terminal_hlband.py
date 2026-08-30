@@ -106,6 +106,7 @@ TRAIL_TIERS = (
 )
 # 卖② time_force：智能时间成本（防长期磨人，不砍还在趋势里的仓）
 #   BARS = 日线慢均线一半：满此日后才把 MA60 当出场地板，不是最长持仓
+#   BARS<=0：关闭整条 time_force（不是 MIN_RET=0）
 #   收盘破日线 MA60 → 立即强制平仓
 #   仍站上 MA60 且峰值浮盈 < MIN_RET → 豁免一次，再观察 GRACE_BARS 日，期满强平（回收死钱）
 #   仍站上 MA60 且峰值 >= MIN_RET → 不按日历强平，交给 trail / 破 MA60 / 周线空
@@ -4915,9 +4916,16 @@ def _time_force_mark_skip(lot, peak_ret, hold_bars, m60):
 
 def _time_force_hit(price, closes, hold_bars, lot=None):
     """智能时间成本：持仓 > TIME_FORCE_BARS 后，破日线 MA60 强制平仓。
+    BARS<=0 关闭整条规则（MIN_RET=0 只关掉让路，不是关闭）。
     仍站上 MA60 时：峰值已达 TIME_FORCE_MIN_RET（阶梯止盈起步档）则不按日历强平；
     从未武装的死钱仓豁免 GRACE 日后强平。"""
-    if hold_bars is None or int(hold_bars) <= int(TIME_FORCE_BARS):
+    try:
+        bars_lim = int(TIME_FORCE_BARS)
+    except (TypeError, ValueError):
+        bars_lim = 0
+    if bars_lim <= 0:
+        return False
+    if hold_bars is None or int(hold_bars) <= bars_lim:
         return False
     ma60_arr = _price_ma(closes, D_MA_SLOW)
     if ma60_arr is None:
@@ -7282,6 +7290,15 @@ def _apply_panel():
         print(_strategy_tag(), "panel applied", ",".join(applied))
 
 
+def _trail_arm():
+    """档 1 起步 peak_lo；网格扫 TRAIL 时写进 init 指纹。"""
+    tiers = globals().get("TRAIL_TIERS") or ()
+    try:
+        return float(tiers[0][0])
+    except (IndexError, TypeError, ValueError):
+        return None
+
+
 def init(C):
     A.busy = False
     A._hb_at = None
@@ -7522,6 +7539,8 @@ def _init_impl(C):
         _ma_kind(),
         "stop=",
         STOP_LOSS,
+        "trail_arm=",
+        _trail_arm(),
         "chase<",
         CHASE_MAX_PCT,
         "scale=",
@@ -7571,6 +7590,8 @@ def _init_impl(C):
         scale_plat_lookback=SCALE_PLAT_LOOKBACK,
         scale_plat_max_range=SCALE_PLAT_MAX_RANGE,
         scale_w_hist_expand=SCALE_W_HIST_EXPAND_RATIO,
+        stop=STOP_LOSS,
+        trail_arm=_trail_arm(),
         time_force_bars=TIME_FORCE_BARS,
         time_force_min_ret=TIME_FORCE_MIN_RET,
         close_exec="%s-%s"

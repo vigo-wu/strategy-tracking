@@ -1,0 +1,39 @@
+{
+  "theme": "hongli_band",
+  "sweep": "stop_loss_confirm",
+  "compare_div": "front_ratio",
+  "cells": [
+    {
+      "id": "base",
+      "label": "现行 8%",
+      "kind": "base",
+      "overrides": {}
+    },
+    {
+      "id": "sl06",
+      "label": "止损 6%",
+      "kind": "sl06",
+      "overrides": {"STOP_LOSS": 0.06}
+    },
+    {
+      "id": "sl07",
+      "label": "止损 7%",
+      "kind": "sl07",
+      "overrides": {"STOP_LOSS": 0.07}
+    },
+    {
+      "id": "sl9",
+      "label": "止损 9%",
+      "kind": "sl9",
+      "overrides": {
+        "STOP_LOSS": 0.09
+      }
+    },
+    {
+      "id": "sl10",
+      "label": "止损 10%",
+      "kind": "sl10",
+      "overrides": {"STOP_LOSS": 0.1}
+    }
+  ]
+}
