@@ -37,6 +37,7 @@ from analyze import (  # noqa: E402
     daily_csvs_by_stock,
     date_to_ymd,
     daily_csv_for_stock,
+    dividend_from_detail_path,
     div_compare_dataframe,
     dividend_label,
     filter_trades_by_range,
@@ -45,13 +46,17 @@ from analyze import (  # noqa: E402
     load_detail_raw,
     ma_compare_dataframe,
     ma_compare_year_dataframe,
+    match_daily_csv_for_detail,
     normalize_dividend_type,
     normalize_ma_type,
     ohlc_from_csv,
     pair_ma_batch_rows,
     parse_budget_from_log,
+    parse_stock_filter_tokens,
     peek_daily_csv_meta,
     resolve_typed_dir,
+    stock_from_detail_path,
+    stock_matches_filter,
     summarize_batch_row,
     trades_to_dataframe,
     unique_dividend_types,
@@ -113,6 +118,12 @@ def _cached_select_scan(report_dir: str, csv_dir: str, fp_report: tuple, fp_csv:
 
 def _fmt_ymd(d: date) -> str:
     return d.strftime("%Y%m%d")
+
+
+def _daily_csv_label(path: Path) -> str:
+    div = normalize_dividend_type(path.parent.name)
+    lab = DIVIDEND_LABELS.get(div, path.parent.name) if div else path.parent.name
+    return "%s · %s" % (path.name, lab)
 
 
 def _plot_equity(eq: pd.DataFrame, budget: float, title: str, *, name: str = "权益", color: str = "#1565c0") -> go.Figure:
@@ -920,8 +931,18 @@ def _render_batch_run(
             % (len(picked), len(divs))
         )
     else:
-        q = str(st.text_input("代码过滤", value="", key="batch_stock_filter") or "").strip().upper()
-        options = [s for s in stocks if (not q or q in s.upper())]
+        q = str(
+            st.text_input(
+                "代码过滤",
+                value="",
+                key="batch_stock_filter",
+                placeholder="600350,600028 或 600350 600028",
+                help="多个代码用逗号或空格拼接；连续逗号、空格都可以。",
+            )
+            or ""
+        )
+        tokens = parse_stock_filter_tokens(q)
+        options = [s for s in stocks if stock_matches_filter(s, tokens)]
         selected = st.multiselect(
             "标的",
             options=options,
@@ -1754,40 +1775,90 @@ else:
     else:
         idx = st.selectbox("已有明细", range(len(labels)), format_func=lambda i: labels[i])
         detail_path = details[idx]
-        code_guess = detail_path.stem.split("_")[0].split("-")[0]
+        stock_guess = stock_from_detail_path(detail_path)
+        div_guess = dividend_from_detail_path(detail_path)
+        ohlc_match = match_daily_csv_for_detail(
+            detail_path,
+            csv_root,
+            fallback_divs=divs,
+        )
         daily_all: list[Path] = []
-        seen_names: set[str] = set()
+        seen_paths: set[str] = set()
+
+        def _add_daily(p: Path) -> None:
+            try:
+                key = str(p.resolve())
+            except Exception:
+                key = str(p)
+            if key in seen_paths:
+                return
+            seen_paths.add(key)
+            daily_all.append(p)
+
+        if ohlc_match is not None:
+            _add_daily(Path(ohlc_match))
         for d in csv_dirs or [csv_dir]:
             for p in list_daily_csvs(d):
-                if p.name in seen_names:
-                    continue
-                seen_names.add(p.name)
-                daily_all.append(p)
-        ohlc_match = None
-        for p in daily_all:
-            if code_guess and code_guess in p.name:
-                ohlc_match = p
-                break
+                _add_daily(p)
+        opt_keys = [""] + [str(p) for p in daily_all]
+        default_idx = 0
+        if ohlc_match is not None:
+            try:
+                want = str(Path(ohlc_match).resolve())
+            except Exception:
+                want = str(ohlc_match)
+            for i, p in enumerate(daily_all):
+                try:
+                    got = str(p.resolve())
+                except Exception:
+                    got = str(p)
+                if got == want or str(p) == str(ohlc_match):
+                    default_idx = i + 1
+                    break
         ohlc_opt = st.selectbox(
             "关联日线（可选，画 K 线）",
-            ["（不关联）"] + [p.name for p in daily_all],
-            index=(1 + [p.name for p in daily_all].index(ohlc_match.name))
-            if ohlc_match
-            else 0,
+            options=opt_keys,
+            index=min(default_idx, max(0, len(opt_keys) - 1)),
+            format_func=lambda k: "（不关联）" if not k else _daily_csv_label(Path(k)),
+            key="an_ohlc_%s_%s" % (detail_path.parent.name, detail_path.name),
         )
         ohlc_csv = None
-        stock = ""
+        stock = stock_guess
         d0 = d1 = None
-        if ohlc_opt != "（不关联）":
-            ohlc_csv = next((p for p in daily_all if p.name == ohlc_opt), None)
-            if ohlc_csv is not None:
+        if ohlc_opt:
+            ohlc_csv = Path(ohlc_opt)
+            if ohlc_csv.is_file():
                 try:
                     meta = peek_daily_csv_meta(ohlc_csv)
-                    stock = meta["stock"]
+                    stock = str(meta.get("stock") or stock_guess or "")
                     d0, d1 = ymd_to_date(meta["start"]), ymd_to_date(meta["end"])
                 except Exception as e:
                     st.warning(f"日线读取失败：{e}")
                     ohlc_csv = None
+            else:
+                ohlc_csv = None
+        auto_on = False
+        if ohlc_match is not None and ohlc_csv is not None:
+            try:
+                auto_on = ohlc_csv.resolve() == Path(ohlc_match).resolve()
+            except Exception:
+                auto_on = str(ohlc_csv) == str(ohlc_match)
+        if auto_on:
+            st.caption(
+                "已按明细关联 %s · %s"
+                % (
+                    stock_guess or stock or "?",
+                    dividend_label(
+                        normalize_dividend_type(ohlc_csv.parent.name) or div_guess
+                    ),
+                )
+            )
+        elif ohlc_match is None:
+            want_div = div_guess or (divs[0] if divs else DEFAULT_DIVIDEND_TYPE)
+            st.caption(
+                "未找到对应日线，缺 `csv/%s/` 下 %s"
+                % (want_div, stock_guess or detail_path.name)
+            )
 
         # 明细自身时间范围
         try:

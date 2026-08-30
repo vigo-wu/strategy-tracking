@@ -1090,6 +1090,107 @@ class TypedDirTests(unittest.TestCase):
             self.assertEqual([d for d, _p in sibs], ["front", "front_ratio"])
 
 
+class StockFilterTokensTests(unittest.TestCase):
+    def test_comma_space_and_runs(self):
+        from analyze import parse_stock_filter_tokens, stock_matches_filter
+
+        self.assertEqual(parse_stock_filter_tokens("600350,600028"), ["600350", "600028"])
+        self.assertEqual(parse_stock_filter_tokens("600350  600028"), ["600350", "600028"])
+        self.assertEqual(
+            parse_stock_filter_tokens("600350,,  , 600028"),
+            ["600350", "600028"],
+        )
+        self.assertEqual(
+            parse_stock_filter_tokens("600350.SH，601939"),
+            ["600350.SH", "601939"],
+        )
+        stocks = ["600350.SH", "600028.SH", "601939.SH"]
+        toks = parse_stock_filter_tokens("600350,  600028")
+        self.assertEqual(
+            [s for s in stocks if stock_matches_filter(s, toks)],
+            ["600350.SH", "600028.SH"],
+        )
+        self.assertTrue(stock_matches_filter("600350.SH", []))
+        self.assertEqual(parse_stock_filter_tokens(" , , "), [])
+        self.assertTrue(stock_matches_filter("600350.SH", ["600350_SH"]))
+
+
+class MatchDailyForDetailTests(unittest.TestCase):
+    def _write_daily(self, folder: Path, stock: str) -> Path:
+        folder.mkdir(parents=True, exist_ok=True)
+        name = "%s_1d_20200102_20200103.csv" % stock.replace(".", "_")
+        path = folder / name
+        path.write_text(
+            "stock,period,datetime,open,high,low,close,volume,amount\n"
+            "%s,1d,20200102,1,1,1,1,100,100\n"
+            "%s,1d,20200103,1,1,1,1,100,100\n"
+            % (stock, stock),
+            encoding="utf-8",
+        )
+        return path
+
+    def test_stock_from_local_bt_filename(self):
+        from analyze import stock_from_detail_path
+
+        p = Path("report/front/local_bt_600350_SH_2024_SMA_操作明细.csv")
+        self.assertEqual(stock_from_detail_path(p, read_csv=False), "600350.SH")
+
+    def test_div_from_report_folder(self):
+        from analyze import dividend_from_detail_path
+
+        p = Path("report/front/local_bt_600350_SH_操作明细.csv")
+        self.assertEqual(dividend_from_detail_path(p), "front")
+        hist = Path("hongli_band") / "回测记录" / "foo.csv"
+        self.assertEqual(dividend_from_detail_path(hist), "")
+
+    def test_front_detail_hits_front_not_ratio(self):
+        from analyze import match_daily_csv_for_detail
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            csv_root = root / "csv"
+            front_d = self._write_daily(csv_root / "front", "600350.SH")
+            ratio_d = self._write_daily(csv_root / "front_ratio", "600350.SH")
+            detail = root / "report" / "front" / "local_bt_600350_SH_2024_SMA_操作明细.csv"
+            detail.parent.mkdir(parents=True, exist_ok=True)
+            detail.write_text("x", encoding="utf-8")
+            found = match_daily_csv_for_detail(
+                detail,
+                csv_root,
+                fallback_divs=["front_ratio"],
+            )
+            self.assertIsNotNone(found)
+            self.assertEqual(found.resolve(), front_d.resolve())
+            self.assertNotEqual(found.resolve(), ratio_d.resolve())
+
+    def test_hist_uses_fallback_div(self):
+        from analyze import match_daily_csv_for_detail
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            csv_root = root / "csv"
+            ratio_d = self._write_daily(csv_root / "front_ratio", "600350.SH")
+            self._write_daily(csv_root / "front", "600350.SH")
+            detail = root / "回测记录" / "local_bt_600350_SH_操作明细.csv"
+            detail.parent.mkdir(parents=True, exist_ok=True)
+            detail.write_text("x", encoding="utf-8")
+            found = match_daily_csv_for_detail(
+                detail,
+                csv_root,
+                fallback_divs=["front_ratio"],
+            )
+            self.assertIsNotNone(found)
+            self.assertEqual(found.resolve(), ratio_d.resolve())
+
+    def test_stock_from_code_column(self):
+        from analyze import stock_from_detail_path
+
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "export.csv"
+            p.write_text("代码,名称\n600350,山东高速\n", encoding="utf-8")
+            self.assertEqual(stock_from_detail_path(p), "600350")
+
+
 class ParseDividendTypesTests(unittest.TestCase):
     def test_comma_and_space(self):
         from analyze import parse_dividend_types

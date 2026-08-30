@@ -68,6 +68,41 @@ def resolve_typed_dir(root: str | Path, dividend_type: Any = "") -> Path:
     return base / div
 
 
+def parse_stock_filter_tokens(raw: Any) -> list[str]:
+    """代码过滤：逗号（含中文逗号）或空白拆多个 token；连续分隔符当一次。"""
+    s = str(raw or "").strip().upper()
+    if not s:
+        return []
+    s = s.replace("，", ",").replace("；", " ").replace(";", " ")
+    out: list[str] = []
+    seen: set[str] = set()
+    for chunk in s.replace(",", " ").split():
+        t = chunk.strip().upper()
+        if (not t) or t in seen:
+            continue
+        seen.add(t)
+        out.append(t)
+    return out
+
+
+def stock_matches_filter(stock: str, tokens: list[str] | None) -> bool:
+    """空 token 不过滤；任一 token 命中代码（含子串、600350_SH / 600350.SH）。"""
+    if not tokens:
+        return True
+    s = str(stock or "").strip().upper()
+    if not s:
+        return False
+    compact = s.replace("_", ".")
+    for raw in tokens:
+        t = str(raw or "").strip().upper()
+        if not t:
+            continue
+        t_norm = t.replace("_", ".")
+        if t in s or t_norm in compact:
+            return True
+    return False
+
+
 def parse_dividend_types(raw: Any) -> list[str]:
     """逗号/空白分隔的复权列表，按 DIVIDEND_TYPES 去重保序。空输入 → 默认一种。"""
     parts: list[str] = []
@@ -119,13 +154,127 @@ def typed_sibling_dirs(path: str | Path) -> list[tuple[str, Path]]:
 typed_report_dirs = typed_sibling_dirs
 
 
+_DETAIL_NAME_RE = re.compile(
+    r"^local_bt_(\d{6})_(SZ|SH)(?:_(\d{4}))?(?:_(SMA|EMA))?_操作明细\.csv$",
+    re.IGNORECASE,
+)
+_CODE_EX_IN_NAME = re.compile(r"(\d{6})[._](SZ|SH)", re.IGNORECASE)
+
+
+def _norm_listed_stock(raw: Any) -> str:
+    s = str(raw or "").strip().upper().replace("_", ".")
+    if not s:
+        return ""
+    m = re.match(r"^(\d{6})\.(SH|SZ)$", s)
+    if m:
+        return "%s.%s" % (m.group(1), m.group(2))
+    m = re.match(r"^(\d{6})$", s)
+    if m:
+        return m.group(1)
+    return ""
+
+
+def _stock_token_match(meta_stock: str, want: str) -> bool:
+    a = _norm_listed_stock(meta_stock) or str(meta_stock or "").strip().upper().replace("_", ".")
+    b = _norm_listed_stock(want) or str(want or "").strip().upper().replace("_", ".")
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    ac = a.split(".", 1)[0]
+    bc = b.split(".", 1)[0]
+    if ac != bc:
+        return False
+    am = a.split(".", 1)[1] if "." in a else ""
+    bm = b.split(".", 1)[1] if "." in b else ""
+    if am and bm and am != bm:
+        return False
+    return True
+
+
 def daily_csv_for_stock(csv_dir: str | Path, stock: str) -> Path | None:
     want = str(stock or "").strip().upper()
     if not want:
         return None
     for meta in daily_csvs_by_stock(csv_dir):
-        if str(meta.get("stock") or "").strip().upper() == want:
-            return Path(str(meta.get("path") or ""))
+        got = str(meta.get("stock") or "").strip().upper()
+        if got == want or _stock_token_match(got, want):
+            path = Path(str(meta.get("path") or ""))
+            if str(path):
+                return path
+    return None
+
+
+def stock_from_detail_path(path: str | Path, *, read_csv: bool = True) -> str:
+    """从操作明细文件名（或代码列）推断 600350.SH。"""
+    p = Path(path)
+    m = _DETAIL_NAME_RE.match(p.name)
+    if m:
+        return "%s.%s" % (m.group(1), m.group(2).upper())
+    m2 = _CODE_EX_IN_NAME.search(p.stem)
+    if m2:
+        return "%s.%s" % (m2.group(1), m2.group(2).upper())
+    if not read_csv:
+        return ""
+    return _stock_from_detail_csv(p)
+
+
+def _stock_from_detail_csv(path: Path) -> str:
+    try:
+        import csv as _csv
+
+        with path.open("r", encoding="utf-8-sig", errors="replace") as f:
+            reader = _csv.reader(f)
+            header = next(reader, None)
+            if not header:
+                return ""
+            idx = None
+            for i, c in enumerate(header):
+                if str(c).strip() in ("代码", "证券代码"):
+                    idx = i
+                    break
+            if idx is None:
+                return ""
+            for row in reader:
+                if idx >= len(row):
+                    continue
+                tok = _norm_listed_stock(row[idx])
+                if tok:
+                    return tok
+    except Exception:
+        return ""
+    return ""
+
+
+def dividend_from_detail_path(path: str | Path) -> str:
+    """明细父目录名是复权类型则返回；回测记录等返回空串。"""
+    return normalize_dividend_type(Path(path).parent.name)
+
+
+def match_daily_csv_for_detail(
+    detail: str | Path,
+    csv_root: str | Path,
+    fallback_divs: list[str] | tuple[str, ...] | None = None,
+) -> Path | None:
+    """按明细标的 + 所在复权目录匹配 csv/<type>/ 日线；目录无文件再试 fallback_divs。"""
+    stock = stock_from_detail_path(detail)
+    if not stock:
+        return None
+    order: list[str] = []
+    preferred = dividend_from_detail_path(detail)
+    if preferred:
+        order.append(preferred)
+    for raw in fallback_divs or ():
+        d = normalize_dividend_type(raw)
+        if d and d not in order:
+            order.append(d)
+    if not order:
+        order.append(DEFAULT_DIVIDEND_TYPE)
+    root = Path(csv_root)
+    for div in order:
+        found = daily_csv_for_stock(resolve_typed_dir(root, div), stock)
+        if found is not None and found.is_file():
+            return found
     return None
 
 
