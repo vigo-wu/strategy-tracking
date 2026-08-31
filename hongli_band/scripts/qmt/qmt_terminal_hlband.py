@@ -30,20 +30,12 @@ BOOK_STOCKS = {
     "600028.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 中国石油
     "600188.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 兖矿能源
     "603259.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 药名康德
-    "601877.SH": {"ma_type": "SMA", "dividend_type": "front_ratio"},
-    "600938.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
-    "605499.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
-    "600741.SH": {"ma_type": "EMA", "dividend_type": "front"},
-    "000301.SZ": {"ma_type": "EMA", "dividend_type": "front"},
-    "002001.SZ": {"ma_type": "EMA", "dividend_type": "front_ratio"},
-    "002050.SZ": {"ma_type": "SMA", "dividend_type": "front_ratio"},
-    "601988.SH": {"ma_type": "EMA", "dividend_type": "front"},
 }
 # 单实例共享信号账本（不是 STATE_FILE；禁止按标的分文件）
-BOOK_FILE = r"D:\tradingStrategy\hlband_book.json"
+BOOK_FILE = r"D:\HlBandV5\hlband_book.json"
 # 确认打卡截止：14:56 打卡，14:56:30 冻结，须在 14:57 集合竞价前完成分档下单
 BOOK_FREEZE_CLOSE = "145630"
-BOOK_FREEZE_OPEN = "093200"
+BOOK_FREEZE_OPEN = "093030"
 # 可部署比例（相对 E_s = 总资产-其它股票市值）；其余留作 T+1 / 废单重试
 CASH_RATIO = 0.90
 # 全池同时最多几笔（开仓+加仓）。第 4 笔不下。
@@ -202,7 +194,7 @@ OPEN_EXEC_START = "093000"
 OPEN_EXEC_END = "094500"
 # 收盘确认信号时窗（与尾盘成交窗重叠；盘后仍可确认，成交则等到次日开盘窗）
 SIGNAL_CONFIRM_START = "145600"
-SIGNAL_CONFIRM_END = "160000"
+SIGNAL_CONFIRM_END = "150000"
 # 实盘心跳/状态行间隔（秒）；空仓与持仓无新信号沿时均按此节流
 LIVE_HEARTBEAT_SEC = 300
 # 实盘取数：window=确认窗/开盘兜底才拉日+周，盘中只 pending；always=决策窗内每次当确认窗
@@ -229,14 +221,14 @@ PENDING_ORPHAN_SEC = 60
 
 # QMT 模型无 __file__；状态绝对路径（含 {stock}，宇宙循环按票分文件）
 #   513530.SH → ...\hlband_513530_SH.json
-STATE_FILE = r"D:\tradingStrategy\hlband_{stock}.json"
+STATE_FILE = r"D:\HlBandV5\hlband_{stock}.json"
 # 实盘结构化日志根目录；落盘为 LOG_DIR/<stock_tag>/{tag}_events.jsonl 等
 # 空字符串关闭落盘（仍保留终端 print）
-LOG_DIR = r"D:\tradingStrategy\logs"
+LOG_DIR = r"D:\HlBandV5\logs"
 # True=回测也写日志（默认关，避免回测刷爆磁盘）
 LOG_IN_BACKTEST = False
 
-STRATEGY_NAME = "HlBand"
+STRATEGY_NAME = "HlBandV5"
 STRATEGY_VER = "v1.63"
 # =======================================================
 
