@@ -58,6 +58,13 @@ def _trail_arm():
 def init(C):
     A.busy = False
     A._hb_at = None
+    A._universe_timer_at = None
+    A._timer_reg = False
+    A._timer_rereg = False
+    A._timer_gate_at = None
+    A._hb_pump_log_at = None
+    A._state_log_sig = {}
+    A._state_saved_fp = {}
     try:
         _apply_panel()
         _init_impl(C)
@@ -215,29 +222,24 @@ def _init_impl(C):
             )
     else:
         # 实盘宇宙：不按主图/时钟 load；第一轮定时回调再 _activate_stock
+        A._bt_alive = False
         _reset_stock_ctx()
         A.stock = ""
         A.ready_logged = False
-
-    _apply_watch_universe(C)
 
     drive = "handlebar"
     if A.is_backtest:
         # 编辑器回测必须靠 handlebar 扫历史 K。注册 1nSecond 后终端可能改走墙钟
         # 定时、不再推进 barpos；而 _universe_on_timer 在 is_backtest 下直接 return，
         # 表现为 init 之后没有任何 close=/diag。
+        # 不要 set_universe(全池)：终端可能改成等 13 只行情、历史 K 不再往前走。
         print("%s backtest skip run_time drive=handlebar" % STRATEGY_NAME)
     else:
+        _apply_watch_universe(C)
         drive = "timer"
-        try:
-            C.run_time("_universe_on_timer", "1nSecond", "")
-            print(
-                "%s run_time _universe_on_timer 1nSecond start=" % STRATEGY_NAME,
-                "(immediate)",
-            )
-        except Exception as e:
-            print("%s run_time register fail" % STRATEGY_NAME, e)
-            _event_log("run_time_fail", error=str(e))
+        A._clock_C = C
+        _register_universe_timer(C, why="init")
+        _subscribe_clock_quote(C)
 
     uni = list(getattr(A, "watch", None) or [])
     print(
@@ -373,12 +375,18 @@ def _init_impl(C):
         ma_type=_ma_kind(),
         log_dir=str(globals().get("LOG_DIR") or ""),
     )
+    if not A.is_backtest:
+        _kick_universe_after_init(C)
 
 
 def handlebar(C):
+    owned = False
     try:
         _refresh_mode(C)
-        bt = getattr(A, "is_backtest", False)
+        editor_bt = bool(getattr(A, "_bt_alive", False)) and bool(
+            getattr(C, "do_back_test", False)
+        )
+        bt = editor_bt or bool(getattr(A, "is_backtest", False))
         if bt and (not getattr(A, "_bt_hb_logged", False)):
             A._bt_hb_logged = True
             print(
@@ -389,10 +397,13 @@ def handlebar(C):
                 "chart_in_watch=",
                 _chart_in_watch(),
             )
-        if getattr(A, "busy", False):
-            return
-        A.busy = True
         if bt:
+            use_busy = not editor_bt
+            if use_busy and getattr(A, "busy", False):
+                return
+            if use_busy:
+                A.busy = True
+                owned = True
             if _is_local_bt(C) or (not (getattr(A, "watch", None) or [])) or _chart_in_watch():
                 _handle(C)
             elif not getattr(A, "_bt_hb_skip_logged", False):
@@ -403,7 +414,9 @@ def handlebar(C):
                     "watch=",
                     ",".join(getattr(A, "watch", None) or []) or "-",
                 )
-        # 实盘暖机（主图不在池）：只 _refresh_mode。live 扫池只走 run_time。
+        else:
+            # 实盘扫池仍以 run_time 为主；日线主图定时器不回调时由 handlebar 看门狗补扫。
+            _pump_universe_from_handlebar(C)
     except Exception as e:
         print("%s handlebar error" % STRATEGY_NAME, e)
         _event_log("handlebar_error", error=str(e))
@@ -412,4 +425,5 @@ def handlebar(C):
         except Exception:
             pass
     finally:
-        A.busy = False
+        if owned:
+            A.busy = False

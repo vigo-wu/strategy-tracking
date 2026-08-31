@@ -1893,6 +1893,316 @@ class LocalBtUniverseHandlebarTests(unittest.TestCase):
         ns["handlebar"](ctx)
         self.assertEqual(len(called), 1)
 
+    def test_editor_backtest_skips_set_universe(self):
+        # Dimension: MAE — 编辑器回测禁止 set_universe 全池
+        from mock_qmt import MockContext, _as_tag
+        from run import _exec_bundle
+
+        bars = self._bars(stock="600350.SH")
+        store = MarketStore(bars, "600350.SH")
+        walk = bars[-3:]
+        ctx = MockContext(store, [_as_tag(b.dt) for b in walk], "600350.SH")
+        ctx._local_bt = False
+        ctx.do_back_test = True
+        ns = _exec_bundle()
+        ns["_LOCAL_BT"] = False
+        applied = []
+        ns["_apply_watch_universe"] = lambda C: applied.append(1)
+        ns["init"](ctx)
+        self.assertEqual(applied, [])
+        self.assertEqual(ctx.run_time_calls, [])
+
+    def test_backtest_status_every_bar_when_empty(self):
+        # Dimension: MAE — 空仓回测每根都打状态，不再每 20 根才一行
+        from run import _exec_bundle
+
+        ns = _exec_bundle()
+        ns["A"].is_backtest = True
+        ns["A"].ready_logged = True
+
+        class _C(object):
+            barpos = 4581
+
+            def is_last_bar(self):
+                return False
+
+        self.assertTrue(ns["_should_emit_bar_status"](_C(), None, False, False))
+
+    def test_editor_backtest_ignores_last_bar_live_chase(self):
+        # Dimension: State — 编辑器回测 _bt_alive 时末 K 重复推送仍走 _handle
+        from datetime import datetime as dt
+        from mock_qmt import MockContext, _as_tag
+        from run import _exec_bundle
+
+        today = dt.now().strftime("%Y%m%d")
+        bars = self._bars(stock="600350.SH")
+        store = MarketStore(bars, "600350.SH")
+        walk = bars[-3:]
+        ctx = MockContext(store, [_as_tag(b.dt) for b in walk], "600350.SH")
+        ctx._local_bt = False
+        ctx.do_back_test = True
+        ctx._walk_tags = [int(today + "000000")]
+        ctx.is_last_bar = lambda: True
+        ns = _exec_bundle()
+        ns["_LOCAL_BT"] = False
+        handled = []
+        pumped = []
+        ns["_handle"] = lambda C: handled.append(1)
+        ns["_pump_universe_from_handlebar"] = lambda C: pumped.append(1)
+        ns["init"](ctx)
+        self.assertTrue(ns["A"]._bt_alive)
+        ctx.barpos = 0
+        ns["handlebar"](ctx)
+        ns["handlebar"](ctx)
+        ns["handlebar"](ctx)
+        self.assertTrue(ns["A"].is_backtest)
+        self.assertEqual(handled, [1, 1, 1])
+        self.assertEqual(pumped, [])
+
+    def test_live_warmup_chase_still_switches(self):
+        # Dimension: State — 模型交易暖机（无 _bt_alive）今日末 K 第二次仍切实盘
+        from datetime import datetime as dt
+        from mock_qmt import MockContext, _as_tag
+        from run import _exec_bundle
+
+        today = dt.now().strftime("%Y%m%d")
+        bars = self._bars(stock="600350.SH")
+        store = MarketStore(bars, "600350.SH")
+        walk = bars[-3:]
+        ctx = MockContext(store, [_as_tag(b.dt) for b in walk], "600350.SH")
+        ctx._local_bt = False
+        ctx.do_back_test = False
+        ns = _exec_bundle()
+        ns["_LOCAL_BT"] = False
+        ns["_handle_universe"] = lambda C: None
+        ns["_timer_session_idle"] = lambda now_s: False
+        ns["init"](ctx)
+        self.assertFalse(ns["A"]._bt_alive)
+        ctx.do_back_test = True
+        ctx.is_last_bar = lambda: True
+        ctx._walk_tags = [int(today + "000000")]
+        ctx.barpos = 0
+        handled = []
+        pumped = []
+        ns["_handle"] = lambda C: handled.append(1)
+        ns["_pump_universe_from_handlebar"] = lambda C: pumped.append(1)
+        ns["handlebar"](ctx)
+        ns["handlebar"](ctx)
+        self.assertFalse(ns["A"].is_backtest)
+        self.assertEqual(handled, [1])
+        self.assertEqual(pumped, [1])
+
+    def test_universe_timer_starts_never_empty(self):
+        # Dimension: Time — 禁止空串起始；盘中另挂 +2s 墙钟
+        from datetime import datetime as dt
+        from run import _exec_bundle
+
+        ns = _exec_bundle()
+        pre = ns["_universe_timer_starts"]("091417", now=dt(2026, 8, 31, 9, 14, 17))
+        self.assertEqual(pre, ["09:30:00"])
+        mid = ns["_universe_timer_starts"]("093001", now=dt(2026, 8, 31, 9, 30, 1))
+        self.assertEqual(mid[0], "09:30:00")
+        self.assertEqual(mid[1], "09:30:03")
+        late = ns["_universe_timer_starts"]("160000", now=dt(2026, 8, 31, 16, 0, 0))
+        self.assertEqual(late, ["09:30:00"])
+
+    def test_timer_session_idle_gates(self):
+        # Dimension: Time — 盘前/午休/盘后 idle
+        from run import _exec_bundle
+
+        ns = _exec_bundle()
+        self.assertTrue(ns["_timer_session_idle"]("091417"))
+        self.assertFalse(ns["_timer_session_idle"]("093000"))
+        self.assertTrue(ns["_timer_session_idle"]("113000"))
+        self.assertFalse(ns["_timer_session_idle"]("130000"))
+        self.assertTrue(ns["_timer_session_idle"]("160000"))
+
+    def test_live_init_registers_run_time(self):
+        # Dimension: MAE — 实盘 init 注册无下划线回调 + 09:30:00，并同步踢一脚
+        from mock_qmt import MockContext, _as_tag
+        from run import _exec_bundle
+
+        bars = self._bars(stock="000300.SH")
+        store = MarketStore(bars, "000300.SH")
+        walk = bars[-3:]
+        ctx = MockContext(store, [_as_tag(b.dt) for b in walk], "000300.SH")
+        ctx._local_bt = False
+        ctx.do_back_test = False
+        ns = _exec_bundle()
+        ns["_LOCAL_BT"] = False
+        kicked = []
+        ns["_handle_universe"] = lambda C: kicked.append(getattr(ns["A"], "_drive", ""))
+        ns["_timer_session_idle"] = lambda now_s: False
+        ns["init"](ctx)
+        names = [c[0][0] for c in ctx.run_time_calls]
+        self.assertIn("universe_on_timer", names)
+        starts = [c[0][2] for c in ctx.run_time_calls]
+        self.assertIn("09:30:00", starts)
+        self.assertNotIn("", starts)
+        self.assertTrue(ns["A"]._timer_reg)
+        self.assertTrue(ctx.subscribe_calls)
+        self.assertEqual(kicked, ["init_kick"])
+        self.assertTrue(callable(ns.get("universe_on_timer")))
+
+    def test_handlebar_pumps_universe_when_timer_stale(self):
+        # Dimension: State — 日线定时器未打点时 handlebar 看门狗补扫
+        from mock_qmt import MockContext, _as_tag
+        from run import _exec_bundle
+
+        bars = self._bars(stock="000300.SH")
+        store = MarketStore(bars, "000300.SH")
+        walk = bars[-3:]
+        ctx = MockContext(store, [_as_tag(b.dt) for b in walk], "000300.SH")
+        ctx._local_bt = False
+        ctx.do_back_test = False
+        ns = _exec_bundle()
+        ns["_LOCAL_BT"] = False
+        pumped = []
+        ns["_handle_universe"] = lambda C: pumped.append(1)
+        ns["_timer_session_idle"] = lambda now_s: False
+        ns["init"](ctx)
+        del pumped[:]
+        ns["A"].is_backtest = False
+        ns["A"]._universe_timer_at = None
+        ns["A"].busy = False
+        ctx.barpos = 0
+        ns["handlebar"](ctx)
+        self.assertEqual(pumped, [1])
+        self.assertIsNotNone(ns["A"]._universe_timer_at)
+
+    def test_handlebar_does_not_clear_foreign_busy(self):
+        # Dimension: State — handlebar 未持锁时不得清掉定时器 busy
+        from mock_qmt import MockContext, _as_tag
+        from run import _exec_bundle
+
+        bars = self._bars(stock="600350.SH")
+        store = MarketStore(bars, "600350.SH")
+        walk = bars[-3:]
+        ctx = MockContext(store, [_as_tag(b.dt) for b in walk], "600350.SH")
+        ctx._local_bt = False
+        ctx.do_back_test = True
+        ns = _exec_bundle()
+        ns["_LOCAL_BT"] = False
+        ns["init"](ctx)
+        ns["A"].busy = True
+        ctx.barpos = 0
+        ns["handlebar"](ctx)
+        self.assertTrue(ns["A"].busy)
+
+    def test_timer_skip_logs_idle_instead_of_silent(self):
+        # Dimension: MAE — idle 门禁必须打 timer skip，不能再静默
+        from mock_qmt import MockContext, _as_tag
+        from run import _exec_bundle
+
+        bars = self._bars(stock="000300.SH")
+        store = MarketStore(bars, "000300.SH")
+        walk = bars[-2:]
+        ctx = MockContext(store, [_as_tag(b.dt) for b in walk], "000300.SH")
+        ctx._local_bt = False
+        ctx.do_back_test = False
+        ns = _exec_bundle()
+        ns["_LOCAL_BT"] = False
+        ns["_handle_universe"] = lambda C: None
+        ns["init"](ctx)
+        ns["A"].is_backtest = False
+        ns["A"].busy = False
+        ns["_timer_session_idle"] = lambda now_s: True
+        events = []
+        ns["_event_log"] = lambda name, **kw: events.append((name, kw))
+        ns["_universe_on_timer"](ctx)
+        self.assertTrue(any(x[0] == "timer_skip" and x[1].get("reason") == "session_idle" for x in events))
+
+
+class LocalBtStateIoLogTests(unittest.TestCase):
+    def _ns(self, td):
+        from run import _exec_bundle
+
+        ns = _exec_bundle()
+        ns["STATE_FILE"] = str(Path(td) / "hlband_{stock}.json")
+        ns["LOG_DIR"] = ""
+        ns["A"].is_backtest = False
+        ns["A"].stock = "600350.SH"
+        ns["A"]._state_log_sig = {}
+        ns["A"]._state_saved_fp = {}
+        ns["_reset_stock_ctx"]()
+        ns["A"].stock = "600350.SH"
+        return ns
+
+    def test_state_log_once_same_sig(self):
+        # Dimension: State — 同 path+指纹第二次不打
+        from run import _exec_bundle
+
+        ns = _exec_bundle()
+        ns["A"]._state_log_sig = {}
+        self.assertTrue(ns["_state_log_once"]("p", "empty"))
+        self.assertFalse(ns["_state_log_once"]("p", "empty"))
+        self.assertTrue(ns["_state_log_once"]("p", "loaded|x"))
+        self.assertTrue(ns["_state_log_once"]("q", "empty"))
+
+    def test_load_empty_logs_once_per_path(self):
+        # Dimension: State — 无文件 empty 每 path 每会话一次
+        events = []
+        with tempfile.TemporaryDirectory() as td:
+            ns = self._ns(td)
+            ns["_event_log"] = lambda name, **kw: events.append(name)
+            ns["_load_state"]()
+            ns["_load_state"]()
+        self.assertEqual(events.count("state_empty"), 1)
+        self.assertEqual(events.count("state_loaded"), 0)
+
+    def test_load_state_logs_once_until_position_changes(self):
+        # Dimension: State — 仓位变化后才再打 state loaded
+        events = []
+        with tempfile.TemporaryDirectory() as td:
+            ns = self._ns(td)
+            ns["_event_log"] = lambda name, **kw: events.append(name)
+            ns["_live_state_snapshot"] = lambda data: None
+            ns["A"].position = {
+                "shares": 100,
+                "price": 10.0,
+                "cost": 10.0,
+                "opened_at": "2026-01-01",
+            }
+            ns["_save_state"]()
+            events[:] = []
+            ns["_load_state"]()
+            ns["_load_state"]()
+            self.assertEqual(events.count("state_loaded"), 1)
+            ns["A"].position["shares"] = 200
+            ns["_save_state"]()
+            events[:] = []
+            ns["_load_state"]()
+            self.assertEqual(events.count("state_loaded"), 1)
+
+    def test_save_state_skips_unchanged(self):
+        # Dimension: MAE — 内容未变不重写盘、不打快照
+        snaps = []
+        with tempfile.TemporaryDirectory() as td:
+            ns = self._ns(td)
+            ns["_live_state_snapshot"] = lambda data: snaps.append(1)
+            ns["_save_state"]()
+            ns["_save_state"]()
+        self.assertEqual(len(snaps), 1)
+
+    def test_mismatch_and_load_fail_always_log(self):
+        # Dimension: MAE — mismatch / load fail 不节流
+        import json
+
+        events = []
+        with tempfile.TemporaryDirectory() as td:
+            ns = self._ns(td)
+            ns["_event_log"] = lambda name, **kw: events.append(name)
+            p = ns["_state_path"]()
+            Path(p).write_text(json.dumps({"stock": "601939.SH"}), encoding="utf-8")
+            ns["_load_state"]()
+            ns["_load_state"]()
+            self.assertEqual(events.count("state_stock_mismatch"), 2)
+            events[:] = []
+            Path(p).write_text("{not-json", encoding="utf-8")
+            ns["_load_state"]()
+            ns["_load_state"]()
+            self.assertEqual(events.count("state_load_fail"), 2)
+
 
 class FingerprintAggTests(unittest.TestCase):
     def test_glob_fingerprint_is_triple(self):

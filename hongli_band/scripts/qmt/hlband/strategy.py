@@ -868,7 +868,7 @@ def _log_pending_defer_once(kind, day, now_s, signal_day):
 def _should_emit_bar_status(C, now, force, status_idle):
     """
     状态行是否输出。
-    force（信号上升沿）立刻打；回测 idle 逐 bar、非 idle 每 20 根；
+    force（信号上升沿）立刻打；回测逐根打（空仓也打，避免误以为停住）；
     实盘无新沿时一律按 LIVE_HEARTBEAT_SEC 节流（空仓/持仓/挂起相同）。
     """
     if not getattr(A, "ready_logged", False):
@@ -876,12 +876,7 @@ def _should_emit_bar_status(C, now, force, status_idle):
     if force:
         return True
     if getattr(A, "is_backtest", False):
-        if status_idle:
-            return True
-        try:
-            return int(getattr(C, "barpos", 0) or 0) % 20 == 0
-        except Exception:
-            return False
+        return True
     sec = int(globals().get("LIVE_HEARTBEAT_SEC") or 60)
     if sec <= 0:
         return True
@@ -1979,11 +1974,12 @@ def _handle_stock(C, ctx):
             "%s" % STRATEGY_NAME,
             day,
             hhmm,
-            "n1d=%d n1w=%d close=%.4f sig_d=%s sig_w=%s phase=%s prev_d=%s prev_w=%s "
+            "barpos=%s n1d=%d n1w=%d close=%.4f sig_d=%s sig_w=%s phase=%s prev_d=%s prev_w=%s "
             "w_bull=%s w_bear=%s w_bn=%s/%s w_ma5=%s w_ma30=%s w_hist=%s "
             "buy=%s buyR=%s scale=%s scaleR=%s sell=%s sellR=%s "
             "hold=%s nlot=%s ret=%s pe=%s px=%s bt_held=%s avail=%s"
             % (
+                getattr(C, "barpos", "-"),
                 len(closes_s),
                 len(closes_ws),
                 price,

@@ -46,12 +46,17 @@ def _refresh_mode(C):
     国金模型交易常先以 do_back_test=True 暖机历史，
     再进入同一根最新 K 做实时，而标志可能仍为 True。
     追赶规则: 今日最新 K 上 barpos 不变的第 2 次及以后调用 => 实盘。
+    编辑器回测会设 A._bt_alive：全程 do_back_test=True，末根也常是今日，
+    禁止追赶，否则 handlebar 改走扫池、历史 K 停住。
     """
     prev = getattr(A, "is_backtest", None)
     raw = bool(getattr(C, "do_back_test", False))
     A.do_back_test_raw = raw
     use_bt = raw
-    if raw:
+    if raw and getattr(A, "_bt_alive", False):
+        use_bt = True
+        A._mode_same_bp_hits = 0
+    elif raw:
         try:
             if C.is_last_bar():
                 bp = int(getattr(C, "barpos", 0) or 0)

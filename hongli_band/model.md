@@ -166,7 +166,7 @@
 
 实盘改参：模型交易里打开**这一个**策略实例，改「模拟下单 / 可部署比例 / 高位禁开 / 追高 / 硬止损 / 加仓开关」后确定再运行。跟踪池只数以 `BOOK_STOCKS` 长度为准，不要在面板改 N。增减标的改 `BOOK_STOCKS` 后 deploy 并重启这一实例。`TRADE_BUDGET` 仅回测回落；策略交易注入了该值时**不再**读 `TRADE_BUDGET_BY_STOCK`。编辑器回测仍用 config 与按标的覆盖（一图一票，主图挂池内那只）。
 
-实盘：**主图只当时钟**（建议挂不在 `BOOK_STOCKS` 的日线指数）；扫池只走 `run_time`（`1nSecond`，起始空串立即启动）。勿勾独立运行/简易运行。确认窗/开盘兜底才拉全量 K，盘中只处理 pending。账本同一轮先 eval 打卡再 exec 买入。上线前必须停掉旧多图实例。定时下单 `quickTrade=2`。
+实盘：**主图只当时钟**（建议挂不在 `BOOK_STOCKS` 的日线指数）。`run_time` 用公开名 `universe_on_timer`（不用下划线），盘前/盘中都挂 `09:30:00`，盘中再挂数秒后的墙钟；**禁止空串起始**。init 结束会同步踢一轮。另订时钟图 1 分钟/`subscribe_quote` 作看门狗（日线 handlebar 在 bar 已形成后可能不再回调）。勿勾独立运行/简易运行。确认窗/开盘兜底才拉全量 K，盘中只处理 pending。账本同一轮先 eval 打卡再 exec 买入。上线前必须停掉旧多图实例。定时下单 `quickTrade=2`。
 
 | 配置 | 当前值 | 说明 |
 | :--- | :--- | :--- |
@@ -212,7 +212,7 @@
 | `STATE_FILE` | `D:\tradingStrategy\hlband_{stock}.json` | 实盘状态；宇宙循环按票分文件 |
 | `LOG_DIR` | `D:\tradingStrategy\logs` | 实盘结构化日志根目录 |
 
-日志确认 `HlBand v1.59 init` 且 `UNIVERSE n=` 与 `book_stocks=` 一致、`chart=` 不在池内（建议指数）、`drive=timer`、`ohlcv_policy= window`、`DIVIDEND= per-stock`、`cash_ratio= 0.9`、`BOOK_N=` 与名单只数一致后再挂实盘。策略交易下应另有 `panel applied ...` 与 `run_time _universe_on_timer` 行。只开**一个**实例写 `BOOK_FILE`；无信号也要打卡。切 live 后 `state loaded path=` 应为 `hlband_600350_SH.json` 等池内票，**不应**出现时钟指数后缀。10:00 心跳 `work=pending drive=timer`，无全池 `n1d=`；14:56 后每只 `phase=confirm`；15:00 后仍应有定时心跳直到确认结束。实盘买入应看到 `fill ... frac= n_held= vacant= lot= why=split`（持股查询失败备用为 `src=local`）；未冻结为 `why=wait`。空池第一笔 `frac=0.50`（20 万账户约 9 万），第二笔 `frac=0.30`（约 5.4 万），第三笔 `frac` 仍是空档 0.50/0.30/0.20、`lot` 接近 `cap - book_mv`。满 3 笔 `book_lot_cap`。本轮已加过仓后再出买点应 `scale_once`，无第 3 笔。验收：回测先见 `diag: ok`（主图挂池内一只）；买卖日志为 `@close=`（同日）或残留 `@open=`；买卖闭合、无孤儿仓。第一笔仍为 `pullback_vol`；加仓应为 `pullback_vol` / `plat_break` / `w_macd_golden`（状态行 `scale= True`），成交附近有 `lots now n=2`、`book_frac` 与 `skip sell eval after add fill`。加仓当日状态行 `sellR` 应含 `skip_add_bar`，且不应新挂卖点。本轮已加过仓后再出第一笔时，不应再出现 `BUY add`（可见 `scale_once` 或 `pending_entry cancel scale_once`）。执行日已触发卖点时应看到 `pending_entry cancel scale_sell_block` 且不出现 `BUY add`。只出一笔时应看到 `SELL ... lots=[1]` 且另一笔仍持有。卖出前应有 `SELL lot-can_use`；若 `BUY add` 后同日仍出现 `SELL lots=[2]`，看 `risk=True` 的 WARN（券商成交未必是第二笔）。T+1 部分成交应看到 `pending_exit keep after partial fill`。趋势仓满 30 日且峰值≥3%、仍站上 EMA60 时应看到 `time_force skip trend`，之后由 `trail_stop` / `weekly_bear` / 破 EMA60 出场；磨人仓仍应看到 `time_force grace`。
+日志确认 `HlBand_BETA v1.65 init`。模型交易须有 `init kick universe` / `universe begin`。例行 `state loaded` 每票每会话一次。编辑器回测：`BACKTEST= True`、不要出现 `set_universe n=13`；空仓也逐根打状态行（含 `barpos=`），应能看到日期从区间首日推进到末日。`run_time` 行应为 `universe_on_timer` 且 `start= 09:30:00`（不要 `(immediate)`）。另应有 `subscribe_quote 000300.SH 1m`。只开**一个**实例写 `BOOK_FILE`；无信号也要打卡。实盘买入应看到 `fill ... frac= n_held= vacant= lot= why=split`（持股查询失败备用为 `src=local`）；未冻结为 `why=wait`。空池第一笔 `frac=0.50`（20 万账户约 9 万），第二笔 `frac=0.30`（约 5.4 万），第三笔 `frac` 仍是空档 0.50/0.30/0.20、`lot` 接近 `cap - book_mv`。满 3 笔 `book_lot_cap`。本轮已加过仓后再出买点应 `scale_once`，无第 3 笔。验收：回测先见 `diag: ok`（主图挂池内一只）；买卖日志为 `@close=`（同日）或残留 `@open=`；买卖闭合、无孤儿仓。第一笔仍为 `pullback_vol`；加仓应为 `pullback_vol` / `plat_break` / `w_macd_golden`（状态行 `scale= True`），成交附近有 `lots now n=2`、`book_frac` 与 `skip sell eval after add fill`。加仓当日状态行 `sellR` 应含 `skip_add_bar`，且不应新挂卖点。本轮已加过仓后再出第一笔时，不应再出现 `BUY add`（可见 `scale_once` 或 `pending_entry cancel scale_once`）。执行日已触发卖点时应看到 `pending_entry cancel scale_sell_block` 且不出现 `BUY add`。只出一笔时应看到 `SELL ... lots=[1]` 且另一笔仍持有。卖出前应有 `SELL lot-can_use`；若 `BUY add` 后同日仍出现 `SELL lots=[2]`，看 `risk=True` 的 WARN（券商成交未必是第二笔）。T+1 部分成交应看到 `pending_exit keep after partial fill`。趋势仓满 30 日且峰值≥3%、仍站上 EMA60 时应看到 `time_force skip trend`，之后由 `trail_stop` / `weekly_bear` / 破 EMA60 出场；磨人仓仍应看到 `time_force grace`。
 
 ### 上线后确认事项（C1–C12）
 
@@ -221,7 +221,7 @@
 | 项 | 要点 | 否则 |
 | :--- | :--- | :--- |
 | C1 P0 非主图下单 | 模拟盘、主图池外指数，池内一只 `passorder` 品种 ≠ 主图，柜台/委托列表出现该代码 | 本方案不能实盘，退回一图一票 |
-| C2 P0 `run_time` 真跑 | 策略交易切 live（不要只用编辑器运行）。10:00 `drive=timer`；15:05 仍有心跳；handlebar 不扫池 | 查独立运行、函数名、起始是否写成了 09:30。不恢复 tick 扫池 |
+| C2 P0 扫池真跑 | 策略交易切 live。init 后立刻 `init kick universe` + `universe begin`；有 `subscribe_quote`；`run_time universe_on_timer start=09:30:00` | 空串起始、下划线函数名、日线 handlebar 不推。不要退回 tick 算指标 |
 | C3 主图 | `chart=` 不在 `book_stocks=`；暖机无指数买卖点 | 改挂指数；不要改回 tick 驱动 |
 | C4 旧多图已停 | 模型交易只留一个 HlBand | 双打卡双下单 |
 | C5 STATE 路径 | `hlband_<池内代码>_SH.json`，无指数后缀文件 | 停机，禁止按时钟 load |
