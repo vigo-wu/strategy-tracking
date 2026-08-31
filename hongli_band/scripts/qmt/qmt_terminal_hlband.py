@@ -24,15 +24,24 @@ ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 # k / book_mv 只统计 BOOK_STOCKS。N = 字典长度。实盘单实例监视全池并写账本；回测用 TRADE_BUDGET。
 # 形态：code → 配置字典。ma_type（EMA|SMA）；dividend_type 见下方复权注释。
 # 简写兼容：value 写成 "SMA" 视为 {"ma_type": "SMA"}；旧纯字符串 tuple 仍认作白名单。
-BOOK_STOCKS = BOOK_STOCKS = {
+BOOK_STOCKS = {
     "600350.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"}, # 山东高速
     "601939.SH": {"ma_type": "SMA", "dividend_type": "front"}, # 建设银行
     "600028.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 中国石油
     "600188.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 兖矿能源
     "603259.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 药名康德
+    # 临时
+    "601877.SH": {"ma_type": "SMA", "dividend_type": "front_ratio"},
+    "600938.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "605499.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "600741.SH": {"ma_type": "EMA", "dividend_type": "front"},
+    "000301.SZ": {"ma_type": "EMA", "dividend_type": "front"},
+    "002001.SZ": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "002050.SZ": {"ma_type": "SMA", "dividend_type": "front_ratio"},
+    "601988.SH": {"ma_type": "EMA", "dividend_type": "front"},
 }
 # 单实例共享信号账本（不是 STATE_FILE；禁止按标的分文件）
-BOOK_FILE = r"D:\tradingStrategy\hlband_book.json"
+BOOK_FILE = r"D:\tradingStrategy_beta\hlband_book.json"
 # 确认打卡截止：14:56 打卡，14:56:30 冻结，须在 14:57 集合竞价前完成分档下单
 BOOK_FREEZE_CLOSE = "145630"
 BOOK_FREEZE_OPEN = "093200"
@@ -221,14 +230,14 @@ PENDING_ORPHAN_SEC = 60
 
 # QMT 模型无 __file__；状态绝对路径（含 {stock}，宇宙循环按票分文件）
 #   513530.SH → ...\hlband_513530_SH.json
-STATE_FILE = r"D:\tradingStrategy\hlband_{stock}.json"
+STATE_FILE = r"D:\tradingStrategy_beta\hlband_{stock}.json"
 # 实盘结构化日志根目录；落盘为 LOG_DIR/<stock_tag>/{tag}_events.jsonl 等
 # 空字符串关闭落盘（仍保留终端 print）
-LOG_DIR = r"D:\tradingStrategy\logs"
+LOG_DIR = r"D:\tradingStrategy_beta\logs"
 # True=回测也写日志（默认关，避免回测刷爆磁盘）
 LOG_IN_BACKTEST = False
 
-STRATEGY_NAME = "HlBand"
+STRATEGY_NAME = "HlBand_BETA"
 STRATEGY_VER = "v1.60"
 # =======================================================
 
