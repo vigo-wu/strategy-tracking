@@ -1,0 +1,236 @@
+
+[2026-08-31 14:43:07][HLBAND][SH000300][日线] 0D:\service\GJQMT\python\HLBAND.py_000300165: 策略停止
+[2026-08-31 14:43:07][HLBAND][SH000300][日线] [trade]start simulation mode
+[2026-08-31 14:43:08][HLBAND][SH000300][日线] HlBand panel applied DRY_RUN,TRADE_BUDGET,CASH_RATIO,W_BIAS_HARD,CHASE_MAX_PCT,STOP_LOSS,SCALE_ENABLE
+HlBand skip download_history (live) n=13 1d +1w
+HlBand set_universe n=14 000301.SZ,002001.SZ,002050.SZ,600028.SH,600188.SH,600350.SH,600741.SH,600938.SH,601877.SH,601939.SH,601988.SH,603259.SH,605499.SH,000300.SH
+HlBand run_time check_market 2nSecond start=2026-01-01 09:00:00
+HlBand UNIVERSE n=13 stocks=000301.SZ,002001.SZ,002050.SZ,600028.SH,600188.SH,600350.SH,600741.SH,600938.SH,601877.SH,601939.SH,601988.SH,603259.SH,605499.SH chart=000300.SH drive=timer 只保留一个 HlBand 实例
+HlBand v1.63 init chart= 000300.SH stock= - 39953913 STOCK PERIOD= 1d ohlcv_policy= window DIVIDEND= per-stock chart_div= front BACKTEST= False DRY_RUN= False budget= 100000.0 BOOK_N= 13 book_stocks= 000301.SZ,002001.SZ,002050.SZ,600028.SH,600188.SH,600350.SH,600741.SH,600938.SH,601877.SH,601939.SH,601988.SH,603259.SH,605499.SH cash_ratio= 0.9 lot_open_frac= 0.5 lot_add_frac= 0.3 book_lot_max= 3 book_freeze= 145630/093200 wMA= 5/13/34 dMA= 20/60 ma_type= EMA stop= 0.08 trail_arm= 0.03 chase< 0.05 scale= True scale_lots= True scale_once= True scale_arm= 0.03 scale_arm_bars= 8 scale_plat= 20/0.10 scale_w_expand= 1.2 time_force_bars= 30 time_force_min_ret= 0.03 close_exec= 145600-145700 open_exec= 093000-094500
+HlBand check_market hit=1 t=144307 busy=False bt=False
+HlBand live heartbeat 2026-08-31 14:43:07 PERIOD= 1d stock=  watch=13 chart=000300.SH drive=timer work=pending E=0 N=13 k=0 k_other=0 reserve=0 lot=0 fill_cap=0 name_lim=0 scale_lim=0 book_mv=0 other_mv=0 name_mv=0 n_buy=0 n_held=0 frac=0.00 vacant=- why=wait src=- reason=pending
+HlBand state loaded path= D:\tradingStrategy\hlband_000301_SZ.json None pending= False
+HlBand state loaded path= D:\tradingStrategy\hlband_002001_SZ.json None pending= False
+HlBand state loaded path= D:\tradingStrategy\hlband_002050_SZ.json None pending= False
+HlBand state loaded path= D:\tradingStrategy\hlband_600028_SH.json None pending= False
+HlBand state loaded path= D:\tradingStrategy\hlband_600188_SH.json None pending= False
+HlBand state loaded path= D:\tradingStrategy\hlband_600350_SH.json None pending= False
+HlBand state loaded path= D:\tradingStrategy\hlband_600741_SH.json None pending= False
+HlBand state loaded path= D:\tradingStrategy\hlband_600938_SH.json None pending= False
+HlBand state loaded path= D:\tradingStrategy\hlband_601877_SH.json None pending= False
+HlBand state loaded path= D:\tradingStrategy\hlband_601939_SH.json None pending= False
+HlBand state loaded path= D:\tradingStrategy\hlband_601988_SH.json None pending= False
+HlBand state loaded path= D:\tradingStrategy\hlband_603259_SH.json None pending= False
+HlBand state loaded path= D:\tradingStrategy\hlband_605499_SH.json None pending= False
+
+[2026-08-31 14:43:10][HLBAND][SH000300][日线] HlBand check_market hit=2 t=144309 busy=False bt=False
+
+[2026-08-31 14:43:12][HLBAND][SH000300][日线] HlBand check_market hit=3 t=144312 busy=False bt=False
+
+[2026-08-31 14:43:14][HLBAND][SH000300][日线] HlBand check_market hit=4 t=144314 busy=False bt=False
+
+[2026-08-31 14:43:16][HLBAND][SH000300][日线] HlBand check_market hit=5 t=144315 busy=False bt=False
+
+[2026-08-31 14:44:06][HLBAND][SH000300][日线] HlBand check_market hit=30 t=144406 busy=False bt=False
+
+[2026-08-31 14:45:06][HLBAND][SH000300][日线] HlBand check_market hit=60 t=144506 busy=False bt=False
+
+[2026-08-31 14:46:09][HLBAND][SH000300][日线] HlBand check_market hit=90 t=144609 busy=False bt=False
+
+[2026-08-31 14:47:06][HLBAND][SH000300][日线] HlBand check_market hit=120 t=144706 busy=False bt=False
+
+[2026-08-31 14:48:06][HLBAND][SH000300][日线] HlBand check_market hit=150 t=144806 busy=False bt=False
+
+[2026-08-31 14:48:08][HLBAND][SH000300][日线] HlBand live heartbeat 2026-08-31 14:48:08 PERIOD= 1d stock= 605499.SH watch=13 chart=000300.SH drive=timer work=pending E=0 N=13 k=0 k_other=0 reserve=0 lot=0 fill_cap=0 name_lim=0 scale_lim=0 book_mv=0 other_mv=0 name_mv=0 n_buy=0 n_held=0 frac=0.00 vacant=- why=wait src=- reason=pending
+
+[2026-08-31 14:49:06][HLBAND][SH000300][日线] HlBand check_market hit=180 t=144906 busy=False bt=False
+
+[2026-08-31 14:50:06][HLBAND][SH000300][日线] HlBand check_market hit=210 t=145006 busy=False bt=False
+
+[2026-08-31 14:51:06][HLBAND][SH000300][日线] HlBand check_market hit=240 t=145105 busy=False bt=False
+
+[2026-08-31 14:52:06][HLBAND][SH000300][日线] HlBand check_market hit=270 t=145206 busy=False bt=False
+
+[2026-08-31 14:53:06][HLBAND][SH000300][日线] HlBand check_market hit=300 t=145306 busy=False bt=False
+
+[2026-08-31 14:53:10][HLBAND][SH000300][日线] HlBand live heartbeat 2026-08-31 14:53:09 PERIOD= 1d stock= 605499.SH watch=13 chart=000300.SH drive=timer work=pending E=0 N=13 k=0 k_other=0 reserve=0 lot=0 fill_cap=0 name_lim=0 scale_lim=0 book_mv=0 other_mv=0 name_mv=0 n_buy=0 n_held=0 frac=0.00 vacant=- why=wait src=- reason=pending
+
+[2026-08-31 14:54:06][HLBAND][SH000300][日线] HlBand check_market hit=330 t=145405 busy=False bt=False
+
+[2026-08-31 14:55:06][HLBAND][SH000300][日线] HlBand check_market hit=360 t=145506 busy=False bt=False
+
+[2026-08-31 14:56:02][HLBAND][SH000300][日线] HlBand diag: d1_000301_SZ_ok source= get_market_data_ex period= 1d n= 180 end= 20260831 last= 14.59 div= front chart= front
+HlBand diag: w1_000301_SZ_ok source= get_market_data_ex period= 1w n= 120 end= 20260831 last= 14.1 div= front chart= front
+HlBand 20260831 1456 n1d=180 n1w=120 close=14.5900 sig_d=20260831 sig_w=20260831 phase=confirm prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=13.2291 w_ma30=11.9273 w_hist=0.1337 buy=False buyR=w_bias_skip scale=False scaleR=w_macd_golden sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=- avail=-
+HlBand diag: d1_002001_SZ_ok source= get_market_data_ex period= 1d n= 180 end= 20260831 last= 27.01 div= front_ratio chart= front
+HlBand diag: w1_002001_SZ_ok source= get_market_data_ex period= 1w n= 120 end= 20260831 last= 27.14 div= front_ratio chart= front
+HlBand 20260831 1456 n1d=180 n1w=120 close=27.0100 sig_d=20260831 sig_w=20260831 phase=confirm prev_d=False prev_w=False w_bull=False w_bear=True w_bn=1/2 w_ma5=28.27 w_ma30=29.1476 w_hist=-0.5515 buy=False buyR=weekly_bear,vol_dry_skip scale=False scaleR=scale_no_pos sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=- avail=-
+
+[2026-08-31 14:56:02][HLBAND][SH000300][日线] HlBand diag: d1_002050_SZ_ok source= get_market_data_ex period= 1d n= 180 end= 20260831 last= 36.28 div= front_ratio chart= front
+HlBand diag: w1_002050_SZ_ok source= get_market_data_ex period= 1w n= 120 end= 20260831 last= 36.17 div= front_ratio chart= front
+HlBand 20260831 1456 n1d=180 n1w=120 close=36.2800 sig_d=20260831 sig_w=20260831 phase=confirm prev_d=False prev_w=False w_bull=False w_bear=True w_bn=1/2 w_ma5=37.566 w_ma30=46.0873 w_hist=-1.0533 buy=False buyR=weekly_bear,vol_dry_skip scale=False scaleR=scale_no_pos sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=- avail=-
+HlBand diag: d1_600028_SH_ok source= get_market_data_ex period= 1d n= 180 end= 20260831 last= 5.46 div= front chart= front
+HlBand diag: w1_600028_SH_ok source= get_market_data_ex period= 1w n= 120 end= 20260831 last= 5.46 div= front chart= front
+
+[2026-08-31 14:56:02][HLBAND][SH000300][日线] HlBand 20260831 1456 n1d=180 n1w=120 close=5.4600 sig_d=20260831 sig_w=20260831 phase=confirm prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=5.196 w_ma30=5.2758 w_hist=0.0759 buy=False buyR=w_slope_skip scale=False scaleR=scale_no_pos sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=- avail=-
+HlBand diag: d1_600188_SH_ok source= get_market_data_ex period= 1d n= 180 end= 20260831 last= 23.64 div= front chart= front
+HlBand diag: w1_600188_SH_ok source= get_market_data_ex period= 1w n= 120 end= 20260831 last= 23.02 div= front chart= front
+HlBand 20260831 1456 n1d=180 n1w=120 close=23.6400 sig_d=20260831 sig_w=20260831 phase=confirm prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=21.6604 w_ma30=19.0537 w_hist=0.0788 buy=False buyR=w_bias_skip scale=False scaleR=w_macd_golden sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=- avail=-
+HlBand diag: d1_600350_SH_ok source= get_market_data_ex period= 1d n= 180 end= 20260831 last= 10.27 div= front_ratio chart= front
+HlBand diag: w1_600350_SH_ok source= get_market_data_ex period= 1w n= 120 end= 20260831 last= 10.47 div= front_ratio chart= front
+
+[2026-08-31 14:56:02][HLBAND][SH000300][日线] HlBand 20260831 1456 n1d=180 n1w=120 close=10.2700 sig_d=20260831 sig_w=20260831 phase=confirm prev_d=False prev_w=False w_bull=False w_bear=True w_bn=1/2 w_ma5=10.7709 w_ma30=10.5077 w_hist=-0.1446 buy=False buyR=weekly_bear scale=False scaleR=scale_no_pos sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=- avail=-
+HlBand diag: d1_600741_SH_ok source= get_market_data_ex period= 1d n= 180 end= 20260831 last= 15.44 div= front chart= front
+HlBand diag: w1_600741_SH_ok source= get_market_data_ex period= 1w n= 120 end= 20260831 last= 15.39 div= front chart= front
+
+[2026-08-31 14:56:02][HLBAND][SH000300][日线] HlBand 20260831 1456 n1d=180 n1w=120 close=15.4400 sig_d=20260831 sig_w=20260831 phase=confirm prev_d=False prev_w=False w_bull=False w_bear=True w_bn=1/2 w_ma5=15.5679 w_ma30=16.6905 w_hist=0.013 buy=False buyR=weekly_bear scale=False scaleR=scale_no_pos sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=- avail=-
+HlBand diag: d1_600938_SH_ok source= get_market_data_ex period= 1d n= 180 end= 20260831 last= 34.68 div= front_ratio chart= front
+HlBand diag: w1_600938_SH_ok source= get_market_data_ex period= 1w n= 120 end= 20260831 last= 34.19 div= front_ratio chart= front
+HlBand 20260831 1456 n1d=180 n1w=120 close=34.6800 sig_d=20260831 sig_w=20260831 phase=confirm prev_d=False prev_w=False w_bull=False w_bear=False w_bn=0/2 w_ma5=32.9368 w_ma30=32.2612 w_hist=0.1065 buy=False buyR=- scale=False scaleR=w_macd_golden sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=- avail=-
+HlBand diag: d1_601877_SH_ok source= get_market_data_ex period= 1d n= 180 end= 20260831 last= 25.66 div= front_ratio chart= front
+HlBand diag: w1_601877_SH_ok source= get_market_data_ex period= 1w n= 120 end= 20260831 last= 25.74 div= front_ratio chart= front
+HlBand 20260831 1456 n1d=180 n1w=120 close=25.6600 sig_d=20260831 sig_w=20260831 phase=confirm prev_d=False prev_w=False w_bull=False w_bear=True w_bn=1/2 w_ma5=25.428 w_ma30=29.0991 w_hist=-0.1467 buy=False buyR=weekly_bear,pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=- avail=-
+
+[2026-08-31 14:56:02][HLBAND][SH000300][日线] HlBand diag: d1_601939_SH_ok source= get_market_data_ex period= 1d n= 180 end= 20260831 last= 10.95 div= front chart= front
+HlBand diag: w1_601939_SH_ok source= get_market_data_ex period= 1w n= 120 end= 20260831 last= 10.69 div= front chart= front
+HlBand 20260831 1456 n1d=180 n1w=120 close=10.9500 sig_d=20260831 sig_w=20260831 phase=confirm prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=10.476 w_ma30=9.4848 w_hist=0.0484 buy=False buyR=w_bias_skip scale=False scaleR=plat_break sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=- avail=-
+HlBand diag: d1_601988_SH_ok source= get_market_data_ex period= 1d n= 180 end= 20260831 last= 6.49 div= front chart= front
+HlBand diag: w1_601988_SH_ok source= get_market_data_ex period= 1w n= 120 end= 20260831 last= 6.19 div= front chart= front
+
+[2026-08-31 14:56:02][HLBAND][SH000300][日线] HlBand 20260831 1456 n1d=180 n1w=120 close=6.4900 sig_d=20260831 sig_w=20260831 phase=confirm prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=6.0197 w_ma30=5.6997 w_hist=0.0228 buy=False buyR=- scale=False scaleR=plat_break sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=- avail=-
+HlBand diag: d1_603259_SH_ok source= get_market_data_ex period= 1d n= 180 end= 20260831 last= 153.78 div= front chart= front
+HlBand diag: w1_603259_SH_ok source= get_market_data_ex period= 1w n= 120 end= 20260831 last= 157.4 div= front chart= front
+HlBand 20260831 1456 n1d=180 n1w=120 close=153.7800 sig_d=20260831 sig_w=20260831 phase=confirm prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=151.7282 w_ma30=115.437 w_hist=5.1272 buy=False buyR=w_bias_skip,pullback_vol scale=False scaleR=pullback_vol sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=- avail=-
+HlBand diag: d1_605499_SH_ok source= get_market_data_ex period= 1d n= 180 end= 20260831 last= 119.96 div= front_ratio chart= front
+
+[2026-08-31 14:56:02][HLBAND][SH000300][日线] HlBand diag: w1_605499_SH_ok source= get_market_data_ex period= 1w n= 120 end= 20260831 last= 120.81 div= front_ratio chart= front
+HlBand 20260831 1456 n1d=180 n1w=120 close=119.9600 sig_d=20260831 sig_w=20260831 phase=confirm prev_d=False prev_w=False w_bull=False w_bear=True w_bn=1/2 w_ma5=122.674 w_ma30=149.3143 w_hist=1.545 buy=False buyR=weekly_bear,vol_dry_skip scale=False scaleR=scale_no_pos sell=False sellR=- hold=False nlot=0 ret=None pe=False px=False bt_held=- avail=-
+
+[2026-08-31 14:56:06][HLBAND][SH000300][日线] HlBand check_market hit=390 t=145605 busy=False bt=False
+
+[2026-08-31 14:57:06][HLBAND][SH000300][日线] HlBand check_market hit=420 t=145706 busy=False bt=False
+
+[2026-08-31 14:58:06][HLBAND][SH000300][日线] HlBand check_market hit=450 t=145806 busy=False bt=False
+
+[2026-08-31 14:58:10][HLBAND][SH000300][日线] HlBand live heartbeat 2026-08-31 14:58:10 PERIOD= 1d stock= 605499.SH watch=13 chart=000300.SH drive=timer work=pending E=0 N=13 k=0 k_other=0 reserve=0 lot=0 fill_cap=0 name_lim=0 scale_lim=0 book_mv=0 other_mv=0 name_mv=0 n_buy=0 n_held=0 frac=0.00 vacant=- why=wait src=- reason=pending
+
+[2026-08-31 14:59:06][HLBAND][SH000300][日线] HlBand check_market hit=480 t=145906 busy=False bt=False
+
+[2026-08-31 15:00:06][HLBAND][SH000300][日线] HlBand check_market hit=510 t=150005 busy=False bt=False
+
+[2026-08-31 15:01:06][HLBAND][SH000300][日线] HlBand check_market hit=540 t=150106 busy=False bt=False
+
+[2026-08-31 15:02:06][HLBAND][SH000300][日线] HlBand check_market hit=570 t=150206 busy=False bt=False
+
+[2026-08-31 15:03:06][HLBAND][SH000300][日线] HlBand check_market hit=600 t=150306 busy=False bt=False
+
+[2026-08-31 15:03:12][HLBAND][SH000300][日线] HlBand live heartbeat 2026-08-31 15:03:12 PERIOD= 1d stock= 605499.SH watch=13 chart=000300.SH drive=timer work=pending E=0 N=13 k=0 k_other=0 reserve=0 lot=0 fill_cap=0 name_lim=0 scale_lim=0 book_mv=0 other_mv=0 name_mv=0 n_buy=0 n_held=0 frac=0.00 vacant=- why=wait src=- reason=pending
+
+[2026-08-31 15:04:06][HLBAND][SH000300][日线] HlBand check_market hit=630 t=150406 busy=False bt=False
+
+[2026-08-31 15:05:06][HLBAND][SH000300][日线] HlBand check_market hit=660 t=150506 busy=False bt=False
+
+[2026-08-31 15:06:06][HLBAND][SH000300][日线] HlBand check_market hit=690 t=150605 busy=False bt=False
+
+[2026-08-31 15:07:06][HLBAND][SH000300][日线] HlBand check_market hit=720 t=150705 busy=False bt=False
+
+[2026-08-31 15:08:06][HLBAND][SH000300][日线] HlBand check_market hit=750 t=150806 busy=False bt=False
+
+[2026-08-31 15:08:14][HLBAND][SH000300][日线] HlBand live heartbeat 2026-08-31 15:08:14 PERIOD= 1d stock= 605499.SH watch=13 chart=000300.SH drive=timer work=pending E=0 N=13 k=0 k_other=0 reserve=0 lot=0 fill_cap=0 name_lim=0 scale_lim=0 book_mv=0 other_mv=0 name_mv=0 n_buy=0 n_held=0 frac=0.00 vacant=- why=wait src=- reason=pending
+
+[2026-08-31 15:09:06][HLBAND][SH000300][日线] HlBand check_market hit=780 t=150906 busy=False bt=False
+
+[2026-08-31 15:10:06][HLBAND][SH000300][日线] HlBand check_market hit=810 t=151006 busy=False bt=False
+
+[2026-08-31 15:11:06][HLBAND][SH000300][日线] HlBand check_market hit=840 t=151105 busy=False bt=False
+
+[2026-08-31 15:12:06][HLBAND][SH000300][日线] HlBand check_market hit=870 t=151206 busy=False bt=False
+
+[2026-08-31 15:13:06][HLBAND][SH000300][日线] HlBand check_market hit=900 t=151305 busy=False bt=False
+
+[2026-08-31 15:13:16][HLBAND][SH000300][日线] HlBand live heartbeat 2026-08-31 15:13:16 PERIOD= 1d stock= 605499.SH watch=13 chart=000300.SH drive=timer work=pending E=0 N=13 k=0 k_other=0 reserve=0 lot=0 fill_cap=0 name_lim=0 scale_lim=0 book_mv=0 other_mv=0 name_mv=0 n_buy=0 n_held=0 frac=0.00 vacant=- why=wait src=- reason=pending
+
+[2026-08-31 15:14:06][HLBAND][SH000300][日线] HlBand check_market hit=930 t=151406 busy=False bt=False
+
+[2026-08-31 15:15:06][HLBAND][SH000300][日线] HlBand check_market hit=960 t=151506 busy=False bt=False
+
+[2026-08-31 15:16:06][HLBAND][SH000300][日线] HlBand check_market hit=990 t=151605 busy=False bt=False
+
+[2026-08-31 15:17:06][HLBAND][SH000300][日线] HlBand check_market hit=1020 t=151706 busy=False bt=False
+
+[2026-08-31 15:18:06][HLBAND][SH000300][日线] HlBand check_market hit=1050 t=151806 busy=False bt=False
+
+[2026-08-31 15:18:18][HLBAND][SH000300][日线] HlBand live heartbeat 2026-08-31 15:18:17 PERIOD= 1d stock= 605499.SH watch=13 chart=000300.SH drive=timer work=pending E=0 N=13 k=0 k_other=0 reserve=0 lot=0 fill_cap=0 name_lim=0 scale_lim=0 book_mv=0 other_mv=0 name_mv=0 n_buy=0 n_held=0 frac=0.00 vacant=- why=wait src=- reason=pending
+
+[2026-08-31 15:19:06][HLBAND][SH000300][日线] HlBand check_market hit=1080 t=151906 busy=False bt=False
+
+[2026-08-31 15:20:06][HLBAND][SH000300][日线] HlBand check_market hit=1110 t=152005 busy=False bt=False
+
+[2026-08-31 15:21:06][HLBAND][SH000300][日线] HlBand check_market hit=1140 t=152106 busy=False bt=False
+
+[2026-08-31 15:22:06][HLBAND][SH000300][日线] HlBand check_market hit=1170 t=152205 busy=False bt=False
+
+[2026-08-31 15:23:06][HLBAND][SH000300][日线] HlBand check_market hit=1200 t=152306 busy=False bt=False
+
+[2026-08-31 15:23:20][HLBAND][SH000300][日线] HlBand live heartbeat 2026-08-31 15:23:20 PERIOD= 1d stock= 605499.SH watch=13 chart=000300.SH drive=timer work=pending E=0 N=13 k=0 k_other=0 reserve=0 lot=0 fill_cap=0 name_lim=0 scale_lim=0 book_mv=0 other_mv=0 name_mv=0 n_buy=0 n_held=0 frac=0.00 vacant=- why=wait src=- reason=pending
+
+[2026-08-31 15:24:06][HLBAND][SH000300][日线] HlBand check_market hit=1230 t=152405 busy=False bt=False
+
+[2026-08-31 15:25:55][HLBAND][SH000300][日线] HlBand check_market hit=1260 t=152555 busy=False bt=False
+
+[2026-08-31 15:26:06][HLBAND][SH000300][日线] HlBand check_market hit=1290 t=152606 busy=False bt=False
+
+[2026-08-31 15:27:49][HLBAND][SH000300][日线] HlBand check_market hit=1320 t=152749 busy=False bt=False
+
+[2026-08-31 15:28:06][HLBAND][SH000300][日线] HlBand check_market hit=1350 t=152806 busy=False bt=False
+
+[2026-08-31 15:28:22][HLBAND][SH000300][日线] HlBand live heartbeat 2026-08-31 15:28:21 PERIOD= 1d stock= 605499.SH watch=13 chart=000300.SH drive=timer work=pending E=0 N=13 k=0 k_other=0 reserve=0 lot=0 fill_cap=0 name_lim=0 scale_lim=0 book_mv=0 other_mv=0 name_mv=0 n_buy=0 n_held=0 frac=0.00 vacant=- why=wait src=- reason=pending
+
+[2026-08-31 15:29:06][HLBAND][SH000300][日线] HlBand check_market hit=1380 t=152905 busy=False bt=False
+
+[2026-08-31 15:30:06][HLBAND][SH000300][日线] HlBand check_market hit=1410 t=153006 busy=False bt=False
+
+[2026-08-31 15:31:06][HLBAND][SH000300][日线] HlBand check_market hit=1440 t=153106 busy=False bt=False
+
+[2026-08-31 15:32:06][HLBAND][SH000300][日线] HlBand check_market hit=1470 t=153206 busy=False bt=False
+
+[2026-08-31 15:33:06][HLBAND][SH000300][日线] HlBand check_market hit=1500 t=153306 busy=False bt=False
+
+[2026-08-31 15:33:22][HLBAND][SH000300][日线] HlBand live heartbeat 2026-08-31 15:33:22 PERIOD= 1d stock= 605499.SH watch=13 chart=000300.SH drive=timer work=pending E=0 N=13 k=0 k_other=0 reserve=0 lot=0 fill_cap=0 name_lim=0 scale_lim=0 book_mv=0 other_mv=0 name_mv=0 n_buy=0 n_held=0 frac=0.00 vacant=- why=wait src=- reason=pending
+
+[2026-08-31 15:34:06][HLBAND][SH000300][日线] HlBand check_market hit=1530 t=153406 busy=False bt=False
+
+[2026-08-31 15:35:06][HLBAND][SH000300][日线] HlBand check_market hit=1560 t=153506 busy=False bt=False
+
+[2026-08-31 15:36:06][HLBAND][SH000300][日线] HlBand check_market hit=1590 t=153606 busy=False bt=False
+
+[2026-08-31 15:37:06][HLBAND][SH000300][日线] HlBand check_market hit=1620 t=153705 busy=False bt=False
+
+[2026-08-31 15:38:06][HLBAND][SH000300][日线] HlBand check_market hit=1650 t=153806 busy=False bt=False
+
+[2026-08-31 15:38:24][HLBAND][SH000300][日线] HlBand live heartbeat 2026-08-31 15:38:23 PERIOD= 1d stock= 605499.SH watch=13 chart=000300.SH drive=timer work=pending E=0 N=13 k=0 k_other=0 reserve=0 lot=0 fill_cap=0 name_lim=0 scale_lim=0 book_mv=0 other_mv=0 name_mv=0 n_buy=0 n_held=0 frac=0.00 vacant=- why=wait src=- reason=pending
+
+[2026-08-31 15:39:06][HLBAND][SH000300][日线] HlBand check_market hit=1680 t=153905 busy=False bt=False
+
+[2026-08-31 15:40:06][HLBAND][SH000300][日线] HlBand check_market hit=1710 t=154006 busy=False bt=False
+
+[2026-08-31 15:41:06][HLBAND][SH000300][日线] HlBand check_market hit=1740 t=154106 busy=False bt=False
+
+[2026-08-31 15:42:06][HLBAND][SH000300][日线] HlBand check_market hit=1770 t=154205 busy=False bt=False
+[2026-08-31 15:42:45][HLBAND][SH000300][日线] 0D:\service\GJQMT\python\HLBAND.py_000300168: 策略停止
+
+
+
+
+[2026-08-31 15:46:04][HLBAND_PROD][SH601398][日线] HlBand panel applied DRY_RUN,TRADE_BUDGET,CASH_RATIO,MIN_LOT,MAX_NAME_FRAC,W_BIAS_HARD,CHASE_MAX_PCT,STOP_LOSS,SCALE_ENABLE
+HlBand skip download_history (live) 1d +1w
+HlBand state loaded path= D:\tradingStrategy\hlband_601398_SH.json {'shares': 6700, 'price': 7.75, 'cost': 51925.0, 'opened_at': '20260824093004', 'lots': 1} pending= False
+
+[2026-08-31 15:46:04][HLBAND_PROD][SH601398][日线] [trade]start trading mode
+[2026-08-31 15:46:04][HLBAND_PROD][SH601398][日线] HlBand v1.47 init 601398.SH 39953913 STOCK PERIOD= 1d BACKTEST= False DRY_RUN= False budget= 50000.0 dynamic_budget= True BOOK_N= 1 book_stocks= 601398.SH cash_ratio= 0.9 min_lot= 20000.0 max_name_frac= 0.5 equal_split= True book_freeze= 145630/093200 wMA= 5/13/34 dMA= 20/60 ma_type= SMA stop= 0.08 chase< 0.05 scale= True scale_lots= True scale_once= True scale_arm= 0.03 scale_arm_bars= 8 scale_plat= 20/0.10 scale_w_expand= 1.2 time_force_bars= 30 time_force_min_ret= 0.03 close_exec= 145600-145700 open_exec= 093000-094500
+
+[2026-08-31 15:46:05][HLBAND_PROD][SH601398][日线] HlBand live heartbeat 2026-08-31 15:46:04 PERIOD= 1d stock= 601398.SH lots=L2:6700@7.7500 E=0 N=1 k=0 k_other=0 reserve=0 lot=0 book_mv=0 other_mv=0 name_mv=0 n_buy=0 why=wait src=- reason=confirm
+HlBand diag: d1_ok source= get_market_data_ex period= 1d n= 180 end= 20260831 last= 8.07
+HlBand diag: w1_ok source= get_market_data_ex period= 1w n= 120 end= 20260831 last= 7.86
+
+[2026-08-31 15:46:05][HLBAND_PROD][SH601398][日线] HlBand 20260831 1546 n1d=180 n1w=120 close=8.0700 sig_d=20260831 sig_w=20260831 phase=confirm prev_d=False prev_w=False w_bull=True w_bear=False w_bn=0/2 w_ma5=7.742 w_ma30=7.3353 w_hist=0.0499 buy=False buyR=- scale=False scaleR=plat_break sell=False sellR=- hold=True nlot=1 ret=4.13% pe=False px=False bt_held=- avail=-
