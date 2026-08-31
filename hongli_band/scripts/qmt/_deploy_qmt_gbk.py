@@ -61,7 +61,7 @@ def main() -> None:
         stems=[p.stem for p in TARGETS],
     )
     print("OK: 打开国金 QMT -> 模型交易 -> 新建策略交易 -> HlBand / 红利波段")
-    print("主图仅常驻（建议池外日线指数）；扫池=run_time 1s；交易池=BOOK_STOCKS")
+    print("主图仅常驻（建议池外日线指数）；扫池=run_time 2s 历史start；交易池=BOOK_STOCKS")
     print("勿勾独立运行/简易运行；上线前停掉旧多图实例，只留一个 HlBand")
     print("编辑 hlband/*.py 与 panel.xml；策略交易改参，编辑器回测仍用 config.py")
 

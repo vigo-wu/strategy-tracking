@@ -24,12 +24,20 @@ ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 # k / book_mv 只统计 BOOK_STOCKS。N = 字典长度。实盘单实例监视全池并写账本；回测用 TRADE_BUDGET。
 # 形态：code → 配置字典。ma_type（EMA|SMA）；dividend_type 见下方复权注释。
 # 简写兼容：value 写成 "SMA" 视为 {"ma_type": "SMA"}；旧纯字符串 tuple 仍认作白名单。
-BOOK_STOCKS = BOOK_STOCKS = {
+BOOK_STOCKS = {
     "600350.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"}, # 山东高速
     "601939.SH": {"ma_type": "SMA", "dividend_type": "front"}, # 建设银行
     "600028.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 中国石油
     "600188.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 兖矿能源
     "603259.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 药名康德
+    "601877.SH": {"ma_type": "SMA", "dividend_type": "front_ratio"},
+    "600938.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "605499.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "600741.SH": {"ma_type": "EMA", "dividend_type": "front"},
+    "000301.SZ": {"ma_type": "EMA", "dividend_type": "front"},
+    "002001.SZ": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "002050.SZ": {"ma_type": "SMA", "dividend_type": "front_ratio"},
+    "601988.SH": {"ma_type": "EMA", "dividend_type": "front"},
 }
 # 单实例共享信号账本（不是 STATE_FILE；禁止按标的分文件）
 BOOK_FILE = r"D:\tradingStrategy\hlband_book.json"
@@ -229,7 +237,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.60"
+STRATEGY_VER = "v1.63"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
@@ -707,7 +715,7 @@ def _state_load_path():
     return path
 
 
-def _load_state():
+def _load_state(log=True):
     if "{stock}" in str(STATE_FILE or "") and (not _state_stock_tag()):
         return
     A.position = None
@@ -717,8 +725,9 @@ def _load_state():
     A.pending = None
     path = _state_load_path()
     if not path or not os.path.isfile(path):
-        print(_strategy_tag(), "state: empty (no file)", path or STATE_FILE)
-        _event_log("state_empty", path=path or STATE_FILE)
+        if log:
+            print(_strategy_tag(), "state: empty (no file)", path or STATE_FILE)
+            _event_log("state_empty", path=path or STATE_FILE)
         return
     try:
         with open(path, "r") as f:
@@ -764,14 +773,15 @@ def _load_state():
         except Exception as e:
             print(_strategy_tag(), "state extra load fail", e)
             _event_log("state_extra_load_fail", error=str(e))
-    print(_strategy_tag(), "state loaded", "path=", path, A.position, "pending=", bool(A.pending))
-    _event_log(
-        "state_loaded",
-        path=path,
-        position=A.position,
-        pending=bool(A.pending),
-        pending_order=bool(getattr(A, "pending", None)),
-    )
+    if log:
+        print(_strategy_tag(), "state loaded", "path=", path, A.position, "pending=", bool(A.pending))
+        _event_log(
+            "state_loaded",
+            path=path,
+            position=A.position,
+            pending=bool(A.pending),
+            pending_order=bool(getattr(A, "pending", None)),
+        )
 
 
 def _save_state():
@@ -6945,6 +6955,10 @@ def _per_stock_map():
     return d
 
 
+# 同票 STATE 磁盘重读间隔（秒）。未到期用内存热缓存，避免 2s 定时器刷 state loaded。
+_STATE_RELOAD_SEC = 60
+
+
 def _stash_stock_ui(code):
     code = str(code or "").strip()
     if not code:
@@ -6968,6 +6982,98 @@ def _restore_stock_ui(code):
             setattr(A, k, rec[k])
 
 
+def _copy_state_dict(val):
+    if isinstance(val, dict):
+        return dict(val)
+    return None
+
+
+def _copy_state_lots(val):
+    if not isinstance(val, list):
+        return []
+    out = []
+    for lot in val:
+        if isinstance(lot, dict):
+            out.append(dict(lot))
+    return out
+
+
+def _stash_hot_state(code):
+    """切票前把仓位/pending/extra 留在内存，供间隔内免读盘。"""
+    code = str(code or "").strip()
+    if not code:
+        return
+    _stash_stock_ui(code)
+    rec = dict(_per_stock_map().get(code) or {})
+    rec["_hot_position"] = _copy_state_dict(getattr(A, "position", None))
+    rec["_hot_lots"] = _copy_state_lots(getattr(A, "lots", None))
+    rec["_hot_acted_day"] = str(getattr(A, "acted_day", "") or "")
+    rec["_hot_acted"] = set(getattr(A, "acted", set()) or [])
+    pend = getattr(A, "pending", None)
+    rec["_hot_pending"] = dict(pend) if isinstance(pend, dict) else None
+    extra = {}
+    fn = globals().get("_state_extra_save")
+    if callable(fn):
+        try:
+            fn(extra)
+        except Exception:
+            extra = {}
+    rec["_hot_extra"] = extra
+    rec["_hot_ok"] = True
+    _per_stock_map()[code] = rec
+
+
+def _restore_hot_state(code):
+    rec = _per_stock_map().get(code) if code else None
+    if not (isinstance(rec, dict) and rec.get("_hot_ok")):
+        return False
+    pos = rec.get("_hot_position")
+    A.position = dict(pos) if isinstance(pos, dict) else None
+    A.lots = _copy_state_lots(rec.get("_hot_lots"))
+    A.acted_day = str(rec.get("_hot_acted_day") or "")
+    acted = rec.get("_hot_acted")
+    if isinstance(acted, (set, list, tuple)):
+        A.acted = set([str(x) for x in acted])
+    else:
+        A.acted = set()
+    pend = rec.get("_hot_pending")
+    A.pending = dict(pend) if isinstance(pend, dict) else None
+    extra = rec.get("_hot_extra")
+    fn = globals().get("_state_extra_load")
+    if callable(fn) and isinstance(extra, dict):
+        try:
+            fn(extra)
+        except Exception:
+            pass
+    _restore_stock_ui(code)
+    return True
+
+
+def _state_reload_due(code):
+    rec = _per_stock_map().get(code) or {}
+    last = rec.get("_state_loaded_at")
+    if last is None or (not rec.get("_hot_ok")):
+        return True
+    try:
+        sec = float(globals().get("_STATE_RELOAD_SEC") or 60)
+        return (datetime.datetime.now() - last).total_seconds() >= sec
+    except Exception:
+        return True
+
+
+def _live_load_state(code):
+    """读盘。每票只在首次打印路径；之后静默（含 60s 重读）。"""
+    rec = _per_stock_map().get(code) or {}
+    log = not bool(rec.get("_state_path_logged"))
+    _load_state(log=log)
+    _restore_stock_ui(code)
+    rec = dict(_per_stock_map().get(code) or {})
+    rec["_state_path_logged"] = True
+    rec["_state_loaded_at"] = datetime.datetime.now()
+    _per_stock_map()[code] = rec
+    _stash_hot_state(code)
+
+
 def _activate_stock(code):
     """保存当前票 → reset extra → 切 A.stock → load 该票 STATE。"""
     code = str(code or "").strip()
@@ -6977,15 +7083,18 @@ def _activate_stock(code):
     if cur == code:
         return code
     if cur:
-        _stash_stock_ui(cur)
+        _stash_hot_state(cur)
         if not getattr(A, "is_backtest", False):
             _save_state()
     _reset_stock_ctx()
     A.stock = code
     _restore_stock_ui(code)
-    if not getattr(A, "is_backtest", False):
-        _load_state()
-        _restore_stock_ui(code)
+    if getattr(A, "is_backtest", False):
+        return code
+    if _state_reload_due(code):
+        _live_load_state(code)
+    elif not _restore_hot_state(code):
+        _live_load_state(code)
     return code
 
 
@@ -7173,7 +7282,7 @@ def _handle_universe(C):
                 or getattr(A, "pending", None)
             )
             _per_stock_map()[code] = rec
-            _stash_stock_ui(code)
+            _stash_hot_state(code)
         except Exception as e:
             print("%s universe stock error" % STRATEGY_NAME, code, e)
             _event_log("universe_stock_error", stock=code, error=str(e))
@@ -7207,7 +7316,7 @@ def _handle_universe(C):
 
     cur = str(getattr(A, "stock", "") or "").strip()
     if cur and (not getattr(A, "is_backtest", False)):
-        _stash_stock_ui(cur)
+        _stash_hot_state(cur)
         _save_state()
     A._universe_loop = False
     A._live_work = ""
@@ -7215,7 +7324,7 @@ def _handle_universe(C):
 
 
 def _universe_on_timer(C):
-    """C.run_time 回调。起始空串立即跑；此处用墙钟过滤时段。"""
+    """定时扫池。时段过滤在此，不依赖 startTime。"""
     if getattr(A, "busy", False):
         return
     if not _chart_in_watch():
@@ -7243,6 +7352,29 @@ def _universe_on_timer(C):
     finally:
         A._force_quicktrade = None
         A.busy = False
+
+
+def check_market(C):
+    """C.run_time 回调。必须是顶层公开函数名，与 init 注册字符串一致。"""
+    n = int(getattr(A, "_timer_hits", 0) or 0) + 1
+    A._timer_hits = n
+    if n <= 5 or (n % 30) == 0:
+        now_s = ""
+        try:
+            now_s = _bar_hhmmss(datetime.datetime.now())
+        except Exception:
+            pass
+        print(
+            "%s check_market hit=%s t=%s busy=%s bt=%s"
+            % (
+                STRATEGY_NAME,
+                n,
+                now_s,
+                getattr(A, "busy", False),
+                getattr(A, "is_backtest", None),
+            )
+        )
+    _universe_on_timer(C)
 
 # === hlband/runtime.py ===
 def _as_bool(val):
@@ -7289,6 +7421,32 @@ def _apply_panel():
     if applied:
         g["_PANEL_APPLIED"] = set(applied)
         print(_strategy_tag(), "panel applied", ",".join(applied))
+
+
+def _register_live_timer(C):
+    """实盘秒级定时。必须在 init 里调用。
+
+    国金/迅投：startTime 要用已经过去的 YYYY-MM-DD HH:MM:SS，定时器才视为到期并开始重复。
+    空串或仅 09:30:00 会等到「下一次该时刻」或根本不触发。period 官方为 nSecond。
+    """
+    func = "check_market"
+    start = "2026-01-01 09:00:00"
+    last_err = None
+    for period in ("2nSecond", "2Second"):
+        try:
+            C.run_time(func, period, start)
+            print(
+                "%s run_time %s %s start=%s"
+                % (STRATEGY_NAME, func, period, start)
+            )
+            return
+        except Exception as e:
+            last_err = e
+            print(
+                "%s run_time register fail period=%s" % (STRATEGY_NAME, period),
+                e,
+            )
+    _event_log("run_time_fail", error=str(last_err))
 
 
 def _trail_arm():
@@ -7468,21 +7626,13 @@ def _init_impl(C):
 
     drive = "handlebar"
     if A.is_backtest:
-        # 编辑器回测必须靠 handlebar 扫历史 K。注册 1nSecond 后终端可能改走墙钟
-        # 定时、不再推进 barpos；而 _universe_on_timer 在 is_backtest 下直接 return，
+        # 编辑器回测必须靠 handlebar 扫历史 K。注册秒级定时后终端可能改走墙钟
+        # 定时、不再推进 barpos；而 check_market 在 is_backtest 下直接 return，
         # 表现为 init 之后没有任何 close=/diag。
         print("%s backtest skip run_time drive=handlebar" % STRATEGY_NAME)
     else:
         drive = "timer"
-        try:
-            C.run_time("_universe_on_timer", "1nSecond", "")
-            print(
-                "%s run_time _universe_on_timer 1nSecond start=" % STRATEGY_NAME,
-                "(immediate)",
-            )
-        except Exception as e:
-            print("%s run_time register fail" % STRATEGY_NAME, e)
-            _event_log("run_time_fail", error=str(e))
+        _register_live_timer(C)
 
     uni = list(getattr(A, "watch", None) or [])
     print(

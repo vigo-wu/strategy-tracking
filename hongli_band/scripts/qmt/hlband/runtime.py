@@ -46,6 +46,32 @@ def _apply_panel():
         print(_strategy_tag(), "panel applied", ",".join(applied))
 
 
+def _register_live_timer(C):
+    """实盘秒级定时。必须在 init 里调用。
+
+    国金/迅投：startTime 要用已经过去的 YYYY-MM-DD HH:MM:SS，定时器才视为到期并开始重复。
+    空串或仅 09:30:00 会等到「下一次该时刻」或根本不触发。period 官方为 nSecond。
+    """
+    func = "check_market"
+    start = "2026-01-01 09:00:00"
+    last_err = None
+    for period in ("2nSecond", "2Second"):
+        try:
+            C.run_time(func, period, start)
+            print(
+                "%s run_time %s %s start=%s"
+                % (STRATEGY_NAME, func, period, start)
+            )
+            return
+        except Exception as e:
+            last_err = e
+            print(
+                "%s run_time register fail period=%s" % (STRATEGY_NAME, period),
+                e,
+            )
+    _event_log("run_time_fail", error=str(last_err))
+
+
 def _trail_arm():
     """档 1 起步 peak_lo；网格扫 TRAIL 时写进 init 指纹。"""
     tiers = globals().get("TRAIL_TIERS") or ()
@@ -223,21 +249,13 @@ def _init_impl(C):
 
     drive = "handlebar"
     if A.is_backtest:
-        # 编辑器回测必须靠 handlebar 扫历史 K。注册 1nSecond 后终端可能改走墙钟
-        # 定时、不再推进 barpos；而 _universe_on_timer 在 is_backtest 下直接 return，
+        # 编辑器回测必须靠 handlebar 扫历史 K。注册秒级定时后终端可能改走墙钟
+        # 定时、不再推进 barpos；而 check_market 在 is_backtest 下直接 return，
         # 表现为 init 之后没有任何 close=/diag。
         print("%s backtest skip run_time drive=handlebar" % STRATEGY_NAME)
     else:
         drive = "timer"
-        try:
-            C.run_time("_universe_on_timer", "1nSecond", "")
-            print(
-                "%s run_time _universe_on_timer 1nSecond start=" % STRATEGY_NAME,
-                "(immediate)",
-            )
-        except Exception as e:
-            print("%s run_time register fail" % STRATEGY_NAME, e)
-            _event_log("run_time_fail", error=str(e))
+        _register_live_timer(C)
 
     uni = list(getattr(A, "watch", None) or [])
     print(

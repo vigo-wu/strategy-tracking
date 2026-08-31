@@ -44,7 +44,7 @@ def _state_load_path():
     return path
 
 
-def _load_state():
+def _load_state(log=True):
     if "{stock}" in str(STATE_FILE or "") and (not _state_stock_tag()):
         return
     A.position = None
@@ -54,8 +54,9 @@ def _load_state():
     A.pending = None
     path = _state_load_path()
     if not path or not os.path.isfile(path):
-        print(_strategy_tag(), "state: empty (no file)", path or STATE_FILE)
-        _event_log("state_empty", path=path or STATE_FILE)
+        if log:
+            print(_strategy_tag(), "state: empty (no file)", path or STATE_FILE)
+            _event_log("state_empty", path=path or STATE_FILE)
         return
     try:
         with open(path, "r") as f:
@@ -101,14 +102,15 @@ def _load_state():
         except Exception as e:
             print(_strategy_tag(), "state extra load fail", e)
             _event_log("state_extra_load_fail", error=str(e))
-    print(_strategy_tag(), "state loaded", "path=", path, A.position, "pending=", bool(A.pending))
-    _event_log(
-        "state_loaded",
-        path=path,
-        position=A.position,
-        pending=bool(A.pending),
-        pending_order=bool(getattr(A, "pending", None)),
-    )
+    if log:
+        print(_strategy_tag(), "state loaded", "path=", path, A.position, "pending=", bool(A.pending))
+        _event_log(
+            "state_loaded",
+            path=path,
+            position=A.position,
+            pending=bool(A.pending),
+            pending_order=bool(getattr(A, "pending", None)),
+        )
 
 
 def _save_state():

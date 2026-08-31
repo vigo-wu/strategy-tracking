@@ -1893,6 +1893,57 @@ class LocalBtUniverseHandlebarTests(unittest.TestCase):
         ns["handlebar"](ctx)
         self.assertEqual(len(called), 1)
 
+    def test_live_init_registers_run_time_with_historical_start(self):
+        from mock_qmt import MockContext, _as_tag
+        from run import _exec_bundle
+
+        bars = self._bars(stock="000001.SH")
+        store = MarketStore(bars, "000001.SH")
+        walk = bars[-3:]
+        ctx = MockContext(store, [_as_tag(b.dt) for b in walk], "000001.SH")
+        ctx._local_bt = False
+        ctx.do_back_test = False
+        ns = _exec_bundle()
+        ns["_LOCAL_BT"] = False
+        ns["init"](ctx)
+        self.assertEqual(len(ctx.run_time_calls), 1)
+        args = ctx.run_time_calls[0][0]
+        self.assertEqual(args[0], "check_market")
+        self.assertIn(args[1], ("2nSecond", "2Second"))
+        self.assertGreaterEqual(len(args[2]), 19)
+        self.assertIn("-", args[2])
+        self.assertIn(" ", args[2])
+        self.assertTrue(callable(ns.get("check_market")))
+
+    def test_activate_stock_throttles_disk_reload(self):
+        from run import _exec_bundle
+
+        ns = _exec_bundle()
+        ns["A"].is_backtest = False
+        ns["A"].stock = ""
+        ns["A"]._per_stock = {}
+        ns["_save_state"] = lambda: None
+        loads = []
+
+        def fake_load(log=True):
+            loads.append((str(ns["A"].stock), log))
+            ns["A"].position = None
+            ns["A"].lots = []
+            ns["A"].pending = None
+
+        ns["_load_state"] = fake_load
+        ns["_activate_stock"]("600350.SH")
+        ns["_activate_stock"]("601939.SH")
+        ns["_activate_stock"]("600350.SH")
+        ns["_activate_stock"]("601939.SH")
+        self.assertEqual([x[0] for x in loads], ["600350.SH", "601939.SH"])
+        self.assertEqual([x[1] for x in loads], [True, True])
+        rec = ns["_per_stock_map"]()["600350.SH"]
+        rec["_state_loaded_at"] = datetime.now() - timedelta(seconds=120)
+        ns["_activate_stock"]("600350.SH")
+        self.assertEqual([x[0] for x in loads], ["600350.SH", "601939.SH", "600350.SH"])
+        self.assertEqual([x[1] for x in loads], [True, True, False])
+
 
 class FingerprintAggTests(unittest.TestCase):
     def test_glob_fingerprint_is_triple(self):

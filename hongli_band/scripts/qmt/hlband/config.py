@@ -20,6 +20,14 @@ BOOK_STOCKS = {
     "600028.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 中国石油
     "600188.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 兖矿能源
     "603259.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 药名康德
+    "601877.SH": {"ma_type": "SMA", "dividend_type": "front_ratio"},
+    "600938.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "605499.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "600741.SH": {"ma_type": "EMA", "dividend_type": "front"},
+    "000301.SZ": {"ma_type": "EMA", "dividend_type": "front"},
+    "002001.SZ": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "002050.SZ": {"ma_type": "SMA", "dividend_type": "front_ratio"},
+    "601988.SH": {"ma_type": "EMA", "dividend_type": "front"},
 }
 # 单实例共享信号账本（不是 STATE_FILE；禁止按标的分文件）
 BOOK_FILE = r"D:\tradingStrategy\hlband_book.json"
@@ -219,7 +227,7 @@ LOG_DIR = r"D:\tradingStrategy\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBand"
-STRATEGY_VER = "v1.60"
+STRATEGY_VER = "v1.63"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
