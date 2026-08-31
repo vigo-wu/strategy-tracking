@@ -192,7 +192,7 @@ OPEN_EXEC_START = "093000"
 OPEN_EXEC_END = "094500"
 # 收盘确认信号时窗（与尾盘成交窗重叠；盘后仍可确认，成交则等到次日开盘窗）
 SIGNAL_CONFIRM_START = "145600"
-SIGNAL_CONFIRM_END = "160000"
+SIGNAL_CONFIRM_END = "150000"
 # 实盘心跳/状态行间隔（秒）；空仓与持仓无新信号沿时均按此节流
 LIVE_HEARTBEAT_SEC = 300
 # 实盘取数：window=确认窗/开盘兜底才拉日+周，盘中只 pending；always=决策窗内每次当确认窗
