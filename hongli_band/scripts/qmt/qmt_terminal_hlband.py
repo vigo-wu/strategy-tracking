@@ -29,7 +29,7 @@ BOOK_STOCKS = {
     "601939.SH": {"ma_type": "SMA", "dividend_type": "front"}, # 建设银行
     "600028.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 中国石油
     "600188.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 兖矿能源
-    "603259.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 药名康德
+    "603259.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 药明康德
 }
 # 单实例共享信号账本（不是 STATE_FILE；禁止按标的分文件）
 BOOK_FILE = r"D:\HlBandV5\hlband_book.json"
@@ -187,7 +187,7 @@ DECISION_START = "093000"
 DECISION_END = "150000"
 # 信号 pending 主成交窗：连续竞价尾盘，14:57 起已是收盘集合竞价，不再报单。
 # 14:56:00 起限价挂卖一（买）/买一（卖）；14:57:00 前结束。错过则次日开盘窗补。
-PENDING_EXEC_START = "145600"
+PENDING_EXEC_START = "145630"
 PENDING_EXEC_END = "145700"
 # 隔夜残留 / 开盘兜底：错过尾盘时次日开盘窗按开盘价补成交
 OPEN_EXEC_START = "093000"
@@ -1537,9 +1537,12 @@ def _norm_dividend(raw):
     return s
 
 
-def _book_dividend_raw():
-    """BOOK_STOCKS[A.stock].dividend_type；无键返回 None。"""
-    stock = str(getattr(A, "stock", "") or "").strip()
+def _book_dividend_raw(stock=None):
+    """BOOK_STOCKS[stock].dividend_type；无键返回 None。"""
+    if stock is None:
+        stock = str(getattr(A, "stock", "") or "").strip()
+    else:
+        stock = str(stock or "").strip()
     cfg_fn = globals().get("_book_cfg")
     if callable(cfg_fn):
         entry = cfg_fn(stock)
@@ -1563,10 +1566,10 @@ def _book_dividend_raw():
     return None
 
 
-def _dividend_type():
+def _dividend_type_for(stock):
     """QMT 复权：优先 BOOK_STOCKS[code].dividend_type，否则 DIVIDEND_TYPE。"""
     glob_raw = globals().get("DIVIDEND_TYPE")
-    book_raw = _book_dividend_raw()
+    book_raw = _book_dividend_raw(stock)
     picked = book_raw
     if picked is None or str(picked).strip() == "":
         picked = glob_raw
@@ -1583,6 +1586,10 @@ def _dividend_type():
     if glob_norm in _VALID_DIVIDEND:
         return glob_norm
     return "front_ratio"
+
+
+def _dividend_type():
+    return _dividend_type_for(getattr(A, "stock", ""))
 
 
 def _chart_dividend(C):
@@ -1614,17 +1621,47 @@ def _norm_bar_day(x):
     return ""
 
 
+def _md_match_key(md, stock):
+    """在 get_market_data_ex 的 dict 上匹配 code（大小写 / 点号后缀）。"""
+    if md is None or not isinstance(md, dict):
+        return None
+    if stock in md:
+        return stock
+    want = str(stock or "").strip().upper()
+    if not want:
+        return None
+    want_nodot = want.replace(".", "")
+    found = None
+    for k in md.keys():
+        ku = str(k or "").strip().upper()
+        if ku == want:
+            return k
+        if found is None and ku.replace(".", "") == want_nodot:
+            found = k
+    return found
+
+
+def _series_from_ex_matched(md, stock, field):
+    vals = _series_from_ex(md, stock, field)
+    if vals:
+        return vals
+    k = _md_match_key(md, stock)
+    if k is not None and k != stock:
+        return _series_from_ex(md, k, field)
+    return vals
+
+
 def _days_from_ex(md, stock):
     """从 get_market_data_ex 结果解析交易日列表（与 close 序列对齐时优先 index/time）。"""
     if md is None:
         return None
     df = None
-    if isinstance(md, dict) and stock in md:
-        df = md[stock]
-    elif isinstance(md, dict):
-        for v in md.values():
-            df = v
-            break
+    if isinstance(md, dict):
+        k = _md_match_key(md, stock)
+        if k is not None:
+            df = md[k]
+        elif len(md) == 1:
+            df = next(iter(md.values()))
     if df is None:
         return None
     raw = None
@@ -1659,7 +1696,7 @@ def _get_daily_bar_days(C, stock, count=8):
         end = end[:8]
     fields = ["close"]
     md = None
-    div = _dividend_type()
+    div = _dividend_type_for(stock)
     try:
         md = C.get_market_data_ex(
             fields=fields,
@@ -1760,28 +1797,51 @@ def _bar_end_str(C):
     return end_day
 
 
-def _ohlcv_diag_key(base):
-    st = str(getattr(A, "stock", "") or "").replace(".", "_")
+def _ohlcv_diag_key(base, stock=None):
+    if stock is None:
+        stock = getattr(A, "stock", "")
+    st = str(stock or "").replace(".", "_")
     if st:
         return "%s_%s" % (base, st)
     return base
 
 
-def _get_ohlcv_period(C, stock, period, count, need, diag_key):
+def _ohlcv_cache_map():
+    d = getattr(A, "_ohlcv_cache", None)
+    if isinstance(d, dict):
+        return d
+    if getattr(A, "_universe_loop", False):
+        d = {}
+        A._ohlcv_cache = d
+        return d
+    return None
+
+
+def _ohlcv_cache_key(stock, period, count, end, div):
+    return (
+        str(stock or ""),
+        str(period or ""),
+        int(count),
+        str(end or ""),
+        str(div or ""),
+    )
+
+
+def _ohlcv_end_for_period(C, period):
     end = _bar_end_str(C)
     if period in ("1d", "1w", "1mon", "1q", "1hy", "1y"):
         end = end[:8] if len(end) >= 8 else end
-    md = None
-    md_used = None
-    source = None
-    open_ = high = low = close = volume = None
-    fields = ["open", "high", "low", "close", "volume"]
-    div = _dividend_type()
+    return end
 
+
+def _call_market_data_ex(C, fields, stocks, period, end, count, div):
+    """kwargs 优先，TypeError 再位置参数；subscribe=False。返回 (md, source, err)。"""
+    md = None
+    source = None
     try:
         md = C.get_market_data_ex(
             fields=fields,
-            stock_code=[stock],
+            stock_code=stocks,
             period=period,
             end_time=end,
             count=count,
@@ -1794,7 +1854,7 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
         try:
             md = C.get_market_data_ex(
                 fields,
-                [stock],
+                stocks,
                 period=period,
                 start_time="",
                 end_time=end,
@@ -1803,41 +1863,45 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
             )
             source = "get_market_data_ex/pos"
         except Exception as e:
-            _diag_once(diag_key + "_ex_fail", e)
-            md = None
+            return None, None, e
     except Exception as e:
-        _diag_once(diag_key + "_ex_fail", e)
-        md = None
+        return None, None, e
+    return md, source, None
 
-    if md is not None:
-        md_used = md
-        open_ = _series_from_ex(md, stock, "open")
-        high = _series_from_ex(md, stock, "high")
-        low = _series_from_ex(md, stock, "low")
-        close = _series_from_ex(md, stock, "close")
-        volume = _series_from_ex(md, stock, "volume")
 
-    if not close or len(close) < need:
-        try:
-            md2 = C.get_market_data(
-                fields,
-                stock_code=[stock],
-                period=period,
-                end_time=end,
-                count=count,
-                dividend_type=div,
-            )
-            source = "get_market_data"
-            md_used = md2
-            open_ = _series_from_ex(md2, stock, "open")
-            high = _series_from_ex(md2, stock, "high")
-            low = _series_from_ex(md2, stock, "low")
-            close = _series_from_ex(md2, stock, "close")
-            volume = _series_from_ex(md2, stock, "volume")
-        except Exception as e:
-            _diag_once(diag_key + "_gmd_fail", e)
-
+def _parse_ohlcv_tuple(md, stock, period, end):
+    """md → OHLCV 元组；周线仍丢掉未收盘周。不打 diag。"""
+    if md is None:
+        return None
+    open_ = _series_from_ex_matched(md, stock, "open")
+    high = _series_from_ex_matched(md, stock, "high")
+    low = _series_from_ex_matched(md, stock, "low")
+    close = _series_from_ex_matched(md, stock, "close")
+    volume = _series_from_ex_matched(md, stock, "volume")
     if not close:
+        return None
+    n = len(close)
+    if not open_ or len(open_) != n:
+        open_ = list(close)
+    if not high or len(high) != n:
+        high = list(close)
+    if not low or len(low) != n:
+        low = list(close)
+    if not volume or len(volume) != n:
+        volume = [0.0] * n
+    if _is_weekly_period(period):
+        days = _days_from_ex(md, stock)
+        trimmed = _drop_unclosed_week_ohlcv(
+            open_, high, low, close, volume, days, end
+        )
+        if trimmed is None:
+            return None
+        open_, high, low, close, volume = trimmed
+    return open_, high, low, close, volume
+
+
+def _accept_ohlcv(tup, need, diag_key, source, period, end, div, C):
+    if tup is None or not tup[3]:
         _diag_once(
             diag_key + "_empty",
             "period=",
@@ -1848,34 +1912,7 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
             0,
         )
         return None
-
-    n = len(close)
-    if not open_ or len(open_) != n:
-        open_ = list(close)
-    if not high or len(high) != n:
-        high = list(close)
-    if not low or len(low) != n:
-        low = list(close)
-    if not volume or len(volume) != n:
-        volume = [0.0] * n
-
-    if _is_weekly_period(period):
-        days = _days_from_ex(md_used, stock) if md_used is not None else None
-        trimmed = _drop_unclosed_week_ohlcv(
-            open_, high, low, close, volume, days, end
-        )
-        if trimmed is None:
-            _diag_once(
-                diag_key + "_empty",
-                "period=",
-                period,
-                "end=",
-                end,
-                "n=0 after drop forming week",
-            )
-            return None
-        open_, high, low, close, volume = trimmed
-
+    close = tup[3]
     if len(close) < need:
         _diag_once(
             diag_key + "_empty",
@@ -1887,11 +1924,9 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
             len(close),
         )
         return None
-
     if np.std(np.asarray(close[-min(20, len(close)) :], dtype=float)) < 1e-8:
         _diag_once(diag_key + "_flat", "n=", len(close), "source=", source)
         return None
-
     _diag_once(
         diag_key + "_ok",
         "source=",
@@ -1909,26 +1944,167 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
         "chart=",
         _chart_dividend(C) or "-",
     )
-    return open_, high, low, close, volume
+    return tup
 
 
-def _get_ohlcv_1d(C, stock):
+def _get_ohlcv_period(C, stock, period, count, need, diag_key):
+    end = _ohlcv_end_for_period(C, period)
+    fields = ["open", "high", "low", "close", "volume"]
+    div = _dividend_type_for(stock)
+    cache = _ohlcv_cache_map()
+    key = _ohlcv_cache_key(stock, period, count, end, div)
+    if cache is not None:
+        hit = cache.get(key)
+        if hit is not None and len(hit[3]) >= int(need):
+            return hit
+    md, source, err = _call_market_data_ex(
+        C, fields, [stock], period, end, count, div
+    )
+    if err is not None:
+        _diag_once(diag_key + "_ex_fail", err)
+    tup = _parse_ohlcv_tuple(md, stock, period, end) if md is not None else None
+    if tup is None or len(tup[3]) < int(need):
+        try:
+            md2 = C.get_market_data(
+                fields,
+                stock_code=[stock],
+                period=period,
+                end_time=end,
+                count=count,
+                dividend_type=div,
+            )
+            source = "get_market_data"
+            tup2 = _parse_ohlcv_tuple(md2, stock, period, end)
+            if tup2 is not None:
+                tup = tup2
+        except Exception as e:
+            _diag_once(diag_key + "_gmd_fail", e)
+    tup = _accept_ohlcv(tup, need, diag_key, source, period, end, div, C)
+    if tup is not None and cache is not None:
+        cache[key] = tup
+    return tup
+
+
+def _ohlcv_need_1d():
     plat_n = int(globals().get("SCALE_PLAT_LOOKBACK") or 20)
-    need = max(
+    return max(
         int(D_MA_SLOW),
         int(VOL_PULLBACK_N),
         int(VOL_DRY_N),
         plat_n + 2,
     ) + 10
+
+
+def _ohlcv_need_1w():
+    return max(int(W_MA_SLOW), int(MACD_SLOW) + int(MACD_SIGNAL)) + 5
+
+
+def _prefetch_watch_ohlcv(C, stocks):
+    """按复权分组批量拉日+周；组失败或缺 key 单只回落。写入 A._ohlcv_cache。"""
+    codes = []
+    seen = set()
+    for x in stocks or []:
+        s = str(x or "").strip()
+        if (not s) or (s in seen):
+            continue
+        seen.add(s)
+        codes.append(s)
+    if not codes:
+        return
+    period_d = getattr(A, "period", "1d")
+    end_d = _ohlcv_end_for_period(C, period_d)
+    end_w = _ohlcv_end_for_period(C, "1w")
+    count_d = int(OHLC_COUNT)
+    count_w = int(WEEKLY_OHLC_COUNT)
+    need_d = _ohlcv_need_1d()
+    need_w = _ohlcv_need_1w()
+    fields = ["open", "high", "low", "close", "volume"]
+    groups = {}
+    for code in codes:
+        div = _dividend_type_for(code)
+        groups.setdefault(div, []).append(code)
+    cache = getattr(A, "_ohlcv_cache", None)
+    if not isinstance(cache, dict):
+        cache = {}
+        A._ohlcv_cache = cache
+    rpc = 0
+
+    def _fill(period, count, end, need, diag_base):
+        n_rpc = 0
+        for div, group in groups.items():
+            md, source, err = _call_market_data_ex(
+                C, fields, list(group), period, end, count, div
+            )
+            n_rpc += 1
+            missing = []
+            if err is not None or not isinstance(md, dict):
+                missing = list(group)
+            else:
+                for code in group:
+                    if _md_match_key(md, code) is None:
+                        missing.append(code)
+                        continue
+                    parsed = _parse_ohlcv_tuple(md, code, period, end)
+                    tup = _accept_ohlcv(
+                        parsed,
+                        need,
+                        _ohlcv_diag_key(diag_base, code),
+                        source or "get_market_data_ex",
+                        period,
+                        end,
+                        div,
+                        C,
+                    )
+                    if tup is not None:
+                        cache[_ohlcv_cache_key(code, period, count, end, div)] = tup
+            for code in missing:
+                n_rpc += 1
+                _get_ohlcv_period(
+                    C,
+                    code,
+                    period,
+                    count,
+                    need,
+                    _ohlcv_diag_key(diag_base, code),
+                )
+        return n_rpc
+
+    rpc += _fill(period_d, count_d, end_d, need_d, "d1")
+    rpc += _fill("1w", count_w, end_w, need_w, "w1")
+    print(
+        _strategy_tag(),
+        "ohlcv prefetch groups=%s rpc=%s n=%s"
+        % (len(groups), rpc, len(codes)),
+    )
+    _event_log(
+        "ohlcv_prefetch",
+        groups=len(groups),
+        rpc=rpc,
+        n=len(codes),
+    )
+
+
+def _get_ohlcv_1d(C, stock):
+    need = _ohlcv_need_1d()
     return _get_ohlcv_period(
-        C, stock, getattr(A, "period", "1d"), int(OHLC_COUNT), need, _ohlcv_diag_key("d1")
+        C,
+        stock,
+        getattr(A, "period", "1d"),
+        int(OHLC_COUNT),
+        need,
+        _ohlcv_diag_key("d1", stock),
     )
 
 
 def _get_ohlcv_1w(C, stock):
-    need = max(int(W_MA_SLOW), int(MACD_SLOW) + int(MACD_SIGNAL)) + 5
+    need = _ohlcv_need_1w()
     return _get_ohlcv_period(
-        C, stock, "1w", int(WEEKLY_OHLC_COUNT), need, _ohlcv_diag_key("w1")
+        C,
+        stock,
+        "1w",
+        int(WEEKLY_OHLC_COUNT),
+        need,
+        _ohlcv_diag_key("w1", stock),
     )
 
 # === qmt_common/mode.py ===
@@ -6939,6 +7115,52 @@ def _chart_in_watch():
     return False
 
 
+def _ohlcv_prefetch_codes(live_work, stocks, day, prev_closed):
+    """本轮会走 _get_ohlcv_1d/1w 的交易池子集。signal=全池；open_exec=未确认兜底或买入 pending。"""
+    live_work = str(live_work or "")
+    out_stocks = []
+    for x in stocks or []:
+        s = str(x or "").strip()
+        if s:
+            out_stocks.append(s)
+    if live_work == "signal":
+        return list(out_stocks)
+    if live_work != "open_exec":
+        return []
+    pmap = getattr(A, "_per_stock", None)
+    if not isinstance(pmap, dict) or not pmap:
+        return list(out_stocks)
+    prev_closed = str(prev_closed or "")
+    day = str(day or "")
+    need = []
+    for code in out_stocks:
+        rec = pmap.get(code)
+        if not isinstance(rec, dict):
+            rec = {}
+            want = str(code).strip().upper()
+            for k, v in pmap.items():
+                if str(k or "").strip().upper() == want and isinstance(v, dict):
+                    rec = v
+                    break
+        confirmed = str(rec.get("_confirmed_eval_day", "") or "")
+        has_pend = bool(rec.get("_has_pend"))
+        extra = rec.get("_hot_extra") if isinstance(rec.get("_hot_extra"), dict) else {}
+        has_buy = bool(rec.get("_has_buy_pend")) or isinstance(
+            extra.get("pending_entry"), dict
+        )
+        fb_done = str(
+            rec.get("_fallback_done_day", "") or extra.get("fallback_done_day") or ""
+        )
+        need_fb = (
+            (not has_pend)
+            and (confirmed < prev_closed)
+            and (fb_done != day)
+        )
+        if need_fb or has_buy:
+            need.append(code)
+    return need
+
+
 def _per_stock_map():
     d = getattr(A, "_per_stock", None)
     if not isinstance(d, dict):
@@ -7268,10 +7490,16 @@ def _handle_universe(C):
             rec["_confirmed_eval_day"] = str(
                 getattr(A, "_confirmed_eval_day", "") or ""
             )
+            rec["_fallback_done_day"] = str(
+                getattr(A, "_fallback_done_day", "") or ""
+            )
             rec["_has_pend"] = bool(
                 getattr(A, "pending_entry", None)
                 or getattr(A, "pending_exit", None)
                 or getattr(A, "pending", None)
+            )
+            rec["_has_buy_pend"] = isinstance(
+                getattr(A, "pending_entry", None), dict
             )
             _per_stock_map()[code] = rec
             _stash_hot_state(code)
@@ -7289,22 +7517,32 @@ def _handle_universe(C):
         for code in stocks:
             _run_one(code, "")
     else:
-        for code in stocks:
-            _run_one(code, "eval")
-        _log_book_checkin_missing(ctx.get("now_s"))
-        for code in stocks:
-            _run_one(code, "exec")
-        if live_work == "signal":
-            all_ok = True
-            any_pend = False
+        need_codes = _ohlcv_prefetch_codes(
+            live_work, stocks, day, ctx.get("prev_closed")
+        )
+        try:
+            if need_codes:
+                _prefetch_watch_ohlcv(C, need_codes)
             for code in stocks:
-                rec = _per_stock_map().get(code) or {}
-                if str(rec.get("_confirmed_eval_day", "") or "") != str(day):
-                    all_ok = False
-                if rec.get("_has_pend"):
-                    any_pend = True
-            if all_ok and (not any_pend):
-                A._universe_signal_done_day = str(day)
+                _run_one(code, "eval")
+            _log_book_checkin_missing(ctx.get("now_s"))
+            for code in stocks:
+                _run_one(code, "exec")
+            if live_work == "signal":
+                all_ok = True
+                any_pend = False
+                for code in stocks:
+                    rec = _per_stock_map().get(code) or {}
+                    if str(rec.get("_confirmed_eval_day", "") or "") != str(day):
+                        all_ok = False
+                    if rec.get("_has_pend"):
+                        any_pend = True
+                if all_ok and (not any_pend):
+                    A._universe_signal_done_day = str(day)
+        finally:
+            cache = getattr(A, "_ohlcv_cache", None)
+            if isinstance(cache, dict):
+                cache.clear()
 
     cur = str(getattr(A, "stock", "") or "").strip()
     if cur and (not getattr(A, "is_backtest", False)):

@@ -71,6 +71,52 @@ def _chart_in_watch():
     return False
 
 
+def _ohlcv_prefetch_codes(live_work, stocks, day, prev_closed):
+    """本轮会走 _get_ohlcv_1d/1w 的交易池子集。signal=全池；open_exec=未确认兜底或买入 pending。"""
+    live_work = str(live_work or "")
+    out_stocks = []
+    for x in stocks or []:
+        s = str(x or "").strip()
+        if s:
+            out_stocks.append(s)
+    if live_work == "signal":
+        return list(out_stocks)
+    if live_work != "open_exec":
+        return []
+    pmap = getattr(A, "_per_stock", None)
+    if not isinstance(pmap, dict) or not pmap:
+        return list(out_stocks)
+    prev_closed = str(prev_closed or "")
+    day = str(day or "")
+    need = []
+    for code in out_stocks:
+        rec = pmap.get(code)
+        if not isinstance(rec, dict):
+            rec = {}
+            want = str(code).strip().upper()
+            for k, v in pmap.items():
+                if str(k or "").strip().upper() == want and isinstance(v, dict):
+                    rec = v
+                    break
+        confirmed = str(rec.get("_confirmed_eval_day", "") or "")
+        has_pend = bool(rec.get("_has_pend"))
+        extra = rec.get("_hot_extra") if isinstance(rec.get("_hot_extra"), dict) else {}
+        has_buy = bool(rec.get("_has_buy_pend")) or isinstance(
+            extra.get("pending_entry"), dict
+        )
+        fb_done = str(
+            rec.get("_fallback_done_day", "") or extra.get("fallback_done_day") or ""
+        )
+        need_fb = (
+            (not has_pend)
+            and (confirmed < prev_closed)
+            and (fb_done != day)
+        )
+        if need_fb or has_buy:
+            need.append(code)
+    return need
+
+
 def _per_stock_map():
     d = getattr(A, "_per_stock", None)
     if not isinstance(d, dict):
@@ -400,10 +446,16 @@ def _handle_universe(C):
             rec["_confirmed_eval_day"] = str(
                 getattr(A, "_confirmed_eval_day", "") or ""
             )
+            rec["_fallback_done_day"] = str(
+                getattr(A, "_fallback_done_day", "") or ""
+            )
             rec["_has_pend"] = bool(
                 getattr(A, "pending_entry", None)
                 or getattr(A, "pending_exit", None)
                 or getattr(A, "pending", None)
+            )
+            rec["_has_buy_pend"] = isinstance(
+                getattr(A, "pending_entry", None), dict
             )
             _per_stock_map()[code] = rec
             _stash_hot_state(code)
@@ -421,22 +473,32 @@ def _handle_universe(C):
         for code in stocks:
             _run_one(code, "")
     else:
-        for code in stocks:
-            _run_one(code, "eval")
-        _log_book_checkin_missing(ctx.get("now_s"))
-        for code in stocks:
-            _run_one(code, "exec")
-        if live_work == "signal":
-            all_ok = True
-            any_pend = False
+        need_codes = _ohlcv_prefetch_codes(
+            live_work, stocks, day, ctx.get("prev_closed")
+        )
+        try:
+            if need_codes:
+                _prefetch_watch_ohlcv(C, need_codes)
             for code in stocks:
-                rec = _per_stock_map().get(code) or {}
-                if str(rec.get("_confirmed_eval_day", "") or "") != str(day):
-                    all_ok = False
-                if rec.get("_has_pend"):
-                    any_pend = True
-            if all_ok and (not any_pend):
-                A._universe_signal_done_day = str(day)
+                _run_one(code, "eval")
+            _log_book_checkin_missing(ctx.get("now_s"))
+            for code in stocks:
+                _run_one(code, "exec")
+            if live_work == "signal":
+                all_ok = True
+                any_pend = False
+                for code in stocks:
+                    rec = _per_stock_map().get(code) or {}
+                    if str(rec.get("_confirmed_eval_day", "") or "") != str(day):
+                        all_ok = False
+                    if rec.get("_has_pend"):
+                        any_pend = True
+                if all_ok and (not any_pend):
+                    A._universe_signal_done_day = str(day)
+        finally:
+            cache = getattr(A, "_ohlcv_cache", None)
+            if isinstance(cache, dict):
+                cache.clear()
 
     cur = str(getattr(A, "stock", "") or "").strip()
     if cur and (not getattr(A, "is_backtest", False)):

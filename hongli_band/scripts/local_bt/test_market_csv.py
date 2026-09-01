@@ -1778,8 +1778,10 @@ class FastOhlcvPatchTests(unittest.TestCase):
         self.assertIsNotNone(orig_d)
         self.assertIsNotNone(orig_w)
         _patch_fast_ohlcv(ns)
+        ns["A"]._ohlcv_cache = {"sentinel": True}
         fast_d = ns["_get_ohlcv_1d"](ctx, "600350.SH")
         fast_w = ns["_get_ohlcv_1w"](ctx, "600350.SH")
+        self.assertEqual(ns["A"]._ohlcv_cache, {"sentinel": True})
         self.assertIsNotNone(fast_d)
         self.assertIsNotNone(fast_w)
         self.assertEqual(len(fast_d[3]), len(orig_d[3]))
@@ -1956,6 +1958,187 @@ class FingerprintAggTests(unittest.TestCase):
             self.assertEqual(len(fp), 3)
             self.assertEqual(fp[0], 1)
             self.assertGreater(fp[2], 0)
+
+
+class OhlcvPrefetchCacheTests(unittest.TestCase):
+    def _bars(self, n=400, stock="600350.SH"):
+        d = datetime(2018, 1, 2)
+        bars = []
+        while len(bars) < n:
+            if d.weekday() < 5:
+                px = 10.0 + 0.01 * len(bars)
+                b = _bar(d.strftime("%Y%m%d"), px)
+                bars.append(
+                    DailyBar(
+                        day=b.day,
+                        dt=b.dt,
+                        open=b.open,
+                        high=b.high,
+                        low=b.low,
+                        close=b.close,
+                        volume=b.volume,
+                        stock=stock,
+                    )
+                )
+            d += timedelta(days=1)
+        return bars
+
+    def _setup(self):
+        from mock_qmt import MockContext, _as_tag
+        from run import _exec_bundle
+
+        bars = self._bars()
+        store = MarketStore(bars, "600350.SH")
+        walk = bars[-30:]
+        ctx = MockContext(store, [_as_tag(b.dt) for b in walk], "600350.SH")
+        ctx.barpos = len(walk) - 1
+        ns = _exec_bundle()
+        ns["A"].period = "1d"
+        ns["A"].stock = ""
+        ns["A"].is_backtest = True
+        ns["A"]._diag = set()
+        if hasattr(ns["A"], "_ohlcv_cache"):
+            delattr(ns["A"], "_ohlcv_cache")
+        return ns, ctx
+
+    def _wrap_md(self, ctx, *, lower_keys=False, fail_multi=False):
+        from mock_qmt import _parse_md_call
+
+        calls = []
+        orig = ctx._md
+
+        def wrapped(*a, **k):
+            spec = _parse_md_call(a, k)
+            calls.append({"spec": spec, "kwargs": dict(k)})
+            if fail_multi and len(spec["stocks"]) > 1:
+                raise RuntimeError("batch fail")
+            out = orig(*a, **k)
+            if lower_keys:
+                return {str(kk).lower(): vv for kk, vv in out.items()}
+            return out
+
+        ctx._md = wrapped
+        return calls
+
+    def test_dividend_type_wraps_for_stock(self):
+        from run import _exec_bundle
+
+        ns = _exec_bundle()
+        ns["A"].stock = "600350.SH"
+        self.assertEqual(ns["_dividend_type"](), ns["_dividend_type_for"]("600350.SH"))
+        self.assertEqual(ns["_dividend_type_for"]("600350.SH"), "front_ratio")
+        self.assertEqual(ns["_dividend_type_for"]("600028.SH"), "front")
+        self.assertEqual(
+            ns["_ohlcv_diag_key"]("d1", "600028.SH"),
+            "d1_600028_SH",
+        )
+
+    def test_prefetch_codes_watch_only_and_open_subset(self):
+        from run import _exec_bundle
+
+        ns = _exec_bundle()
+        ns["A"].watch = ["600350.SH", "600028.SH"]
+        ns["A"].chart_stock = "000300.SH"
+        uni = ns["_watch_universe_codes"]()
+        self.assertIn("000300.SH", uni)
+        stocks = list(ns["A"].watch)
+        got = ns["_ohlcv_prefetch_codes"]("signal", stocks, "20260901", "20260831")
+        self.assertEqual(got, stocks)
+        self.assertNotIn("000300.SH", got)
+        self.assertEqual(
+            ns["_ohlcv_prefetch_codes"]("pending", stocks, "20260901", "20260831"),
+            [],
+        )
+        ns["A"]._per_stock = {}
+        self.assertEqual(
+            ns["_ohlcv_prefetch_codes"]("open_exec", stocks, "20260901", "20260831"),
+            stocks,
+        )
+        ns["A"]._per_stock = {
+            "600350.SH": {
+                "_confirmed_eval_day": "20260831",
+                "_has_pend": False,
+                "_fallback_done_day": "",
+            },
+            "600028.SH": {
+                "_confirmed_eval_day": "20260831",
+                "_has_pend": True,
+                "_has_buy_pend": False,
+                "_fallback_done_day": "",
+            },
+        }
+        self.assertEqual(
+            ns["_ohlcv_prefetch_codes"]("open_exec", stocks, "20260901", "20260831"),
+            [],
+        )
+        ns["A"]._per_stock["600028.SH"]["_has_buy_pend"] = True
+        self.assertEqual(
+            ns["_ohlcv_prefetch_codes"]("open_exec", stocks, "20260901", "20260831"),
+            ["600028.SH"],
+        )
+        ns["A"]._per_stock["600350.SH"]["_confirmed_eval_day"] = "20260830"
+        self.assertEqual(
+            ns["_ohlcv_prefetch_codes"]("open_exec", stocks, "20260901", "20260831"),
+            ["600350.SH", "600028.SH"],
+        )
+
+    def test_multi_code_one_md_cache_matches_single(self):
+        import numpy as np
+
+        ns, ctx = self._setup()
+        calls = self._wrap_md(ctx, lower_keys=True)
+        codes = ["600028.SH", "600188.SH"]
+        single_d = ns["_get_ohlcv_1d"](ctx, codes[0])
+        single_w = ns["_get_ohlcv_1w"](ctx, codes[0])
+        self.assertIsNotNone(single_d)
+        self.assertIsNotNone(single_w)
+        self.assertFalse(hasattr(ns["A"], "_ohlcv_cache") and ns["A"]._ohlcv_cache)
+        ns["A"].stock = ""
+        ns["A"]._diag = set()
+        calls.clear()
+        ns["_prefetch_watch_ohlcv"](ctx, codes)
+        batch = [c for c in calls if len(c["spec"]["stocks"]) >= 2]
+        self.assertEqual(len(batch), 2)
+        self.assertEqual({c["spec"]["period"] for c in batch}, {"1d", "1w"})
+        for c in batch:
+            self.assertFalse(c["kwargs"].get("subscribe", True))
+            self.assertEqual(c["spec"]["stocks"], codes)
+        n_after_prefetch = len(calls)
+        cached_d = ns["_get_ohlcv_1d"](ctx, codes[0])
+        cached_w = ns["_get_ohlcv_1w"](ctx, codes[0])
+        self.assertEqual(len(calls), n_after_prefetch)
+        self.assertIsNotNone(cached_d)
+        self.assertIsNotNone(cached_w)
+        self.assertTrue(
+            np.allclose(
+                np.asarray(cached_d[3], dtype=float),
+                np.asarray(single_d[3], dtype=float),
+            )
+        )
+        self.assertTrue(
+            np.allclose(
+                np.asarray(cached_w[3], dtype=float),
+                np.asarray(single_w[3], dtype=float),
+            )
+        )
+        self.assertAlmostEqual(float(cached_d[3][-1]), float(single_d[3][-1]))
+        tick = ns["_get_ohlcv_period"](ctx, codes[0], "1d", 2, 1, "d1open_600028_SH")
+        self.assertIsNotNone(tick)
+        self.assertGreater(len(calls), n_after_prefetch)
+        self.assertEqual(int(calls[-1]["spec"]["count"]), 2)
+
+    def test_group_fail_falls_back_per_stock(self):
+        ns, ctx = self._setup()
+        calls = self._wrap_md(ctx, fail_multi=True)
+        codes = ["600028.SH", "600188.SH"]
+        ns["_prefetch_watch_ohlcv"](ctx, codes)
+        singles = [c for c in calls if len(c["spec"]["stocks"]) == 1]
+        self.assertGreaterEqual(len(singles), 4)
+        hit_d = ns["_get_ohlcv_1d"](ctx, codes[0])
+        self.assertIsNotNone(hit_d)
+        n = len(calls)
+        ns["_get_ohlcv_1d"](ctx, codes[0])
+        self.assertEqual(len(calls), n)
 
 
 if __name__ == "__main__":
