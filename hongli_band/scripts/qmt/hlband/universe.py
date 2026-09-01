@@ -269,10 +269,13 @@ def _activate_stock(code):
 
 
 def _timer_session_idle(now_s):
+    """午休、开盘前、确认窗结束后空闲。晚盘截止跟 SIGNAL_CONFIRM_END，等于截止时刻仍工作。"""
     s = str(now_s or "")
     if "113000" <= s < "130000":
         return True
-    if s >= "160000" or s < "093000":
+    conf_e = _cfg_hhmmss("SIGNAL_CONFIRM_END", "150000")
+    dec_s = _cfg_hhmmss("DECISION_START", "093000")
+    if s > conf_e or s < dec_s:
         return True
     return False
 
@@ -282,8 +285,8 @@ def _compute_live_work(now_s, day):
     open_s = _cfg_hhmmss("OPEN_EXEC_START", "093000")
     open_e = _cfg_hhmmss("OPEN_EXEC_END", "094500")
     conf_s = _cfg_hhmmss("SIGNAL_CONFIRM_START", "145600")
-    conf_e = _cfg_hhmmss("SIGNAL_CONFIRM_END", "160000")
-    dec_s = str(globals().get("DECISION_START") or "093000")
+    conf_e = _cfg_hhmmss("SIGNAL_CONFIRM_END", "150000")
+    dec_s = _cfg_hhmmss("DECISION_START", "093000")
     s = str(now_s or "")
     if s < dec_s or s > conf_e:
         return ""

@@ -3989,7 +3989,7 @@ def _book_window_id(now_s):
 
 def _book_freeze_s(window):
     if window == "open":
-        return str(globals().get("BOOK_FREEZE_OPEN") or "093200")
+        return str(globals().get("BOOK_FREEZE_OPEN") or "093030")
     return str(globals().get("BOOK_FREEZE_CLOSE") or "145630")
 
 
@@ -6314,7 +6314,7 @@ def _handle_clock_gate(C, from_timer=False):
     hhmm = _bar_hhmm(bar_dt if bt else now)
     live_cc = _live_close_confirm_on()
     conf_start = str(globals().get("SIGNAL_CONFIRM_START", "145600") or "145600")
-    conf_end = str(globals().get("SIGNAL_CONFIRM_END", "160000") or "160000")
+    conf_end = str(globals().get("SIGNAL_CONFIRM_END", "150000") or "150000")
     in_exec = (not bt) and (DECISION_START <= now_s < conf_start)
     in_confirm = (not bt) and (conf_start <= now_s <= conf_end)
     phase = "bt" if bt else "live"
@@ -7313,10 +7313,13 @@ def _activate_stock(code):
 
 
 def _timer_session_idle(now_s):
+    """午休、开盘前、确认窗结束后空闲。晚盘截止跟 SIGNAL_CONFIRM_END，等于截止时刻仍工作。"""
     s = str(now_s or "")
     if "113000" <= s < "130000":
         return True
-    if s >= "160000" or s < "093000":
+    conf_e = _cfg_hhmmss("SIGNAL_CONFIRM_END", "150000")
+    dec_s = _cfg_hhmmss("DECISION_START", "093000")
+    if s > conf_e or s < dec_s:
         return True
     return False
 
@@ -7326,8 +7329,8 @@ def _compute_live_work(now_s, day):
     open_s = _cfg_hhmmss("OPEN_EXEC_START", "093000")
     open_e = _cfg_hhmmss("OPEN_EXEC_END", "094500")
     conf_s = _cfg_hhmmss("SIGNAL_CONFIRM_START", "145600")
-    conf_e = _cfg_hhmmss("SIGNAL_CONFIRM_END", "160000")
-    dec_s = str(globals().get("DECISION_START") or "093000")
+    conf_e = _cfg_hhmmss("SIGNAL_CONFIRM_END", "150000")
+    dec_s = _cfg_hhmmss("DECISION_START", "093000")
     s = str(now_s or "")
     if s < dec_s or s > conf_e:
         return ""
@@ -7952,6 +7955,11 @@ def _init_impl(C):
             globals().get("OPEN_EXEC_START", "093000"),
             globals().get("OPEN_EXEC_END", "094500"),
         ),
+        "confirm=",
+        "%s-%s" % (
+            globals().get("SIGNAL_CONFIRM_START", "145600"),
+            globals().get("SIGNAL_CONFIRM_END", "150000"),
+        ),
     )
     _event_log(
         "init",
@@ -7984,6 +7992,11 @@ def _init_impl(C):
         % (
             globals().get("OPEN_EXEC_START", "093000"),
             globals().get("OPEN_EXEC_END", "094500"),
+        ),
+        confirm="%s-%s"
+        % (
+            globals().get("SIGNAL_CONFIRM_START", "145600"),
+            globals().get("SIGNAL_CONFIRM_END", "150000"),
         ),
         budget=_trade_budget_cap(),
         book_n=_cfg_book_n(),

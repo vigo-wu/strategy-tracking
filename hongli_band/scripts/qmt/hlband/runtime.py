@@ -345,6 +345,11 @@ def _init_impl(C):
             globals().get("OPEN_EXEC_START", "093000"),
             globals().get("OPEN_EXEC_END", "094500"),
         ),
+        "confirm=",
+        "%s-%s" % (
+            globals().get("SIGNAL_CONFIRM_START", "145600"),
+            globals().get("SIGNAL_CONFIRM_END", "150000"),
+        ),
     )
     _event_log(
         "init",
@@ -377,6 +382,11 @@ def _init_impl(C):
         % (
             globals().get("OPEN_EXEC_START", "093000"),
             globals().get("OPEN_EXEC_END", "094500"),
+        ),
+        confirm="%s-%s"
+        % (
+            globals().get("SIGNAL_CONFIRM_START", "145600"),
+            globals().get("SIGNAL_CONFIRM_END", "150000"),
         ),
         budget=_trade_budget_cap(),
         book_n=_cfg_book_n(),

@@ -1584,7 +1584,7 @@ def _handle_clock_gate(C, from_timer=False):
     hhmm = _bar_hhmm(bar_dt if bt else now)
     live_cc = _live_close_confirm_on()
     conf_start = str(globals().get("SIGNAL_CONFIRM_START", "145600") or "145600")
-    conf_end = str(globals().get("SIGNAL_CONFIRM_END", "160000") or "160000")
+    conf_end = str(globals().get("SIGNAL_CONFIRM_END", "150000") or "150000")
     in_exec = (not bt) and (DECISION_START <= now_s < conf_start)
     in_confirm = (not bt) and (conf_start <= now_s <= conf_end)
     phase = "bt" if bt else "live"

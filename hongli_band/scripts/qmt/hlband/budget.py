@@ -884,7 +884,7 @@ def _book_window_id(now_s):
 
 def _book_freeze_s(window):
     if window == "open":
-        return str(globals().get("BOOK_FREEZE_OPEN") or "093200")
+        return str(globals().get("BOOK_FREEZE_OPEN") or "093030")
     return str(globals().get("BOOK_FREEZE_CLOSE") or "145630")
 
 
