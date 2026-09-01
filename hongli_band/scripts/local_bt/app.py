@@ -73,8 +73,15 @@ from run import (  # noqa: E402
     run_backtest,
     write_typed_summaries,
 )
-from stock_select import (  # noqa: E402
+from select_config import (  # noqa: E402
     DEFAULT_FILTERS,
+    FILTER_WIDGETS,
+    SELECT_SIDEBAR,
+    cast_filter_value,
+    widget_kwargs,
+    year_max_for_window,
+)
+from stock_select import (  # noqa: E402
     SCORE_YEARS,
     coverage_notes,
     csv_dir_fingerprint,
@@ -1501,6 +1508,65 @@ def _render_select(
         st.caption("看 K 线 / 成交明细请切到「仅分析已有明细」。")
 
 
+def _render_select_filter_widgets(year_max: int) -> dict[str, Any]:
+    """按 select_config.FILTER_WIDGETS 画硬过滤控件。"""
+    out: dict[str, Any] = {}
+    for spec in FILTER_WIDGETS:
+        kwargs = widget_kwargs(spec, year_max=year_max)
+        key = str(spec["key"])
+        label = str(spec["label"])
+        wkey = "select_flt_%s" % key
+        if wkey in st.session_state:
+            kwargs.pop("value", None)
+        widget = str(spec.get("widget") or "number_input")
+        if widget == "slider":
+            raw = st.slider(label, key=wkey, **kwargs)
+        else:
+            raw = st.number_input(label, key=wkey, **kwargs)
+        out[key] = cast_filter_value(spec, raw)
+        cap = spec.get("caption")
+        if cap:
+            st.caption(str(cap))
+    return out
+
+
+def _render_select_sidebar() -> tuple[dict[str, Any], tuple[str, ...] | None, dict | None]:
+    """选股侧栏：打分年份 + 硬过滤。默认值/范围见 select_config.py。"""
+    cfg = SELECT_SIDEBAR
+    st.subheader(str(cfg["year_section"]))
+    try:
+        scanned = _cached_select_scan(
+            str(DEFAULT_REPORT_ROOT),
+            str(DEFAULT_CSV_ROOT),
+            report_fingerprint(str(DEFAULT_REPORT_ROOT)),
+            csv_dir_fingerprint(str(DEFAULT_CSV_ROOT)),
+        )
+    except Exception:
+        scanned = {"stocks": {}, "book": {}, "score_years": ()}
+        st.error("扫描回测报告失败")
+        st.code(traceback.format_exc())
+    avail = infer_score_years((scanned or {}).get("stocks") or {}) or tuple(SCORE_YEARS)
+    start_key = str(cfg["year_start_key"])
+    end_key = str(cfg["year_end_key"])
+    start = st.selectbox(str(cfg["year_start_label"]), list(avail), index=0, key=start_key)
+    end_opts = [y for y in avail if str(y) >= str(start)] or list(avail)
+    if st.session_state.get(end_key) not in end_opts:
+        st.session_state[end_key] = end_opts[-1]
+    end = st.selectbox(str(cfg["year_end_label"]), end_opts, key=end_key)
+    if str(end) < str(start):
+        start, end = end, start
+    select_years = tuple(y for y in avail if str(start) <= str(y) <= str(end))
+    if not select_years:
+        select_years = avail
+    st.caption(str(cfg["year_caption"]) % (select_years[0], select_years[-1]))
+    st.subheader(str(cfg["filter_section"]))
+    filters = _render_select_filter_widgets(year_max_for_window(len(select_years)))
+    if st.button(str(cfg["refresh_label"])):
+        _cached_select_scan.clear()
+        st.rerun()
+    return filters, select_years, scanned
+
+
 # ---------- sidebar / controls ----------
 mode = st.radio("模式", ["跑本地回测", "仅分析已有明细", "选股方案"], horizontal=True)
 scope = "单标的"
@@ -1528,7 +1594,7 @@ with st.sidebar:
         else:
             st.warning("请至少选择一种复权")
     else:
-        st.caption("选股扫描 `report/` 下全部已有复权子目录，不受此处勾选限制。")
+        st.caption(str(SELECT_SIDEBAR["scan_caption"]))
     report_dirs = [str(resolve_typed_dir(DEFAULT_REPORT_ROOT, d)) for d in divs]
     csv_dirs = [str(resolve_typed_dir(csv_root, d)) for d in divs]
     csv_dir = csv_dirs[0] if csv_dirs else str(resolve_typed_dir(csv_root, DEFAULT_DIVIDEND_TYPE))
@@ -1548,79 +1614,7 @@ with st.sidebar:
     select_years: tuple[str, ...] | None = None
     select_scanned: dict | None = None
     if mode == "选股方案":
-        st.subheader("打分年份")
-        try:
-            select_scanned = _cached_select_scan(
-                str(DEFAULT_REPORT_ROOT),
-                str(DEFAULT_CSV_ROOT),
-                report_fingerprint(str(DEFAULT_REPORT_ROOT)),
-                csv_dir_fingerprint(str(DEFAULT_CSV_ROOT)),
-            )
-        except Exception:
-            select_scanned = {"stocks": {}, "book": {}, "score_years": ()}
-            st.error("扫描回测报告失败")
-            st.code(traceback.format_exc())
-        avail = infer_score_years((select_scanned or {}).get("stocks") or {}) or tuple(SCORE_YEARS)
-        start = st.selectbox("起始年", list(avail), index=0, key="select_year_start")
-        end_opts = [y for y in avail if str(y) >= str(start)] or list(avail)
-        if st.session_state.get("select_year_end") not in end_opts:
-            st.session_state["select_year_end"] = end_opts[-1]
-        end = st.selectbox("结束年", end_opts, key="select_year_end")
-        if str(end) < str(start):
-            start, end = end, start
-        select_years = tuple(y for y in avail if str(start) <= str(y) <= str(end))
-        if not select_years:
-            select_years = avail
-        st.caption("建议均线/复权与硬过滤都在 %s–%s 内重算；改年不重新扫描。" % (select_years[0], select_years[-1]))
-        n_win = max(len(select_years), 1)
-        year_max = max(5, n_win)
-        st.subheader("硬过滤")
-        select_filters["min_n_buy"] = int(
-            st.number_input("最少跨年轮次", min_value=0, max_value=50, value=int(DEFAULT_FILTERS["min_n_buy"]), step=1)
-        )
-        select_filters["min_n_buy_per_year"] = int(
-            st.number_input(
-                "每年最少轮次",
-                min_value=0,
-                max_value=20,
-                value=int(DEFAULT_FILTERS["min_n_buy_per_year"]),
-                step=1,
-            )
-        )
-        st.caption("窗口内每一年都要达标，缺文件按 0；0 表示不启用。")
-        select_filters["min_years_traded"] = int(
-            st.number_input(
-                "最少成交年数",
-                min_value=1,
-                max_value=year_max,
-                value=min(int(DEFAULT_FILTERS["min_years_traded"]), year_max),
-                step=1,
-            )
-        )
-        select_filters["min_pos_years"] = int(
-            st.number_input(
-                "最少盈利年数",
-                min_value=0,
-                max_value=year_max,
-                value=min(int(DEFAULT_FILTERS["min_pos_years"]), year_max),
-                step=1,
-            )
-        )
-        select_filters["min_pos_ratio"] = float(
-            st.slider("或盈利年占比 ≥", min_value=0.0, max_value=1.0, value=float(DEFAULT_FILTERS["min_pos_ratio"]), step=0.05)
-        )
-        select_filters["max_win_pnl_share"] = float(
-            st.slider("单笔盈利占毛利上限", min_value=0.3, max_value=1.0, value=float(DEFAULT_FILTERS["max_win_pnl_share"]), step=0.05)
-        )
-        select_filters["vol_drop_top"] = float(
-            st.slider("剔除最高波动分位", min_value=0.0, max_value=0.3, value=float(DEFAULT_FILTERS["vol_drop_top"]), step=0.05)
-        )
-        select_filters["top_n"] = int(
-            st.slider("推荐池 N", min_value=4, max_value=9, value=int(DEFAULT_FILTERS["top_n"]), step=1)
-        )
-        if st.button("刷新缓存"):
-            _cached_select_scan.clear()
-            st.rerun()
+        select_filters, select_years, select_scanned = _render_select_sidebar()
 
 if mode == "选股方案":
     _render_select(

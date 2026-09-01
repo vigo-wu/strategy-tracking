@@ -119,9 +119,9 @@ hongli_band/回测记录/      ← 旧终端导出；「仅分析」会一并列
 3. 用胜出复权的窗口内分年 KPI 打分；股性（年化波动、贴 MA20）读 **该窗口建议复权** 的 `csv/<type>/`。
 4. 过线后按得分取 Top N。页面给出 `BOOK_STOCKS` 草稿：有建议均线才出行动；有建议复权则带上 `"dividend_type"`。
 
-默认硬过滤（可在侧栏改）：跨年轮次 ≥ 6、每年最少轮次默认不启用（0；>0 时窗口内每一年含缺文件/未走完年都要达标）、成交年 ≥ 2、盈利年 ≥ 2 或盈利年占比 ≥ 50%、单笔盈利占毛利 ≤ 70%、剔除波动最高 10%、推荐池 6 只。成交年 / 盈利年 / 每年轮次按选定窗口计。
+默认硬过滤、侧栏控件范围与打分权重写在 `hongli_band/scripts/local_bt/select_config.py`，侧栏可改。成交年 / 盈利年 / 每年轮次按选定窗口计。
 
-打分权重（过线之后）：年等权盈亏 30%、胜率 20%、稳定性 20%、利润因子 15%、卖出质量 15%。**不要把得分当分真实夏普**；全池 Top N 有多重选择偏差。
+打分权重（过线之后百分位加权）也在该文件。**不要把得分当分真实夏普**；全池 Top N 有多重选择偏差。
 
 覆盖提示里「缺对照」时：先多选复权跑「批量 + 按自然年分段」；建议均线还要同时勾 SMA/EMA 对照。
 
@@ -151,7 +151,7 @@ python hongli_band/scripts/local_bt/stock_select.py --report-dir hongli_band/rep
 单测（在 `hongli_band/scripts/local_bt/` 下）：
 
 ```bash
-python -m unittest test_market_csv
+python -m unittest test_market_csv test_select_config
 ```
 
 ## 常见误区

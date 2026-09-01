@@ -45,6 +45,7 @@ from analyze import (  # noqa: E402
     typed_sibling_dirs,
 )
 from market_csv import load_daily_csv  # noqa: E402
+from select_config import DEFAULT_FILTERS, WEIGHTS  # noqa: E402
 
 DEFAULT_REPORT = DEFAULT_REPORT_ROOT
 DEFAULT_CSV_DIR = DEFAULT_CSV_ROOT
@@ -67,24 +68,6 @@ SKIP_CODES = (
 SCORE_YEARS = ("2021", "2022", "2023", "2024", "2025", "2026")
 RECENT_KEY = "recent"
 
-DEFAULT_FILTERS: dict[str, Any] = {
-    "min_n_buy": 6,
-    "min_n_buy_per_year": 0,
-    "min_years_traded": 2,
-    "min_pos_years": 2,
-    "min_pos_ratio": 0.50,
-    "max_win_pnl_share": 0.70,
-    "vol_drop_top": 0.10,
-    "top_n": 6,
-}
-
-WEIGHTS = {
-    "pnl": 0.30,
-    "win_rate": 0.20,
-    "stability": 0.20,
-    "profit_factor": 0.15,
-    "quality": 0.15,
-}
 PF_CAP = 10.0
 VOL_MIN_BARS = 40
 TOUCH_TOL = 0.025
