@@ -177,7 +177,7 @@ DECISION_START = "093000"
 DECISION_END = "150000"
 # 信号 pending 主成交窗：连续竞价尾盘，14:57 起已是收盘集合竞价，不再报单。
 # 14:56:00 起限价挂卖一（买）/买一（卖）；14:57:00 前结束。错过则次日开盘窗补。
-PENDING_EXEC_START = "145600"
+PENDING_EXEC_START = "145630"
 PENDING_EXEC_END = "145700"
 # 隔夜残留 / 开盘兜底：错过尾盘时次日开盘窗按开盘价补成交
 OPEN_EXEC_START = "093000"
