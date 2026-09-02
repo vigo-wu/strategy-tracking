@@ -41,6 +41,8 @@ from analyze import (  # noqa: E402
     dividend_from_detail_path,
     div_compare_dataframe,
     dividend_label,
+    enrich_detail_raw_hold_metrics,
+    enrich_trades_hold_metrics,
     filter_trades_by_range,
     list_daily_csvs,
     list_detail_csvs,
@@ -500,6 +502,105 @@ _KLINE_PLOT_CONFIG = {
 }
 
 
+def _ensure_hold_metrics(
+    trades: list[dict[str, Any]],
+    detail_path: Path,
+    *,
+    csv_root: str | None = None,
+    dividend_type: str = "",
+    stock: str = "",
+) -> list[dict[str, Any]]:
+    """成交轮次缺持有回撤/浮盈时补算。"""
+    if not trades:
+        return trades
+    if all(
+        t.get("hold_max_dd") is not None and t.get("hold_max_up") is not None for t in trades
+    ):
+        return trades
+    return enrich_trades_hold_metrics(
+        trades,
+        csv_root=csv_root if csv_root is not None else DEFAULT_CSV_ROOT,
+        dividend_type=dividend_type,
+        detail_path=detail_path,
+        default_stock=stock,
+    )
+
+
+def _show_trades_rounds(
+    trades: list[dict[str, Any]],
+    detail_path: Path,
+    *,
+    csv_root: str | None = None,
+    dividend_type: str = "",
+    stock: str = "",
+    key_suffix: str = "",
+) -> None:
+    """成交轮次表：含持有回撤%/浮盈%，并提供导出。"""
+    trades = _ensure_hold_metrics(
+        trades,
+        detail_path,
+        csv_root=csv_root,
+        dividend_type=dividend_type,
+        stock=stock,
+    )
+    df = trades_to_dataframe(trades)
+    st.subheader("成交轮次")
+    st.caption(
+        "持有回撤% = 区间收盘峰值回撤（≤0）；"
+        "持有浮盈% = 区间最高价相对买价最大浮盈（≥0）。"
+    )
+    st.dataframe(
+        df,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "持有回撤%": st.column_config.NumberColumn(
+                "持有回撤%",
+                help="持仓区间收盘价从峰值到谷底的最大回撤（百分比，≤0）",
+                format="%.2f",
+            ),
+            "持有浮盈%": st.column_config.NumberColumn(
+                "持有浮盈%",
+                help="持仓区间最高价相对买价的最大浮盈 MFE（百分比，≥0）",
+                format="%.2f",
+            ),
+        },
+    )
+    if not df.empty:
+        dl_key = "dl_trades_%s_%s" % (detail_path.name, key_suffix or "main")
+        st.download_button(
+            "导出成交轮次 CSV",
+            data=df.to_csv(index=False).encode("utf-8-sig"),
+            file_name="%s_成交轮次.csv" % detail_path.stem.replace("_操作明细", ""),
+            mime="text/csv",
+            key=dl_key,
+        )
+
+
+def _show_detail_raw(
+    detail_path: Path,
+    trades: list[dict[str, Any]],
+    *,
+    csv_root: str | None = None,
+    dividend_type: str = "",
+    stock: str = "",
+) -> None:
+    """操作明细（原始）：卖出行附带持有回撤%/浮盈%。"""
+    st.subheader("操作明细（原始）")
+    try:
+        trades = _ensure_hold_metrics(
+            trades,
+            detail_path,
+            csv_root=csv_root,
+            dividend_type=dividend_type,
+            stock=stock,
+        )
+        raw = enrich_detail_raw_hold_metrics(load_detail_raw(detail_path), trades)
+        st.dataframe(raw, use_container_width=True, hide_index=True)
+    except Exception as e:
+        st.warning("无法读取原始明细：%s" % e)
+
+
 def _render_analysis(
     detail_path: Path,
     budget: float,
@@ -511,8 +612,22 @@ def _render_analysis(
     show_metrics: bool = True,
     show_equity: bool = True,
     title_prefix: str = "",
+    csv_root: str | None = None,
+    dividend_type: str = "",
 ) -> dict:
-    result = analyze_detail(detail_path, budget=budget)
+    result = analyze_detail(
+        detail_path,
+        budget=budget,
+        meta={
+            "tag": "HlBand",
+            "ver": "local",
+            "stock": stock or "?",
+            "period": "1d",
+            "budget": float(budget),
+        },
+        csv_root=csv_root if csv_root is not None else DEFAULT_CSV_ROOT,
+        dividend_type=dividend_type,
+    )
     trades = result["trades"]
     if range_start or range_end:
         # 仅分析模式可按卖出日再筛
@@ -531,6 +646,14 @@ def _render_analysis(
                 price_info={"source": "terminal", "terminal_csv": str(detail_path)},
             )
             result["equity"] = mod.equity_curve(trades, budget)
+            trades = _ensure_hold_metrics(
+                trades,
+                detail_path,
+                csv_root=csv_root,
+                dividend_type=dividend_type,
+                stock=stock,
+            )
+            result["trades"] = trades
 
     stats = result["stats"]
     if show_metrics:
@@ -613,15 +736,22 @@ def _render_analysis(
     else:
         st.info("未绑定行情 CSV，跳过 K 线（仅分析明细时可选对应日线）。")
 
-    st.subheader("成交轮次")
-    st.dataframe(trades_to_dataframe(trades), use_container_width=True, hide_index=True)
+    _show_trades_rounds(
+        trades,
+        detail_path,
+        csv_root=csv_root,
+        dividend_type=dividend_type,
+        stock=stock,
+        key_suffix=str(title_prefix or "an").replace(" ", "_"),
+    )
 
-    st.subheader("操作明细（原始）")
-    try:
-        raw = load_detail_raw(detail_path)
-        st.dataframe(raw, use_container_width=True, hide_index=True)
-    except Exception as e:
-        st.warning("无法读取原始明细：%s" % e)
+    _show_detail_raw(
+        detail_path,
+        trades,
+        csv_root=csv_root,
+        dividend_type=dividend_type,
+        stock=stock,
+    )
     return result
 
 
@@ -653,11 +783,18 @@ def _render_book_detail_panel(
     budget: float,
     *,
     caption: str = "",
+    csv_root: str | None = None,
+    dividend_type: str = "",
 ) -> None:
     if not detail_path.is_file():
         st.warning("明细不存在：`%s`" % detail_path)
         return
-    combo = analyze_book_detail(detail_path, budget=budget)
+    combo = analyze_book_detail(
+        detail_path,
+        budget=budget,
+        csv_root=csv_root if csv_root is not None else DEFAULT_CSV_ROOT,
+        dividend_type=dividend_type,
+    )
     stats = combo.get("stats") or {}
     trades = combo.get("trades") or []
     st.caption(
@@ -696,14 +833,19 @@ def _render_book_detail_panel(
                 use_container_width=True,
                 hide_index=True,
             )
-    st.subheader("成交轮次")
-    st.dataframe(trades_to_dataframe(trades), use_container_width=True, hide_index=True)
-    st.subheader("操作明细（原始）")
-    try:
-        raw = load_detail_raw(detail_path)
-        st.dataframe(raw, use_container_width=True, hide_index=True)
-    except Exception as e:
-        st.warning("无法读取原始明细：%s" % e)
+    _show_trades_rounds(
+        trades,
+        detail_path,
+        csv_root=csv_root,
+        dividend_type=dividend_type,
+        key_suffix="book",
+    )
+    _show_detail_raw(
+        detail_path,
+        trades,
+        csv_root=csv_root,
+        dividend_type=dividend_type,
+    )
 
 
 def _render_analysis_trade_records(result: dict[str, Any], params: dict[str, Any]) -> None:

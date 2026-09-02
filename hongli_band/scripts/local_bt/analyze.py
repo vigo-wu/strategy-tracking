@@ -1547,13 +1547,271 @@ def enrich_trades_signals_from_log(
     return out
 
 
+def infer_dividend_type_from_path(path: str | Path | None) -> str:
+    """从路径段推断复权类型（如 report/front_ratio/...）；找不到则默认。"""
+    if not path:
+        return DEFAULT_DIVIDEND_TYPE
+    p = Path(path)
+    d = dividend_from_detail_path(p)
+    if d:
+        return d
+    for part in p.parts:
+        x = normalize_dividend_type(part)
+        if x:
+            return x
+    return DEFAULT_DIVIDEND_TYPE
+
+
+def hold_max_dd_from_closes(closes: list[float] | tuple[float, ...]) -> float | None:
+    """持仓区间收盘价峰值回撤，返回百分比（≤0）；不足 2 根有效 K 则 None。"""
+    vals: list[float] = []
+    for c in closes or []:
+        try:
+            v = float(c)
+        except (TypeError, ValueError):
+            continue
+        if v > 0 and np.isfinite(v):
+            vals.append(v)
+    if len(vals) < 2:
+        return None
+    peak = vals[0]
+    worst = 0.0
+    for c in vals:
+        peak = max(peak, c)
+        worst = min(worst, c / peak - 1.0)
+    return round(worst * 100.0, 4)
+
+
+def hold_max_up_from_highs(
+    highs: list[float] | tuple[float, ...],
+    buy_price: float,
+) -> float | None:
+    """持仓区间最高价相对买价的最大浮盈（MFE），返回百分比（≥0）。"""
+    try:
+        bp = float(buy_price)
+    except (TypeError, ValueError):
+        return None
+    if bp <= 0 or not np.isfinite(bp):
+        return None
+    vals: list[float] = []
+    for h in highs or []:
+        try:
+            v = float(h)
+        except (TypeError, ValueError):
+            continue
+        if v > 0 and np.isfinite(v):
+            vals.append(v)
+    if not vals:
+        return None
+    return round((max(vals) / bp - 1.0) * 100.0, 4)
+
+
+def enrich_trades_hold_metrics(
+    trades: list[dict[str, Any]],
+    csv_root: str | Path | None = None,
+    dividend_type: str = "",
+    *,
+    detail_path: str | Path | None = None,
+    default_stock: str = "",
+) -> list[dict[str, Any]]:
+    """为每笔轮次填 hold_max_dd / hold_max_up；缺行情则 None。"""
+    if not trades:
+        return trades
+    root = Path(csv_root) if csv_root else DEFAULT_CSV_ROOT
+    div = normalize_dividend_type(dividend_type)
+    if not div:
+        div = infer_dividend_type_from_path(detail_path)
+    csv_dir = resolve_typed_dir(root, div)
+    fallback = str(default_stock or "").strip().upper()
+    if not fallback and detail_path:
+        fallback = stock_from_detail_path(detail_path, read_csv=True)
+
+    groups: dict[str, list[tuple[int, str, str]]] = {}
+    out: list[dict[str, Any]] = [dict(t) for t in trades]
+    for i, t in enumerate(out):
+        t.setdefault("hold_max_dd", None)
+        t.setdefault("hold_max_up", None)
+        stock = str(t.get("stock") or "").strip().upper() or fallback
+        buy_d = compact_day(str(t.get("buy_open_day") or ""))
+        sell_d = compact_day(str(t.get("sell_exec_day") or ""))
+        if not stock or not buy_d or not sell_d:
+            continue
+        groups.setdefault(stock, []).append((i, buy_d, sell_d))
+
+    # stock -> day -> (close, high)
+    ohlc_by_stock: dict[str, dict[str, tuple[float, float]]] = {}
+    for stock, items in groups.items():
+        start = min(b for _i, b, _s in items)
+        end = max(s for _i, _b, s in items)
+        path = daily_csv_for_stock(csv_dir, stock)
+        if path is None or not path.is_file():
+            continue
+        try:
+            df = ohlc_from_csv(path, start=start, end=end, stock="")
+        except Exception:
+            continue
+        if df is None or df.empty or "Close" not in df.columns:
+            continue
+        m: dict[str, tuple[float, float]] = {}
+        for ts, row in df.iterrows():
+            if hasattr(ts, "strftime"):
+                day = ts.strftime("%Y%m%d")
+            else:
+                day = compact_day(str(ts))
+            try:
+                c = float(row["Close"])
+            except (TypeError, ValueError, KeyError):
+                continue
+            if not (day and c > 0 and np.isfinite(c)):
+                continue
+            high = c
+            if "High" in df.columns:
+                try:
+                    hv = float(row["High"])
+                    if hv > 0 and np.isfinite(hv):
+                        high = hv
+                except (TypeError, ValueError, KeyError):
+                    pass
+            m[day] = (c, high)
+        if m:
+            ohlc_by_stock[stock] = m
+
+    for stock, items in groups.items():
+        cmap = ohlc_by_stock.get(stock) or {}
+        if not cmap:
+            continue
+        days_sorted = sorted(cmap.keys())
+        for i, buy_d, sell_d in items:
+            closes = [cmap[d][0] for d in days_sorted if buy_d <= d <= sell_d]
+            highs = [cmap[d][1] for d in days_sorted if buy_d <= d <= sell_d]
+            out[i]["hold_max_dd"] = hold_max_dd_from_closes(closes)
+            try:
+                bp = float(out[i].get("buy_price") or 0)
+            except (TypeError, ValueError):
+                bp = 0.0
+            out[i]["hold_max_up"] = hold_max_up_from_highs(highs, bp)
+    return out
+
+
+def enrich_trades_hold_mdd(
+    trades: list[dict[str, Any]],
+    csv_root: str | Path | None = None,
+    dividend_type: str = "",
+    *,
+    detail_path: str | Path | None = None,
+    default_stock: str = "",
+) -> list[dict[str, Any]]:
+    """兼容旧名 → enrich_trades_hold_metrics。"""
+    return enrich_trades_hold_metrics(
+        trades,
+        csv_root=csv_root,
+        dividend_type=dividend_type,
+        detail_path=detail_path,
+        default_stock=default_stock,
+    )
+
+
+def enrich_detail_raw_hold_metrics(
+    raw_df: pd.DataFrame,
+    trades: list[dict[str, Any]],
+) -> pd.DataFrame:
+    """把轮次持有回撤/浮盈填到原始操作明细的卖出行；买入行留空。"""
+    if raw_df is None:
+        return pd.DataFrame()
+    out = raw_df.copy()
+    out["持有回撤%"] = None
+    out["持有浮盈%"] = None
+    if out.empty or not trades:
+        return out
+
+    c_time = None
+    c_side = None
+    c_shares = None
+    c_code = None
+    for col in out.columns:
+        s = str(col).strip()
+        if s in ("操作时间", "成交时间", "时间") and c_time is None:
+            c_time = col
+        elif s in ("操作类型", "买卖方向", "方向") and c_side is None:
+            c_side = col
+        elif s in ("数量", "成交数量", "股数") and c_shares is None:
+            c_shares = col
+        elif s in ("代码", "证券代码", "股票代码", "标的") and c_code is None:
+            c_code = col
+    if c_time is None or c_side is None:
+        return out
+
+    # pool of unused trades for matching
+    pool = [dict(t) for t in trades]
+    used = [False] * len(pool)
+
+    def _pick(code: str, sell_day: str, shares: int) -> dict[str, Any] | None:
+        code_n = _norm_signal_stock(code)
+        # 1) code + day + shares
+        for i, t in enumerate(pool):
+            if used[i]:
+                continue
+            if compact_day(str(t.get("sell_exec_day") or "")) != sell_day:
+                continue
+            if int(t.get("shares") or 0) != shares:
+                continue
+            ts = _norm_signal_stock(str(t.get("stock") or ""))
+            if code_n and ts and ts != code_n:
+                continue
+            used[i] = True
+            return t
+        # 2) code + day
+        for i, t in enumerate(pool):
+            if used[i]:
+                continue
+            if compact_day(str(t.get("sell_exec_day") or "")) != sell_day:
+                continue
+            ts = _norm_signal_stock(str(t.get("stock") or ""))
+            if code_n and ts and ts != code_n:
+                continue
+            if code_n and not ts:
+                continue
+            if code_n and ts == code_n:
+                used[i] = True
+                return t
+            if not code_n:
+                used[i] = True
+                return t
+        return None
+
+    for idx, row in out.iterrows():
+        side_raw = str(row[c_side]).strip() if c_side is not None else ""
+        if "卖" not in side_raw:
+            continue
+        day = compact_day(str(row[c_time]))
+        if not day:
+            continue
+        code = ""
+        if c_code is not None and pd.notna(row[c_code]):
+            code = str(row[c_code]).strip()
+        shares = 0
+        if c_shares is not None and pd.notna(row[c_shares]):
+            try:
+                shares = int(float(row[c_shares]))
+            except (TypeError, ValueError):
+                shares = 0
+        t = _pick(code, day, shares)
+        if not t:
+            continue
+        out.at[idx, "持有回撤%"] = t.get("hold_max_dd")
+        out.at[idx, "持有浮盈%"] = t.get("hold_max_up")
+    return out
+
+
 def analyze_detail(
     detail_path: str | Path,
     budget: float = 50000.0,
     meta: dict | None = None,
     log_path: str | Path | None = None,
+    csv_root: str | Path | None = None,
+    dividend_type: str = "",
 ) -> dict[str, Any]:
-    """操作明细 → trades / equity / stats；旁路 log 可补买卖信号。"""
+    """操作明细 → trades / equity / stats；旁路 log 可补买卖信号；行情可补持有回撤。"""
     mod = report_mod()
     path = Path(detail_path)
     rounds = mod.parse_terminal_rounds(path)
@@ -1569,6 +1827,16 @@ def analyze_detail(
     }
     if "budget" not in meta_d:
         meta_d["budget"] = float(budget)
+    default_stock = str(meta_d.get("stock") or "")
+    if default_stock in ("?", ""):
+        default_stock = stock_from_detail_path(path, read_csv=True)
+    trades = enrich_trades_hold_mdd(
+        trades,
+        csv_root=csv_root,
+        dividend_type=dividend_type,
+        detail_path=path,
+        default_stock=default_stock,
+    )
     stats = mod.compute_stats(meta_d, trades, diag={}, price_info={"source": "terminal", "terminal_csv": str(path)})
     eq = mod.equity_curve(trades, float(budget))
     return {
@@ -1615,6 +1883,8 @@ def trades_to_dataframe(trades: list[dict]) -> pd.DataFrame:
         "pnl",
         "ret_pct",
         "hold_calendar_days",
+        "hold_max_dd",
+        "hold_max_up",
         "buy_signal",
         "sell_signal",
     ]

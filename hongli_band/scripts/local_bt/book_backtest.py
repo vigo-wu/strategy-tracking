@@ -12,6 +12,7 @@ if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from analyze import (  # noqa: E402
+    DEFAULT_CSV_ROOT,
     DEFAULT_DIVIDEND_TYPE,
     analyze_detail,
     daily_csv_for_stock,
@@ -290,6 +291,8 @@ def analyze_book_detail(
     detail_path: str | Path,
     budget: float = 100000.0,
     log_path: str | Path | None = None,
+    csv_root: str | Path | None = None,
+    dividend_type: str = "",
 ) -> dict[str, Any]:
     """组合明细 → 组合级 analyze + 按票归因。"""
     path = Path(detail_path)
@@ -297,7 +300,13 @@ def analyze_book_detail(
     log = Path(log_path) if log_path else sibling_log_path(path)
     if log and log.is_file():
         bud = parse_budget_from_log(log, default=bud)
-    combo = analyze_detail(path, budget=bud, log_path=log)
+    combo = analyze_detail(
+        path,
+        budget=bud,
+        log_path=log,
+        csv_root=csv_root if csv_root is not None else DEFAULT_CSV_ROOT,
+        dividend_type=dividend_type,
+    )
     per_stock = attribute_portfolio_kpi(path, budget=bud, log_path=log)
     combo["per_stock"] = per_stock
     combo["sum_pnl"] = float((combo.get("stats") or {}).get("sum_pnl") or 0.0)
