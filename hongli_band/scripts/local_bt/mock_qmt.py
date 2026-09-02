@@ -152,6 +152,51 @@ class MockContext:
         return out
 
 
+class BookMockContext(MockContext):
+    """多标的 CSV 路由：组合 BOOK 回放。"""
+
+    def __init__(
+        self,
+        stores: dict[str, MarketStore],
+        walk_tags: list[int],
+        chart_stock: str,
+    ):
+        chart = str(chart_stock or "").strip().upper()
+        if not chart:
+            chart = next(iter(stores))
+        primary = stores.get(chart) or next(iter(stores.values()))
+        super().__init__(primary, walk_tags, chart)
+        self._stores = {str(k).strip().upper(): v for k, v in stores.items()}
+        self.chart_stock = chart
+
+    def _store_for(self, raw: str) -> MarketStore | None:
+        key = str(raw or "").strip().upper()
+        if key in self._stores:
+            return self._stores[key]
+        code, mkt = split_stock(key)
+        alt = "%s.%s" % (code, mkt)
+        return self._stores.get(alt)
+
+    def _md(self, *args: Any, **kwargs: Any):
+        spec = _parse_md_call(args, kwargs)
+        stocks = spec["stocks"] or [self.chart_stock]
+        out = {}
+        for raw in stocks:
+            st = self._store_for(str(raw))
+            if st is None:
+                continue
+            frame = st.frame(
+                period=spec["period"],
+                end_time=spec["end_time"],
+                count=spec["count"],
+                fields=spec["fields"],
+                start_time=spec["start_time"],
+                stock=str(raw),
+            )
+            out[str(raw)] = frame
+        return out
+
+
 def inject_qmt_globals(ns: dict) -> None:
     ns["passorder"] = passorder
     ns["download_history_data"] = download_history_data

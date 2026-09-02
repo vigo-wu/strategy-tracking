@@ -63,6 +63,10 @@ def _reset_stock_ctx():
     A._defer_log_exit_day = ""
     A._defer_log_book_day = ""
     A._defer_log_wait_day = ""
+    A.bt_held = 0
+    A.bt_locked = 0
+    A.bt_lock_day = ""
+    A.bt_opened_at = ""
 
 
 def _state_extra_save(data):

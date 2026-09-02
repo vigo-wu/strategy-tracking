@@ -248,9 +248,23 @@ def _patch_fast_ohlcv(ns: dict) -> None:
             return orig_series(md, stock, field)
         return None
 
-    def _ohlcv_from_ctx(C, period, count, need, diag_key):
-        fn = getattr(C, "ohlcv", None)
-        tup = fn(period, count) if callable(fn) else None
+    def _ohlcv_from_ctx(C, period, count, need, diag_key, stock=None):
+        end_fn = getattr(C, "walk_end_day", None)
+        end = end_fn() if callable(end_fn) else ""
+        if not end:
+            return None
+        # 组合回放：必须按当前 A.stock 路由，不能总读 chart 主 store
+        store = None
+        store_for = getattr(C, "_store_for", None)
+        if callable(store_for) and stock:
+            store = store_for(str(stock))
+        if store is None:
+            store = getattr(C, "_store", None)
+        if store is not None and hasattr(store, "ohlcv"):
+            tup = store.ohlcv(period, end, count)
+        else:
+            fn = getattr(C, "ohlcv", None)
+            tup = fn(period, count) if callable(fn) else None
         if tup is None:
             return None
         _open, _high, _low, close, _volume = tup
@@ -264,8 +278,6 @@ def _patch_fast_ohlcv(ns: dict) -> None:
             return None
         diag = ns.get("_diag_once")
         if callable(diag):
-            end_fn = getattr(C, "walk_end_day", None)
-            end = end_fn() if callable(end_fn) else ""
             chart_fn = ns.get("_chart_dividend")
             chart = "-"
             if callable(chart_fn):
@@ -291,6 +303,8 @@ def _patch_fast_ohlcv(ns: dict) -> None:
                 div,
                 "chart=",
                 chart,
+                "stock=",
+                str(stock or "-"),
             )
         return tup
 
@@ -303,14 +317,18 @@ def _patch_fast_ohlcv(ns: dict) -> None:
             plat_n + 2,
         ) + 10
         period = getattr(ns.get("A"), "period", "1d")
-        return _ohlcv_from_ctx(C, period, int(ns.get("OHLC_COUNT") or 180), need, "d1")
+        return _ohlcv_from_ctx(
+            C, period, int(ns.get("OHLC_COUNT") or 180), need, "d1", stock=stock
+        )
 
     def _get_ohlcv_1w(C, stock):
         need = max(
             int(ns.get("W_MA_SLOW") or 0),
             int(ns.get("MACD_SLOW") or 0) + int(ns.get("MACD_SIGNAL") or 0),
         ) + 5
-        return _ohlcv_from_ctx(C, "1w", int(ns.get("WEEKLY_OHLC_COUNT") or 120), need, "w1")
+        return _ohlcv_from_ctx(
+            C, "1w", int(ns.get("WEEKLY_OHLC_COUNT") or 120), need, "w1", stock=stock
+        )
 
     ns["_series_from_ex"] = _series_from_ex
     ns["_get_ohlcv_1d"] = _get_ohlcv_1d

@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 # 侧栏分区与年份控件（选项来自扫描结果，此处只放文案 / session key）
@@ -156,3 +157,168 @@ def cast_filter_value(spec: dict[str, Any], raw: Any) -> Any:
     if str(spec.get("dtype") or "float") == "int":
         return int(raw)
     return float(raw)
+
+
+ANALYSIS_SIDEBAR: dict[str, Any] = {
+    "title": "数据分析",
+    "scan_caption": "扫描 `report/` 全部复权子目录；打分/持有均走组合 local_bt 回放。",
+    "year_section": "数据区间（打分/KPI）",
+    "year_start_label": "数据起始年",
+    "year_end_label": "数据结束年",
+    "year_caption": "数据 %s–%s · 回看 %s 后首评 %s · 评估至 %s",
+    "year_start_key": "analysis_year_start",
+    "year_end_key": "analysis_year_end",
+    "walk_section": "Walk-forward",
+    "filter_section": "硬过滤",
+    "book_section": "组合仓位",
+    "advanced_section": "高级",
+    "submit_label": "开始分析",
+    "reset_label": "重新配置",
+    "refresh_label": "刷新缓存",
+    "form_key": "analysis_cfg",
+    "result_key": "analysis_result",
+    "params_key": "analysis_params",
+}
+
+ANALYSIS_WIDGETS: list[dict[str, Any]] = [
+    {
+        "key": "lookback_n",
+        "label": "打分回看年数",
+        "widget": "number_input",
+        "dtype": "int",
+        "min_value": 1,
+        "max_value": 10,
+        "step": 1,
+        "default": 2,
+    },
+    {
+        "key": "rebalance_years",
+        "label": "换仓周期（年）",
+        "widget": "number_input",
+        "dtype": "int",
+        "min_value": 1,
+        "max_value": 10,
+        "step": 1,
+        "default": 1,
+    },
+    {
+        "key": "top_k",
+        "label": "每段持仓只数",
+        "widget": "number_input",
+        "dtype": "int",
+        "min_value": 1,
+        "max_value": 9,
+        "step": 1,
+        "default": 3,
+    },
+    {
+        "key": "score_mode",
+        "label": "打分 KPI",
+        "widget": "select",
+        "options": [("portfolio", "组合回放（推荐）"), ("single", "单票 KPI（回退）")],
+        "default": "portfolio",
+    },
+    {
+        "key": "score_pool",
+        "label": "打分池",
+        "widget": "select",
+        "options": [("scanned", "扫描全池"), ("passed_prefilter", "宽松预过滤")],
+        "default": "scanned",
+    },
+    {
+        "key": "force_rerun",
+        "label": "强制重跑回放",
+        "widget": "checkbox",
+        "default": False,
+    },
+    {
+        "key": "workers",
+        "label": "打分并行进程（0=顺序）",
+        "widget": "number_input",
+        "dtype": "int",
+        "min_value": 0,
+        "max_value": 8,
+        "step": 1,
+        "default": 0,
+    },
+    {
+        "key": "trade_budget",
+        "label": "组合资金帽（元）",
+        "widget": "number_input",
+        "dtype": "float",
+        "min_value": 10000.0,
+        "max_value": 5000000.0,
+        "step": 10000.0,
+        "default": 100000.0,
+    },
+    {
+        "key": "book_lot_max",
+        "label": "BOOK_LOT_MAX",
+        "widget": "number_input",
+        "dtype": "int",
+        "min_value": 1,
+        "max_value": 9,
+        "step": 1,
+        "default": 3,
+    },
+    {
+        "key": "lot_open_frac",
+        "label": "大仓档比例",
+        "widget": "slider",
+        "dtype": "float",
+        "min_value": 0.1,
+        "max_value": 0.9,
+        "step": 0.05,
+        "default": 0.50,
+    },
+    {
+        "key": "lot_add_frac",
+        "label": "加仓档比例",
+        "widget": "slider",
+        "dtype": "float",
+        "min_value": 0.05,
+        "max_value": 0.5,
+        "step": 0.05,
+        "default": 0.30,
+    },
+]
+
+WEIGHT_WIDGETS: list[dict[str, Any]] = [
+    {"key": "pnl", "label": "权重·盈亏", "default": WEIGHTS["pnl"]},
+    {"key": "win_rate", "label": "权重·胜率", "default": WEIGHTS["win_rate"]},
+    {"key": "stability", "label": "权重·稳定性", "default": WEIGHTS["stability"]},
+    {"key": "profit_factor", "label": "权重·利润因子", "default": WEIGHTS["profit_factor"]},
+    {"key": "quality", "label": "权重·质量", "default": WEIGHTS["quality"]},
+]
+
+
+def load_book_defaults(config_path: str | None = None) -> dict[str, Any]:
+    """读 hlband config 组合仓位默认值。"""
+    path = (
+        Path(config_path)
+        if config_path
+        else Path(__file__).resolve().parent.parent / "qmt" / "hlband" / "config.py"
+    )
+    out = {
+        "trade_budget": 100000.0,
+        "book_lot_max": 3,
+        "lot_open_frac": 0.50,
+        "lot_add_frac": 0.30,
+    }
+    if not path.is_file():
+        return out
+    try:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("hlband_cfg_analysis", path)
+        if spec is None or spec.loader is None:
+            return out
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        out["trade_budget"] = float(getattr(mod, "TRADE_BUDGET", out["trade_budget"]))
+        out["book_lot_max"] = int(getattr(mod, "BOOK_LOT_MAX", out["book_lot_max"]))
+        out["lot_open_frac"] = float(getattr(mod, "LOT_OPEN_FRAC", out["lot_open_frac"]))
+        out["lot_add_frac"] = float(getattr(mod, "LOT_ADD_FRAC", out["lot_add_frac"]))
+    except Exception:
+        pass
+    return out

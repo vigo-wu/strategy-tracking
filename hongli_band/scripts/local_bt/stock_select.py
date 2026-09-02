@@ -670,6 +670,7 @@ def scan_reports(
     score_years = infer_score_years(stocks)
     return {
         "stocks": stocks,
+        "files": packed,
         "coverage": {
             "n_stock": len(stocks),
             "n_detail": n_files,
@@ -679,6 +680,7 @@ def scan_reports(
         "score_years": score_years,
         "report_dir": str(report.resolve()),
         "csv_dir": str(data_dir.resolve()),
+        "portfolio_kpi": {},
     }
 
 
@@ -875,17 +877,78 @@ def _pct_rank(s: pd.Series) -> pd.Series:
     return s.rank(method="average", pct=True)
 
 
+def empty_year_kpi() -> dict[str, Any]:
+    return {
+        "n_buy": 0,
+        "sum_pnl": 0.0,
+        "win_rate": 0.0,
+        "avg_ret": 0.0,
+        "max_win": 0.0,
+        "max_loss": 0.0,
+        "gross_profit": 0.0,
+        "gross_loss": 0.0,
+        "profit_factor": None,
+        "max_dd": None,
+        "avg_hold_days": None,
+        "max_win_pnl": 0.0,
+        "budget": 0.0,
+        "sell": {},
+        "buy": {},
+        "skip": {},
+        "n_bars": 0,
+    }
+
+
+def _portfolio_score_filters(
+    flt: dict[str, Any],
+    score_years: tuple[str, ...],
+) -> dict[str, Any]:
+    """组合归因轮次少于单票独立回测，硬过滤按窗口年数放宽。"""
+    out = dict(flt)
+    ny = max(1, len(score_years))
+    per = int(out.get("min_n_buy_per_year") or 0)
+    if per > 0:
+        out["min_n_buy"] = max(1, per * ny)
+    else:
+        base = int(out.get("min_n_buy") or 0)
+        out["min_n_buy"] = max(1, ny if base <= 0 else min(base, ny * 2))
+    out["max_win_pnl_share"] = 1.0
+    return out
+
+
+def _overlay_portfolio_kpi(
+    resolved: dict[str, Any],
+    portfolio_kpi: dict[str, Any],
+    score_years: tuple[str, ...],
+) -> None:
+    for stock, rec in resolved.items():
+        pk = portfolio_kpi.get(stock) or {}
+        years: dict[str, Any] = {}
+        for y in score_years:
+            k = pk.get(str(y))
+            years[str(y)] = dict(k) if k else empty_year_kpi()
+        rec["years"] = years
+
+
 def score_universe(
     scanned: dict[str, Any],
     filters: dict[str, Any] | None = None,
     score_years: tuple[str, ...] | None = None,
+    *,
+    kpi_source: str = "single",
+    weights: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """硬过滤 + 百分位加权打分。score_years 内重跑建议均线/复权，不改扫描缓存。"""
     flt = dict(DEFAULT_FILTERS)
     if filters:
         flt.update(filters)
+    wt = dict(WEIGHTS)
+    if weights:
+        wt.update(weights)
     book: dict[str, str] = dict(scanned.get("book") or {})
     raw_stocks: dict[str, Any] = dict(scanned.get("stocks") or {})
+    portfolio_kpi: dict[str, Any] = dict(scanned.get("portfolio_kpi") or {})
+    kpi_src = str(kpi_source or "single").strip().lower()
     available = infer_score_years(raw_stocks)
     requested = score_years
     if requested is None:
@@ -895,10 +958,14 @@ def score_universe(
         keep = set(available)
         requested = tuple(y for y in requested if y in keep)
     score_years = requested if requested else (available or SCORE_YEARS)
+    if kpi_src == "portfolio" and score_years:
+        flt = _portfolio_score_filters(flt, score_years)
 
     resolved: dict[str, Any] = {}
     for stock, rec in raw_stocks.items():
         resolved[stock] = _apply_year_window(rec, score_years)
+    if kpi_src == "portfolio" and portfolio_kpi:
+        _overlay_portfolio_kpi(resolved, portfolio_kpi, score_years)
     n_detail = (scanned.get("coverage") or {}).get("n_detail")
     cov = _coverage_from_stocks(resolved, n_detail=n_detail, score_years=score_years)
 
@@ -1046,11 +1113,11 @@ def score_universe(
         pf_r = _pct_rank(sub["profit_factor"])
         q_r = _pct_rank(sub["quality"])
         part = (
-            WEIGHTS["pnl"] * pnl_r.fillna(0.5)
-            + WEIGHTS["win_rate"] * wr_r.fillna(0.5)
-            + WEIGHTS["stability"] * st_r.fillna(0.5)
-            + WEIGHTS["profit_factor"] * pf_r.fillna(0.5)
-            + WEIGHTS["quality"] * q_r.fillna(0.5)
+            wt["pnl"] * pnl_r.fillna(0.5)
+            + wt["win_rate"] * wr_r.fillna(0.5)
+            + wt["stability"] * st_r.fillna(0.5)
+            + wt["profit_factor"] * pf_r.fillna(0.5)
+            + wt["quality"] * q_r.fillna(0.5)
         )
         score.loc[passed_mask] = part
         df.loc[passed_mask, "score_pnl"] = pnl_r

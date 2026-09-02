@@ -179,6 +179,10 @@ def _stash_hot_state(code):
     rec["_hot_lots"] = _copy_state_lots(getattr(A, "lots", None))
     rec["_hot_acted_day"] = str(getattr(A, "acted_day", "") or "")
     rec["_hot_acted"] = set(getattr(A, "acted", set()) or [])
+    rec["_hot_bt_held"] = int(getattr(A, "bt_held", 0) or 0)
+    rec["_hot_bt_locked"] = int(getattr(A, "bt_locked", 0) or 0)
+    rec["_hot_bt_lock_day"] = str(getattr(A, "bt_lock_day", "") or "")
+    rec["_hot_bt_opened_at"] = str(getattr(A, "bt_opened_at", "") or "")
     pend = getattr(A, "pending", None)
     rec["_hot_pending"] = dict(pend) if isinstance(pend, dict) else None
     extra = {}
@@ -206,6 +210,10 @@ def _restore_hot_state(code):
         A.acted = set([str(x) for x in acted])
     else:
         A.acted = set()
+    A.bt_held = int(rec.get("_hot_bt_held") or 0)
+    A.bt_locked = int(rec.get("_hot_bt_locked") or 0)
+    A.bt_lock_day = str(rec.get("_hot_bt_lock_day") or "")
+    A.bt_opened_at = str(rec.get("_hot_bt_opened_at") or "")
     pend = rec.get("_hot_pending")
     A.pending = dict(pend) if isinstance(pend, dict) else None
     extra = rec.get("_hot_extra")
@@ -260,6 +268,8 @@ def _activate_stock(code):
     A.stock = code
     _restore_stock_ui(code)
     if getattr(A, "is_backtest", False):
+        # eval/exec 两轮：eval 写入的 pending_entry 在 _hot_extra，exec 前须恢复
+        _restore_hot_state(code)
         return code
     if _state_reload_due(code):
         _live_load_state(code)

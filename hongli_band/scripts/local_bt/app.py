@@ -74,13 +74,19 @@ from run import (  # noqa: E402
     write_typed_summaries,
 )
 from select_config import (  # noqa: E402
+    ANALYSIS_SIDEBAR,
+    ANALYSIS_WIDGETS,
     DEFAULT_FILTERS,
     FILTER_WIDGETS,
     SELECT_SIDEBAR,
+    WEIGHTS,
+    WEIGHT_WIDGETS,
     cast_filter_value,
+    load_book_defaults,
     widget_kwargs,
     year_max_for_window,
 )
+from select_analysis import data_and_eval_years, run_walk_forward, write_analysis_csv  # noqa: E402
 from stock_select import (  # noqa: E402
     SCORE_YEARS,
     coverage_notes,
@@ -1567,8 +1573,217 @@ def _render_select_sidebar() -> tuple[dict[str, Any], tuple[str, ...] | None, di
     return filters, select_years, scanned
 
 
+def _collect_analysis_form(avail: tuple[str, ...], defaults: dict[str, Any]) -> dict[str, Any]:
+    cfg = ANALYSIS_SIDEBAR
+    start_default = str(defaults.get("data_start") or (avail[0] if avail else ""))
+    end_default = str(defaults.get("data_end") or (avail[-1] if avail else ""))
+    if start_default and end_default and end_default < start_default:
+        start_default, end_default = end_default, start_default
+    with st.form(str(cfg["form_key"])):
+        st.subheader(str(cfg["title"]))
+        st.caption(str(cfg["scan_caption"]))
+        st.markdown("**%s**" % cfg["year_section"])
+        c1, c2 = st.columns(2)
+        with c1:
+            start = st.selectbox(
+                str(cfg["year_start_label"]),
+                list(avail),
+                index=list(avail).index(start_default) if start_default in avail else 0,
+                key="analysis_form_data_start",
+            )
+        with c2:
+            end_opts = [y for y in avail if y >= start] or list(avail)
+            end = st.selectbox(
+                str(cfg["year_end_label"]),
+                end_opts,
+                index=end_opts.index(end_default) if end_default in end_opts else len(end_opts) - 1,
+                key="analysis_form_data_end",
+            )
+        st.markdown("**%s**" % cfg["walk_section"])
+        ac1, ac2, ac3 = st.columns(3)
+        params: dict[str, Any] = dict(defaults)
+        with ac1:
+            params["lookback_n"] = int(
+                st.number_input("打分回看年数", min_value=1, max_value=10, value=int(params.get("lookback_n") or 2), step=1)
+            )
+        with ac2:
+            params["rebalance_years"] = int(
+                st.number_input("换仓周期", min_value=1, max_value=10, value=int(params.get("rebalance_years") or 1), step=1)
+            )
+        with ac3:
+            params["top_k"] = int(
+                st.number_input("每段持仓只数", min_value=1, max_value=9, value=int(params.get("top_k") or 3), step=1)
+            )
+        params["score_mode"] = st.selectbox(
+            "打分 KPI",
+            ["portfolio", "single"],
+            index=0 if str(params.get("score_mode") or "portfolio") == "portfolio" else 1,
+            format_func=lambda x: "组合回放（推荐）" if x == "portfolio" else "单票 KPI（回退）",
+        )
+        params["score_pool"] = st.selectbox(
+            "打分池",
+            ["scanned", "passed_prefilter"],
+            index=0 if str(params.get("score_pool") or "scanned") == "scanned" else 1,
+            format_func=lambda x: "扫描全池" if x == "scanned" else "宽松预过滤",
+        )
+        params["force_rerun"] = st.checkbox("强制重跑回放", value=bool(params.get("force_rerun")))
+        params["workers"] = int(
+            st.number_input("打分并行进程（0=顺序）", min_value=0, max_value=8, value=int(params.get("workers") or 0), step=1)
+        )
+        st.markdown("**%s**" % cfg["filter_section"])
+        flt: dict[str, Any] = {}
+        for spec in FILTER_WIDGETS:
+            kwargs = widget_kwargs(spec, year_max=year_max_for_window(max(int(params["lookback_n"]), 1)))
+            fk = "analysis_flt_%s" % spec["key"]
+            if str(spec.get("widget") or "") == "slider":
+                flt[spec["key"]] = cast_filter_value(spec, st.slider(str(spec["label"]), key=fk, **kwargs))
+            else:
+                flt[spec["key"]] = cast_filter_value(spec, st.number_input(str(spec["label"]), key=fk, **kwargs))
+        params["filters"] = flt
+        st.markdown("**%s**" % cfg["book_section"])
+        bc1, bc2 = st.columns(2)
+        book = load_book_defaults()
+        with bc1:
+            params["trade_budget"] = float(
+                st.number_input("组合资金帽（元）", min_value=10000.0, value=float(params.get("trade_budget") or book["trade_budget"]), step=10000.0)
+            )
+            params["book_lot_max"] = int(
+                st.number_input("BOOK_LOT_MAX", min_value=1, max_value=9, value=int(params.get("book_lot_max") or book["book_lot_max"]), step=1)
+            )
+        with bc2:
+            params["lot_open_frac"] = float(
+                st.slider("大仓档", min_value=0.1, max_value=0.9, value=float(params.get("lot_open_frac") or book["lot_open_frac"]), step=0.05)
+            )
+            params["lot_add_frac"] = float(
+                st.slider("加仓档", min_value=0.05, max_value=0.5, value=float(params.get("lot_add_frac") or book["lot_add_frac"]), step=0.05)
+            )
+        with st.expander(str(cfg["advanced_section"])):
+            weights = dict(WEIGHTS)
+            wc = st.columns(len(WEIGHT_WIDGETS))
+            for i, wspec in enumerate(WEIGHT_WIDGETS):
+                with wc[i]:
+                    weights[wspec["key"]] = float(
+                        st.number_input(
+                            str(wspec["label"]),
+                            min_value=0.0,
+                            max_value=1.0,
+                            value=float((params.get("weights") or {}).get(wspec["key"], wspec["default"])),
+                            step=0.05,
+                            key="analysis_w_%s" % wspec["key"],
+                        )
+                    )
+            params["weights"] = weights
+        submitted = st.form_submit_button(str(cfg["submit_label"]))
+    if str(end) < str(start):
+        start, end = end, start
+    lookback = int(params.get("lookback_n") or 2)
+    data_years, eval_years = data_and_eval_years(str(start), str(end), lookback, avail)
+    params["data_start"] = str(start)
+    params["data_end"] = str(end)
+    params["data_years"] = data_years
+    params["eval_years"] = eval_years
+    if submitted and data_years:
+        first_eval = eval_years[0] if eval_years else "-"
+        st.info(
+            str(cfg["year_caption"])
+            % (data_years[0], data_years[-1], lookback, first_eval, eval_years[-1] if eval_years else "-")
+        )
+    return submitted, params
+
+
+def _render_analysis_results(result: dict[str, Any], params: dict[str, Any]) -> None:
+    cfg = ANALYSIS_SIDEBAR
+    if st.button(str(cfg["reset_label"]), key="analysis_reset"):
+        st.session_state.pop(str(cfg["result_key"]), None)
+        st.session_state.pop(str(cfg["params_key"]), None)
+        st.rerun()
+    st.caption("参数：%s" % params)
+    for line in result.get("notes") or []:
+        st.markdown("- " + line)
+    s = result.get("summary") or {}
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("有效评估年", s.get("n_ok_years"))
+    c2.metric("组合合计盈亏", "%.0f" % float(s.get("total_pnl") or 0))
+    c3.metric("年均盈亏", "-" if s.get("mean_pnl") is None else "%.0f" % float(s["mean_pnl"]))
+    ratio = s.get("pos_ratio")
+    c4.metric("盈利年占比", "-" if ratio is None else "%.0f%%" % (100.0 * float(ratio)))
+    yr = pd.DataFrame(result.get("year_rows") or [])
+    if not yr.empty:
+        st.subheader("分年汇总")
+        st.dataframe(yr, use_container_width=True, hide_index=True)
+    pr = pd.DataFrame(result.get("period_rows") or [])
+    if not pr.empty:
+        with st.expander("换仓段汇总"):
+            st.dataframe(pr, use_container_width=True, hide_index=True)
+    eq = result.get("equity_pts") or []
+    if eq:
+        edf = pd.DataFrame(eq)
+        fig = go.Figure()
+        fig.add_trace(
+            go.Scatter(x=edf["year"], y=edf["cum_pnl"], mode="lines+markers", name="累计组合盈亏")
+        )
+        fig.update_layout(title="累计组合盈亏（年重置槽位、非复利）", height=360)
+        st.plotly_chart(fig, use_container_width=True)
+    out_path = Path(str(DEFAULT_REPORT_ROOT)) / "local_bt_select_analysis.csv"
+    try:
+        write_analysis_csv(result, out_path)
+        st.caption("产物：`%s`" % out_path)
+    except Exception as e:
+        st.warning("写 CSV 失败：%s" % e)
+
+
+def _render_analysis_mode(scanned: dict | None) -> None:
+    cfg = ANALYSIS_SIDEBAR
+    avail = infer_score_years((scanned or {}).get("stocks") or {}) or tuple(SCORE_YEARS)
+    if not avail:
+        st.error("无分年扫描数据。请先跑「批量 + 按自然年分段」。")
+        return
+    defaults = dict(st.session_state.get(str(cfg["params_key"])) or {})
+    defaults.setdefault("lookback_n", 2)
+    defaults.setdefault("rebalance_years", 1)
+    defaults.setdefault("top_k", 3)
+    defaults.update(load_book_defaults())
+    result = st.session_state.get(str(cfg["result_key"]))
+    if result is None:
+        submitted, params = _collect_analysis_form(avail, defaults)
+        if submitted:
+            with st.spinner("组合回放分析中…"):
+                try:
+                    result = run_walk_forward(
+                        scanned or {"stocks": {}, "portfolio_kpi": {}},
+                        data_start=str(params.get("data_start") or ""),
+                        data_end=str(params.get("data_end") or ""),
+                        lookback_n=int(params.get("lookback_n") or 2),
+                        rebalance_years=int(params.get("rebalance_years") or 1),
+                        top_k=int(params.get("top_k") or 3),
+                        filters=params.get("filters") or dict(DEFAULT_FILTERS),
+                        weights=params.get("weights") or dict(WEIGHTS),
+                        book_params={
+                            "trade_budget": params.get("trade_budget"),
+                            "book_lot_max": params.get("book_lot_max"),
+                            "lot_open_frac": params.get("lot_open_frac"),
+                            "lot_add_frac": params.get("lot_add_frac"),
+                        },
+                        csv_root=str(DEFAULT_CSV_ROOT),
+                        report_dir=str(DEFAULT_REPORT_ROOT),
+                        score_mode=str(params.get("score_mode") or "portfolio"),
+                        score_pool=str(params.get("score_pool") or "scanned"),
+                        force_rerun=bool(params.get("force_rerun")),
+                        workers=int(params.get("workers") or 0),
+                    )
+                    st.session_state[str(cfg["result_key"])] = result
+                    st.session_state[str(cfg["params_key"])] = params
+                    st.rerun()
+                except Exception:
+                    st.error("分析失败")
+                    st.code(traceback.format_exc())
+        return
+    params = st.session_state.get(str(cfg["params_key"])) or defaults
+    _render_analysis_results(result, params)
+
+
 # ---------- sidebar / controls ----------
-mode = st.radio("模式", ["跑本地回测", "仅分析已有明细", "选股方案"], horizontal=True)
+mode = st.radio("模式", ["跑本地回测", "仅分析已有明细", "选股方案", "数据分析"], horizontal=True)
 scope = "单标的"
 if mode == "跑本地回测":
     scope = st.radio("范围", ["单标的", "批量（按标的汇总）"], horizontal=True)
@@ -1577,7 +1792,7 @@ with st.sidebar:
     st.header("参数")
     csv_root = str(DEFAULT_CSV_ROOT)
     divs: list[str] = []
-    if mode != "选股方案":
+    if mode != "选股方案" and mode != "数据分析":
         csv_root = st.text_input("行情根目录", value=str(DEFAULT_CSV_ROOT))
         divs = st.multiselect(
             "复权类型",
@@ -1594,7 +1809,7 @@ with st.sidebar:
         else:
             st.warning("请至少选择一种复权")
     else:
-        st.caption(str(SELECT_SIDEBAR["scan_caption"]))
+        st.caption(str(SELECT_SIDEBAR["scan_caption"]) if mode == "选股方案" else str(ANALYSIS_SIDEBAR["scan_caption"]))
     report_dirs = [str(resolve_typed_dir(DEFAULT_REPORT_ROOT, d)) for d in divs]
     csv_dirs = [str(resolve_typed_dir(csv_root, d)) for d in divs]
     csv_dir = csv_dirs[0] if csv_dirs else str(resolve_typed_dir(csv_root, DEFAULT_DIVIDEND_TYPE))
@@ -1613,8 +1828,26 @@ with st.sidebar:
     select_filters = dict(DEFAULT_FILTERS)
     select_years: tuple[str, ...] | None = None
     select_scanned: dict | None = None
+    analysis_scanned: dict | None = None
     if mode == "选股方案":
         select_filters, select_years, select_scanned = _render_select_sidebar()
+    elif mode == "数据分析":
+        if st.button(str(ANALYSIS_SIDEBAR["refresh_label"]), key="analysis_refresh"):
+            _cached_select_scan.clear()
+            st.session_state.pop(str(ANALYSIS_SIDEBAR["result_key"]), None)
+            st.session_state.pop(str(ANALYSIS_SIDEBAR["params_key"]), None)
+            st.rerun()
+        try:
+            analysis_scanned = _cached_select_scan(
+                str(DEFAULT_REPORT_ROOT),
+                str(DEFAULT_CSV_ROOT),
+                report_fingerprint(str(DEFAULT_REPORT_ROOT)),
+                csv_dir_fingerprint(str(DEFAULT_CSV_ROOT)),
+            )
+        except Exception:
+            analysis_scanned = {"stocks": {}, "portfolio_kpi": {}}
+            st.error("扫描回测报告失败")
+            st.code(traceback.format_exc())
 
 if mode == "选股方案":
     _render_select(
@@ -1624,6 +1857,8 @@ if mode == "选股方案":
         score_years=select_years,
         scanned=select_scanned,
     )
+elif mode == "数据分析":
+    _render_analysis_mode(analysis_scanned)
 elif mode == "跑本地回测" and scope == "批量（按标的汇总）":
     _render_batch_run(csv_root, list(divs), workers=workers, quiet=quiet)
 elif mode == "跑本地回测":

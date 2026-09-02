@@ -133,7 +133,43 @@ class TradeLedger:
         return dest
 
 
-def wrap_fill_hooks(ns: dict, ledger: TradeLedger) -> None:
+class CombinedTradeLedger:
+    """组合回放：按当前激活标的写入同一明细表。"""
+
+    def __init__(self, stock_getter):
+        self._stock_getter = stock_getter
+        self.rows: list[list[str]] = []
+        self._lots: dict[str, deque] = {}
+
+    def _ledger(self, stock: str) -> TradeLedger:
+        lg = TradeLedger(stock)
+        lg.rows = self.rows
+        lg._lots = self._lots.setdefault(str(stock).strip().upper(), deque())
+        return lg
+
+    def on_buy(self, vol: int, price: float, when: Any) -> None:
+        stock = str(self._stock_getter() or "").strip().upper()
+        if not stock:
+            return
+        self._ledger(stock).on_buy(vol, price, when)
+
+    def on_sell(self, vol: int, price: float, when: Any) -> None:
+        stock = str(self._stock_getter() or "").strip().upper()
+        if not stock:
+            return
+        self._ledger(stock).on_sell(vol, price, when)
+
+    def write(self, path: str | Path) -> Path:
+        dest = Path(path)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with dest.open("w", encoding="gbk", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(HEADER)
+            w.writerows(self.rows)
+        return dest
+
+
+def wrap_fill_hooks(ns: dict, ledger: TradeLedger | CombinedTradeLedger) -> None:
     orig_buy = ns["_apply_buy_fill"]
     orig_sell = ns["_apply_sell_fill"]
 
