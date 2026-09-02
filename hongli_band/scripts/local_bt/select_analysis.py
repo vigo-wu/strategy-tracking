@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import pickle
+import subprocess
 import sys
-from concurrent.futures import ProcessPoolExecutor, as_completed
+import tempfile
+import time
+import uuid
 from pathlib import Path
 from typing import Any, Callable
 
@@ -18,9 +22,9 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 from analyze import DEFAULT_DIVIDEND_TYPE, DEFAULT_REPORT_ROOT, resolve_typed_dir  # noqa: E402
+from batch_job import run_score_year  # noqa: E402
 from book_backtest import (  # noqa: E402
     analyze_book_detail,
-    attribute_portfolio_kpi,
     book_log_name,
     book_stocks_hash,
     normalize_book_stocks,
@@ -225,41 +229,165 @@ def _score_cache_likely(payload: dict[str, Any]) -> bool:
 
 
 def _run_score_year_job(payload: dict[str, Any]) -> dict[str, Any]:
-    year = str(payload["year"])
-    pool = payload["pool"]
-    start = "%s0101" % year
-    end = "%s1231" % year
-    out_dir = Path(payload["out_dir"])
-    log_name = book_log_name(kind="score", year=year, tag=str(payload["tag"]))
-    trades_path = out_dir / log_name.replace(".txt", "_操作明细.csv")
-    budget = float(payload.get("budget") or 100000.0)
-    if trades_path.is_file() and not payload.get("force_rerun"):
-        per = attribute_portfolio_kpi(trades_path, budget=budget)
-        # 空明细多半是修复前的坏缓存，不能当命中（否则 2023+ 会永久无推荐）
-        if per:
-            return {"year": year, "per_stock": per, "cached": True, "path": str(trades_path)}
-    try:
-        log_path, meta = run_book_backtest(
-            pool,
-            start,
-            end,
-            payload["csv_root"],
-            out_dir,
-            log_name=log_name,
-            quiet=True,
-            overrides=payload.get("overrides") or {},
+    """串行路径 / 单测入口；并行必须走 batch_job.run_score_year。"""
+    return run_score_year(payload)
+
+
+def _score_parallel_workers(requested: int, n_jobs: int, n_pool: int) -> int:
+    """大池并行过多会 CPU/内存挤兑，首年更久且像卡死；按池大小封顶。"""
+    w = max(0, int(requested or 0))
+    if w <= 1 or n_jobs <= 1:
+        return 1
+    cap = min(w, n_jobs)
+    if n_pool >= 80:
+        cap = min(cap, 2)
+    elif n_pool >= 40:
+        cap = min(cap, 3)
+    elif n_pool >= 20:
+        cap = min(cap, 4)
+    return max(1, cap)
+
+
+def _run_score_jobs_subprocess(
+    jobs: list[dict[str, Any]],
+    *,
+    n_workers: int,
+    n_pool: int,
+    get_done: Callable[[], int],
+    total: int,
+    on_progress: ProgressCb,
+    finish_row: Callable[[dict[str, Any]], None],
+) -> list[dict[str, Any]]:
+    """独立 python 子进程跑打分年，避开 Streamlit + ProcessPool 的 ScriptRunContext 卡死。"""
+    results: list[dict[str, Any]] = []
+    queue = list(jobs)
+    active: list[dict[str, Any]] = []
+    t0 = time.perf_counter()
+    work = Path(tempfile.mkdtemp(prefix="hlband_score_"))
+    script = str((HERE / "batch_job.py").resolve())
+
+    def _spawn(job: dict[str, Any]) -> dict[str, Any]:
+        tok = uuid.uuid4().hex
+        inp = work / ("in_%s.pkl" % tok)
+        outp = work / ("out_%s.pkl" % tok)
+        inp.write_bytes(pickle.dumps(job, protocol=pickle.HIGHEST_PROTOCOL))
+        creationflags = 0
+        if sys.platform == "win32":
+            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        proc = subprocess.Popen(
+            [sys.executable, script, "--score-year", str(inp), str(outp)],
+            cwd=str(HERE),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            creationflags=creationflags,
         )
-        tp = trades_csv_path(log_path)
-        per = attribute_portfolio_kpi(tp, budget=budget)
         return {
-            "year": year,
-            "per_stock": per,
-            "cached": False,
-            "path": str(tp),
-            "meta": meta,
+            "year": str(job["year"]),
+            "proc": proc,
+            "inp": inp,
+            "outp": outp,
         }
-    except Exception as e:
-        return {"year": year, "error": str(e), "per_stock": {}}
+
+    def _collect(slot: dict[str, Any]) -> dict[str, Any]:
+        proc: subprocess.Popen = slot["proc"]
+        outp: Path = slot["outp"]
+        year = str(slot["year"])
+        stdout_b, stderr_b = proc.communicate()
+        try:
+            if outp.is_file():
+                row = pickle.loads(outp.read_bytes())
+                if isinstance(row, dict):
+                    return row
+        except Exception as e:
+            return {"year": year, "error": "读结果失败: %s" % e, "per_stock": {}}
+        err = (stderr_b or b"").decode("utf-8", errors="replace").strip()
+        out = (stdout_b or b"").decode("utf-8", errors="replace").strip()
+        tip = err or out or ("exit=%s" % proc.returncode)
+        return {"year": year, "error": tip[:500], "per_stock": {}}
+
+    _emit_wf_progress(
+        on_progress,
+        phase="score",
+        done=get_done(),
+        total=total,
+        year="",
+        action="run",
+        label="打分预计算 %s/%s · 子进程×%s · 池 %s 只 · 首年约数分钟"
+        % (get_done(), total, n_workers, n_pool),
+        extra={"pool_n": n_pool, "parallel": n_workers},
+    )
+    try:
+        while queue or active:
+            while queue and len(active) < n_workers:
+                job = queue.pop(0)
+                active.append(_spawn(job))
+                _emit_wf_progress(
+                    on_progress,
+                    phase="score",
+                    done=get_done(),
+                    total=total,
+                    year=str(job["year"]),
+                    action="run",
+                    label="打分预计算 %s/%s · 启动 %s · 在跑 %s · 池 %s 只"
+                    % (
+                        get_done(),
+                        total,
+                        job["year"],
+                        "、".join(str(s["year"]) for s in active),
+                        n_pool,
+                    ),
+                    extra={"pool_n": n_pool, "running": [str(s["year"]) for s in active]},
+                )
+            alive: list[dict[str, Any]] = []
+            finished_any = False
+            for slot in active:
+                rc = slot["proc"].poll()
+                if rc is None:
+                    alive.append(slot)
+                    continue
+                finished_any = True
+                row = _collect(slot)
+                try:
+                    slot["inp"].unlink(missing_ok=True)
+                    slot["outp"].unlink(missing_ok=True)
+                except Exception:
+                    pass
+                results.append(row)
+                finish_row(row)
+            active = alive
+            if not finished_any:
+                elapsed = int(time.perf_counter() - t0)
+                running = "、".join(str(s["year"]) for s in active) or "-"
+                _emit_wf_progress(
+                    on_progress,
+                    phase="score",
+                    done=get_done(),
+                    total=total,
+                    year="",
+                    action="run",
+                    label="打分预计算 %s/%s · 子进程×%s 仍在跑 %s · 已等待 %ss · 池 %s 只"
+                    % (get_done(), total, n_workers, running, elapsed, n_pool),
+                    extra={
+                        "pool_n": n_pool,
+                        "parallel": n_workers,
+                        "elapsed_s": elapsed,
+                        "running": [str(s["year"]) for s in active],
+                    },
+                )
+                time.sleep(2.0)
+    finally:
+        for slot in active:
+            try:
+                slot["proc"].kill()
+            except Exception:
+                pass
+        try:
+            for p in work.glob("*"):
+                p.unlink(missing_ok=True)
+            work.rmdir()
+        except Exception:
+            pass
+    return results
 
 
 def precompute_portfolio_kpis(
@@ -302,8 +430,8 @@ def precompute_portfolio_kpis(
     results: list[dict[str, Any]] = []
     errors: list[str] = []
     score_paths: dict[str, str] = dict(scanned.get("score_detail_paths") or {})
-    w = int(workers or 0)
     n_pool = len(pool)
+    n_workers = _score_parallel_workers(int(workers or 0), len(jobs), n_pool)
     done = int(progress_done)
     total = int(progress_total) if progress_total is not None else (done + len(jobs))
 
@@ -332,7 +460,7 @@ def precompute_portfolio_kpis(
             extra={"pool_n": n_pool, "cached": bool(row.get("cached")), "error": row.get("error")},
         )
 
-    if w <= 1 or len(jobs) <= 1:
+    if n_workers <= 1:
         for j in jobs:
             year = str(j["year"])
             likely = _score_cache_likely(j)
@@ -357,23 +485,17 @@ def precompute_portfolio_kpis(
             results.append(row)
             _finish_score_row(row)
     else:
-        _emit_wf_progress(
-            on_progress,
-            phase="score",
-            done=done,
-            total=total,
-            year="",
-            action="run",
-            label="打分预计算 %s/%s · 并行 %s 年 · 池 %s 只"
-            % (done, total, len(jobs), n_pool),
-            extra={"pool_n": n_pool, "parallel": len(jobs)},
+        results.extend(
+            _run_score_jobs_subprocess(
+                jobs,
+                n_workers=n_workers,
+                n_pool=n_pool,
+                get_done=lambda: done,
+                total=total,
+                on_progress=on_progress,
+                finish_row=_finish_score_row,
+            )
         )
-        with ProcessPoolExecutor(max_workers=min(w, len(jobs))) as ex:
-            futs = [ex.submit(_run_score_year_job, j) for j in jobs]
-            for fu in as_completed(futs):
-                row = fu.result()
-                results.append(row)
-                _finish_score_row(row)
     for row in results:
         sy = str(row.get("year") or "")
         sp = str(row.get("path") or "").strip()

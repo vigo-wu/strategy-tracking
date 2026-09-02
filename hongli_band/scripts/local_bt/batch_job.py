@@ -60,3 +60,68 @@ def run_group(payloads: list[dict[str, Any]]) -> list[dict[str, Any]]:
             )
         )
     return rows
+
+
+def run_score_year(payload: dict[str, Any]) -> dict[str, Any]:
+    """Walk-forward Phase A：单年全池组合回测 → 按票归因 KPI。
+
+    Streamlit 下勿用 ProcessPool submit 本函数；请走 ``--score-year`` 子进程入口。
+    """
+    from book_backtest import (
+        attribute_portfolio_kpi,
+        book_log_name,
+        run_book_backtest,
+    )
+    from trades_csv import trades_csv_path
+
+    year = str(payload["year"])
+    pool = payload["pool"]
+    start = "%s0101" % year
+    end = "%s1231" % year
+    out_dir = Path(payload["out_dir"])
+    log_name = book_log_name(kind="score", year=year, tag=str(payload["tag"]))
+    trades_path = out_dir / log_name.replace(".txt", "_操作明细.csv")
+    budget = float(payload.get("budget") or 100000.0)
+    if trades_path.is_file() and not payload.get("force_rerun"):
+        per = attribute_portfolio_kpi(trades_path, budget=budget)
+        # 空明细多半是修复前的坏缓存，不能当命中
+        if per:
+            return {"year": year, "per_stock": per, "cached": True, "path": str(trades_path)}
+    try:
+        log_path, meta = run_book_backtest(
+            pool,
+            start,
+            end,
+            payload["csv_root"],
+            out_dir,
+            log_name=log_name,
+            quiet=True,
+            overrides=payload.get("overrides") or {},
+        )
+        tp = trades_csv_path(log_path)
+        per = attribute_portfolio_kpi(tp, budget=budget)
+        return {
+            "year": year,
+            "per_stock": per,
+            "cached": False,
+            "path": str(tp),
+            "meta": meta,
+        }
+    except Exception as e:
+        return {"year": year, "error": str(e), "per_stock": {}}
+
+
+def _cli_score_year(in_path: str, out_path: str) -> int:
+    import pickle
+
+    payload = pickle.loads(Path(in_path).read_bytes())
+    row = run_score_year(payload)
+    Path(out_path).write_bytes(pickle.dumps(row, protocol=pickle.HIGHEST_PROTOCOL))
+    return 0 if not row.get("error") else 1
+
+
+if __name__ == "__main__":
+    # python batch_job.py --score-year <in.pkl> <out.pkl>
+    if len(sys.argv) >= 4 and sys.argv[1] == "--score-year":
+        raise SystemExit(_cli_score_year(sys.argv[2], sys.argv[3]))
+    raise SystemExit("usage: batch_job.py --score-year <in.pkl> <out.pkl>")

@@ -71,12 +71,33 @@ def unique_dividend_types(rows: list[dict[str, Any]]) -> list[str]:
 
 
 def resolve_typed_dir(root: str | Path, dividend_type: Any = "") -> Path:
-    """root/<type>；root 已是该 type 目录名则不再拼接。非法 type 回落默认。"""
+    """root/<type>；root 已是该 type 目录名则不再拼接。非法 type 回落默认。
+
+    若 root/<type> 不存在，再找 root/<快照>/<type>（如 ``20070104_20260828/front_ratio``），
+    多个快照时取目录名最大者（通常对应最新结束日）。
+    """
     base = Path(root)
     div = normalize_dividend_type(dividend_type) or DEFAULT_DIVIDEND_TYPE
     if base.name == div:
         return base
-    return base / div
+    direct = base / div
+    if direct.is_dir():
+        return direct
+    if base.is_dir():
+        found: list[Path] = []
+        try:
+            children = list(base.iterdir())
+        except OSError:
+            children = []
+        for child in children:
+            if not child.is_dir() or child.name in DIVIDEND_TYPES:
+                continue
+            typed = child / div
+            if typed.is_dir():
+                found.append(typed)
+        if found:
+            return max(found, key=lambda p: p.parent.name)
+    return direct
 
 
 def parse_stock_filter_tokens(raw: Any) -> list[str]:
@@ -1820,11 +1841,12 @@ def analyze_detail(
 ) -> dict[str, Any]:
     """操作明细 → trades / equity / stats；旁路 log 可补买卖信号；行情可补持有回撤/浮盈。
 
-    hold_metrics=False 时跳过日线 enrich（扫描/打分 KPI 用，显著加速）。
+    hold_metrics=False 时跳过日线 enrich，并 quiet 解析警告（扫描/打分 KPI 用，显著加速）。
     """
     mod = report_mod()
     path = Path(detail_path)
-    rounds = mod.parse_terminal_rounds(path)
+    # 批量扫数千明细时，每条 open-buy warn 刷 Streamlit 终端会拖慢数量级
+    rounds = mod.parse_terminal_rounds(path, quiet=(not hold_metrics))
     trades = _normalize_trades(rounds)
     log = Path(log_path) if log_path else sibling_log_path(path)
     trades = enrich_trades_signals_from_log(trades, log)

@@ -14,8 +14,9 @@ if str(Path(__file__).resolve().parent) not in sys.path:
 from analyze import (  # noqa: E402
     DEFAULT_CSV_ROOT,
     DEFAULT_DIVIDEND_TYPE,
+    _stock_token_match,
     analyze_detail,
-    daily_csv_for_stock,
+    daily_csvs_by_stock,
     load_detail_raw,
     parse_budget_from_log,
     resolve_typed_dir,
@@ -102,6 +103,31 @@ def book_log_name(*, kind: str, year: str, tag: str, end: str = "") -> str:
     return "local_bt_book_hold_%s_k%s.txt" % (y, t)
 
 
+def _csv_index_for_div(csv_root: Path, dividend_type: str) -> dict[str, Path]:
+    """每种复权只扫一次日线目录，避免按票反复 peek（100 票 × 全目录曾达数分钟）。"""
+    csv_dir = resolve_typed_dir(csv_root, dividend_type)
+    out: dict[str, Path] = {}
+    for meta in daily_csvs_by_stock(csv_dir):
+        stock = str(meta.get("stock") or "").strip().upper()
+        path = Path(str(meta.get("path") or ""))
+        if stock and str(path):
+            out[stock] = path
+    return out
+
+
+def _lookup_csv_path(index: dict[str, Path], stock: str) -> Path | None:
+    want = str(stock or "").strip().upper()
+    if not want:
+        return None
+    hit = index.get(want)
+    if hit is not None:
+        return hit
+    for got, path in index.items():
+        if _stock_token_match(got, want):
+            return path
+    return None
+
+
 def load_stores_for_book(
     book_stocks: Mapping[str, Any],
     csv_root: str | Path,
@@ -110,10 +136,12 @@ def load_stores_for_book(
     errors: list[str] = []
     root = Path(csv_root)
     norm = normalize_book_stocks(book_stocks)
+    index_by_div: dict[str, dict[str, Path]] = {}
     for stock, cfg in norm.items():
-        div = cfg.get("dividend_type") or DEFAULT_DIVIDEND_TYPE
-        csv_dir = resolve_typed_dir(root, div)
-        path = daily_csv_for_stock(csv_dir, stock)
+        div = str(cfg.get("dividend_type") or DEFAULT_DIVIDEND_TYPE)
+        if div not in index_by_div:
+            index_by_div[div] = _csv_index_for_div(root, div)
+        path = _lookup_csv_path(index_by_div[div], stock)
         if path is None or not Path(path).is_file():
             errors.append("%s 缺 CSV (%s)" % (stock, div))
             continue

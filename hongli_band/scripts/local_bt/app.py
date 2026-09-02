@@ -2317,13 +2317,17 @@ def _render_analysis_mode(scanned: dict | None) -> None:
                     status.info("准备 Walk-forward…")
 
                     def _on_wf_progress(ev: dict) -> None:
-                        total = int(ev.get("total") or 0)
-                        done = int(ev.get("done") or 0)
-                        if total > 0:
-                            bar.progress(min(1.0, float(done) / float(total)))
-                        label = str(ev.get("label") or "").strip()
-                        if label:
-                            status.info(label)
+                        try:
+                            total = int(ev.get("total") or 0)
+                            done = int(ev.get("done") or 0)
+                            if total > 0:
+                                bar.progress(min(1.0, float(done) / float(total)))
+                            label = str(ev.get("label") or "").strip()
+                            if label:
+                                status.info(label)
+                        except Exception:
+                            # ProcessPool/旧路径可能弄丢 ScriptRunContext；忽略以免刷屏卡死观感
+                            pass
 
                     scan = scanned if (scanned or {}).get("stocks") else None
                     if scan is None:

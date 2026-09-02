@@ -239,7 +239,7 @@ ANALYSIS_WIDGETS: list[dict[str, Any]] = [
     },
     {
         "key": "workers",
-        "label": "打分并行进程（0=顺序）",
+        "label": "打分并行子进程（0/1=顺序；大池自动≤2）",
         "widget": "number_input",
         "dtype": "int",
         "min_value": 0,

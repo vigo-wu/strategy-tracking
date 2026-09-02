@@ -333,11 +333,12 @@ def _col_by_aliases(df: pd.DataFrame, *aliases: str) -> str | None:
     return None
 
 
-def parse_terminal_rounds(path: Path) -> list[dict]:
+def parse_terminal_rounds(path: Path, *, quiet: bool = False) -> list[dict]:
     """解析 QMT「操作明细」CSV → 买卖轮次（按代码各自 FIFO）。
 
     卖出若吃掉多笔买入，按买入 lot 拆成多轮（保留各笔买入日/买价）；
     盈亏按股数分摊卖出行「盈利」（末笔吃尾差）。
+    quiet=True 时不向 stderr 刷 open-buy/orphan 警告（批量扫描/打分用）。
     """
     df = _read_csv_auto(path)
     if df.empty:
@@ -405,10 +406,11 @@ def parse_terminal_rounds(path: Path) -> list[dict]:
             continue
         pending_buys = pending_by_code.get(code) or []
         if not pending_buys:
-            print(
-                f"warn: orphan sell {r['day']} code={code or '-'} in terminal csv",
-                file=sys.stderr,
-            )
+            if not quiet:
+                print(
+                    f"warn: orphan sell {r['day']} code={code or '-'} in terminal csv",
+                    file=sys.stderr,
+                )
             continue
         sell_p = float(r["price"])
         remain_sh = int(r["shares"])
@@ -429,14 +431,15 @@ def parse_terminal_rounds(path: Path) -> list[dict]:
         if code in pending_by_code and not pending_by_code[code]:
             pending_by_code.pop(code, None)
         if not taken:
-            print(
-                f"warn: orphan sell {r['day']} code={code or '-'} in terminal csv",
-                file=sys.stderr,
-            )
+            if not quiet:
+                print(
+                    f"warn: orphan sell {r['day']} code={code or '-'} in terminal csv",
+                    file=sys.stderr,
+                )
             continue
         tot_sh = sum(int(x["shares"]) for x in taken)
         sh = int(r["shares"] or tot_sh)
-        if tot_sh != int(r["shares"]):
+        if tot_sh != int(r["shares"]) and not quiet:
             print(
                 f"warn: shares mismatch buys {tot_sh} vs sell {r['day']}x{r['shares']}"
                 f" code={code or '-'}",
@@ -470,7 +473,7 @@ def parse_terminal_rounds(path: Path) -> list[dict]:
                 round_row["stock"] = code
             rounds.append(round_row)
     open_left = sum(len(v) for v in pending_by_code.values())
-    if open_left:
+    if open_left and not quiet:
         print(f"warn: {open_left} open buy(s) left in terminal csv", file=sys.stderr)
     return rounds
 

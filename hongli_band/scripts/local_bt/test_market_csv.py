@@ -1090,6 +1090,17 @@ class TypedDirTests(unittest.TestCase):
         self.assertEqual(resolve_typed_dir(root, "nope"), root / DEFAULT_DIVIDEND_TYPE)
         self.assertEqual(resolve_typed_dir(root, "FOLLOW"), root / DEFAULT_DIVIDEND_TYPE)
 
+    def test_resolve_typed_dir_nested_snapshot(self):
+        from analyze import resolve_typed_dir
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            older = root / "20070104_20200101" / "front_ratio"
+            newer = root / "20070104_20260828" / "front_ratio"
+            older.mkdir(parents=True)
+            newer.mkdir(parents=True)
+            self.assertEqual(resolve_typed_dir(root, "front_ratio"), newer)
+
     def test_list_detail_csvs_stays_in_typed_dir(self):
         from analyze import list_detail_csvs
 
