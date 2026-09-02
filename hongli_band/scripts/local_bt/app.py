@@ -2021,9 +2021,9 @@ def _collect_analysis_form(avail: tuple[str, ...], defaults: dict[str, Any]) -> 
             )
             params["workers"] = int(
                 st.number_input(
-                    "打分并行进程（0=顺序）",
+                    "打分并行子进程（0/1=顺序）",
                     min_value=0,
-                    max_value=8,
+                    max_value=16,
                     value=int(params.get("workers") or 0),
                     step=1,
                 )

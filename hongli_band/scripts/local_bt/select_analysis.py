@@ -233,19 +233,13 @@ def _run_score_year_job(payload: dict[str, Any]) -> dict[str, Any]:
     return run_score_year(payload)
 
 
-def _score_parallel_workers(requested: int, n_jobs: int, n_pool: int) -> int:
-    """大池并行过多会 CPU/内存挤兑，首年更久且像卡死；按池大小封顶。"""
+def _score_parallel_workers(requested: int, n_jobs: int, n_pool: int = 0) -> int:
+    """按用户填写的进程数并行；0/1=顺序。n_pool 仅兼容旧调用。"""
+    del n_pool
     w = max(0, int(requested or 0))
-    if w <= 1 or n_jobs <= 1:
+    if w <= 1 or int(n_jobs or 0) <= 1:
         return 1
-    cap = min(w, n_jobs)
-    if n_pool >= 80:
-        cap = min(cap, 2)
-    elif n_pool >= 40:
-        cap = min(cap, 3)
-    elif n_pool >= 20:
-        cap = min(cap, 4)
-    return max(1, cap)
+    return max(1, min(w, int(n_jobs)))
 
 
 def _run_score_jobs_subprocess(
