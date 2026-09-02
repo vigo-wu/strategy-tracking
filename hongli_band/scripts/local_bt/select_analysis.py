@@ -1,5 +1,5 @@
 # coding: utf-8
-"""walk-forward 数据分析：组合打分预计算 + TopK 持有回放。"""
+"""walk-forward 数据分析：每换仓段手工篮子 + 持有回放。"""
 from __future__ import annotations
 
 import argparse
@@ -31,13 +31,19 @@ from book_backtest import (  # noqa: E402
     run_book_backtest,
 )
 from compound_wallet import parse_wallet_from_log  # noqa: E402
-from select_config import DEFAULT_FILTERS, WEIGHTS, load_book_defaults, load_book_stocks_full  # noqa: E402
+from select_config import (  # noqa: E402
+    DEFAULT_FILTERS,
+    coerce_book_stocks_dict,
+    is_year_keyed_baskets,
+    load_book_defaults,
+    load_book_stocks_full,
+    parse_book_stocks_text,
+)
 from stock_select import (  # noqa: E402
     _apply_year_window,
-    empty_year_kpi,
     infer_score_years,
+    list_score_years,
     score_universe,
-    scan_reports,
 )
 from trades_csv import trades_csv_path  # noqa: E402
 
@@ -67,6 +73,57 @@ def pick_details_from_basket(
     return out
 
 
+def picks_from_scored(
+    scored: dict[str, Any] | None,
+    top_k: int,
+) -> tuple[list[dict[str, Any]], str]:
+    """Walk-forward 选股：硬过滤通过者优先，不足 top_k 时按总分从其余补足。
+
+    返回 (picks, note)。note 非空表示发生了补足或仍不足。
+    """
+    k = min(max(int(top_k or 3), 1), 9)
+    df = None
+    if scored:
+        rec = scored.get("recommend")
+        df = scored.get("df")
+        if df is None or (hasattr(df, "empty") and df.empty):
+            df = rec
+    if df is None or (hasattr(df, "empty") and df.empty):
+        return [], ""
+    picks: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    n_passed = 0
+    for _, r in df.iterrows():
+        if len(picks) >= k:
+            break
+        stock = str(r.get("stock") or "").strip().upper()
+        if not stock or stock in seen:
+            continue
+        ma = str(r.get("ma_type_suggest") or r.get("ma_type") or "").upper()
+        if ma not in MA_TYPES:
+            ma = "EMA"
+        div = str(r.get("div_type_suggest") or r.get("div_type") or DEFAULT_DIVIDEND_TYPE).lower()
+        if not div:
+            div = DEFAULT_DIVIDEND_TYPE
+        seen.add(stock)
+        if bool(r.get("passed")):
+            n_passed += 1
+        picks.append(
+            {
+                "stock": stock,
+                "score": r.get("score"),
+                "ma_type": ma,
+                "div_type": div,
+            }
+        )
+    note = ""
+    if len(picks) < k:
+        note = "硬过滤后可交易不足 %s 只，仅选出 %s 只" % (k, len(picks))
+    elif n_passed < k:
+        note = "硬过滤仅 %s 只过线，已按分数补足至 %s 只" % (n_passed, k)
+    return picks, note
+
+
 def iter_rebalance_periods(
     eval_years: tuple[str, ...],
     rebalance_years: int,
@@ -90,6 +147,94 @@ def iter_rebalance_periods(
         )
         i += r
     return out
+
+
+def _copy_book(book: dict[str, Any] | None) -> dict[str, dict[str, str]]:
+    return {str(k): dict(v) for k, v in (book or {}).items()}
+
+
+def hold_years_for_range(
+    data_start: str,
+    data_end: str,
+    available: tuple[str, ...] | None = None,
+) -> tuple[str, ...]:
+    """评估/持有年：有扫描年则与区间求交；否则用日历年 data_start–data_end。"""
+    ds, de = str(data_start or "").strip(), str(data_end or "").strip()
+    if ds and de and de < ds:
+        ds, de = de, ds
+    scanned_years = tuple(str(y) for y in (available or ()) if str(y).isdigit())
+    if scanned_years:
+        if ds and de:
+            return tuple(y for y in scanned_years if ds <= y <= de)
+        return scanned_years
+    if ds.isdigit() and de.isdigit() and len(ds) == 4 and len(de) == 4:
+        return tuple(str(y) for y in range(int(ds), int(de) + 1))
+    return ()
+
+
+def resolve_period_basket(
+    raw: Any,
+    fallback: dict[str, Any] | None = None,
+) -> dict[str, dict[str, str]]:
+    """段内篮子：None 回落 fallback；空 dict/list 表示未配置。"""
+    fb = normalize_book_stocks(fallback or {})
+    if raw is None:
+        return _copy_book(fb)
+    if raw == {} or raw == []:
+        return {}
+    out: dict[str, Any] = {}
+    if isinstance(raw, (list, tuple)):
+        for item in raw:
+            stock = str(item or "").strip().upper()
+            if not stock:
+                continue
+            if stock in fb:
+                out[stock] = dict(fb[stock])
+            else:
+                out[stock] = {"ma_type": "EMA", "dividend_type": DEFAULT_DIVIDEND_TYPE}
+        return normalize_book_stocks(out)
+    if isinstance(raw, dict):
+        for k, v in raw.items():
+            stock = str(k or "").strip().upper()
+            if not stock:
+                continue
+            base = dict(fb.get(stock) or {"ma_type": "EMA", "dividend_type": DEFAULT_DIVIDEND_TYPE})
+            if isinstance(v, dict):
+                ma = v.get("ma_type") or base.get("ma_type") or "EMA"
+                div = v.get("dividend_type") or base.get("dividend_type") or DEFAULT_DIVIDEND_TYPE
+                out[stock] = {"ma_type": ma, "dividend_type": div}
+            elif isinstance(v, str) and v.strip():
+                out[stock] = {"ma_type": v, "dividend_type": base.get("dividend_type") or DEFAULT_DIVIDEND_TYPE}
+            else:
+                out[stock] = base
+        return normalize_book_stocks(out)
+    return _copy_book(fb)
+
+
+def period_baskets_from_book(
+    periods: list[dict[str, Any]],
+    book: dict[str, Any] | None = None,
+) -> dict[str, dict[str, dict[str, str]]]:
+    basket = normalize_book_stocks(book if book is not None else load_book_stocks_full())
+    out: dict[str, dict[str, dict[str, str]]] = {}
+    for p in periods:
+        out[str(p.get("select_year") or "")] = _copy_book(basket)
+    return out
+
+
+def load_picks_file(path: str | Path) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """读 picks 文件：按年 dict → (period_baskets, None)；单篮子 → (None, book)。"""
+    data = parse_book_stocks_text(Path(path).read_text(encoding="utf-8"))
+    if is_year_keyed_baskets(data):
+        return {str(k): v for k, v in data.items()}, None
+    return None, coerce_book_stocks_dict(data)
+
+
+def load_period_baskets_json(path: str | Path) -> dict[str, Any]:
+    periods, _book = load_picks_file(path)
+    if periods is None:
+        raise ValueError("picks 须为 {换仓年: 篮子}；单篮子请用 CLI 同一文件（会应用到全部段）")
+    return periods
 
 
 def score_years_for_period(
@@ -532,30 +677,36 @@ def _naive_year_pnl(
 
 
 def run_walk_forward(
-    scanned: dict[str, Any],
+    scanned: dict[str, Any] | None = None,
     *,
     data_start: str = "",
     data_end: str = "",
     eval_years: tuple[str, ...] | None = None,
-    lookback_n: int = 2,
     rebalance_years: int = 1,
-    top_k: int = 3,
-    filters: dict[str, Any] | None = None,
-    weights: dict[str, float] | None = None,
+    period_baskets: dict[str, Any] | None = None,
+    fallback_book: dict[str, Any] | None = None,
     book_params: dict[str, Any] | None = None,
     csv_root: str | Path = "",
     report_dir: str | Path = "",
-    score_mode: str = "portfolio",
-    score_pool: str = "scanned",
     force_rerun: bool = False,
-    workers: int = 0,
     compound_backtest: bool = True,
     on_progress: ProgressCb = None,
+    lookback_n: int = 2,
+    top_k: int = 3,
+    filters: dict[str, Any] | None = None,
+    weights: dict[str, float] | None = None,
+    score_mode: str = "portfolio",
+    score_pool: str = "scanned",
+    workers: int = 0,
 ) -> dict[str, Any]:
-    flt = dict(DEFAULT_FILTERS)
-    if filters:
-        flt.update(filters)
-    flt["top_n"] = min(max(int(top_k or 3), 1), 9)
+    del lookback_n, top_k, filters, weights, score_mode, score_pool, workers
+    scanned = scanned if isinstance(scanned, dict) else {}
+    fallback = normalize_book_stocks(
+        fallback_book if fallback_book is not None else load_book_stocks_full()
+    )
+    baskets_in = (
+        {str(k): v for k, v in period_baskets.items()} if period_baskets is not None else None
+    )
     available = infer_score_years(scanned.get("stocks") or {})
     ds = str(data_start or "").strip()
     de = str(data_end or "").strip()
@@ -563,30 +714,19 @@ def run_walk_forward(
         ds = str(available[0])
     if not de and available:
         de = str(available[-1])
-    data_years, eval_from_data = data_and_eval_years(ds, de, lookback_n, available)
-    eval_years_run = tuple(eval_years) if eval_years else eval_from_data
+    data_years = hold_years_for_range(ds, de, available)
+    eval_years_run = tuple(str(y) for y in eval_years) if eval_years else data_years
     notes: list[str] = []
+    has_scan_kpi = bool(scanned.get("stocks"))
     if data_years:
-        if eval_years_run:
-            notes.append(
-                "数据年 %s–%s → 评估 %s–%s（回看 %s）"
-                % (
-                    data_years[0],
-                    data_years[-1],
-                    eval_years_run[0],
-                    eval_years_run[-1],
-                    lookback_n,
-                )
-            )
-        else:
-            notes.append(
-                "数据年 %s–%s 在回看 %s 下推不出首评年"
-                % (
-                    data_years[0] if data_years else ds,
-                    data_years[-1] if data_years else de,
-                    lookback_n,
-                )
-            )
+        notes.append(
+            "评估持有 %s–%s · 换仓 %s 年 · 手工篮子"
+            % (data_years[0], data_years[-1], max(1, int(rebalance_years or 1)))
+        )
+    elif ds or de:
+        notes.append("数据年 %s–%s 推不出持有年" % (ds or "-", de or "-"))
+    if not has_scan_kpi:
+        notes.append("未扫描分年明细，不计算单票合计对照（naive_pnl）")
     if not eval_years_run:
         return {
             "summary": {
@@ -606,54 +746,15 @@ def run_walk_forward(
                 data_end=de,
                 data_years=data_years,
                 eval_years=(),
-                lookback_n=lookback_n,
                 rebalance_years=rebalance_years,
-                top_k=top_k,
-                mode=str(score_mode or "portfolio").strip().lower(),
-                score_pool=score_pool,
-                flt=flt,
-                weights=weights,
+                period_baskets={},
                 book_params=book_params,
                 compound_backtest=compound_backtest,
             ),
         }
     periods = iter_rebalance_periods(eval_years_run, rebalance_years)
-    mode = str(score_mode or "portfolio").strip().lower()
-    pool = build_score_pool(scanned, pool_mode=score_pool, filters=flt)
-    n_hold = sum(len(tuple(p.get("hold_years") or ())) for p in periods)
-    need_score_years: tuple[str, ...] = ()
-    n_score = 0
-    if mode == "portfolio":
-        need_score_years = collect_score_years(periods, lookback_n, data_years)
-        if pool and need_score_years:
-            n_score = len(need_score_years)
-    progress_total = n_score + n_hold
+    progress_total = sum(len(tuple(p.get("hold_years") or ())) for p in periods)
     progress_done = 0
-
-    if mode == "portfolio":
-        if not pool:
-            notes.append("打分池为空，无法组合预计算。")
-        elif need_score_years:
-            precompute_portfolio_kpis(
-                scanned,
-                need_score_years,
-                pool,
-                csv_root=csv_root,
-                report_dir=report_dir,
-                book_params=book_params,
-                force_rerun=force_rerun,
-                workers=workers,
-                on_progress=on_progress,
-                progress_done=0,
-                progress_total=progress_total,
-            )
-            progress_done = n_score
-            notes.append(
-                "组合打分年 %s · 池 %s 只"
-                % ("、".join(need_score_years) if need_score_years else "-", len(pool))
-            )
-            for err in scanned.get("_portfolio_kpi_errors") or []:
-                notes.append("打分预计算警告: %s" % err)
 
     overrides = _book_overrides(book_params)
     budget = float(overrides["TRADE_BUDGET"])
@@ -666,9 +767,10 @@ def run_walk_forward(
     year_rows: list[dict[str, Any]] = []
     period_rows: list[dict[str, Any]] = []
     equity_pts: list[dict[str, Any]] = []
+    resolved_baskets: dict[str, dict[str, dict[str, str]]] = {}
     cum = 0.0
     if compound_backtest:
-        notes.append("持有期复利回测：跨年传递期末权益；打分预计算仍固定 TRADE_BUDGET")
+        notes.append("持有期复利回测：跨年传递期末权益")
 
     def _hold_step(
         *,
@@ -708,84 +810,25 @@ def run_walk_forward(
     for period in periods:
         select_year = str(period["select_year"])
         hold_years = tuple(str(y) for y in period["hold_years"])
-        window = score_years_for_period(select_year, lookback_n, data_years)
+        raw = None if baskets_in is None else baskets_in.get(select_year)
+        basket = resolve_period_basket(raw, fallback)
+        resolved_baskets[select_year] = _copy_book(basket)
         period_status = "ok"
-        picks: list[dict[str, Any]] = []
-        if len(window) < max(1, int(lookback_n)):
-            period_status = "窗口不足"
-            for hy in hold_years:
-                _hold_step(
-                    hy=hy,
-                    period_i=int(period["period_i"]),
-                    select_year=select_year,
-                    action="skip",
-                    tip="跳过（窗口不足）",
-                    bump=True,
-                )
-                year_rows.append(
-                    {
-                        "year": hy,
-                        "period_i": period["period_i"],
-                        "select_year": select_year,
-                        "is_rebalance": hy == select_year,
-                        "picks": "",
-                        "pick_details": [],
-                        "portfolio_pnl": None,
-                        "naive_pnl": None,
-                        "status": period_status,
-                    }
-                )
-            period_rows.append(
-                {
-                    "period_i": period["period_i"],
-                    "select_year": select_year,
-                    "hold_years": "、".join(hold_years),
-                    "picks": "",
-                    "period_pnl": None,
-                    "status": period_status,
-                }
-            )
-            continue
-
-        scored = score_universe(
-            scanned,
-            filters=flt,
-            score_years=window,
-            kpi_source=mode if mode in ("portfolio", "single") else "single",
-            weights=weights,
-        )
-        rec = scored.get("recommend")
-        if rec is None or rec.empty:
+        if not basket:
             period_status = "无推荐"
-        else:
-            for _, r in rec.iterrows():
-                picks.append(
-                    {
-                        "stock": str(r["stock"]),
-                        "score": r.get("score"),
-                        "ma_type": r.get("ma_type_suggest"),
-                        "div_type": r.get("div_type_suggest"),
-                    }
-                )
-        basket = {}
-        score_by_stock: dict[str, Any] = {}
-        for p in picks:
-            ma = str(p.get("ma_type") or "").upper()
-            div = str(p.get("div_type") or DEFAULT_DIVIDEND_TYPE).lower()
-            if ma in MA_TYPES:
-                stock = str(p["stock"])
-                basket[stock] = {"ma_type": ma, "dividend_type": div}
-                if p.get("score") is not None:
-                    score_by_stock[stock] = p.get("score")
+            notes.append("段 p%s %s：未配置标的" % (period["period_i"], select_year))
         pick_names = "、".join(sorted(basket.keys()))
-        details = pick_details_from_basket(basket, score_by_stock)
+        details = pick_details_from_basket(basket)
 
         period_pnl = 0.0
         for hy in hold_years:
             is_rebalance = hy == select_year
             row_status = period_status
             port_pnl = None
-            naive = _naive_year_pnl(list(basket.keys()), hy, scanned) if basket else 0.0
+            if has_scan_kpi:
+                naive = _naive_year_pnl(list(basket.keys()), hy, scanned) if basket else None
+            else:
+                naive = None
             if period_status != "ok" or not basket:
                 _hold_step(
                     hy=hy,
@@ -966,13 +1009,8 @@ def run_walk_forward(
             data_end=de,
             data_years=data_years,
             eval_years=eval_years_run,
-            lookback_n=lookback_n,
             rebalance_years=rebalance_years,
-            top_k=top_k,
-            mode=mode,
-            score_pool=score_pool,
-            flt=flt,
-            weights=weights,
+            period_baskets=resolved_baskets,
             book_params=book_params,
             compound_backtest=compound_backtest,
         ),
@@ -985,13 +1023,8 @@ def _walk_forward_params(
     data_end: str,
     data_years: tuple[str, ...],
     eval_years: tuple[str, ...],
-    lookback_n: int,
     rebalance_years: int,
-    top_k: int,
-    mode: str,
-    score_pool: str,
-    flt: dict[str, Any],
-    weights: dict[str, float] | None,
+    period_baskets: dict[str, Any] | None,
     book_params: dict[str, Any] | None,
     compound_backtest: bool = True,
 ) -> dict[str, Any]:
@@ -1000,13 +1033,8 @@ def _walk_forward_params(
         "data_end": data_end,
         "data_years": list(data_years),
         "eval_years": list(eval_years),
-        "lookback_n": lookback_n,
         "rebalance_years": rebalance_years,
-        "top_k": top_k,
-        "score_mode": mode,
-        "score_pool": score_pool,
-        "filters": flt,
-        "weights": dict(weights or WEIGHTS),
+        "period_baskets": dict(period_baskets or {}),
         "book_params": dict(book_params or load_book_defaults()),
         "compound_backtest": bool(compound_backtest),
     }
@@ -1211,23 +1239,23 @@ def main(argv: list[str] | None = None) -> int:
         "--eval-start",
         default="",
         dest="data_start",
-        help="数据/KPI 起始自然年（首评年=区间内最早可回看年）",
+        help="持有起始自然年（含）",
     )
     ap.add_argument(
         "--data-end",
         "--eval-end",
         default="",
         dest="data_end",
-        help="数据/KPI 结束自然年（评估持有年至多到此年）",
+        help="持有结束自然年（含）",
     )
-    ap.add_argument("--lookback-n", type=int, default=2)
     ap.add_argument("--rebalance-years", type=int, default=1)
-    ap.add_argument("--top-k", type=int, default=3)
-    ap.add_argument("--score-mode", choices=("portfolio", "single"), default="portfolio")
-    ap.add_argument("--score-pool", choices=("scanned", "passed_prefilter"), default="scanned")
+    ap.add_argument(
+        "--picks-json",
+        default="",
+        help="手工篮子：按年 {换仓年: 篮子}，或 BOOK_STOCKS 风格单篮子（应用到全部段，可行尾注释）",
+    )
     ap.add_argument("--force-rerun", action="store_true")
     ap.add_argument("--no-compound", action="store_true", help="关闭持有期复利（固定 TRADE_BUDGET）")
-    ap.add_argument("--workers", type=int, default=0)
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
     csv_dir = args.csv_dir or str(Path(args.report_dir).parent.parent / "tools" / "csv")
@@ -1258,32 +1286,34 @@ def main(argv: list[str] | None = None) -> int:
         print("wrote", out)
         return 0 if str(s.get("status") or "") == "ok" else 1
 
-    scanned = scan_reports(args.report_dir, csv_dir)
-    avail = infer_score_years(scanned.get("stocks") or {})
-    if not avail:
-        print("无分年扫描数据", file=sys.stderr)
-        return 1
+    avail = list_score_years(args.report_dir)
     data_start = str(args.data_start or (avail[0] if avail else ""))
     data_end = str(args.data_end or (avail[-1] if avail else ""))
-    _, eval_years = data_and_eval_years(data_start, data_end, args.lookback_n, avail)
+    if not data_start or not data_end:
+        print("请指定 --data-start / --data-end", file=sys.stderr)
+        return 1
+    fallback = load_book_stocks_full()
+    period_baskets = None
+    if args.picks_json:
+        period_baskets, book_override = load_picks_file(args.picks_json)
+        if book_override is not None:
+            fallback = book_override
     result = run_walk_forward(
-        scanned,
+        {"stocks": {}},
         data_start=data_start,
         data_end=data_end,
-        lookback_n=args.lookback_n,
         rebalance_years=args.rebalance_years,
-        top_k=args.top_k,
-        score_mode=args.score_mode,
-        score_pool=args.score_pool,
+        period_baskets=period_baskets,
+        fallback_book=fallback,
         force_rerun=args.force_rerun,
-        workers=args.workers,
         compound_backtest=not args.no_compound,
         csv_root=csv_dir,
         report_dir=args.report_dir,
     )
     s = result.get("summary") or {}
+    eval_years = (result.get("params") or {}).get("eval_years") or []
     print(
-        "data %s–%s eval %s–%s total_pnl=%s mean=%s pos_ratio=%s"
+        "hold %s–%s eval %s–%s total_pnl=%s mean=%s pos_ratio=%s"
         % (
             data_start,
             data_end,

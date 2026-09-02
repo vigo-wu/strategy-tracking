@@ -15,6 +15,10 @@ from select_config import (
     FILTER_BY_KEY,
     FILTER_WIDGETS,
     WEIGHTS,
+    basket_from_import_text,
+    coerce_book_stocks_dict,
+    is_year_keyed_baskets,
+    parse_book_stocks_text,
     widget_kwargs,
     year_max_for_window,
 )
@@ -64,6 +68,60 @@ class SelectConfigTest(unittest.TestCase):
             set(WEIGHTS),
             {"pnl", "win_rate", "stability", "profit_factor", "quality"},
         )
+
+
+SAMPLE_BOOK = """
+{
+    "600350.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"}, # 山东高速
+    "601939.SH": {"ma_type": "SMA", "dividend_type": "front"}, # 建设银行
+    "600028.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 中国石油
+    "600188.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 兖矿能源
+    "603259.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 药明康德
+}
+"""
+
+
+class BookStocksParseTests(unittest.TestCase):
+    def test_parse_commented_config_snippet(self) -> None:
+        data = parse_book_stocks_text(SAMPLE_BOOK)
+        self.assertIn("600350.SH", data)
+        self.assertEqual(data["601939.SH"]["ma_type"], "SMA")
+        book = coerce_book_stocks_dict(data)
+        self.assertEqual(book["600350.SH"]["dividend_type"], "front_ratio")
+        self.assertEqual(book["603259.SH"]["ma_type"], "EMA")
+
+    def test_parse_book_stocks_prefix_and_trailing_comma(self) -> None:
+        text = (
+            "BOOK_STOCKS = {\n"
+            '  "601988.SH": "SMA",\n'
+            "}"
+        )
+        data = parse_book_stocks_text(text)
+        book = coerce_book_stocks_dict(data)
+        self.assertEqual(book["601988.SH"]["ma_type"], "SMA")
+
+    def test_year_keyed_extract(self) -> None:
+        text = (
+            "{\n"
+            '  "2022": {"600350.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"}},\n'
+            '  "2023": {"601988.SH": "SMA"},\n'
+            "}"
+        )
+        self.assertTrue(is_year_keyed_baskets(parse_book_stocks_text(text)))
+        y22 = basket_from_import_text(text, "2022")
+        self.assertEqual(set(y22), {"600350.SH"})
+        y23 = basket_from_import_text(text, "2023")
+        self.assertEqual(y23["601988.SH"]["ma_type"], "SMA")
+        with self.assertRaises(ValueError):
+            basket_from_import_text(text, "2024")
+
+    def test_empty_and_invalid(self) -> None:
+        with self.assertRaises(ValueError):
+            parse_book_stocks_text("   ")
+        with self.assertRaises(ValueError):
+            parse_book_stocks_text("[1, 2, 3]")
+        self.assertFalse(is_year_keyed_baskets({}))
+        self.assertFalse(is_year_keyed_baskets(None))
 
 
 if __name__ == "__main__":

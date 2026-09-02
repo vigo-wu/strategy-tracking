@@ -5,6 +5,11 @@
 """
 from __future__ import annotations
 
+import ast
+import io
+import json
+import re
+import tokenize
 from pathlib import Path
 from typing import Any
 
@@ -161,36 +166,28 @@ def cast_filter_value(spec: dict[str, Any], raw: Any) -> Any:
 
 ANALYSIS_SIDEBAR: dict[str, Any] = {
     "title": "数据分析",
-    "scan_caption": "扫描 `report/` 全部复权子目录；打分/持有均走组合 local_bt 回放。",
-    "year_section": "数据区间（打分/KPI）",
+    "scan_caption": "每换仓段手工指定篮子（默认拷贝 config.BOOK_STOCKS），只跑持有期组合回放。",
+    "year_section": "数据区间（持有年）",
     "year_start_label": "数据起始年",
     "year_end_label": "数据结束年",
-    "year_caption": "数据 %s–%s · 回看 %s 后首评 %s · 评估至 %s",
+    "year_caption": "评估持有 %s–%s · 换仓 %s 年 · %s 段",
     "year_start_key": "analysis_year_start",
     "year_end_key": "analysis_year_end",
-    "walk_section": "Walk-forward",
+    "walk_section": "Walk-forward 各段标的",
     "filter_section": "硬过滤",
     "book_section": "组合仓位",
     "advanced_section": "高级",
     "submit_label": "开始分析",
     "reset_label": "重新配置",
     "refresh_label": "刷新缓存",
+    "reload_wf_label": "从 config 重载各段",
+    "import_period_label": "导入",
     "form_key": "analysis_cfg",
     "result_key": "analysis_result",
     "params_key": "analysis_params",
 }
 
 ANALYSIS_WIDGETS: list[dict[str, Any]] = [
-    {
-        "key": "lookback_n",
-        "label": "打分回看年数",
-        "widget": "number_input",
-        "dtype": "int",
-        "min_value": 1,
-        "max_value": 10,
-        "step": 1,
-        "default": 2,
-    },
     {
         "key": "rebalance_years",
         "label": "换仓周期（年）",
@@ -200,30 +197,6 @@ ANALYSIS_WIDGETS: list[dict[str, Any]] = [
         "max_value": 10,
         "step": 1,
         "default": 1,
-    },
-    {
-        "key": "top_k",
-        "label": "每段持仓只数",
-        "widget": "number_input",
-        "dtype": "int",
-        "min_value": 1,
-        "max_value": 9,
-        "step": 1,
-        "default": 3,
-    },
-    {
-        "key": "score_mode",
-        "label": "打分 KPI",
-        "widget": "select",
-        "options": [("portfolio", "组合回放（推荐）"), ("single", "单票 KPI（回退）")],
-        "default": "portfolio",
-    },
-    {
-        "key": "score_pool",
-        "label": "打分池",
-        "widget": "select",
-        "options": [("scanned", "扫描全池"), ("passed_prefilter", "宽松预过滤")],
-        "default": "scanned",
     },
     {
         "key": "force_rerun",
@@ -236,16 +209,6 @@ ANALYSIS_WIDGETS: list[dict[str, Any]] = [
         "label": "复利回测（持有期跨年传递权益）",
         "widget": "checkbox",
         "default": True,
-    },
-    {
-        "key": "workers",
-        "label": "打分并行子进程（0/1=顺序）",
-        "widget": "number_input",
-        "dtype": "int",
-        "min_value": 0,
-        "max_value": 16,
-        "step": 1,
-        "default": 0,
     },
     {
         "key": "trade_budget",
@@ -417,3 +380,88 @@ def editor_rows_to_book_stocks(rows: Any) -> dict[str, dict[str, str]]:
         div = normalize_dividend_type(div_raw) or DEFAULT_DIVIDEND_TYPE
         out[code] = {"ma_type": ma, "dividend_type": div}
     return out
+
+
+def _strip_python_comments(src: str) -> str:
+    buf = io.StringIO(src)
+    tokens = []
+    try:
+        for tok in tokenize.generate_tokens(buf.readline):
+            if tok.type == tokenize.COMMENT:
+                continue
+            tokens.append(tok)
+    except tokenize.TokenError as e:
+        raise ValueError("无法解析 BOOK_STOCKS 字典：%s" % e) from e
+    return tokenize.untokenize(tokens)
+
+
+def parse_book_stocks_text(text: str) -> dict[str, Any]:
+    """解析 BOOK_STOCKS 风格文本（可行尾注释、尾逗号、可选 BOOK_STOCKS =）。"""
+    s = str(text or "").strip()
+    if not s:
+        raise ValueError("空文本")
+    s = re.sub(r"^BOOK_STOCKS\s*=\s*", "", s, count=1, flags=re.IGNORECASE).strip()
+    data: Any = None
+    try:
+        data = json.loads(s)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        try:
+            data = ast.literal_eval(_strip_python_comments(s))
+        except (SyntaxError, ValueError, MemoryError) as e:
+            raise ValueError("无法解析 BOOK_STOCKS 字典：%s" % e) from e
+    if not isinstance(data, dict):
+        raise ValueError("须为字典，得到 %s" % type(data).__name__)
+    return data
+
+
+def is_year_keyed_baskets(data: dict[str, Any] | None) -> bool:
+    """顶层 key 全是四位年后才视为按年映射；空 dict 当单篮子。"""
+    if not data:
+        return False
+    keys = [str(k).strip() for k in data.keys()]
+    return all(k.isdigit() and len(k) == 4 for k in keys)
+
+
+def coerce_book_stocks_dict(raw: Any) -> dict[str, dict[str, str]]:
+    """list / dict → {code: {ma_type, dividend_type}}。"""
+    from analyze import DEFAULT_DIVIDEND_TYPE, normalize_dividend_type, normalize_ma_type  # noqa: WPS433
+
+    if raw is None:
+        return {}
+    if isinstance(raw, (list, tuple)):
+        items = [(str(x), {}) for x in raw]
+    elif isinstance(raw, dict):
+        items = list(raw.items())
+    else:
+        raise ValueError("篮子须为字典或代码列表")
+    out: dict[str, dict[str, str]] = {}
+    for k, v in items:
+        stock = str(k or "").strip().upper()
+        if not stock:
+            continue
+        if isinstance(v, dict):
+            ma = normalize_ma_type(v.get("ma_type")) or "EMA"
+            div = normalize_dividend_type(v.get("dividend_type")) or DEFAULT_DIVIDEND_TYPE
+        elif isinstance(v, str):
+            ma = normalize_ma_type(v) or "EMA"
+            div = DEFAULT_DIVIDEND_TYPE
+        else:
+            ma, div = "EMA", DEFAULT_DIVIDEND_TYPE
+        out[stock] = {"ma_type": ma, "dividend_type": div}
+    return out
+
+
+def basket_from_import_text(text: str, select_year: str) -> dict[str, dict[str, str]]:
+    """弹窗导入：单篮子整段写入；按年 dict 取 select_year。"""
+    data = parse_book_stocks_text(text)
+    year = str(select_year or "").strip()
+    if is_year_keyed_baskets(data):
+        raw = None
+        for k, v in data.items():
+            if str(k).strip() == year:
+                raw = v
+                break
+        if raw is None:
+            raise ValueError("按年字典没有换仓年 %s" % year)
+        return coerce_book_stocks_dict(raw)
+    return coerce_book_stocks_dict(data)
