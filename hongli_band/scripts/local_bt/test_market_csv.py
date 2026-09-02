@@ -1101,6 +1101,18 @@ class TypedDirTests(unittest.TestCase):
             newer.mkdir(parents=True)
             self.assertEqual(resolve_typed_dir(root, "front_ratio"), newer)
 
+    def test_daily_csv_for_stock_uses_filename_index(self):
+        from analyze import daily_csv_for_stock
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            keep = root / "600350_SH_1d_20100101_20200101.csv"
+            newer = root / "600350_SH_1d_20100101_20240101.csv"
+            keep.write_text("x", encoding="utf-8")
+            newer.write_text("y", encoding="utf-8")
+            found = daily_csv_for_stock(root, "600350.SH")
+            self.assertEqual(found, newer)
+
     def test_list_detail_csvs_stays_in_typed_dir(self):
         from analyze import list_detail_csvs
 

@@ -790,12 +790,13 @@ def _render_book_detail_panel(
     if not detail_path.is_file():
         st.warning("明细不存在：`%s`" % detail_path)
         return
-    combo = analyze_book_detail(
-        detail_path,
-        budget=budget,
-        csv_root=csv_root if csv_root is not None else DEFAULT_CSV_ROOT,
-        dividend_type=dividend_type,
-    )
+    with st.spinner("加载成交轮次与持仓回撤…"):
+        combo = analyze_book_detail(
+            detail_path,
+            budget=budget,
+            csv_root=csv_root if csv_root is not None else DEFAULT_CSV_ROOT,
+            dividend_type=dividend_type,
+        )
     stats = combo.get("stats") or {}
     trades = combo.get("trades") or []
     st.caption(
@@ -1424,7 +1425,13 @@ def _render_batch_run(
                     on_progress,
                     int(workers),
                 )
-                rows = [summarize_batch_row(r) for r in raw]
+                n_raw = len(raw)
+                rows = []
+                for i, r in enumerate(raw):
+                    if i == 0 or (i + 1) % 25 == 0 or i + 1 == n_raw:
+                        status.info("汇总 KPI %s/%s…" % (i + 1, n_raw))
+                    rows.append(summarize_batch_row(r))
+                status.info("写入汇总 CSV…")
                 write_typed_summaries(rows, split=split_mode, compare_ma=bool(compare_ma))
                 all_rows = rows
                 if compare_ma:

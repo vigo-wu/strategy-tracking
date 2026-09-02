@@ -228,13 +228,42 @@ def daily_csv_for_stock(csv_dir: str | Path, stock: str) -> Path | None:
     want = str(stock or "").strip().upper()
     if not want:
         return None
-    for meta in daily_csvs_by_stock(csv_dir):
-        got = str(meta.get("stock") or "").strip().upper()
-        if got == want or _stock_token_match(got, want):
-            path = Path(str(meta.get("path") or ""))
-            if str(path):
-                return path
+    index = _daily_csv_path_index(Path(csv_dir))
+    hit = index.get(want)
+    if hit is not None:
+        return hit
+    for got, path in index.items():
+        if _stock_token_match(got, want):
+            return path
     return None
+
+
+_DAILY_PATH_INDEX: dict[str, tuple[tuple[int, int], dict[str, Path]]] = {}
+
+
+def _daily_csv_path_index(csv_dir: Path) -> dict[str, Path]:
+    """按文件名建 代码→日线路径；避免 daily_csv_for_stock 每次 peek 整目录。"""
+    root = Path(csv_dir)
+    key = str(root)
+    files = list_daily_csvs(root)
+    try:
+        fp = (len(files), max((p.stat().st_mtime_ns for p in files), default=0))
+    except OSError:
+        fp = (len(files), 0)
+    cached = _DAILY_PATH_INDEX.get(key)
+    if cached and cached[0] == fp:
+        return cached[1]
+    index: dict[str, Path] = {}
+    for path in files:
+        m = _CODE_EX_IN_NAME.search(path.stem)
+        if not m:
+            continue
+        code = "%s.%s" % (m.group(1), m.group(2).upper())
+        prev = index.get(code)
+        if prev is None or path.name > prev.name:
+            index[code] = path
+    _DAILY_PATH_INDEX[key] = (fp, index)
+    return index
 
 
 def stock_from_detail_path(path: str | Path, *, read_csv: bool = True) -> str:
@@ -1950,6 +1979,7 @@ def summarize_detail(
             "period": "1d",
             "budget": float(budget),
         },
+        hold_metrics=False,
     )
     stats = result["stats"] or {}
     return {
