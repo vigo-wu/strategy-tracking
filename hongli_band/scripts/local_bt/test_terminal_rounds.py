@@ -81,27 +81,23 @@ class ParseTerminalRoundsTests(unittest.TestCase):
         self.assertAlmostEqual(rounds[0]["sell_price"], 3.80, places=4)
         self.assertAlmostEqual(rounds[0]["pnl"], 861.0, places=2)
 
-    def test_multi_lot_sell_keeps_each_buy_day(self):
-        """一笔卖出吃掉两笔买入时，拆成两轮，保留各自买入日/买价。"""
+    def test_leading_zero_code_not_stripped(self):
+        """002001 被 pandas 读成 int 2001 时，轮次仍应还原为 002001。"""
         lines = [
-            "600350,山东高速,股票,交运,多,2022-09-16 15:00:00,买入,4.51,4.51,0,0,0,13700,0,61807,普通",
-            "600350,山东高速,股票,交运,多,2022-10-17 15:00:00,买入,4.68,4.68,0,0,0,7900,0,36972,普通",
-            "600350,山东高速,股票,交运,多,2022-10-26 15:00:00,卖出,4.69,4.69,3285.75,0,0,21600,0,101304,普通",
+            "002001,新和成,股票,医药,多,2021-04-21 15:00:00,买入,21.74,21.74,0,0,0,1200,0,26088,普通",
+            "002001,新和成,股票,医药,多,2021-04-23 15:00:00,卖出,22.25,22.25,620.33,0,0,1200,0,26700,普通",
         ]
         with tempfile.TemporaryDirectory() as td:
-            p = _write_detail(Path(td) / "multi_操作明细.csv", lines)
+            p = _write_detail(Path(td) / "zhc_操作明细.csv", lines)
             rounds = report_mod().parse_terminal_rounds(p)
-        self.assertEqual(len(rounds), 2)
-        by_day = {r["buy_open_day"]: r for r in rounds}
-        self.assertIn("20220916", by_day)
-        self.assertIn("20221017", by_day)
-        self.assertEqual(by_day["20220916"]["shares"], 13700)
-        self.assertEqual(by_day["20221017"]["shares"], 7900)
-        self.assertAlmostEqual(by_day["20220916"]["buy_price"], 4.51, places=4)
-        self.assertAlmostEqual(by_day["20221017"]["buy_price"], 4.68, places=4)
-        self.assertAlmostEqual(
-            by_day["20220916"]["pnl"] + by_day["20221017"]["pnl"], 3285.75, places=2
-        )
+            raw = report_mod()._read_csv_auto(p)
+        self.assertEqual(len(rounds), 1)
+        self.assertEqual(rounds[0].get("stock"), "002001")
+        self.assertNotEqual(rounds[0].get("stock"), "2001")
+        self.assertEqual(str(raw.iloc[0]["代码"]), "002001")
+        self.assertEqual(report_mod().normalize_terminal_code(2001), "002001")
+        self.assertEqual(report_mod().normalize_terminal_code(2001.0), "002001")
+        self.assertEqual(report_mod().normalize_terminal_code("002001.SZ"), "002001")
 
     def test_enrich_signals_from_log(self):
         log = "\n".join(

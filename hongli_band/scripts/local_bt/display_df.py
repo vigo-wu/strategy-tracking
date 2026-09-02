@@ -47,6 +47,20 @@ TRADES_DISPLAY_COLUMNS: dict[str, str] = {
 }
 
 
+def normalize_display_code(stock: object) -> str:
+    """展示用代码：补前导零，保留 .SH/.SZ；不把 600350.SH 收成裸码。"""
+    raw = str(stock).strip() if stock is not None else ""
+    if not raw or raw.lower() in ("nan", "none", "nat"):
+        return ""
+    upper = raw.upper()
+    if "." in upper:
+        num, mkt = upper.rsplit(".", 1)
+        if num.isdigit():
+            num = num.zfill(6)
+        return "%s.%s" % (num, mkt)
+    return stock_meta(upper)[0]
+
+
 def stock_display_name(stock: str) -> str:
     """STOCK_META 中文名；未知则回退裸代码（stock_meta 已如此）。"""
     return stock_meta(stock)[1]
@@ -82,7 +96,10 @@ def insert_name_column(df: pd.DataFrame, code_col: str = "代码") -> pd.DataFra
     if df.empty or code_col not in df.columns:
         return df.copy() if df is not None else pd.DataFrame()
     out = df.copy()
-    names = out[code_col].map(lambda x: stock_display_name(str(x) if x is not None else ""))
+    # 补前导零（2001→002001），保留市场后缀
+    codes = out[code_col].map(normalize_display_code)
+    out[code_col] = codes
+    names = codes.map(lambda x: stock_display_name(str(x) if x is not None else ""))
     if "名称" in out.columns:
         out["名称"] = names
         cols = list(out.columns)

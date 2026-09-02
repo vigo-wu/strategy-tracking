@@ -7,9 +7,11 @@ import json
 import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import pandas as pd
+
+ProgressCb = Callable[[dict[str, Any]], None] | None
 
 HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
@@ -186,6 +188,42 @@ def _book_overrides(book_params: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _emit_wf_progress(
+    on_progress: ProgressCb,
+    *,
+    phase: str,
+    done: int,
+    total: int,
+    year: str = "",
+    action: str = "",
+    label: str = "",
+    extra: dict[str, Any] | None = None,
+) -> None:
+    if not on_progress:
+        return
+    on_progress(
+        {
+            "phase": str(phase or ""),
+            "done": int(done),
+            "total": max(int(total), 0),
+            "year": str(year or ""),
+            "action": str(action or ""),
+            "label": str(label or ""),
+            "extra": dict(extra or {}),
+        }
+    )
+
+
+def _score_trades_path(payload: dict[str, Any]) -> Path:
+    out_dir = Path(payload["out_dir"])
+    log_name = book_log_name(kind="score", year=str(payload["year"]), tag=str(payload["tag"]))
+    return out_dir / log_name.replace(".txt", "_操作明细.csv")
+
+
+def _score_cache_likely(payload: dict[str, Any]) -> bool:
+    return _score_trades_path(payload).is_file() and not bool(payload.get("force_rerun"))
+
+
 def _run_score_year_job(payload: dict[str, Any]) -> dict[str, Any]:
     year = str(payload["year"])
     pool = payload["pool"]
@@ -234,6 +272,9 @@ def precompute_portfolio_kpis(
     book_params: dict[str, Any] | None = None,
     force_rerun: bool = False,
     workers: int = 0,
+    on_progress: ProgressCb = None,
+    progress_done: int = 0,
+    progress_total: int | None = None,
 ) -> dict[str, dict[str, Any]]:
     if not pool or not score_years:
         return dict(scanned.get("portfolio_kpi") or {})
@@ -262,13 +303,77 @@ def precompute_portfolio_kpis(
     errors: list[str] = []
     score_paths: dict[str, str] = dict(scanned.get("score_detail_paths") or {})
     w = int(workers or 0)
+    n_pool = len(pool)
+    done = int(progress_done)
+    total = int(progress_total) if progress_total is not None else (done + len(jobs))
+
+    def _finish_score_row(row: dict[str, Any]) -> None:
+        nonlocal done
+        year = str(row.get("year") or "")
+        if row.get("error"):
+            action = "error"
+            tip = "失败: %s" % row.get("error")
+        elif row.get("cached"):
+            action = "cache"
+            tip = "缓存命中"
+        else:
+            action = "run"
+            tip = "回测完成"
+        done += 1
+        _emit_wf_progress(
+            on_progress,
+            phase="score",
+            done=done,
+            total=total,
+            year=year,
+            action=action,
+            label="打分预计算 %s/%s · %s · %s · 池 %s 只"
+            % (done, total, year or "-", tip, n_pool),
+            extra={"pool_n": n_pool, "cached": bool(row.get("cached")), "error": row.get("error")},
+        )
+
     if w <= 1 or len(jobs) <= 1:
-        results = [_run_score_year_job(j) for j in jobs]
+        for j in jobs:
+            year = str(j["year"])
+            likely = _score_cache_likely(j)
+            _emit_wf_progress(
+                on_progress,
+                phase="score",
+                done=done,
+                total=total,
+                year=year,
+                action="cache" if likely else "run",
+                label="打分预计算 %s/%s · %s · %s · 池 %s 只"
+                % (
+                    min(done + 1, total),
+                    total,
+                    year,
+                    "读缓存…" if likely else "正在组合回测…",
+                    n_pool,
+                ),
+                extra={"pool_n": n_pool, "cached": likely},
+            )
+            row = _run_score_year_job(j)
+            results.append(row)
+            _finish_score_row(row)
     else:
+        _emit_wf_progress(
+            on_progress,
+            phase="score",
+            done=done,
+            total=total,
+            year="",
+            action="run",
+            label="打分预计算 %s/%s · 并行 %s 年 · 池 %s 只"
+            % (done, total, len(jobs), n_pool),
+            extra={"pool_n": n_pool, "parallel": len(jobs)},
+        )
         with ProcessPoolExecutor(max_workers=min(w, len(jobs))) as ex:
             futs = [ex.submit(_run_score_year_job, j) for j in jobs]
             for fu in as_completed(futs):
-                results.append(fu.result())
+                row = fu.result()
+                results.append(row)
+                _finish_score_row(row)
     for row in results:
         sy = str(row.get("year") or "")
         sp = str(row.get("path") or "").strip()
@@ -329,6 +434,7 @@ def run_walk_forward(
     force_rerun: bool = False,
     workers: int = 0,
     compound_backtest: bool = True,
+    on_progress: ProgressCb = None,
 ) -> dict[str, Any]:
     flt = dict(DEFAULT_FILTERS)
     if filters:
@@ -398,11 +504,20 @@ def run_walk_forward(
     periods = iter_rebalance_periods(eval_years_run, rebalance_years)
     mode = str(score_mode or "portfolio").strip().lower()
     pool = build_score_pool(scanned, pool_mode=score_pool, filters=flt)
+    n_hold = sum(len(tuple(p.get("hold_years") or ())) for p in periods)
+    need_score_years: tuple[str, ...] = ()
+    n_score = 0
     if mode == "portfolio":
         need_score_years = collect_score_years(periods, lookback_n, data_years)
+        if pool and need_score_years:
+            n_score = len(need_score_years)
+    progress_total = n_score + n_hold
+    progress_done = 0
+
+    if mode == "portfolio":
         if not pool:
             notes.append("打分池为空，无法组合预计算。")
-        else:
+        elif need_score_years:
             precompute_portfolio_kpis(
                 scanned,
                 need_score_years,
@@ -412,7 +527,11 @@ def run_walk_forward(
                 book_params=book_params,
                 force_rerun=force_rerun,
                 workers=workers,
+                on_progress=on_progress,
+                progress_done=0,
+                progress_total=progress_total,
             )
+            progress_done = n_score
             notes.append(
                 "组合打分年 %s · 池 %s 只"
                 % ("、".join(need_score_years) if need_score_years else "-", len(pool))
@@ -435,6 +554,41 @@ def run_walk_forward(
     if compound_backtest:
         notes.append("持有期复利回测：跨年传递期末权益；打分预计算仍固定 TRADE_BUDGET")
 
+    def _hold_step(
+        *,
+        hy: str,
+        period_i: int,
+        select_year: str,
+        action: str,
+        tip: str,
+        picks: str = "",
+        extra: dict[str, Any] | None = None,
+        bump: bool = False,
+    ) -> None:
+        nonlocal progress_done
+        if bump:
+            progress_done += 1
+            done_show = progress_done
+        else:
+            done_show = min(progress_done + 1, progress_total) if progress_total else progress_done
+        pick_part = (" · %s" % picks) if picks else ""
+        _emit_wf_progress(
+            on_progress,
+            phase="hold",
+            done=done_show,
+            total=progress_total,
+            year=hy,
+            action=action,
+            label="持有回放 %s/%s · %s · 段p%s · 换仓年%s%s · %s"
+            % (done_show, progress_total, hy, period_i, select_year, pick_part, tip),
+            extra={
+                "period_i": period_i,
+                "select_year": select_year,
+                "picks": picks,
+                **(extra or {}),
+            },
+        )
+
     for period in periods:
         select_year = str(period["select_year"])
         hold_years = tuple(str(y) for y in period["hold_years"])
@@ -444,6 +598,14 @@ def run_walk_forward(
         if len(window) < max(1, int(lookback_n)):
             period_status = "窗口不足"
             for hy in hold_years:
+                _hold_step(
+                    hy=hy,
+                    period_i=int(period["period_i"]),
+                    select_year=select_year,
+                    action="skip",
+                    tip="跳过（窗口不足）",
+                    bump=True,
+                )
                 year_rows.append(
                     {
                         "year": hy,
@@ -509,6 +671,15 @@ def run_walk_forward(
             port_pnl = None
             naive = _naive_year_pnl(list(basket.keys()), hy, scanned) if basket else 0.0
             if period_status != "ok" or not basket:
+                _hold_step(
+                    hy=hy,
+                    period_i=int(period["period_i"]),
+                    select_year=select_year,
+                    action="skip",
+                    tip="跳过（%s）" % (period_status or "无篮子"),
+                    picks=pick_names,
+                    bump=True,
+                )
                 year_rows.append(
                     {
                         "year": hy,
@@ -530,8 +701,19 @@ def run_walk_forward(
             trades_path = trades_csv_path(log_path)
             wallet_start = running_wallet if compound_backtest else None
             wallet_end = None
+            use_cache = trades_path.is_file() and not force_rerun
+            _hold_step(
+                hy=hy,
+                period_i=int(period["period_i"]),
+                select_year=select_year,
+                action="cache" if use_cache else "run",
+                tip="读缓存…" if use_cache else "正在回测…",
+                picks=pick_names,
+                bump=False,
+                extra={"cached": use_cache},
+            )
             try:
-                if trades_path.is_file() and not force_rerun:
+                if use_cache:
                     combo = analyze_book_detail(trades_path, budget=budget, log_path=log_path)
                     if compound_backtest:
                         parsed = parse_wallet_from_log(log_path.read_text(encoding="utf-8", errors="replace"))
@@ -568,9 +750,23 @@ def run_walk_forward(
                     else:
                         port_pnl = float(combo.get("sum_pnl") or 0.0)
                 row_status = "ok"
+                finish_action = "cache" if use_cache else "run"
+                finish_tip = "缓存命中" if use_cache else "回测完成"
             except Exception as e:
                 row_status = "回放失败: %s" % e
                 port_pnl = None
+                finish_action = "error"
+                finish_tip = "失败: %s" % e
+            _hold_step(
+                hy=hy,
+                period_i=int(period["period_i"]),
+                select_year=select_year,
+                action=finish_action,
+                tip=finish_tip,
+                picks=pick_names,
+                bump=True,
+                extra={"cached": use_cache, "status": row_status},
+            )
             if port_pnl is not None:
                 period_pnl += port_pnl
                 if compound_backtest and wallet_end is not None:
@@ -631,6 +827,16 @@ def run_walk_forward(
         "initial_wallet": float(initial_wallet),
         "final_wallet": float(running_wallet) if compound_backtest else None,
     }
+    if progress_total > 0:
+        _emit_wf_progress(
+            on_progress,
+            phase="hold",
+            done=progress_total,
+            total=progress_total,
+            year="",
+            action="run",
+            label="Walk-forward 完成 %s/%s" % (progress_total, progress_total),
+        )
     return {
         "summary": summary,
         "year_rows": year_rows,

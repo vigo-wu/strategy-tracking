@@ -19,6 +19,12 @@ class DisplayDfTests(unittest.TestCase):
         self.assertEqual(name, "山东高速")
         self.assertNotEqual(name, "600350")
 
+    def test_stock_display_name_leading_zero_stripped_input(self):
+        """导出里若写成 2001，名称仍应解析为新和成。"""
+        self.assertEqual(stock_display_name("2001"), "新和成")
+        self.assertEqual(stock_display_name("002001"), "新和成")
+        self.assertEqual(stock_display_name("002001.SZ"), "新和成")
+
     def test_stock_display_name_unknown_fallback(self):
         name = stock_display_name("999999.SH")
         self.assertEqual(name, "999999")

@@ -114,6 +114,7 @@ from stock_select import (  # noqa: E402
     format_book_snippet,
     glob_fingerprint,
     infer_score_years,
+    list_score_years,
     report_fingerprint,
     scan_reports,
     score_universe,
@@ -2264,12 +2265,22 @@ def _render_analysis_results(result: dict[str, Any], params: dict[str, Any]) -> 
         st.warning("写 CSV 失败：%s" % e)
 
 
+def _load_analysis_scan() -> dict:
+    """Walk-forward 提交时懒加载全量 scan（带 cache）。"""
+    return _cached_select_scan(
+        str(DEFAULT_REPORT_ROOT),
+        str(DEFAULT_CSV_ROOT),
+        report_fingerprint(str(DEFAULT_REPORT_ROOT)),
+        csv_dir_fingerprint(str(DEFAULT_CSV_ROOT)),
+    )
+
+
 def _render_analysis_mode(scanned: dict | None) -> None:
     cfg = ANALYSIS_SIDEBAR
-    avail = infer_score_years((scanned or {}).get("stocks") or {}) or tuple(SCORE_YEARS)
+    avail = list_score_years(str(DEFAULT_REPORT_ROOT)) or tuple(SCORE_YEARS)
     if not avail:
         avail = tuple(str(y) for y in range(2018, 2027))
-        st.caption("未扫到分年报告，年份列表使用 2018–2026 兜底（固定标的仍可读 CSV）。")
+        st.caption("未扫到分年报告文件名，年份列表使用 2018–2026 兜底（固定标的仍可读 CSV）。")
     defaults = dict(st.session_state.get(str(cfg["params_key"])) or {})
     defaults.setdefault("lookback_n", 2)
     defaults.setdefault("rebalance_years", 1)
@@ -2281,15 +2292,15 @@ def _render_analysis_mode(scanned: dict | None) -> None:
     if result is None:
         submitted, params = _collect_analysis_form(avail, defaults)
         if submitted:
-            with st.spinner("组合回放分析中…"):
-                try:
-                    book_params = {
-                        "trade_budget": params.get("trade_budget"),
-                        "book_lot_max": params.get("book_lot_max"),
-                        "lot_open_frac": params.get("lot_open_frac"),
-                        "lot_add_frac": params.get("lot_add_frac"),
-                    }
-                    if str(params.get("analysis_type") or "") == "固定标的":
+            try:
+                book_params = {
+                    "trade_budget": params.get("trade_budget"),
+                    "book_lot_max": params.get("book_lot_max"),
+                    "lot_open_frac": params.get("lot_open_frac"),
+                    "lot_add_frac": params.get("lot_add_frac"),
+                }
+                if str(params.get("analysis_type") or "") == "固定标的":
+                    with st.spinner("组合回放分析中…"):
                         result = run_fixed_book(
                             params.get("book_stocks") or load_book_stocks_full(),
                             data_start=str(params.get("data_start") or ""),
@@ -2300,34 +2311,55 @@ def _render_analysis_mode(scanned: dict | None) -> None:
                             compound_backtest=bool(params.get("compound_backtest", True)),
                             force_rerun=bool(params.get("force_rerun")),
                         )
-                    else:
-                        result = run_walk_forward(
-                            scanned or {"stocks": {}, "portfolio_kpi": {}},
-                            data_start=str(params.get("data_start") or ""),
-                            data_end=str(params.get("data_end") or ""),
-                            lookback_n=int(params.get("lookback_n") or 2),
-                            rebalance_years=int(params.get("rebalance_years") or 1),
-                            top_k=int(params.get("top_k") or 3),
-                            filters=params.get("filters") or dict(DEFAULT_FILTERS),
-                            weights=params.get("weights") or dict(WEIGHTS),
-                            book_params=book_params,
-                            csv_root=str(DEFAULT_CSV_ROOT),
-                            report_dir=str(DEFAULT_REPORT_ROOT),
-                            score_mode=str(params.get("score_mode") or "portfolio"),
-                            score_pool=str(params.get("score_pool") or "scanned"),
-                            force_rerun=bool(params.get("force_rerun")),
-                            workers=int(params.get("workers") or 0),
-                            compound_backtest=bool(params.get("compound_backtest", True)),
-                        )
-                    st.session_state[str(cfg["result_key"])] = result
-                    st.session_state[str(cfg["params_key"])] = params
-                    st.session_state["analysis_book_rows"] = book_stocks_to_editor_rows(
-                        params.get("book_stocks") or {}
+                else:
+                    bar = st.progress(0.0)
+                    status = st.empty()
+                    status.info("准备 Walk-forward…")
+
+                    def _on_wf_progress(ev: dict) -> None:
+                        total = int(ev.get("total") or 0)
+                        done = int(ev.get("done") or 0)
+                        if total > 0:
+                            bar.progress(min(1.0, float(done) / float(total)))
+                        label = str(ev.get("label") or "").strip()
+                        if label:
+                            status.info(label)
+
+                    scan = scanned if (scanned or {}).get("stocks") else None
+                    if scan is None:
+                        status.info("阶段 · 扫描回测报告（首次较慢，之后有缓存）…")
+                        scan = _load_analysis_scan()
+                    status.info("阶段 · 打分预计算 / 持有回放…")
+                    result = run_walk_forward(
+                        scan or {"stocks": {}, "portfolio_kpi": {}},
+                        data_start=str(params.get("data_start") or ""),
+                        data_end=str(params.get("data_end") or ""),
+                        lookback_n=int(params.get("lookback_n") or 2),
+                        rebalance_years=int(params.get("rebalance_years") or 1),
+                        top_k=int(params.get("top_k") or 3),
+                        filters=params.get("filters") or dict(DEFAULT_FILTERS),
+                        weights=params.get("weights") or dict(WEIGHTS),
+                        book_params=book_params,
+                        csv_root=str(DEFAULT_CSV_ROOT),
+                        report_dir=str(DEFAULT_REPORT_ROOT),
+                        score_mode=str(params.get("score_mode") or "portfolio"),
+                        score_pool=str(params.get("score_pool") or "scanned"),
+                        force_rerun=bool(params.get("force_rerun")),
+                        workers=int(params.get("workers") or 0),
+                        compound_backtest=bool(params.get("compound_backtest", True)),
+                        on_progress=_on_wf_progress,
                     )
-                    st.rerun()
-                except Exception:
-                    st.error("分析失败")
-                    st.code(traceback.format_exc())
+                    bar.progress(1.0)
+                    status.success("Walk-forward 完成")
+                st.session_state[str(cfg["result_key"])] = result
+                st.session_state[str(cfg["params_key"])] = params
+                st.session_state["analysis_book_rows"] = book_stocks_to_editor_rows(
+                    params.get("book_stocks") or {}
+                )
+                st.rerun()
+            except Exception:
+                st.error("分析失败")
+                st.code(traceback.format_exc())
         return
     params = st.session_state.get(str(cfg["params_key"])) or defaults
     _render_analysis_results(result, params)
@@ -2389,17 +2421,8 @@ with st.sidebar:
             st.session_state.pop(str(ANALYSIS_SIDEBAR["result_key"]), None)
             st.session_state.pop(str(ANALYSIS_SIDEBAR["params_key"]), None)
             st.rerun()
-        try:
-            analysis_scanned = _cached_select_scan(
-                str(DEFAULT_REPORT_ROOT),
-                str(DEFAULT_CSV_ROOT),
-                report_fingerprint(str(DEFAULT_REPORT_ROOT)),
-                csv_dir_fingerprint(str(DEFAULT_CSV_ROOT)),
-            )
-        except Exception:
-            analysis_scanned = {"stocks": {}, "portfolio_kpi": {}}
-            st.error("扫描回测报告失败")
-            st.code(traceback.format_exc())
+        # 切栏不跑全量 scan_reports；Walk-forward 提交时再懒加载
+        analysis_scanned = None
 
 if mode == "选股方案":
     _render_select(

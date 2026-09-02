@@ -12,6 +12,7 @@ from select_analysis import (
     iter_rebalance_periods,
     pick_details_from_basket,
     run_fixed_book,
+    run_walk_forward,
     score_years_for_period,
     write_analysis_csv,
 )
@@ -216,6 +217,111 @@ class SelectAnalysisTests(unittest.TestCase):
             df = pd.read_csv(path)
             parsed = json.loads(df.iloc[0]["pick_details"])
             self.assertEqual(parsed[0]["ma_type"], "EMA")
+
+    def test_walk_forward_on_progress(self):
+        import pandas as pd
+
+        kpi = {**empty_year_kpi(), "n_buy": 5, "sum_pnl": 1000.0, "win_rate": 60.0}
+        scanned = {
+            "stocks": {
+                "600350.SH": {
+                    "stock": "600350.SH",
+                    "years": {"2020": dict(kpi), "2021": dict(kpi), "2022": dict(kpi)},
+                    "by_ma": {},
+                    "by_div": {},
+                    "style": {},
+                }
+            },
+            "portfolio_kpi": {},
+        }
+        events: list[dict] = []
+
+        def on_progress(ev: dict) -> None:
+            events.append(dict(ev))
+
+        def _fake_score_job(payload: dict) -> dict:
+            year = str(payload["year"])
+            out = Path(payload["out_dir"]) / ("score_%s.csv" % year)
+            out.write_text("代码,操作类型,操作价格,数量,盈利\n", encoding="gbk")
+            return {
+                "year": year,
+                "per_stock": {"600350.SH": dict(kpi)},
+                "cached": True,
+                "path": str(out),
+            }
+
+        def _fake_run(book_stocks, start, end, csv_root, out_dir, **kwargs):
+            log_name = kwargs.get("log_name") or "hold.txt"
+            log_path = Path(out_dir) / log_name
+            log_path.write_text(
+                "local_bt_book compound=1 wallet_start=100000.00\nwallet_end=101000.00\n",
+                encoding="utf-8",
+            )
+            trades = log_path.with_name(log_path.stem + "_操作明细.csv")
+            trades.write_text("代码,操作类型,操作价格,数量,盈利\n", encoding="gbk")
+            return log_path, {
+                "wallet_cash_start": 100000.0,
+                "wallet_cash_end": 101000.0,
+                "skipped": [],
+            }
+
+        recommend = pd.DataFrame(
+            [
+                {
+                    "stock": "600350.SH",
+                    "score": 1.2,
+                    "ma_type_suggest": "EMA",
+                    "div_type_suggest": "front_ratio",
+                }
+            ]
+        )
+        with tempfile.TemporaryDirectory() as td:
+            report = Path(td) / "report"
+            report.mkdir()
+            with patch("select_analysis._run_score_year_job", side_effect=_fake_score_job), patch(
+                "select_analysis.build_score_pool",
+                return_value={"600350.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"}},
+            ), patch(
+                "select_analysis.score_universe",
+                return_value={"recommend": recommend, "df": recommend, "passed": recommend},
+            ), patch("select_analysis.run_book_backtest", side_effect=_fake_run), patch(
+                "select_analysis.analyze_book_detail",
+                return_value={"sum_pnl": 1000.0, "stats": {"n_buy": 1}},
+            ):
+                result = run_walk_forward(
+                    scanned,
+                    data_start="2020",
+                    data_end="2022",
+                    lookback_n=2,
+                    rebalance_years=1,
+                    top_k=1,
+                    filters={"min_n_buy": 0, "min_years_traded": 1, "min_pos_years": 0, "top_n": 1},
+                    book_params={"trade_budget": 100000.0},
+                    csv_root=td,
+                    report_dir=report,
+                    score_mode="portfolio",
+                    score_pool="scanned",
+                    force_rerun=True,
+                    workers=1,
+                    compound_backtest=True,
+                    on_progress=on_progress,
+                )
+        self.assertTrue(events)
+        phases = {str(e.get("phase") or "") for e in events}
+        self.assertIn("score", phases)
+        self.assertIn("hold", phases)
+        for e in events:
+            self.assertTrue(str(e.get("label") or "").strip())
+            self.assertIn("year", e)
+            self.assertGreaterEqual(int(e.get("done") or 0), 0)
+            self.assertGreater(int(e.get("total") or 0), 0)
+        dones = [int(e["done"]) for e in events]
+        self.assertEqual(dones, sorted(dones))
+        last = events[-1]
+        self.assertEqual(int(last["done"]), int(last["total"]))
+        yearish = " ".join(str(e.get("year") or "") + " " + str(e.get("label") or "") for e in events)
+        self.assertTrue(any(y in yearish for y in ("2020", "2021", "2022")))
+        self.assertGreaterEqual(len(result.get("year_rows") or []), 1)
 
 
 if __name__ == "__main__":

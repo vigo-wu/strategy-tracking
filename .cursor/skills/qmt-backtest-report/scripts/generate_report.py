@@ -256,11 +256,69 @@ def parse_trades(seg: str, tag: str, stock: str) -> list[dict]:
     return trades
 
 
+_CODE_COL_ALIASES = ("代码", "证券代码", "股票代码", "标的")
+
+
+def normalize_terminal_code(val: object) -> str:
+    """操作明细代码规范化：补前导零（002001），去掉市场后缀。
+
+    pandas 把 002001 读成 int/float 2001 时也能还原为 6 位代码。
+    """
+    if val is None:
+        return ""
+    try:
+        if pd.isna(val):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    if isinstance(val, bool):
+        return ""
+    if isinstance(val, (int, float)):
+        try:
+            fv = float(val)
+            iv = int(fv)
+            if fv == float(iv):
+                s = str(iv)
+            else:
+                s = str(val).strip()
+        except Exception:
+            s = str(val).strip()
+    else:
+        s = str(val).strip().upper()
+        if not s or s in ("NAN", "NONE", "NAT"):
+            return ""
+        # float 被写成 "2001.0"
+        if re.fullmatch(r"\d+\.0+", s):
+            s = s.split(".", 1)[0]
+    if "." in s:
+        s = s.split(".", 1)[0]
+    if s.isdigit():
+        s = s.zfill(6)
+    return s
+
+
+def _coerce_code_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """就地把代码列规范为 6 位字符串，避免导出/展示丢前导零。"""
+    if df is None or df.empty:
+        return df
+    targets: list = []
+    for col in df.columns:
+        if str(col).strip() in _CODE_COL_ALIASES:
+            targets.append(col)
+    # 国金固定列序：列名乱码时首列仍是代码
+    if not targets and df.shape[1] >= 13:
+        targets.append(df.columns[0])
+    for col in targets:
+        df[col] = df[col].map(normalize_terminal_code)
+    return df
+
+
 def _read_csv_auto(path: Path) -> pd.DataFrame:
     last_err: Exception | None = None
     for enc in ("gbk", "gb18030", "utf-8-sig", "utf-8"):
         try:
-            return pd.read_csv(path, encoding=enc)
+            df = pd.read_csv(path, encoding=enc)
+            return _coerce_code_columns(df)
         except Exception as e:
             last_err = e
     raise RuntimeError(f"cannot read {path}: {last_err}")
@@ -325,9 +383,7 @@ def parse_terminal_rounds(path: Path) -> list[dict]:
                 pnl = None
         code = ""
         if c_code is not None and pd.notna(r[c_code]):
-            code = str(r[c_code]).strip().upper()
-            if "." in code:
-                code = code.split(".", 1)[0]
+            code = normalize_terminal_code(r[c_code])
         rows.append(
             {
                 "day": day,

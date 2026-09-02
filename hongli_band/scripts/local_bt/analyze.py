@@ -1263,7 +1263,12 @@ def _norm_signal_stock(raw: str) -> str:
     s = str(raw or "").strip().upper()
     if not s:
         return ""
-    return s.split(".", 1)[0]
+    s = s.split(".", 1)[0]
+    if re.fullmatch(r"\d+\.0+", s):
+        s = s.split(".", 1)[0]
+    if s.isdigit():
+        s = s.zfill(6)
+    return s
 
 
 def parse_fill_signals_from_log(log_text: str) -> list[dict[str, Any]]:
@@ -1810,8 +1815,13 @@ def analyze_detail(
     log_path: str | Path | None = None,
     csv_root: str | Path | None = None,
     dividend_type: str = "",
+    *,
+    hold_metrics: bool = True,
 ) -> dict[str, Any]:
-    """操作明细 → trades / equity / stats；旁路 log 可补买卖信号；行情可补持有回撤。"""
+    """操作明细 → trades / equity / stats；旁路 log 可补买卖信号；行情可补持有回撤/浮盈。
+
+    hold_metrics=False 时跳过日线 enrich（扫描/打分 KPI 用，显著加速）。
+    """
     mod = report_mod()
     path = Path(detail_path)
     rounds = mod.parse_terminal_rounds(path)
@@ -1827,16 +1837,17 @@ def analyze_detail(
     }
     if "budget" not in meta_d:
         meta_d["budget"] = float(budget)
-    default_stock = str(meta_d.get("stock") or "")
-    if default_stock in ("?", ""):
-        default_stock = stock_from_detail_path(path, read_csv=True)
-    trades = enrich_trades_hold_mdd(
-        trades,
-        csv_root=csv_root,
-        dividend_type=dividend_type,
-        detail_path=path,
-        default_stock=default_stock,
-    )
+    if hold_metrics:
+        default_stock = str(meta_d.get("stock") or "")
+        if default_stock in ("?", ""):
+            default_stock = stock_from_detail_path(path, read_csv=True)
+        trades = enrich_trades_hold_metrics(
+            trades,
+            csv_root=csv_root,
+            dividend_type=dividend_type,
+            detail_path=path,
+            default_stock=default_stock,
+        )
     stats = mod.compute_stats(meta_d, trades, diag={}, price_info={"source": "terminal", "terminal_csv": str(path)})
     eq = mod.equity_curve(trades, float(budget))
     return {

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import re
 from collections import deque
 from datetime import datetime
 from pathlib import Path
@@ -309,6 +310,10 @@ STOCK_META = {
 def stock_meta(stock: str) -> tuple[str, str, str, str]:
     raw = str(stock or "").strip().upper()
     code = raw.split(".", 1)[0]
+    if re.fullmatch(r"\d+\.0+", code):
+        code = code.split(".", 1)[0]
+    if code.isdigit():
+        code = code.zfill(6)
     name, kind, industry = STOCK_META.get(code, (code, "股票", "其它"))
     if code not in STOCK_META and (code.startswith("51") or code.startswith("56") or code.startswith("15")):
         kind = "ETF"

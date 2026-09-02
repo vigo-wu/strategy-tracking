@@ -268,6 +268,7 @@ def kpi_from_detail(detail: Path, log: Path | None, stock: str) -> dict[str, Any
         budget=budget,
         meta={"tag": "HlBand", "ver": "local", "stock": stock, "period": "1d", "budget": budget},
         log_path=log,
+        hold_metrics=False,
     )
     stats = result.get("stats") or {}
     trades = result.get("trades") or []
@@ -711,6 +712,34 @@ def infer_score_years(stocks: dict[str, Any]) -> tuple[str, ...]:
             add_years(drec.get("years"))
             for mrec in (drec.get("by_ma") or {}).values():
                 add_years(mrec.get("years"))
+    return tuple(sorted(found))
+
+
+def list_score_years(report_dir: str | Path | None = None) -> tuple[str, ...]:
+    """轻量年份发现：只 glob 文件名，不读 CSV、不算 KPI。"""
+    report = Path(report_dir) if report_dir else resolve_typed_dir(
+        DEFAULT_REPORT, DEFAULT_DIVIDEND_TYPE
+    )
+    found: set[str] = set()
+    dirs = typed_sibling_dirs(report)
+    if not dirs:
+        dirs = [("", report)] if report.is_dir() else []
+    for _div, rdir in dirs:
+        if not rdir.is_dir():
+            continue
+        for item in list_detail_files(rdir):
+            y = item.get("year")
+            if y and str(y).isdigit():
+                found.add(str(y))
+        for p in rdir.glob("local_bt_book_score_*_操作明细.csv"):
+            parts = p.stem.split("_")
+            if len(parts) >= 5 and str(parts[4]).isdigit():
+                found.add(str(parts[4]))
+        for p in rdir.glob("local_bt_book_hold_*_操作明细.csv"):
+            parts = p.stem.split("_")
+            # local_bt_book_hold_{YYYY}_p{N}_k{hash}_操作明细
+            if len(parts) >= 5 and str(parts[4]).isdigit():
+                found.add(str(parts[4]))
     return tuple(sorted(found))
 
 
