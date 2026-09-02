@@ -232,6 +232,12 @@ ANALYSIS_WIDGETS: list[dict[str, Any]] = [
         "default": False,
     },
     {
+        "key": "compound_backtest",
+        "label": "复利回测（持有期跨年传递权益）",
+        "widget": "checkbox",
+        "default": True,
+    },
+    {
         "key": "workers",
         "label": "打分并行进程（0=顺序）",
         "widget": "number_input",
@@ -292,33 +298,122 @@ WEIGHT_WIDGETS: list[dict[str, Any]] = [
 ]
 
 
+def _hlband_config_path(config_path: str | None = None) -> Path:
+    if config_path:
+        return Path(config_path)
+    return Path(__file__).resolve().parent.parent / "qmt" / "hlband" / "config.py"
+
+
+def _load_hlband_config_mod(config_path: str | None = None):
+    path = _hlband_config_path(config_path)
+    if not path.is_file():
+        return None
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("hlband_cfg_analysis", path)
+    if spec is None or spec.loader is None:
+        return None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def load_book_defaults(config_path: str | None = None) -> dict[str, Any]:
     """读 hlband config 组合仓位默认值。"""
-    path = (
-        Path(config_path)
-        if config_path
-        else Path(__file__).resolve().parent.parent / "qmt" / "hlband" / "config.py"
-    )
     out = {
         "trade_budget": 100000.0,
         "book_lot_max": 3,
         "lot_open_frac": 0.50,
         "lot_add_frac": 0.30,
     }
-    if not path.is_file():
-        return out
     try:
-        import importlib.util
-
-        spec = importlib.util.spec_from_file_location("hlband_cfg_analysis", path)
-        if spec is None or spec.loader is None:
+        mod = _load_hlband_config_mod(config_path)
+        if mod is None:
             return out
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
         out["trade_budget"] = float(getattr(mod, "TRADE_BUDGET", out["trade_budget"]))
         out["book_lot_max"] = int(getattr(mod, "BOOK_LOT_MAX", out["book_lot_max"]))
         out["lot_open_frac"] = float(getattr(mod, "LOT_OPEN_FRAC", out["lot_open_frac"]))
         out["lot_add_frac"] = float(getattr(mod, "LOT_ADD_FRAC", out["lot_add_frac"]))
     except Exception:
         pass
+    return out
+
+
+def load_book_stocks_full(config_path: str | None = None) -> dict[str, dict[str, str]]:
+    """config.BOOK_STOCKS → {code: {ma_type, dividend_type}}。读失败则空字典。"""
+    from analyze import DEFAULT_DIVIDEND_TYPE, normalize_dividend_type, normalize_ma_type  # noqa: WPS433
+
+    try:
+        mod = _load_hlband_config_mod(config_path)
+    except Exception:
+        return {}
+    if mod is None:
+        return {}
+    raw = getattr(mod, "BOOK_STOCKS", None)
+    default_ma = normalize_ma_type(getattr(mod, "MA_TYPE", "EMA")) or "EMA"
+    default_div = (
+        normalize_dividend_type(getattr(mod, "DIVIDEND_TYPE", "")) or DEFAULT_DIVIDEND_TYPE
+    )
+    if isinstance(raw, dict):
+        items = list(raw.items())
+    elif isinstance(raw, (list, tuple)):
+        items = [(str(x), {}) for x in raw]
+    else:
+        return {}
+    out: dict[str, dict[str, str]] = {}
+    for k, v in items:
+        stock = str(k or "").strip().upper()
+        if not stock:
+            continue
+        if isinstance(v, dict):
+            ma = normalize_ma_type(v.get("ma_type")) or default_ma
+            div = normalize_dividend_type(v.get("dividend_type")) or default_div
+        elif isinstance(v, str):
+            ma = normalize_ma_type(v) or default_ma
+            div = default_div
+        else:
+            ma, div = default_ma, default_div
+        out[stock] = {"ma_type": ma, "dividend_type": div}
+    return out
+
+
+def book_stocks_to_editor_rows(book: dict[str, dict[str, str]] | None) -> list[dict[str, str]]:
+    from display_df import stock_display_name  # noqa: WPS433
+
+    rows: list[dict[str, str]] = []
+    for code in sorted((book or {}).keys()):
+        cfg = book[code] or {}
+        rows.append(
+            {
+                "代码": str(code),
+                "名称": stock_display_name(str(code)),
+                "均线类型": str(cfg.get("ma_type") or "EMA"),
+                "复权方式": str(cfg.get("dividend_type") or "front_ratio"),
+            }
+        )
+    return rows
+
+
+def editor_rows_to_book_stocks(rows: Any) -> dict[str, dict[str, str]]:
+    """data_editor 行 → normalize 前的 BOOK_STOCKS dict。忽略「名称」列。"""
+    from analyze import DEFAULT_DIVIDEND_TYPE, normalize_dividend_type, normalize_ma_type  # noqa: WPS433
+
+    out: dict[str, dict[str, str]] = {}
+    if rows is None:
+        return out
+    if hasattr(rows, "to_dict"):
+        records = rows.to_dict(orient="records")
+    else:
+        records = list(rows or [])
+    for rec in records:
+        if not isinstance(rec, dict):
+            continue
+        code = str(rec.get("代码") or rec.get("stock") or "").strip().upper()
+        if not code:
+            continue
+        ma_raw = rec.get("均线类型", rec.get("ma_type"))
+        div_raw = rec.get("复权方式", rec.get("dividend_type"))
+        ma = normalize_ma_type(ma_raw) or "EMA"
+        div = normalize_dividend_type(div_raw) or DEFAULT_DIVIDEND_TYPE
+        out[code] = {"ma_type": ma, "dividend_type": div}
     return out

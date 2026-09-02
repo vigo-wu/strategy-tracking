@@ -22,6 +22,7 @@ REPORT_PY = (
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
+from display_df import TRADES_DISPLAY_COLUMNS, insert_name_column, rename_columns  # noqa: E402
 from market_csv import (  # noqa: E402
     aggregate_weekly,
     compact_day,
@@ -379,7 +380,7 @@ def div_compare_dataframe(
         kpi = kpis_by_type.get(div) or {}
         rec: dict[str, Any] = {}
         if stock:
-            rec["标的"] = stock
+            rec["代码"] = stock
         if year:
             rec["年份"] = year
         rec["复权"] = DIVIDEND_LABELS.get(div, div)
@@ -393,14 +394,14 @@ def div_compare_dataframe(
     if year:
         cols = ["年份"] + cols
     if stock:
-        cols = ["标的"] + cols
+        cols = ["代码"] + cols
     df = pd.DataFrame(recs, columns=cols)
     if "轮次" in df.columns:
         df["轮次"] = pd.to_numeric(df["轮次"], errors="coerce").astype("Int64")
     for col in ("总盈亏", "胜率", "平均收益%"):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
-    return df
+    return insert_name_column(df, code_col="代码") if stock else df
 
 
 def normalize_ma_type(raw: Any) -> str:
@@ -562,7 +563,7 @@ def ma_compare_dataframe(pairs: list[dict[str, Any]]) -> pd.DataFrame:
     has_year = any(str(r.get("year") or "").strip() for r in pairs)
     has_div = len(unique_dividend_types(pairs)) >= 2
     for r in pairs:
-        rec: dict[str, Any] = {"标的": r.get("stock") or ""}
+        rec: dict[str, Any] = {"代码": r.get("stock") or ""}
         if has_year:
             rec["年份"] = str(r.get("year") or "")
         if has_div:
@@ -584,7 +585,7 @@ def ma_compare_dataframe(pairs: list[dict[str, Any]]) -> pd.DataFrame:
         )
         recs.append(rec)
     cols = [
-        "标的",
+        "代码",
         "轮次SMA",
         "轮次EMA",
         "盈亏SMA",
@@ -598,10 +599,10 @@ def ma_compare_dataframe(pairs: list[dict[str, Any]]) -> pd.DataFrame:
         "建议",
     ]
     if has_div:
-        cols = ["标的", "复权"] + [c for c in cols if c != "标的"]
+        cols = ["代码", "复权"] + [c for c in cols if c != "代码"]
     if has_year:
-        rest = [c for c in cols if c != "标的"]
-        cols = ["标的", "年份"] + [c for c in rest if c != "年份"]
+        rest = [c for c in cols if c != "代码"]
+        cols = ["代码", "年份"] + [c for c in rest if c != "年份"]
     df = pd.DataFrame(recs, columns=cols)
     for col in ("轮次SMA", "轮次EMA"):
         if col in df.columns:
@@ -609,7 +610,7 @@ def ma_compare_dataframe(pairs: list[dict[str, Any]]) -> pd.DataFrame:
     for col in ("盈亏SMA", "盈亏EMA", "Δ盈亏", "胜率SMA", "胜率EMA", "平均%SMA", "平均%EMA"):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
-    return df
+    return insert_name_column(df, code_col="代码")
 
 
 def summarize_ma_compare_by_year(pairs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -768,12 +769,21 @@ def _load_report_mod():
 
 
 _REPORT = None
+_REPORT_MTIME: float | None = None
 
 
 def report_mod():
-    global _REPORT
-    if _REPORT is None:
+    """加载 generate_report；磁盘 mtime 变化时重载（Streamlit 长会话也能吃到修复）。"""
+    global _REPORT, _REPORT_MTIME
+    try:
+        mtime = float(REPORT_PY.stat().st_mtime)
+    except OSError:
+        mtime = None
+    if _REPORT is None or (mtime is not None and mtime != _REPORT_MTIME):
+        if _REPORT is not None and "qmt_generate_report" in sys.modules:
+            del sys.modules["qmt_generate_report"]
         _REPORT = _load_report_mod()
+        _REPORT_MTIME = mtime
     return _REPORT
 
 
@@ -1238,16 +1248,318 @@ def load_detail_raw(path: str | Path) -> pd.DataFrame:
     return mod._read_csv_auto(Path(path))
 
 
+def sibling_log_path(detail_path: str | Path) -> Path | None:
+    """操作明细旁的同名 .txt log（local_bt_*_操作明细.csv → local_bt_*.txt）。"""
+    path = Path(detail_path)
+    name = path.name
+    if name.endswith("_操作明细.csv"):
+        cand = path.with_name(name[: -len("_操作明细.csv")] + ".txt")
+        if cand.is_file():
+            return cand
+    return None
+
+
+def _norm_signal_stock(raw: str) -> str:
+    s = str(raw or "").strip().upper()
+    if not s:
+        return ""
+    return s.split(".", 1)[0]
+
+
+def parse_fill_signals_from_log(log_text: str) -> list[dict[str, Any]]:
+    """从 local_bt log 提取买卖信号。
+
+    买：BUY filled / BUY add filled
+    卖：SELL <reason> <code> xN（含部分卖出）；SELL done 补 open_day
+    """
+    pending_buy: dict[str, Any] | None = None
+    pending_sell: dict[str, Any] | None = None
+    pending_stock = ""
+    events: list[dict[str, Any]] = []
+    for line in str(log_text or "").splitlines():
+        m = re.search(
+            r"BUY(?: add)? by signal=(\S+)\s+label=(\S+).*?(?:signal_day=(\d+)|@close=)",
+            line,
+        )
+        if m:
+            pending_buy = {
+                "signal": m.group(1),
+                "label": m.group(2),
+                "day": str(m.group(3) or "")[:8],
+            }
+            pending_stock = ""
+            continue
+        m = re.search(r"(?:BUY(?: add)?|ADD) BUY (\S+)\s+x(\d+)", line)
+        if m:
+            pending_stock = _norm_signal_stock(m.group(1))
+            continue
+        # 首开：BUY filled {..., 'opened_at': '...'}
+        m = re.search(
+            r"BUY filled \{'shares': (\d+),[^}]*'opened_at': '(\d+)'",
+            line,
+        )
+        if m and pending_buy:
+            events.append(
+                {
+                    "kind": "buy",
+                    "shares": int(m.group(1)),
+                    "day": str(m.group(2))[:8],
+                    "stock": pending_stock,
+                    "signal": pending_buy.get("signal") or "-",
+                    "label": pending_buy.get("label") or pending_buy.get("signal") or "-",
+                }
+            )
+            pending_buy = None
+            pending_stock = ""
+            continue
+        # 加仓：BUY add filled {'add_shares': N, ...}（无 opened_at，用 signal_day）
+        m = re.search(r"BUY add filled \{'add_shares': (\d+)", line)
+        if m and pending_buy:
+            day = str(pending_buy.get("day") or "")[:8]
+            events.append(
+                {
+                    "kind": "buy",
+                    "shares": int(m.group(1)),
+                    "day": day,
+                    "stock": pending_stock,
+                    "signal": pending_buy.get("signal") or "-",
+                    "label": pending_buy.get("label") or pending_buy.get("signal") or "-",
+                }
+            )
+            pending_buy = None
+            pending_stock = ""
+            continue
+        m = re.search(
+            r"SELL by signal=(\S+)\s+label=(\S+).*?(?:signal_day=(\d+)|@close=)",
+            line,
+        )
+        if m:
+            day = str(m.group(3) or "")[:8]
+            pending_sell = {
+                "signal": m.group(1),
+                "label": m.group(2),
+                "day": day,
+            }
+            continue
+        # 实际卖出成交（含 partial）：SELL trail_stop 600350.SH x9400
+        m = re.search(r"SELL (\S+) (\S+)\s+x(\d+)", line)
+        if m and m.group(1) not in ("by", "done", "lot-can_use"):
+            reason = m.group(1)
+            stock = _norm_signal_stock(m.group(2))
+            shares = int(m.group(3))
+            sig = (pending_sell or {}).get("signal") or reason
+            label = (pending_sell or {}).get("label") or reason
+            day = str((pending_sell or {}).get("day") or "")[:8]
+            events.append(
+                {
+                    "kind": "sell",
+                    "shares": shares,
+                    "day": day,
+                    "open_day": "",
+                    "stock": stock,
+                    "signal": sig,
+                    "label": label,
+                }
+            )
+            continue
+        m = re.search(
+            r"SELL done (\S+)\s+last=\s*[0-9.]+\s+cleared \{'shares': (\d+),[^}]*'opened_at': '(\d+)'",
+            line,
+        )
+        if m:
+            sig = m.group(1)
+            shares = int(m.group(2))
+            open_day = str(m.group(3))[:8]
+            label = (pending_sell or {}).get("label") or sig
+            if pending_sell and pending_sell.get("signal"):
+                sig = str(pending_sell.get("signal") or sig)
+            stock = pending_stock
+            filled = False
+            for e in reversed(events):
+                if e.get("kind") != "sell":
+                    continue
+                if int(e.get("shares") or 0) != shares:
+                    continue
+                if e.get("stock") and stock and e.get("stock") != stock:
+                    continue
+                if not e.get("open_day"):
+                    e["open_day"] = open_day
+                    if not e.get("stock") and stock:
+                        e["stock"] = stock
+                    filled = True
+                    break
+            if not filled:
+                events.append(
+                    {
+                        "kind": "sell",
+                        "shares": shares,
+                        "day": str((pending_sell or {}).get("day") or "")[:8],
+                        "open_day": open_day,
+                        "stock": stock,
+                        "signal": sig,
+                        "label": label,
+                    }
+                )
+            pending_sell = None
+            pending_stock = ""
+            continue
+    return events
+
+
+def enrich_trades_signals_from_log(
+    trades: list[dict[str, Any]],
+    log_path: str | Path | None,
+) -> list[dict[str, Any]]:
+    """把 log 信号填回成交轮次。
+
+    两遍匹配：先精确股数，再宽松回退，避免同日小仓轮次抢走大仓信号。
+    买：代码+日+股数 → 代码+日（可共享）→ 日+股数
+    卖：卖出日+股数 → open_day+股数 → 卖出日+代码（可共享）
+    """
+    if not trades or not log_path:
+        return trades
+    path = Path(log_path)
+    if not path.is_file():
+        return trades
+    events = parse_fill_signals_from_log(path.read_text(encoding="utf-8", errors="replace"))
+    if not events:
+        return trades
+    buys = [e for e in events if e.get("kind") == "buy"]
+    sells = [e for e in events if e.get("kind") == "sell"]
+    used_b = [False] * len(buys)
+    used_s = [False] * len(sells)
+    out: list[dict[str, Any]] = [dict(t) for t in trades]
+
+    def _keys(t: dict[str, Any]) -> tuple[str, str, int, str]:
+        return (
+            compact_day(str(t.get("buy_open_day") or "")),
+            compact_day(str(t.get("sell_exec_day") or "")),
+            int(t.get("shares") or 0),
+            str(t.get("stock") or ""),
+        )
+
+    def _buy_exact(day: str, shares: int, stock: str) -> dict[str, Any] | None:
+        code = _norm_signal_stock(stock)
+        if not code or not day:
+            return None
+        for i, e in enumerate(buys):
+            if used_b[i]:
+                continue
+            if e.get("day") == day and int(e.get("shares") or 0) == shares and e.get("stock") == code:
+                used_b[i] = True
+                return e
+        return None
+
+    def _buy_loose(day: str, shares: int, stock: str) -> dict[str, Any] | None:
+        """同日同代码可共享买入信号（FIFO 拆仓无独立 BUY filled）。"""
+        code = _norm_signal_stock(stock)
+        if code and day:
+            for e in buys:
+                if e.get("day") == day and e.get("stock") == code:
+                    return e
+            # 已精确占用过的同日事件也允许回读
+            for nt0 in out:
+                if _norm_signal_stock(str(nt0.get("stock") or "")) != code:
+                    continue
+                if compact_day(str(nt0.get("buy_open_day") or "")) != day:
+                    continue
+                sig = nt0.get("buy_signal")
+                if sig and sig not in ("-", ""):
+                    return {
+                        "signal": sig,
+                        "label": nt0.get("buy_label") or sig,
+                    }
+        if day:
+            for i, e in enumerate(buys):
+                if used_b[i]:
+                    continue
+                if e.get("day") == day and int(e.get("shares") or 0) == shares:
+                    used_b[i] = True
+                    return e
+        return None
+
+    def _sell_exact(sell_day: str, buy_day: str, shares: int, stock: str) -> dict[str, Any] | None:
+        code = _norm_signal_stock(stock)
+        if sell_day:
+            for i, e in enumerate(sells):
+                if used_s[i]:
+                    continue
+                if e.get("day") == sell_day and int(e.get("shares") or 0) == shares:
+                    if not code or not e.get("stock") or e.get("stock") == code:
+                        used_s[i] = True
+                        return e
+        if buy_day:
+            for i, e in enumerate(sells):
+                if used_s[i]:
+                    continue
+                if str(e.get("open_day") or "") == buy_day and int(e.get("shares") or 0) == shares:
+                    if not code or not e.get("stock") or e.get("stock") == code:
+                        used_s[i] = True
+                        return e
+        return None
+
+    def _sell_loose(sell_day: str, stock: str) -> dict[str, Any] | None:
+        """同日同代码可共享卖出信号（一笔卖拆多 lot 时股数对不上 SELL xN）。"""
+        code = _norm_signal_stock(stock)
+        if not (sell_day and code):
+            return None
+        for e in sells:
+            if e.get("day") == sell_day and e.get("stock") == code:
+                return e
+        for nt0 in out:
+            if _norm_signal_stock(str(nt0.get("stock") or "")) != code:
+                continue
+            if compact_day(str(nt0.get("sell_exec_day") or "")) != sell_day:
+                continue
+            sig = nt0.get("sell_signal")
+            if sig and sig not in ("-", ""):
+                return {
+                    "signal": sig,
+                    "label": nt0.get("sell_label") or sig,
+                }
+        return None
+
+    # pass1: 精确股数
+    for nt in out:
+        buy_day, sell_day, sh, stock = _keys(nt)
+        b = _buy_exact(buy_day, sh, stock)
+        if b:
+            nt["buy_signal"] = b.get("signal") or nt.get("buy_signal") or "-"
+            nt["buy_label"] = b.get("label") or nt.get("buy_label") or nt["buy_signal"]
+        s = _sell_exact(sell_day, buy_day, sh, stock)
+        if s:
+            nt["sell_signal"] = s.get("signal") or nt.get("sell_signal") or "-"
+            nt["sell_label"] = s.get("label") or nt.get("sell_label") or nt["sell_signal"]
+
+    # pass2: 宽松回退（仅仍缺信号的轮次）
+    for nt in out:
+        buy_day, sell_day, sh, stock = _keys(nt)
+        if not nt.get("buy_signal") or nt.get("buy_signal") in ("-", ""):
+            b = _buy_loose(buy_day, sh, stock)
+            if b:
+                nt["buy_signal"] = b.get("signal") or "-"
+                nt["buy_label"] = b.get("label") or nt["buy_signal"]
+        if not nt.get("sell_signal") or nt.get("sell_signal") in ("-", ""):
+            s = _sell_loose(sell_day, stock)
+            if s:
+                nt["sell_signal"] = s.get("signal") or "-"
+                nt["sell_label"] = s.get("label") or nt["sell_signal"]
+    return out
+
+
 def analyze_detail(
     detail_path: str | Path,
     budget: float = 50000.0,
     meta: dict | None = None,
+    log_path: str | Path | None = None,
 ) -> dict[str, Any]:
-    """操作明细 → trades / equity / stats。"""
+    """操作明细 → trades / equity / stats；旁路 log 可补买卖信号。"""
     mod = report_mod()
     path = Path(detail_path)
     rounds = mod.parse_terminal_rounds(path)
     trades = _normalize_trades(rounds)
+    log = Path(log_path) if log_path else sibling_log_path(path)
+    trades = enrich_trades_signals_from_log(trades, log)
     meta_d = meta or {
         "tag": "HlBand",
         "ver": "local",
@@ -1266,6 +1578,7 @@ def analyze_detail(
         "equity": eq,
         "budget": float(budget),
         "sum_pnl_detail": float(stats.get("sum_pnl") or 0.0),
+        "log_path": str(log) if log and Path(log).is_file() else "",
     }
 
 
@@ -1290,22 +1603,9 @@ def filter_trades_by_range(
 
 
 def trades_to_dataframe(trades: list[dict]) -> pd.DataFrame:
-    if not trades:
-        return pd.DataFrame(
-            columns=[
-                "i",
-                "buy_open_day",
-                "sell_exec_day",
-                "buy_price",
-                "sell_price",
-                "shares",
-                "pnl",
-                "ret_pct",
-                "hold_calendar_days",
-            ]
-        )
-    cols = [
+    eng_cols = [
         "i",
+        "stock",
         "buy_open_day",
         "sell_exec_day",
         "buy_price",
@@ -1318,8 +1618,17 @@ def trades_to_dataframe(trades: list[dict]) -> pd.DataFrame:
         "buy_signal",
         "sell_signal",
     ]
-    rows = [{c: t.get(c) for c in cols} for t in trades]
-    return pd.DataFrame(rows)
+    if not trades:
+        empty = pd.DataFrame(columns=eng_cols)
+        return insert_name_column(rename_columns(empty, TRADES_DISPLAY_COLUMNS), code_col="代码")
+    rows = [{c: t.get(c) for c in eng_cols} for t in trades]
+    out = rename_columns(pd.DataFrame(rows), TRADES_DISPLAY_COLUMNS)
+    if "代码" in out.columns and out["代码"].notna().any():
+        return insert_name_column(out, code_col="代码")
+    # 单票明细无 stock 字段时去掉空代码列
+    if "代码" in out.columns and out["代码"].isna().all():
+        out = out.drop(columns=["代码"])
+    return out
 
 
 def summarize_detail(
@@ -1395,7 +1704,7 @@ def batch_summary_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
         walk = ""
         if walk_s or walk_e:
             walk = "%s–%s" % (walk_s or "?", walk_e or "?")
-        rec: dict[str, Any] = {"标的": r.get("stock") or ""}
+        rec: dict[str, Any] = {"代码": r.get("stock") or ""}
         if has_year:
             rec["年份"] = str(r.get("year") or "")
         if has_div:
@@ -1417,7 +1726,7 @@ def batch_summary_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
             }
         )
         recs.append(rec)
-    cols = ["标的"]
+    cols = ["代码"]
     if has_year:
         cols.append("年份")
     if has_div:
@@ -1440,7 +1749,7 @@ def batch_summary_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
         df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
     for col in ("总盈亏", "胜率", "平均收益%", "最大单笔%", "最大亏损%"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
-    return df
+    return insert_name_column(df, code_col="代码")
 
 
 def summarize_batch_by_year(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

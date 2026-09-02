@@ -37,6 +37,12 @@ from market_csv import (  # noqa: E402
     walk_days,
 )
 from mock_qmt import MockContext, _as_tag, inject_qmt_globals  # noqa: E402
+from book_pool_patch import install_book_pool_patch  # noqa: E402
+from compound_wallet import (  # noqa: E402
+    install_compound_patch,
+    make_wallet,
+    read_wallet_end,
+)
 from trades_csv import TradeLedger, trades_csv_path, wrap_fill_hooks  # noqa: E402
 
 from qmt_common._deploy_lib import build_bundle  # noqa: E402
@@ -479,8 +485,16 @@ def run_backtest(
     install_config_overrides(ns, overrides)
     if quiet:
         _patch_quiet_status(ns)
+    budget = float(
+        (overrides or {}).get("TRADE_BUDGET") or ns.get("TRADE_BUDGET") or 100000.0
+    )
+    wallet = make_wallet(ns, overrides, budget)
+    install_book_pool_patch(ns)
+    if wallet is not None:
+        install_compound_patch(ns, wallet)
     ledger = TradeLedger(code)
-    wrap_fill_hooks(ns, ledger)
+    wrap_fill_hooks(ns, ledger, wallet)
+    wallet_start = wallet.cash if wallet is not None else None
     log_f = open(log_path, "w", encoding="utf-8", newline="\n", buffering=1024 * 1024)
     log_f.write(banner + "\n")
     if n_w0 < 60:
@@ -508,6 +522,18 @@ def run_backtest(
         except Exception:
             pass
         sys.stdout, sys.stderr = old_out, old_err
+        if wallet is not None:
+            wallet_end = read_wallet_end(ns, wallet)
+            line = "compound=1 wallet_start=%.2f wallet_end=%.2f\n" % (
+                float(wallet_start or wallet.initial_cash),
+                float(wallet_end),
+            )
+            try:
+                with open(log_path, "a", encoding="utf-8", newline="\n") as lf:
+                    lf.write(line)
+            except Exception:
+                pass
+            print(line.strip())
         log_f.close()
     trades_path = trades_csv_path(log_path)
     ledger.write(trades_path)

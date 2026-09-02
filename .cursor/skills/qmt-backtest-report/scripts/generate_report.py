@@ -276,7 +276,11 @@ def _col_by_aliases(df: pd.DataFrame, *aliases: str) -> str | None:
 
 
 def parse_terminal_rounds(path: Path) -> list[dict]:
-    """解析 QMT「操作明细」CSV → 买卖轮次（FIFO）。盈亏取卖出行「盈利」。"""
+    """解析 QMT「操作明细」CSV → 买卖轮次（按代码各自 FIFO）。
+
+    卖出若吃掉多笔买入，按买入 lot 拆成多轮（保留各笔买入日/买价）；
+    盈亏按股数分摊卖出行「盈利」（末笔吃尾差）。
+    """
     df = _read_csv_auto(path)
     if df.empty:
         return []
@@ -286,9 +290,11 @@ def parse_terminal_rounds(path: Path) -> list[dict]:
     c_price = _col_by_aliases(df, "操作价格", "成交价格", "成交价", "价格")
     c_pnl = _col_by_aliases(df, "盈利", "盈亏", "实现盈亏")
     c_shares = _col_by_aliases(df, "数量", "成交数量", "股数")
+    c_code = _col_by_aliases(df, "代码", "证券代码", "股票代码", "标的")
     # 固定列序回退：代码,名称,...,操作时间(5),操作类型(6),操作价格(7),...,盈利(9),...,数量(12)
     if c_time is None and df.shape[1] >= 13:
         cols = list(df.columns)
+        c_code = c_code or cols[0]
         c_time, c_side, c_price, c_pnl, c_shares = cols[5], cols[6], cols[7], cols[9], cols[12]
 
     if not all([c_time, c_side, c_price, c_shares]):
@@ -317,16 +323,36 @@ def parse_terminal_rounds(path: Path) -> list[dict]:
                 pnl = float(r[c_pnl])
             except Exception:
                 pnl = None
-        rows.append({"day": day, "side": side, "price": price, "shares": shares, "pnl": pnl})
+        code = ""
+        if c_code is not None and pd.notna(r[c_code]):
+            code = str(r[c_code]).strip().upper()
+            if "." in code:
+                code = code.split(".", 1)[0]
+        rows.append(
+            {
+                "day": day,
+                "side": side,
+                "price": price,
+                "shares": shares,
+                "pnl": pnl,
+                "code": code,
+            }
+        )
 
     rounds: list[dict] = []
-    pending_buys: list[dict] = []
+    # 按代码分队列，避免组合明细跨票 FIFO 错配（假收益% / 价格对不上盈利）
+    pending_by_code: dict[str, list[dict]] = {}
     for r in rows:
+        code = str(r.get("code") or "")
         if r["side"] == "buy":
-            pending_buys.append(r)
+            pending_by_code.setdefault(code, []).append(r)
             continue
+        pending_buys = pending_by_code.get(code) or []
         if not pending_buys:
-            print(f"warn: orphan sell {r['day']} in terminal csv", file=sys.stderr)
+            print(
+                f"warn: orphan sell {r['day']} code={code or '-'} in terminal csv",
+                file=sys.stderr,
+            )
             continue
         sell_p = float(r["price"])
         remain_sh = int(r["shares"])
@@ -344,36 +370,52 @@ def parse_terminal_rounds(path: Path) -> list[dict]:
                 pending_buys[0] = dict(b)
                 pending_buys[0]["shares"] = bsh - remain_sh
                 remain_sh = 0
+        if code in pending_by_code and not pending_by_code[code]:
+            pending_by_code.pop(code, None)
         if not taken:
-            print(f"warn: orphan sell {r['day']} in terminal csv", file=sys.stderr)
+            print(
+                f"warn: orphan sell {r['day']} code={code or '-'} in terminal csv",
+                file=sys.stderr,
+            )
             continue
         tot_sh = sum(int(x["shares"]) for x in taken)
-        tot_cost = sum(float(x["price"]) * int(x["shares"]) for x in taken)
-        buy_p = tot_cost / tot_sh if tot_sh else float(taken[0]["price"])
         sh = int(r["shares"] or tot_sh)
         if tot_sh != int(r["shares"]):
             print(
-                f"warn: shares mismatch buys {tot_sh} vs sell {r['day']}x{r['shares']}",
+                f"warn: shares mismatch buys {tot_sh} vs sell {r['day']}x{r['shares']}"
+                f" code={code or '-'}",
                 file=sys.stderr,
             )
-        pnl = r["pnl"]
-        if pnl is None:
-            pnl = (sell_p - buy_p) * sh
-        ret = (sell_p - buy_p) / buy_p * 100.0 if buy_p else 0.0
-        rounds.append(
-            {
-                "buy_open_day": taken[0]["day"],
+        # 按买入 lot 拆轮次：保留各笔买入日/买价，避免加仓合并后信号与买入日错配
+        sell_pnl = r["pnl"]
+        allocated = 0.0
+        for i, lot in enumerate(taken):
+            lot_sh = int(lot["shares"])
+            buy_p = float(lot["price"])
+            if sell_pnl is None:
+                lot_pnl = (sell_p - buy_p) * lot_sh
+            elif i == len(taken) - 1:
+                lot_pnl = float(sell_pnl) - allocated
+            else:
+                lot_pnl = float(sell_pnl) * (lot_sh / float(sh)) if sh else 0.0
+                allocated += lot_pnl
+            ret = (sell_p - buy_p) / buy_p * 100.0 if buy_p else 0.0
+            round_row = {
+                "buy_open_day": lot["day"],
                 "sell_exec_day": r["day"],
                 "buy_price": buy_p,
                 "sell_price": sell_p,
-                "shares": sh,
-                "cost": round(buy_p * sh, 2),
-                "pnl": float(pnl),
+                "shares": lot_sh,
+                "cost": round(buy_p * lot_sh, 2),
+                "pnl": float(lot_pnl),
                 "ret_pct": ret,
             }
-        )
-    if pending_buys:
-        print(f"warn: {len(pending_buys)} open buy(s) left in terminal csv", file=sys.stderr)
+            if code:
+                round_row["stock"] = code
+            rounds.append(round_row)
+    open_left = sum(len(v) for v in pending_by_code.values())
+    if open_left:
+        print(f"warn: {open_left} open buy(s) left in terminal csv", file=sys.stderr)
     return rounds
 
 

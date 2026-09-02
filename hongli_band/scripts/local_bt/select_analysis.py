@@ -24,7 +24,8 @@ from book_backtest import (  # noqa: E402
     normalize_book_stocks,
     run_book_backtest,
 )
-from select_config import DEFAULT_FILTERS, WEIGHTS, load_book_defaults  # noqa: E402
+from compound_wallet import parse_wallet_from_log  # noqa: E402
+from select_config import DEFAULT_FILTERS, WEIGHTS, load_book_defaults, load_book_stocks_full  # noqa: E402
 from stock_select import (  # noqa: E402
     _apply_year_window,
     empty_year_kpi,
@@ -35,6 +36,29 @@ from stock_select import (  # noqa: E402
 from trades_csv import trades_csv_path  # noqa: E402
 
 MA_TYPES = ("SMA", "EMA")
+
+
+def pick_details_from_basket(
+    basket: dict[str, Any] | None,
+    scores: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """从组合 basket 生成 year_rows.pick_details（含均线/复权；score 可选）。"""
+    out: list[dict[str, Any]] = []
+    score_map = {str(k).upper(): v for k, v in (scores or {}).items()}
+    for code in sorted((basket or {}).keys()):
+        cfg = (basket or {}).get(code) or {}
+        if not isinstance(cfg, dict):
+            cfg = {"ma_type": str(cfg), "dividend_type": DEFAULT_DIVIDEND_TYPE}
+        key = str(code).upper()
+        row: dict[str, Any] = {
+            "stock": key,
+            "ma_type": str(cfg.get("ma_type") or "").upper(),
+            "dividend_type": str(cfg.get("dividend_type") or DEFAULT_DIVIDEND_TYPE).lower(),
+        }
+        if key in score_map:
+            row["score"] = score_map[key]
+        out.append(row)
+    return out
 
 
 def iter_rebalance_periods(
@@ -236,6 +260,7 @@ def precompute_portfolio_kpis(
     ]
     results: list[dict[str, Any]] = []
     errors: list[str] = []
+    score_paths: dict[str, str] = dict(scanned.get("score_detail_paths") or {})
     w = int(workers or 0)
     if w <= 1 or len(jobs) <= 1:
         results = [_run_score_year_job(j) for j in jobs]
@@ -244,6 +269,12 @@ def precompute_portfolio_kpis(
             futs = [ex.submit(_run_score_year_job, j) for j in jobs]
             for fu in as_completed(futs):
                 results.append(fu.result())
+    for row in results:
+        sy = str(row.get("year") or "")
+        sp = str(row.get("path") or "").strip()
+        if sy and sp:
+            score_paths[sy] = sp
+    scanned["score_detail_paths"] = score_paths
     for row in results:
         year = str(row.get("year") or "")
         if row.get("error"):
@@ -297,6 +328,7 @@ def run_walk_forward(
     score_pool: str = "scanned",
     force_rerun: bool = False,
     workers: int = 0,
+    compound_backtest: bool = True,
 ) -> dict[str, Any]:
     flt = dict(DEFAULT_FILTERS)
     if filters:
@@ -360,6 +392,7 @@ def run_walk_forward(
                 flt=flt,
                 weights=weights,
                 book_params=book_params,
+                compound_backtest=compound_backtest,
             ),
         }
     periods = iter_rebalance_periods(eval_years_run, rebalance_years)
@@ -392,10 +425,15 @@ def run_walk_forward(
     out_dir = resolve_typed_dir(report_dir, DEFAULT_DIVIDEND_TYPE)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    running_wallet = budget
+    initial_wallet = budget
+
     year_rows: list[dict[str, Any]] = []
     period_rows: list[dict[str, Any]] = []
     equity_pts: list[dict[str, Any]] = []
     cum = 0.0
+    if compound_backtest:
+        notes.append("持有期复利回测：跨年传递期末权益；打分预计算仍固定 TRADE_BUDGET")
 
     for period in periods:
         select_year = str(period["select_year"])
@@ -413,9 +451,9 @@ def run_walk_forward(
                         "select_year": select_year,
                         "is_rebalance": hy == select_year,
                         "picks": "",
+                        "pick_details": [],
                         "portfolio_pnl": None,
                         "naive_pnl": None,
-                        "skipped_buys": None,
                         "status": period_status,
                     }
                 )
@@ -452,12 +490,17 @@ def run_walk_forward(
                     }
                 )
         basket = {}
+        score_by_stock: dict[str, Any] = {}
         for p in picks:
             ma = str(p.get("ma_type") or "").upper()
             div = str(p.get("div_type") or DEFAULT_DIVIDEND_TYPE).lower()
             if ma in MA_TYPES:
-                basket[str(p["stock"])] = {"ma_type": ma, "dividend_type": div}
+                stock = str(p["stock"])
+                basket[stock] = {"ma_type": ma, "dividend_type": div}
+                if p.get("score") is not None:
+                    score_by_stock[stock] = p.get("score")
         pick_names = "、".join(sorted(basket.keys()))
+        details = pick_details_from_basket(basket, score_by_stock)
 
         period_pnl = 0.0
         for hy in hold_years:
@@ -473,21 +516,40 @@ def run_walk_forward(
                         "select_year": select_year,
                         "is_rebalance": is_rebalance,
                         "picks": pick_names,
+                        "pick_details": details,
                         "portfolio_pnl": port_pnl,
                         "naive_pnl": naive if basket else None,
-                        "skipped_buys": None,
                         "status": row_status,
+                        "hold_detail_path": None,
                     }
                 )
                 continue
             htag = book_stocks_hash(basket)
             log_name = "local_bt_book_hold_%s_p%s_k%s.txt" % (hy, period["period_i"], htag)
-            trades_path = out_dir / log_name.replace(".txt", "_操作明细.csv")
+            log_path = out_dir / log_name
+            trades_path = trades_csv_path(log_path)
+            wallet_start = running_wallet if compound_backtest else None
+            wallet_end = None
             try:
                 if trades_path.is_file() and not force_rerun:
-                    combo = analyze_book_detail(trades_path, budget=budget)
+                    combo = analyze_book_detail(trades_path, budget=budget, log_path=log_path)
+                    if compound_backtest:
+                        parsed = parse_wallet_from_log(log_path.read_text(encoding="utf-8", errors="replace"))
+                        wallet_end = parsed.get("wallet_cash_end")
+                        if wallet_end is None and wallet_start is not None:
+                            wallet_end = float(wallet_start) + float(combo.get("sum_pnl") or 0.0)
+                        if wallet_start is not None and wallet_end is not None:
+                            port_pnl = float(wallet_end) - float(wallet_start)
+                        else:
+                            port_pnl = float(combo.get("sum_pnl") or 0.0)
+                    else:
+                        port_pnl = float(combo.get("sum_pnl") or 0.0)
                 else:
-                    run_book_backtest(
+                    hold_overrides = dict(overrides)
+                    if compound_backtest:
+                        hold_overrides["compound_backtest"] = True
+                        hold_overrides["wallet_cash"] = running_wallet
+                    _log_path, meta = run_book_backtest(
                         basket,
                         "%s0101" % hy,
                         "%s1231" % hy,
@@ -495,18 +557,36 @@ def run_walk_forward(
                         out_dir,
                         log_name=log_name,
                         quiet=True,
-                        overrides=overrides,
+                        overrides=hold_overrides,
                     )
-                    combo = analyze_book_detail(trades_path, budget=budget)
-                port_pnl = float(combo.get("sum_pnl") or 0.0)
+                    combo = analyze_book_detail(trades_path, budget=budget, log_path=_log_path)
+                    if compound_backtest:
+                        wallet_end = meta.get("wallet_cash_end")
+                        if wallet_end is None:
+                            wallet_end = float(wallet_start or budget) + float(combo.get("sum_pnl") or 0.0)
+                        port_pnl = float(wallet_end) - float(wallet_start or budget)
+                    else:
+                        port_pnl = float(combo.get("sum_pnl") or 0.0)
                 row_status = "ok"
             except Exception as e:
                 row_status = "回放失败: %s" % e
                 port_pnl = None
             if port_pnl is not None:
                 period_pnl += port_pnl
-                cum += port_pnl
-                equity_pts.append({"year": hy, "cum_pnl": cum, "pnl": port_pnl})
+                if compound_backtest and wallet_end is not None:
+                    running_wallet = float(wallet_end)
+                    cum = float(wallet_end) - float(initial_wallet)
+                    equity_pts.append(
+                        {
+                            "year": hy,
+                            "cum_pnl": cum,
+                            "pnl": port_pnl,
+                            "wallet_end": running_wallet,
+                        }
+                    )
+                else:
+                    cum += port_pnl
+                    equity_pts.append({"year": hy, "cum_pnl": cum, "pnl": port_pnl})
             year_rows.append(
                 {
                     "year": hy,
@@ -514,10 +594,13 @@ def run_walk_forward(
                     "select_year": select_year,
                     "is_rebalance": is_rebalance,
                     "picks": pick_names,
+                    "pick_details": details,
                     "portfolio_pnl": port_pnl,
                     "naive_pnl": naive,
-                    "skipped_buys": None,
                     "status": row_status,
+                    "hold_detail_path": str(trades_path) if trades_path.is_file() else None,
+                    "wallet_start": wallet_start,
+                    "wallet_end": wallet_end if compound_backtest else None,
                 }
             )
         period_rows.append(
@@ -533,19 +616,28 @@ def run_walk_forward(
 
     ok_rows = [r for r in year_rows if r.get("status") == "ok" and r.get("portfolio_pnl") is not None]
     pnls = [float(r["portfolio_pnl"]) for r in ok_rows]
+    if compound_backtest and ok_rows:
+        summary_total = float(running_wallet) - float(initial_wallet)
+    else:
+        summary_total = sum(pnls) if pnls else 0.0
     summary = {
         "n_eval_years": len([r for r in year_rows if r.get("portfolio_pnl") is not None]),
         "n_ok_years": len(ok_rows),
-        "total_pnl": sum(pnls) if pnls else 0.0,
+        "total_pnl": summary_total,
         "mean_pnl": (sum(pnls) / len(pnls)) if pnls else None,
         "pos_years": sum(1 for p in pnls if p > 0),
         "pos_ratio": (sum(1 for p in pnls if p > 0) / len(pnls)) if pnls else None,
+        "compound_backtest": bool(compound_backtest),
+        "initial_wallet": float(initial_wallet),
+        "final_wallet": float(running_wallet) if compound_backtest else None,
     }
     return {
         "summary": summary,
         "year_rows": year_rows,
         "period_rows": period_rows,
         "equity_pts": equity_pts,
+        "score_detail_paths": dict(scanned.get("score_detail_paths") or {}),
+        "report_dir": str(out_dir),
         "notes": notes,
         "params": _walk_forward_params(
             data_start=ds,
@@ -560,6 +652,7 @@ def run_walk_forward(
             flt=flt,
             weights=weights,
             book_params=book_params,
+            compound_backtest=compound_backtest,
         ),
     }
 
@@ -578,6 +671,7 @@ def _walk_forward_params(
     flt: dict[str, Any],
     weights: dict[str, float] | None,
     book_params: dict[str, Any] | None,
+    compound_backtest: bool = True,
 ) -> dict[str, Any]:
     return {
         "data_start": data_start,
@@ -592,6 +686,7 @@ def _walk_forward_params(
         "filters": flt,
         "weights": dict(weights or WEIGHTS),
         "book_params": dict(book_params or load_book_defaults()),
+        "compound_backtest": bool(compound_backtest),
     }
 
 
@@ -600,13 +695,193 @@ def write_analysis_csv(result: dict[str, Any], out_path: str | Path) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
     df = pd.DataFrame(result.get("year_rows") or [])
     if not df.empty:
+        if "pick_details" in df.columns:
+            df["pick_details"] = df["pick_details"].map(
+                lambda v: json.dumps(v if isinstance(v, list) else [], ensure_ascii=False)
+            )
         df["params_json"] = json.dumps(result.get("params") or {}, ensure_ascii=False)
     df.to_csv(dest, index=False, encoding="utf-8-sig")
     return dest
 
 
+def run_fixed_book(
+    book_stocks: dict[str, Any] | None = None,
+    *,
+    data_start: str = "",
+    data_end: str = "",
+    book_params: dict[str, Any] | None = None,
+    csv_root: str | Path = "",
+    report_dir: str | Path = "",
+    compound_backtest: bool = True,
+    force_rerun: bool = False,
+) -> dict[str, Any]:
+    """固定标的：一段连续组合回放（无 walk-forward 打分）。"""
+    notes: list[str] = []
+    basket = normalize_book_stocks(book_stocks if book_stocks is not None else load_book_stocks_full())
+    if not basket:
+        notes.append("BOOK_STOCKS 为空，无法回放。")
+        return {
+            "mode": "fixed",
+            "summary": {
+                "total_pnl": None,
+                "wallet_start": None,
+                "wallet_end": None,
+                "n_stocks": 0,
+                "compound_backtest": bool(compound_backtest),
+            },
+            "hold_detail_path": None,
+            "notes": notes,
+            "params": {
+                "mode": "fixed",
+                "data_start": data_start,
+                "data_end": data_end,
+                "book_stocks": {},
+                "book_params": dict(book_params or load_book_defaults()),
+                "compound_backtest": bool(compound_backtest),
+            },
+        }
+    ds = str(data_start or "").strip()
+    de = str(data_end or "").strip()
+    if ds and de and de < ds:
+        ds, de = de, ds
+    start = "%s0101" % ds if len(ds) == 4 else ds
+    end = "%s1231" % de if len(de) == 4 else de
+    if len(start) != 8 or len(end) != 8:
+        notes.append("起止年无效：%s–%s" % (data_start, data_end))
+        return {
+            "mode": "fixed",
+            "summary": {
+                "total_pnl": None,
+                "wallet_start": None,
+                "wallet_end": None,
+                "n_stocks": len(basket),
+                "compound_backtest": bool(compound_backtest),
+            },
+            "hold_detail_path": None,
+            "notes": notes,
+            "params": {
+                "mode": "fixed",
+                "data_start": ds,
+                "data_end": de,
+                "book_stocks": basket,
+                "book_params": dict(book_params or load_book_defaults()),
+                "compound_backtest": bool(compound_backtest),
+            },
+        }
+
+    overrides = _book_overrides(book_params)
+    budget = float(overrides["TRADE_BUDGET"])
+    if compound_backtest:
+        overrides["compound_backtest"] = True
+        overrides["wallet_cash"] = budget
+    out_dir = resolve_typed_dir(report_dir, DEFAULT_DIVIDEND_TYPE)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    htag = book_stocks_hash(basket)
+    log_name = book_log_name(kind="fixed", year=start, tag=htag, end=end)
+    log_path = out_dir / log_name
+    trades_path = trades_csv_path(log_path)
+    notes.append(
+        "固定标的 %s 只 · %s–%s · %s"
+        % (len(basket), start, end, "复利" if compound_backtest else "固定预算")
+    )
+    wallet_start = budget if compound_backtest else None
+    wallet_end = None
+    port_pnl = None
+    status = "ok"
+    try:
+        if trades_path.is_file() and not force_rerun:
+            combo = analyze_book_detail(trades_path, budget=budget, log_path=log_path)
+            if compound_backtest and log_path.is_file():
+                parsed = parse_wallet_from_log(log_path.read_text(encoding="utf-8", errors="replace"))
+                wallet_start = parsed.get("wallet_cash_start") or budget
+                wallet_end = parsed.get("wallet_cash_end")
+                if wallet_end is None:
+                    wallet_end = float(wallet_start) + float(combo.get("sum_pnl") or 0.0)
+                port_pnl = float(wallet_end) - float(wallet_start)
+            else:
+                port_pnl = float(combo.get("sum_pnl") or 0.0)
+            notes.append("命中缓存：%s" % trades_path.name)
+        else:
+            _lp, meta = run_book_backtest(
+                basket,
+                start,
+                end,
+                csv_root,
+                out_dir,
+                log_name=log_name,
+                quiet=True,
+                overrides=overrides,
+            )
+            combo = analyze_book_detail(trades_path, budget=budget, log_path=_lp)
+            if compound_backtest:
+                wallet_start = meta.get("wallet_cash_start") or budget
+                wallet_end = meta.get("wallet_cash_end")
+                if wallet_end is None:
+                    wallet_end = float(wallet_start) + float(combo.get("sum_pnl") or 0.0)
+                port_pnl = float(wallet_end) - float(wallet_start)
+            else:
+                port_pnl = float(combo.get("sum_pnl") or 0.0)
+            if meta.get("skipped"):
+                notes.append("缺 CSV 跳过：%s" % "; ".join(meta["skipped"]))
+    except Exception as e:
+        status = "回放失败: %s" % e
+        notes.append(status)
+        combo = {}
+
+    n_trades = int((combo.get("stats") or {}).get("n_buy") or 0) if combo else 0
+    return {
+        "mode": "fixed",
+        "summary": {
+            "total_pnl": port_pnl,
+            "wallet_start": wallet_start,
+            "wallet_end": wallet_end,
+            "n_stocks": len(basket),
+            "n_buy": n_trades,
+            "compound_backtest": bool(compound_backtest),
+            "status": status,
+            "picks": "、".join(sorted(basket.keys())),
+        },
+        "hold_detail_path": str(trades_path) if trades_path.is_file() else None,
+        "report_dir": str(out_dir),
+        "notes": notes,
+        "params": {
+            "mode": "fixed",
+            "data_start": ds,
+            "data_end": de,
+            "start": start,
+            "end": end,
+            "book_stocks": basket,
+            "book_params": dict(book_params or load_book_defaults()),
+            "compound_backtest": bool(compound_backtest),
+        },
+    }
+
+
+def write_fixed_book_csv(result: dict[str, Any], out_path: str | Path) -> Path:
+    dest = Path(out_path)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    s = result.get("summary") or {}
+    row = {
+        "mode": "fixed",
+        "start": (result.get("params") or {}).get("start"),
+        "end": (result.get("params") or {}).get("end"),
+        "picks": s.get("picks"),
+        "n_stocks": s.get("n_stocks"),
+        "n_buy": s.get("n_buy"),
+        "portfolio_pnl": s.get("total_pnl"),
+        "wallet_start": s.get("wallet_start"),
+        "wallet_end": s.get("wallet_end"),
+        "status": s.get("status"),
+        "hold_detail_path": result.get("hold_detail_path"),
+        "params_json": json.dumps(result.get("params") or {}, ensure_ascii=False),
+    }
+    pd.DataFrame([row]).to_csv(dest, index=False, encoding="utf-8-sig")
+    return dest
+
+
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="HlBand walk-forward 数据分析（组合回放）")
+    ap = argparse.ArgumentParser(description="HlBand walk-forward / 固定标的 数据分析（组合回放）")
+    ap.add_argument("--mode", choices=("walk-forward", "fixed"), default="walk-forward")
     ap.add_argument("--report-dir", default=str(DEFAULT_REPORT_ROOT))
     ap.add_argument("--csv-dir", default="")
     ap.add_argument(
@@ -629,10 +904,38 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--score-mode", choices=("portfolio", "single"), default="portfolio")
     ap.add_argument("--score-pool", choices=("scanned", "passed_prefilter"), default="scanned")
     ap.add_argument("--force-rerun", action="store_true")
+    ap.add_argument("--no-compound", action="store_true", help="关闭持有期复利（固定 TRADE_BUDGET）")
     ap.add_argument("--workers", type=int, default=0)
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
     csv_dir = args.csv_dir or str(Path(args.report_dir).parent.parent / "tools" / "csv")
+    if args.mode == "fixed":
+        result = run_fixed_book(
+            load_book_stocks_full(),
+            data_start=str(args.data_start or ""),
+            data_end=str(args.data_end or ""),
+            compound_backtest=not args.no_compound,
+            force_rerun=args.force_rerun,
+            csv_root=csv_dir,
+            report_dir=args.report_dir,
+        )
+        s = result.get("summary") or {}
+        print(
+            "fixed %s–%s pnl=%s wallet=%s→%s status=%s"
+            % (
+                (result.get("params") or {}).get("start"),
+                (result.get("params") or {}).get("end"),
+                s.get("total_pnl"),
+                s.get("wallet_start"),
+                s.get("wallet_end"),
+                s.get("status"),
+            )
+        )
+        out = args.out or str(Path(args.report_dir) / "local_bt_fixed_book.csv")
+        write_fixed_book_csv(result, out)
+        print("wrote", out)
+        return 0 if str(s.get("status") or "") == "ok" else 1
+
     scanned = scan_reports(args.report_dir, csv_dir)
     avail = infer_score_years(scanned.get("stocks") or {})
     if not avail:
@@ -652,6 +955,7 @@ def main(argv: list[str] | None = None) -> int:
         score_pool=args.score_pool,
         force_rerun=args.force_rerun,
         workers=args.workers,
+        compound_backtest=not args.no_compound,
         csv_root=csv_dir,
         report_dir=args.report_dir,
     )

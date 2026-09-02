@@ -267,11 +267,14 @@ def kpi_from_detail(detail: Path, log: Path | None, stock: str) -> dict[str, Any
         detail,
         budget=budget,
         meta={"tag": "HlBand", "ver": "local", "stock": stock, "period": "1d", "budget": budget},
+        log_path=log,
     )
     stats = result.get("stats") or {}
     trades = result.get("trades") or []
     holds = []
     win_pnls = []
+    buy_ctr: Counter[str] = Counter()
+    sell_ctr: Counter[str] = Counter()
     for t in trades:
         h = t.get("hold_calendar_days")
         if h is not None and h != "":
@@ -285,6 +288,13 @@ def kpi_from_detail(detail: Path, log: Path | None, stock: str) -> dict[str, Any
             pnl = 0.0
         if pnl > 0:
             win_pnls.append(pnl)
+        # 信号计数只看本明细轮次，避免组合 log 污染按票归因
+        bs = str(t.get("buy_signal") or "").strip()
+        if bs and bs not in ("-",):
+            buy_ctr[bs] += 1
+        ss = str(t.get("sell_signal") or "").strip()
+        if ss and ss not in ("-",):
+            sell_ctr[ss] += 1
     gp = float(stats.get("gross_profit") or 0.0)
     gl = float(stats.get("gross_loss") or 0.0)
     sig = parse_log_signals(log)
@@ -302,8 +312,8 @@ def kpi_from_detail(detail: Path, log: Path | None, stock: str) -> dict[str, Any
         "avg_hold_days": (sum(holds) / len(holds)) if holds else None,
         "max_win_pnl": max(win_pnls) if win_pnls else 0.0,
         "budget": float(budget),
-        "sell": sig["sell"],
-        "buy": sig["buy"],
+        "sell": dict(sell_ctr) if sell_ctr else sig["sell"],
+        "buy": dict(buy_ctr) if buy_ctr else sig["buy"],
         "skip": sig["skip"],
         "n_bars": int(sig["n_bars"] or 0),
         "detail": str(detail),

@@ -73,7 +73,7 @@ python .cursor/skills/qmt-backtest-report/scripts/generate_report.py --theme hon
 
 1. **只取末次** `{tag} vX.Y init` 之后的会话（同文件可能混有 KeyboardInterrupt / 旧策略噪声）。
 2. 成交配对：`BUY by signal` + `BUY filled` ↔ `SELL by signal` + `SELL done`；卖出执行日取 `SELL by signal` 前一条 bar 日。
-3. 盈亏粗算：`(sell_price - buy_price) * shares`，不拆佣金。
+3. 盈亏粗算：`(sell_price - buy_price) * shares`，不拆佣金。终端 CSV 有「盈利」列时以该列为准；**组合多标的明细按「代码」各自 FIFO**，禁止跨票配对（否则收益%会假阴/假阳）。一笔卖出吃掉多笔买入时**按买入 lot 拆轮次**（保留各笔买入日/买价，盈利按股数分摊）。
 4. 权益：`equity = budget + cum_pnl`（按平仓日阶梯）。
 5. K 线着色按持仓区间，**不是**涨跌红绿。
 

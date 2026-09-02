@@ -1,12 +1,24 @@
 # coding: utf-8
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
-from book_backtest import book_stocks_hash, normalize_book_stocks
+from book_backtest import book_log_name, book_stocks_hash, normalize_book_stocks
+from compound_wallet import compound_enabled
 from select_analysis import (
     collect_score_years,
     data_and_eval_years,
     iter_rebalance_periods,
+    pick_details_from_basket,
+    run_fixed_book,
     score_years_for_period,
+    write_analysis_csv,
+)
+from select_config import (
+    book_stocks_to_editor_rows,
+    editor_rows_to_book_stocks,
+    load_book_stocks_full,
 )
 from stock_select import empty_year_kpi, score_universe, _overlay_portfolio_kpi
 
@@ -42,6 +54,84 @@ class SelectAnalysisTests(unittest.TestCase):
         a = {"600350.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"}}
         b = normalize_book_stocks(a)
         self.assertEqual(book_stocks_hash(a), book_stocks_hash(b))
+
+    def test_compound_enabled_overrides(self):
+        self.assertTrue(compound_enabled({"compound_backtest": True}))
+        self.assertFalse(compound_enabled({"compound_backtest": False}))
+        self.assertFalse(compound_enabled(None))
+
+    def test_load_book_stocks_full_from_temp_config(self):
+        with tempfile.TemporaryDirectory() as td:
+            cfg = Path(td) / "config.py"
+            cfg.write_text(
+                "BOOK_STOCKS = {\n"
+                '  "600350.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},\n'
+                '  "601988.SH": "SMA",\n'
+                "}\n"
+                'MA_TYPE = "EMA"\n',
+                encoding="utf-8",
+            )
+            book = load_book_stocks_full(str(cfg))
+            self.assertEqual(book["600350.SH"]["ma_type"], "EMA")
+            self.assertEqual(book["600350.SH"]["dividend_type"], "front_ratio")
+            self.assertEqual(book["601988.SH"]["ma_type"], "SMA")
+            rows = book_stocks_to_editor_rows(book)
+            back = editor_rows_to_book_stocks(rows)
+            self.assertIn("600350.SH", back)
+
+    def test_run_fixed_book_passes_basket_and_compound(self):
+        basket = {
+            "600350.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+            "601988.SH": {"ma_type": "SMA", "dividend_type": "front"},
+        }
+        with tempfile.TemporaryDirectory() as td:
+            report = Path(td) / "report"
+            report.mkdir()
+            captured = {}
+
+            def _fake_run(book_stocks, start, end, csv_root, out_dir, **kwargs):
+                captured["book"] = dict(book_stocks)
+                captured["start"] = start
+                captured["end"] = end
+                captured["overrides"] = dict(kwargs.get("overrides") or {})
+                log_name = kwargs.get("log_name") or "x.txt"
+                log_path = Path(out_dir) / log_name
+                log_path.write_text(
+                    "local_bt_book compound=1 wallet_start=100000.00\nwallet_end=110000.00\n",
+                    encoding="utf-8",
+                )
+                trades = log_path.with_name(log_path.stem + "_操作明细.csv")
+                trades.write_text("代码,操作类型,操作价格,数量,盈利\n", encoding="gbk")
+                return log_path, {
+                    "wallet_cash_start": 100000.0,
+                    "wallet_cash_end": 110000.0,
+                    "skipped": [],
+                }
+
+            with patch("select_analysis.run_book_backtest", side_effect=_fake_run), patch(
+                "select_analysis.analyze_book_detail",
+                return_value={"sum_pnl": 10000.0, "stats": {"n_buy": 2}},
+            ):
+                result = run_fixed_book(
+                    basket,
+                    data_start="2024",
+                    data_end="2025",
+                    book_params={"trade_budget": 100000.0},
+                    csv_root=td,
+                    report_dir=report,
+                    compound_backtest=True,
+                    force_rerun=True,
+                )
+            self.assertEqual(captured["start"], "20240101")
+            self.assertEqual(captured["end"], "20251231")
+            self.assertTrue(captured["overrides"].get("compound_backtest"))
+            self.assertEqual(set(captured["book"].keys()), set(basket.keys()))
+            self.assertEqual(result["mode"], "fixed")
+            self.assertAlmostEqual(float(result["summary"]["total_pnl"]), 10000.0)
+            self.assertIn(
+                "fixed",
+                book_log_name(kind="fixed", year="20240101", tag="abc", end="20251231"),
+            )
 
     def test_score_universe_portfolio_kpi(self):
         scanned = {
@@ -80,6 +170,52 @@ class SelectAnalysisTests(unittest.TestCase):
         df = scored["df"]
         row = df[df["stock"] == "600350.SH"].iloc[0]
         self.assertEqual(int(row["n_buy"]), 2)
+
+    def test_pick_details_from_basket(self):
+        basket = {
+            "601988.SH": {"ma_type": "SMA", "dividend_type": "front"},
+            "600350.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+        }
+        details = pick_details_from_basket(basket, {"600350.SH": 1.23})
+        self.assertEqual(len(details), 2)
+        self.assertEqual(details[0]["stock"], "600350.SH")
+        self.assertEqual(details[0]["ma_type"], "EMA")
+        self.assertEqual(details[0]["dividend_type"], "front_ratio")
+        self.assertEqual(details[0]["score"], 1.23)
+        self.assertEqual(details[1]["stock"], "601988.SH")
+        self.assertNotIn("score", details[1])
+        self.assertEqual(pick_details_from_basket(None), [])
+        self.assertEqual(pick_details_from_basket({}), [])
+
+    def test_write_analysis_csv_serializes_pick_details(self):
+        result = {
+            "year_rows": [
+                {
+                    "year": "2022",
+                    "picks": "600350.SH",
+                    "pick_details": [
+                        {"stock": "600350.SH", "ma_type": "EMA", "dividend_type": "front_ratio"}
+                    ],
+                    "portfolio_pnl": 100.0,
+                    "status": "ok",
+                }
+            ],
+            "params": {"top_k": 3},
+        }
+        with tempfile.TemporaryDirectory() as td:
+            path = write_analysis_csv(result, Path(td) / "out.csv")
+            text = path.read_text(encoding="utf-8-sig")
+            self.assertIn("pick_details", text)
+            self.assertIn("600350.SH", text)
+            self.assertIn("front_ratio", text)
+            # nested list must be JSON string, not Python repr of list-of-dict alone in cell mess
+            import json
+
+            import pandas as pd
+
+            df = pd.read_csv(path)
+            parsed = json.loads(df.iloc[0]["pick_details"])
+            self.assertEqual(parsed[0]["ma_type"], "EMA")
 
 
 if __name__ == "__main__":

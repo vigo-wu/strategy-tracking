@@ -18,6 +18,7 @@ from analyze import (  # noqa: E402
     load_detail_raw,
     parse_budget_from_log,
     resolve_typed_dir,
+    sibling_log_path,
 )
 from market_csv import walk_days  # noqa: E402
 from mock_qmt import BookMockContext, _as_tag  # noqa: E402
@@ -29,6 +30,12 @@ from run import (  # noqa: E402
     apply_config_overrides,
     get_market_store,
     install_config_overrides,
+)
+from book_pool_patch import install_book_pool_patch  # noqa: E402
+from compound_wallet import (  # noqa: E402
+    install_compound_patch,
+    make_wallet,
+    read_wallet_end,
 )
 from trades_csv import CombinedTradeLedger, trades_csv_path, wrap_fill_hooks  # noqa: E402
 
@@ -83,11 +90,14 @@ def normalize_book_stocks(raw: Mapping[str, Any] | None) -> dict[str, dict[str, 
     return out
 
 
-def book_log_name(*, kind: str, year: str, tag: str) -> str:
+def book_log_name(*, kind: str, year: str, tag: str, end: str = "") -> str:
     y = str(year or "").strip()
     t = str(tag or "").strip()
     if kind == "score":
         return "local_bt_book_score_%s_u%s.txt" % (y, t)
+    if kind == "fixed":
+        e = str(end or y).strip()
+        return "local_bt_book_fixed_%s_%s_k%s.txt" % (y, e, t)
     return "local_bt_book_hold_%s_k%s.txt" % (y, t)
 
 
@@ -205,13 +215,20 @@ def run_book_backtest(
     if quiet:
         _patch_quiet_status(ns)
 
+    wallet = make_wallet(ns, merged_overrides, budget)
+    install_book_pool_patch(ns)
+    if wallet is not None:
+        install_compound_patch(ns, wallet)
     ledger = CombinedTradeLedger(lambda: str(getattr(ns.get("A"), "stock", "") or ""))
-    wrap_fill_hooks(ns, ledger)
+    wrap_fill_hooks(ns, ledger, wallet)
+    wallet_start = float(wallet.cash) if wallet is not None else budget
 
     banner = (
         "local_bt_book n=%s walk=%s %s chart=%s budget=%s"
         % (len(norm), walk[0].day, walk[-1].day, chart, budget)
     )
+    if wallet is not None:
+        banner += " compound=1 wallet_start=%.2f" % wallet_start
     log_f = open(log_path, "w", encoding="utf-8", newline="\n")
     log_f.write(banner + "\n")
     if load_err:
@@ -245,10 +262,14 @@ def run_book_backtest(
             except Exception:
                 pass
             sys.stdout, sys.stderr = old_out, old_err
+        if wallet is not None:
+            wallet_end = read_wallet_end(ns, wallet)
+            log_f.write("wallet_end=%.2f\n" % float(wallet_end))
         log_f.close()
 
     trades_path = trades_csv_path(log_path)
     ledger.write(trades_path)
+    wallet_end_val = read_wallet_end(ns, wallet) if wallet is not None else None
     meta = {
         "log_path": str(log_path),
         "trades_path": str(trades_path),
@@ -258,6 +279,9 @@ def run_book_backtest(
         "walk_start": walk[0].day,
         "walk_end": walk[-1].day,
         "n_bars": len(walk),
+        "compound": wallet is not None,
+        "wallet_cash_start": wallet_start if wallet is not None else None,
+        "wallet_cash_end": wallet_end_val,
     }
     return log_path, meta
 
@@ -270,10 +294,11 @@ def analyze_book_detail(
     """组合明细 → 组合级 analyze + 按票归因。"""
     path = Path(detail_path)
     bud = float(budget)
-    if log_path:
-        bud = parse_budget_from_log(log_path, default=bud)
-    combo = analyze_detail(path, budget=bud)
-    per_stock = attribute_portfolio_kpi(path, budget=bud, log_path=log_path)
+    log = Path(log_path) if log_path else sibling_log_path(path)
+    if log and log.is_file():
+        bud = parse_budget_from_log(log, default=bud)
+    combo = analyze_detail(path, budget=bud, log_path=log)
+    per_stock = attribute_portfolio_kpi(path, budget=bud, log_path=log)
     combo["per_stock"] = per_stock
     combo["sum_pnl"] = float((combo.get("stats") or {}).get("sum_pnl") or 0.0)
     return combo

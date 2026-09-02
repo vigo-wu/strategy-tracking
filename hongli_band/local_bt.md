@@ -66,6 +66,8 @@ python hongli_band/local_bt_ui.py
 
 成功标志：能列出 `csv/<type>/` 里的标的，或「仅分析」能看到已有操作明细。
 
+界面表格统一 **中文表头**；凡含标的代码的列，列名用「代码」，并在旁紧跟「名称」（来自 `STOCK_META`，未知则显示裸代码）。磁盘 CSV schema 不变。
+
 ## 目录约定
 
 读和写按 **复权类型** 分目录，不要把五种 CSV 揉进同一层。
@@ -133,6 +135,26 @@ hongli_band/回测记录/      ← 旧终端导出；「仅分析」会一并列
 顶栏 **第四模式**。与「选股方案」共用硬过滤/权重控件，但打分与持有走 **组合 BOOK 回放**（全池共享 `BOOK_LOT_MAX` 槽位），而不是读单票分年明细直接相加。
 
 先填 **参数表单**，点「开始分析」后才跑（改控件不会即时重算）。侧栏「刷新缓存」会清扫描缓存，**不会**删除已生成的组合回放文件。
+
+表单顶部可选 **分析类型**：
+
+| 类型 | 做什么 |
+| :--- | :--- |
+| **Walk-forward** | 过去 N 年打分 → Top K → 持有期组合回放（下文默认描述） |
+| **固定标的** | 跳过打分；用 `config.BOOK_STOCKS`（表单可改，不写回）对起止年做 **一段连续** 组合回放 |
+
+#### 固定标的回放
+
+- 默认载入 [`hlband/config.py`](./scripts/qmt/hlband/config.py) 的 `BOOK_STOCKS`（含 `ma_type` / `dividend_type`）；可在表单 `data_editor` 增删改；「从 config 重载」恢复。
+- 区间：数据起始/结束年 → `YYYY0101`–`YYYY1231` 连续回放（复利在区间内滚动，不按年重置钱包）。
+- 仓位：与 Walk-forward 相同（资金帽 / `BOOK_LOT_MAX` / 分档）；默认开复利；可强制重跑。
+- 产物：`report/<type>/local_bt_book_fixed_{start}_{end}_k{hash8}_*`；总表 `report/local_bt_fixed_book.csv`。
+- CLI：
+
+```bash
+python hongli_band/scripts/local_bt/select_analysis.py \
+  --mode fixed --data-start 2024 --data-end 2025 --force-rerun
+```
 
 #### 适用场景
 
@@ -234,6 +256,7 @@ Phase C  持有期回放（组合）
 | `select_year` | 该段段首（选股年） |
 | `is_rebalance` | 是否段首换仓年 |
 | `picks` | 该段 Top K（顿号分隔） |
+| `pick_details` | Top K 明细列表：`stock` / `ma_type` / `dividend_type`（界面「查看标的」弹窗；CSV 中为 JSON 字符串） |
 | `portfolio_pnl` | 该年 Top K **组合回放** 盈亏 |
 | `naive_pnl` | 该年 Top K **单票明细相加**（对照） |
 | `status` | `ok` / `无推荐` / `窗口不足` / `回放失败:…` |
@@ -292,9 +315,25 @@ python hongli_band/scripts/local_bt/select_analysis.py \
 | 起止年 | 选定打分窗口 | **数据年** → 自动推评估年 | 用户指定 walk 区间 |
 | 产物 | `local_bt_stock_select.csv` | `local_bt_select_analysis.csv` | 各票分年明细 |
 
+#### 复利回测（local_bt）
+
+默认 **开启**（数据分析表单「复利回测」；侧栏「复利回测」用于单票/批量）。**仅 local_bt**，QMT 编辑器回测仍固定 `TRADE_BUDGET`。
+
+| 项 | 说明 |
+| :--- | :--- |
+| 口径 | `cap = CASH_RATIO × (现金 + 池内持仓 cost)`；买卖更新现金 |
+| 定仓 | patch `_trade_budget_cap` → 动态 cap × 50%/30%/剩余档 |
+| 明细列 | `买入权重(%)` / `当前权重(%)` 填 cap 占比；追加 `可部署资金` / `组合权益` |
+| walk-forward 持有 | **跨年传递**期末权益作下年初始现金；`portfolio_pnl = wallet_end - wallet_start` |
+| 打分预计算 Phase A | 仍每年独立 `TRADE_BUDGET`（不改 KPI 排序） |
+| 缓存 | 改逻辑或开关后须 **强制重跑** |
+
+关闭复利：数据分析取消勾选，或 CLI `--no-compound`。
+
 #### 近似与局限
 
 - **打分池（大池）vs 持有池（Top K）**：Phase A 全池抢槽，Phase C 仅 K 只，竞争强度不同；组合 KPI 反映的是「在全池里的表现」，不是持有池里的表现。
+- **回测跨票分档**：local_bt 已 patch `_chart_next_frac`，按 universe hot 汇总全池已占 50%/30%/剩余档；与实盘仍可能有 cost 市值等细微差。
 - **ma / div 建议**：仍来自单票 SMA/EMA、复权对照（`scan_reports`），不是组合回放现场推导。
 - **非实盘账本**：无 `BOOK_FILE` 跨日打卡、无实盘均分冻结窗口的完整语义。
 - **得分非 Sharpe**：百分位加权排名，存在多重检验偏差；勿把 `portfolio_pnl` 直接外推为实盘预期。

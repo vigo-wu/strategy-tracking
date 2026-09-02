@@ -1394,7 +1394,10 @@ class DivCompareViewTests(unittest.TestCase):
             },
             stock="600000.SH",
         )
-        self.assertEqual(list(df.columns), ["标的", "复权", "轮次", "总盈亏", "胜率", "平均收益%", "更优"])
+        self.assertEqual(
+            list(df.columns),
+            ["代码", "名称", "复权", "轮次", "总盈亏", "胜率", "平均收益%", "更优"],
+        )
         self.assertEqual(list(df["复权"]), ["前复权", "等比前复权"])
         self.assertEqual(list(df["更优"]), ["是", ""])
 
