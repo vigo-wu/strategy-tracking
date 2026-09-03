@@ -45,7 +45,7 @@ from analyze import (  # noqa: E402
     typed_sibling_dirs,
 )
 from market_csv import load_daily_csv  # noqa: E402
-from select_config import DEFAULT_FILTERS, WEIGHTS  # noqa: E402
+from select_config import DEFAULT_FILTERS, WEIGHTS, clamp_top_n  # noqa: E402
 
 DEFAULT_REPORT = DEFAULT_REPORT_ROOT
 DEFAULT_CSV_DIR = DEFAULT_CSV_ROOT
@@ -1180,8 +1180,9 @@ def score_universe(
     heatmap = passed[heat_cols].copy() if not passed.empty else pd.DataFrame(columns=heat_cols)
 
     book_rank = df[df["in_book"]].copy()
-    top_n = int(flt.get("top_n") or 6)
-    top_n = min(max(top_n, 1), 9)
+    top_n = clamp_top_n(flt.get("top_n"))
+    flt = dict(flt)
+    flt["top_n"] = top_n
     recommend = passed.head(top_n).copy()
     snippet = format_book_snippet(recommend)
 

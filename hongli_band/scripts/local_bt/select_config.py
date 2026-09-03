@@ -115,7 +115,9 @@ FILTER_WIDGETS: list[dict[str, Any]] = [
         "min_value": 4,
         "max_value": 9,
         "step": 1,
-        "default": 10,
+        # 须落在 [min_value, max_value]；打分端也按 max 截断，否则侧栏 N 与推荐池行数不一致
+        "default": 6,
+        "clamp_default": True,
     },
 ]
 
@@ -162,6 +164,20 @@ def cast_filter_value(spec: dict[str, Any], raw: Any) -> Any:
     if str(spec.get("dtype") or "float") == "int":
         return int(raw)
     return float(raw)
+
+
+def clamp_top_n(n: Any, *, fallback: int | None = None) -> int:
+    """推荐池大小：与侧栏 top_n 上限对齐；允许 CLI/测试用低于侧栏下限的值。"""
+    spec = FILTER_BY_KEY.get("top_n") or {}
+    hi = int(spec.get("max_value") or 9)
+    fb = int(fallback if fallback is not None else (spec.get("default") or 6))
+    try:
+        v = int(n) if n is not None else fb
+    except (TypeError, ValueError):
+        v = fb
+    if v <= 0:
+        v = fb
+    return min(max(v, 1), hi)
 
 
 ANALYSIS_SIDEBAR: dict[str, Any] = {

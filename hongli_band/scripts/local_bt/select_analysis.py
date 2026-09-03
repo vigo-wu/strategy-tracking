@@ -33,6 +33,7 @@ from book_backtest import (  # noqa: E402
 from compound_wallet import parse_wallet_from_log  # noqa: E402
 from select_config import (  # noqa: E402
     DEFAULT_FILTERS,
+    clamp_top_n,
     coerce_book_stocks_dict,
     is_year_keyed_baskets,
     load_book_defaults,
@@ -81,7 +82,7 @@ def picks_from_scored(
 
     返回 (picks, note)。note 非空表示发生了补足或仍不足。
     """
-    k = min(max(int(top_k or 3), 1), 9)
+    k = clamp_top_n(top_k, fallback=3)
     df = None
     if scored:
         rec = scored.get("recommend")

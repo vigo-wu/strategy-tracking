@@ -94,6 +94,7 @@ from select_config import (  # noqa: E402
     basket_from_import_text,
     book_stocks_to_editor_rows,
     cast_filter_value,
+    clamp_top_n,
     editor_rows_to_book_stocks,
     load_book_defaults,
     load_book_stocks_full,
@@ -1768,10 +1769,12 @@ def _render_select(
 
     n_all = int(cov.get("n_stock") or 0)
     n_pass = 0 if passed is None or passed.empty else len(passed)
+    top_n = clamp_top_n((scored.get("filters") or filters or {}).get("top_n"))
+    n_rec = 0 if rec is None or rec.empty else len(rec)
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("扫描标的", n_all)
     c2.metric("过线", n_pass)
-    c3.metric("推荐池", 0 if rec is None or rec.empty else len(rec))
+    c3.metric("推荐池", n_rec)
     cut = scored.get("vol_cut")
     c4.metric("波动上限", "-" if cut is None else "%.1f%%" % (float(cut) * 100.0))
     st.caption("产物：`%s` · 扫描全部复权子目录 · 不自动改 `BOOK_STOCKS`" % out_path)
@@ -1783,10 +1786,12 @@ def _render_select(
     else:
         st.dataframe(_select_display_df(book_rank, score_years=years), use_container_width=True, hide_index=True)
 
-    st.subheader("推荐池 Top %s" % int(filters.get("top_n") or 6))
+    st.subheader("推荐池 Top %s" % top_n)
     if rec is None or rec.empty:
         st.warning("没有过线标的。放宽侧栏阈值，或先补齐分年批量回测。")
     else:
+        if n_rec < top_n:
+            st.caption("过线仅 %s 只，不足侧栏推荐池 N=%s。" % (n_rec, top_n))
         st.dataframe(_select_display_df(rec, score_years=years), use_container_width=True, hide_index=True)
         st.caption("建议均线/复权按侧栏选定年重算；缺对照的票不写入 snippet。不自动改 `BOOK_STOCKS`。")
         st.code(format_book_snippet(rec), language="python")
@@ -1872,6 +1877,9 @@ def _render_select_filter_widgets(year_max: int) -> dict[str, Any]:
         key = str(spec["key"])
         label = str(spec["label"])
         wkey = "select_flt_%s" % key
+        if key == "top_n" and wkey in st.session_state:
+            # 旧 session 可能残留越界值（曾 default=10 > max=9）
+            st.session_state[wkey] = clamp_top_n(st.session_state[wkey])
         if wkey in st.session_state:
             kwargs.pop("value", None)
         widget = str(spec.get("widget") or "number_input")
@@ -1880,6 +1888,8 @@ def _render_select_filter_widgets(year_max: int) -> dict[str, Any]:
         else:
             raw = st.number_input(label, key=wkey, **kwargs)
         out[key] = cast_filter_value(spec, raw)
+        if key == "top_n":
+            out[key] = clamp_top_n(out[key])
         cap = spec.get("caption")
         if cap:
             st.caption(str(cap))

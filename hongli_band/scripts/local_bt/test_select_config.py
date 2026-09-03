@@ -16,6 +16,7 @@ from select_config import (
     FILTER_WIDGETS,
     WEIGHTS,
     basket_from_import_text,
+    clamp_top_n,
     coerce_book_stocks_dict,
     is_year_keyed_baskets,
     parse_book_stocks_text,
@@ -50,6 +51,14 @@ class SelectConfigTest(unittest.TestCase):
             val = spec["default"]
             self.assertGreaterEqual(val, lo, spec["key"])
             self.assertLessEqual(val, hi, spec["key"])
+
+    def test_clamp_top_n_matches_sidebar_max(self) -> None:
+        hi = int(FILTER_BY_KEY["top_n"]["max_value"])
+        self.assertEqual(clamp_top_n(10), hi)
+        self.assertEqual(clamp_top_n(hi), hi)
+        self.assertEqual(clamp_top_n(3), 3)
+        self.assertEqual(clamp_top_n(None), int(DEFAULT_FILTERS["top_n"]))
+        self.assertEqual(clamp_top_n(0), int(DEFAULT_FILTERS["top_n"]))
 
     def test_year_max_widget_kwargs_clamp(self) -> None:
         self.assertEqual(year_max_for_window(2), 5)
