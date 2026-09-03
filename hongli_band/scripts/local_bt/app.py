@@ -31,6 +31,7 @@ from analyze import (  # noqa: E402
     DEFAULT_REPORT_ROOT,
     DIVIDEND_LABELS,
     DIVIDEND_TYPES,
+    add_stats_from_trades,
     analyze_detail,
     batch_summary_dataframe,
     batch_year_summary_dataframe,
@@ -528,6 +529,40 @@ def _ensure_hold_metrics(
     )
 
 
+def _show_overall_metrics(stats: dict[str, Any]) -> None:
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric("轮次", int(stats.get("n_buy") or 0))
+    c2.metric("总盈亏", f"{float(stats.get('sum_pnl') or 0):,.2f}")
+    c3.metric("胜率", f"{float(stats.get('win_rate') or 0):.1f}%")
+    c4.metric("平均收益%", f"{float(stats.get('avg_ret') or 0):.2f}")
+    c5.metric("最大单笔%", f"{float(stats.get('max_win') or 0):.2f}")
+    c6.metric("最大亏损%", f"{float(stats.get('max_loss') or 0):.2f}")
+
+
+def _show_add_metrics(stats: dict[str, Any]) -> None:
+    """加仓 KPI 单独一行；无加仓时百分比类显示 -。"""
+    n_add = int(stats.get("n_add") or 0)
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric("加仓次数", n_add)
+    c2.metric(
+        "加仓总盈亏",
+        f"{float(stats.get('add_sum_pnl') or 0):,.2f}" if n_add else "-",
+    )
+    c3.metric("加仓胜率", f"{float(stats.get('add_win_rate') or 0):.1f}%" if n_add else "-")
+    c4.metric(
+        "加仓平均收益%",
+        f"{float(stats.get('add_avg_ret') or 0):.2f}" if n_add else "-",
+    )
+    c5.metric(
+        "加仓最大单笔%",
+        f"{float(stats.get('add_max_win') or 0):.2f}" if n_add else "-",
+    )
+    c6.metric(
+        "加仓最大亏损%",
+        f"{float(stats.get('add_max_loss') or 0):.2f}" if n_add else "-",
+    )
+
+
 def _show_trades_rounds(
     trades: list[dict[str, Any]],
     detail_path: Path,
@@ -647,6 +682,7 @@ def _render_analysis(
                 diag={},
                 price_info={"source": "terminal", "terminal_csv": str(detail_path)},
             )
+            result["stats"].update(add_stats_from_trades(trades))
             result["equity"] = mod.equity_curve(trades, budget)
             trades = _ensure_hold_metrics(
                 trades,
@@ -659,14 +695,8 @@ def _render_analysis(
 
     stats = result["stats"]
     if show_metrics:
-        c1, c2, c3, c4, c5, c6 = st.columns(6)
-        c1.metric("轮次", int(stats.get("n_buy") or 0))
-        c2.metric("总盈亏", f"{float(stats.get('sum_pnl') or 0):,.2f}")
-        c3.metric("胜率", f"{float(stats.get('win_rate') or 0):.1f}%")
-        c4.metric("平均收益%", f"{float(stats.get('avg_ret') or 0):.2f}")
-        c5.metric("最大单笔%", f"{float(stats.get('max_win') or 0):.2f}")
-        c6.metric("最大亏损%", f"{float(stats.get('max_loss') or 0):.2f}")
-
+        _show_overall_metrics(stats)
+        _show_add_metrics(stats)
         st.caption(f"明细真源：`{detail_path}` · 预算 {budget:,.0f} 元")
 
     if show_equity:
@@ -805,13 +835,8 @@ def _render_book_detail_panel(
         + "明细 `%s` · 预算 %s 元"
         % (detail_path.name, f"{budget:,.0f}")
     )
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.metric("轮次", int(stats.get("n_buy") or 0))
-    c2.metric("总盈亏", f"{float(stats.get('sum_pnl') or 0):,.2f}")
-    c3.metric("胜率", f"{float(stats.get('win_rate') or 0):.1f}%")
-    c4.metric("平均收益%", f"{float(stats.get('avg_ret') or 0):.2f}")
-    c5.metric("最大单笔%", f"{float(stats.get('max_win') or 0):.2f}")
-    c6.metric("最大亏损%", f"{float(stats.get('max_loss') or 0):.2f}")
+    _show_overall_metrics(stats)
+    _show_add_metrics(stats)
     st.plotly_chart(
         _plot_equity(combo.get("equity"), budget, "组合权益曲线（预算 + 已实现盈亏累计）"),
         use_container_width=True,

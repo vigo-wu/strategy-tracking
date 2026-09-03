@@ -6,7 +6,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from analyze import enrich_trades_signals_from_log, parse_fill_signals_from_log, report_mod
+from analyze import (
+    add_stats_from_trades,
+    enrich_trades_signals_from_log,
+    mark_add_lots,
+    parse_fill_signals_from_log,
+    report_mod,
+)
 
 
 HEADER = (
@@ -148,6 +154,8 @@ class ParseTerminalRoundsTests(unittest.TestCase):
         ev = parse_fill_signals_from_log(log)
         buys = [e for e in ev if e["kind"] == "buy"]
         self.assertEqual(len(buys), 2)
+        self.assertFalse(buys[0].get("is_add"))
+        self.assertTrue(buys[1].get("is_add"))
         self.assertEqual(buys[1]["signal"], "plat_break")
         self.assertEqual(buys[1]["shares"], 6100)
         self.assertEqual(buys[1]["day"], "20191216")
@@ -162,6 +170,8 @@ class ParseTerminalRoundsTests(unittest.TestCase):
                     "buy_open_day": "20191201",
                     "sell_exec_day": "20191220",
                     "shares": 3000,
+                    "pnl": 100.0,
+                    "ret_pct": 3.0,
                     "buy_signal": "-",
                     "sell_signal": "-",
                 },
@@ -171,6 +181,8 @@ class ParseTerminalRoundsTests(unittest.TestCase):
                     "buy_open_day": "20191201",
                     "sell_exec_day": "20191220",
                     "shares": 9400,
+                    "pnl": 200.0,
+                    "ret_pct": 5.0,
                     "buy_signal": "-",
                     "sell_signal": "-",
                 },
@@ -180,16 +192,63 @@ class ParseTerminalRoundsTests(unittest.TestCase):
                     "buy_open_day": "20191216",
                     "sell_exec_day": "20191220",
                     "shares": 6100,
+                    "pnl": -50.0,
+                    "ret_pct": -2.5,
                     "buy_signal": "-",
                     "sell_signal": "-",
                 },
             ]
             out = enrich_trades_signals_from_log(trades, lp)
+            out = mark_add_lots(out)
         self.assertEqual(out[1]["buy_signal"], "pullback_vol")
         self.assertEqual(out[2]["buy_signal"], "plat_break")
         self.assertEqual(out[2]["sell_signal"], "trail_stop")
         # 同日小仓共享买入信号
         self.assertEqual(out[0]["buy_signal"], "pullback_vol")
+        self.assertFalse(out[0].get("is_add"))
+        self.assertFalse(out[1].get("is_add"))
+        self.assertTrue(out[2].get("is_add"))
+        stats = add_stats_from_trades(out)
+        self.assertEqual(stats["n_add"], 1)
+        self.assertEqual(stats["add_win_n"], 0)
+        self.assertEqual(stats["add_win_rate"], 0.0)
+        self.assertEqual(stats["add_sum_pnl"], -50.0)
+        self.assertEqual(stats["add_avg_ret"], -2.5)
+        self.assertEqual(stats["add_max_win"], -2.5)
+        self.assertEqual(stats["add_max_loss"], -2.5)
+
+    def test_mark_add_lots_overlap_without_log(self):
+        """无 log 时：后买日落在先前持仓区间内 → 加仓。"""
+        trades = [
+            {
+                "i": 1,
+                "stock": "600350",
+                "buy_open_day": "20220916",
+                "sell_exec_day": "20221026",
+                "shares": 13700,
+                "pnl": 2000.0,
+                "ret_pct": 4.0,
+            },
+            {
+                "i": 2,
+                "stock": "600350",
+                "buy_open_day": "20221017",
+                "sell_exec_day": "20221026",
+                "shares": 7900,
+                "pnl": 1285.0,
+                "ret_pct": 1.5,
+            },
+        ]
+        out = mark_add_lots(trades)
+        self.assertFalse(out[0].get("is_add"))
+        self.assertTrue(out[1].get("is_add"))
+        stats = add_stats_from_trades(out)
+        self.assertEqual(stats["n_add"], 1)
+        self.assertEqual(stats["add_win_rate"], 100.0)
+        self.assertEqual(stats["add_sum_pnl"], 1285.0)
+        self.assertEqual(stats["add_avg_ret"], 1.5)
+        self.assertEqual(stats["add_max_win"], 1.5)
+        self.assertEqual(stats["add_max_loss"], 1.5)
 
 
 if __name__ == "__main__":

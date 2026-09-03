@@ -73,6 +73,7 @@ class DisplayDfTests(unittest.TestCase):
         self.assertIn("买入日", empty.columns)
         self.assertIn("持有回撤%", empty.columns)
         self.assertIn("持有浮盈%", empty.columns)
+        self.assertIn("是否加仓", empty.columns)
         self.assertNotIn("buy_open_day", empty.columns)
         df = trades_to_dataframe(
             [
@@ -88,6 +89,7 @@ class DisplayDfTests(unittest.TestCase):
                     "hold_calendar_days": 8,
                     "hold_max_dd": -5.5,
                     "hold_max_up": 8.0,
+                    "is_add": True,
                 }
             ]
         )
@@ -95,6 +97,7 @@ class DisplayDfTests(unittest.TestCase):
         self.assertEqual(df.iloc[0]["买入日"], "20240102")
         self.assertEqual(df.iloc[0]["持有回撤%"], -5.5)
         self.assertEqual(df.iloc[0]["持有浮盈%"], 8.0)
+        self.assertEqual(df.iloc[0]["是否加仓"], "是")
 
     def test_book_editor_rows_have_name_and_roundtrip(self):
         book = {

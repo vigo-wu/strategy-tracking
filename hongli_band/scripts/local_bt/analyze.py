@@ -1266,6 +1266,8 @@ def _normalize_trades(rounds: list[dict]) -> list[dict]:
         t.setdefault("sell_label", t.get("sell_signal", "-"))
         t.setdefault("buy_signal_day", t.get("buy_open_day"))
         t.setdefault("sell_signal_day", t.get("sell_exec_day"))
+        if "is_add" not in t:
+            t["is_add"] = False
         if "hold_calendar_days" not in t:
             try:
                 b = datetime.strptime(str(t["buy_open_day"])[:8], "%Y%m%d")
@@ -1275,6 +1277,65 @@ def _normalize_trades(rounds: list[dict]) -> list[dict]:
                 t["hold_calendar_days"] = None
         trades.append(t)
     return trades
+
+
+def _label_is_add(label: Any) -> bool:
+    return "加仓" in str(label or "")
+
+
+def add_stats_from_trades(trades: list[dict[str, Any]]) -> dict[str, Any]:
+    """从轮次统计加仓次数 / 胜率 / 盈亏 / 收益% 极值。"""
+    adds = [t for t in trades if t.get("is_add")]
+    n_add = len(adds)
+    win_n = sum(1 for t in adds if float(t.get("pnl") or 0) > 0)
+    pnls = [float(t.get("pnl") or 0) for t in adds]
+    rets = [float(t.get("ret_pct") or 0) for t in adds]
+    return {
+        "n_add": n_add,
+        "add_win_n": win_n,
+        "add_win_rate": round(win_n / n_add * 100, 1) if n_add else 0.0,
+        "add_sum_pnl": round(sum(pnls), 2) if pnls else 0.0,
+        "add_avg_ret": round(sum(rets) / len(rets), 2) if rets else 0.0,
+        "add_max_win": round(max(rets), 2) if rets else 0.0,
+        "add_max_loss": round(min(rets), 2) if rets else 0.0,
+    }
+
+
+def mark_add_lots(trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """补全 is_add：label 含「加仓」；其余用同标的重叠持仓兜底。"""
+    if not trades:
+        return trades
+    out: list[dict[str, Any]] = [dict(t) for t in trades]
+    for t in out:
+        if t.get("is_add"):
+            continue
+        if _label_is_add(t.get("buy_label")):
+            t["is_add"] = True
+    # 重叠持仓兜底：B 买入日严格落在 A 持仓区间内（bj < bi < sj）→ B 为加仓
+    by_stock: dict[str, list[int]] = {}
+    for i, t in enumerate(out):
+        code = _norm_signal_stock(str(t.get("stock") or ""))
+        by_stock.setdefault(code, []).append(i)
+    for idxs in by_stock.values():
+        for i in idxs:
+            ti = out[i]
+            if ti.get("is_add"):
+                continue
+            bi = compact_day(str(ti.get("buy_open_day") or ""))
+            if not bi:
+                continue
+            for j in idxs:
+                if i == j:
+                    continue
+                tj = out[j]
+                bj = compact_day(str(tj.get("buy_open_day") or ""))
+                sj = compact_day(str(tj.get("sell_exec_day") or ""))
+                if not bj or not sj:
+                    continue
+                if bj < bi < sj:
+                    ti["is_add"] = True
+                    break
+    return out
 
 
 def parse_budget_from_log(log_path: str | Path | None, default: float = 50000.0) -> float:
@@ -1354,6 +1415,7 @@ def parse_fill_signals_from_log(log_text: str) -> list[dict[str, Any]]:
             line,
         )
         if m and pending_buy:
+            label = pending_buy.get("label") or pending_buy.get("signal") or "-"
             events.append(
                 {
                     "kind": "buy",
@@ -1361,7 +1423,8 @@ def parse_fill_signals_from_log(log_text: str) -> list[dict[str, Any]]:
                     "day": str(m.group(2))[:8],
                     "stock": pending_stock,
                     "signal": pending_buy.get("signal") or "-",
-                    "label": pending_buy.get("label") or pending_buy.get("signal") or "-",
+                    "label": label,
+                    "is_add": False,
                 }
             )
             pending_buy = None
@@ -1371,6 +1434,7 @@ def parse_fill_signals_from_log(log_text: str) -> list[dict[str, Any]]:
         m = re.search(r"BUY add filled \{'add_shares': (\d+)", line)
         if m and pending_buy:
             day = str(pending_buy.get("day") or "")[:8]
+            label = pending_buy.get("label") or pending_buy.get("signal") or "-"
             events.append(
                 {
                     "kind": "buy",
@@ -1378,7 +1442,8 @@ def parse_fill_signals_from_log(log_text: str) -> list[dict[str, Any]]:
                     "day": day,
                     "stock": pending_stock,
                     "signal": pending_buy.get("signal") or "-",
-                    "label": pending_buy.get("label") or pending_buy.get("signal") or "-",
+                    "label": label,
+                    "is_add": True,
                 }
             )
             pending_buy = None
@@ -1523,6 +1588,7 @@ def enrich_trades_signals_from_log(
                     return {
                         "signal": sig,
                         "label": nt0.get("buy_label") or sig,
+                        "is_add": bool(nt0.get("is_add")),
                     }
         if day:
             for i, e in enumerate(buys):
@@ -1581,6 +1647,10 @@ def enrich_trades_signals_from_log(
         if b:
             nt["buy_signal"] = b.get("signal") or nt.get("buy_signal") or "-"
             nt["buy_label"] = b.get("label") or nt.get("buy_label") or nt["buy_signal"]
+            if "is_add" in b:
+                nt["is_add"] = bool(b.get("is_add"))
+            elif _label_is_add(nt["buy_label"]):
+                nt["is_add"] = True
         s = _sell_exact(sell_day, buy_day, sh, stock)
         if s:
             nt["sell_signal"] = s.get("signal") or nt.get("sell_signal") or "-"
@@ -1594,6 +1664,12 @@ def enrich_trades_signals_from_log(
             if b:
                 nt["buy_signal"] = b.get("signal") or "-"
                 nt["buy_label"] = b.get("label") or nt["buy_signal"]
+                if "is_add" in b:
+                    nt["is_add"] = bool(b.get("is_add"))
+                elif _label_is_add(nt["buy_label"]):
+                    nt["is_add"] = True
+        elif not nt.get("is_add") and _label_is_add(nt.get("buy_label")):
+            nt["is_add"] = True
         if not nt.get("sell_signal") or nt.get("sell_signal") in ("-", ""):
             s = _sell_loose(sell_day, stock)
             if s:
@@ -1770,13 +1846,14 @@ def enrich_detail_raw_hold_metrics(
     raw_df: pd.DataFrame,
     trades: list[dict[str, Any]],
 ) -> pd.DataFrame:
-    """把轮次持有回撤/浮盈填到原始操作明细的卖出行；买入行留空。"""
+    """把轮次持有回撤/浮盈填到原始操作明细的卖出行；买入行标是否加仓。"""
     if raw_df is None:
         return pd.DataFrame()
     out = raw_df.copy()
     out["持有回撤%"] = None
     out["持有浮盈%"] = None
-    if out.empty or not trades:
+    out["是否加仓"] = None
+    if out.empty:
         return out
 
     c_time = None
@@ -1796,9 +1873,11 @@ def enrich_detail_raw_hold_metrics(
     if c_time is None or c_side is None:
         return out
 
-    # pool of unused trades for matching
-    pool = [dict(t) for t in trades]
+    # pool of unused trades for matching sells / add buys
+    pool = [dict(t) for t in (trades or [])]
     used = [False] * len(pool)
+    add_pool = [dict(t) for t in (trades or []) if t.get("is_add")]
+    used_add = [False] * len(add_pool)
 
     def _pick(code: str, sell_day: str, shares: int) -> dict[str, Any] | None:
         code_n = _norm_signal_stock(code)
@@ -1834,10 +1913,32 @@ def enrich_detail_raw_hold_metrics(
                 return t
         return None
 
+    def _pick_add_buy(code: str, buy_day: str, shares: int) -> bool:
+        code_n = _norm_signal_stock(code)
+        for i, t in enumerate(add_pool):
+            if used_add[i]:
+                continue
+            if compact_day(str(t.get("buy_open_day") or "")) != buy_day:
+                continue
+            if shares and int(t.get("shares") or 0) != shares:
+                continue
+            ts = _norm_signal_stock(str(t.get("stock") or ""))
+            if code_n and ts and ts != code_n:
+                continue
+            used_add[i] = True
+            return True
+        # 宽松：同日同代码加仓
+        for t in add_pool:
+            if compact_day(str(t.get("buy_open_day") or "")) != buy_day:
+                continue
+            ts = _norm_signal_stock(str(t.get("stock") or ""))
+            if code_n and ts and ts != code_n:
+                continue
+            return True
+        return False
+
     for idx, row in out.iterrows():
         side_raw = str(row[c_side]).strip() if c_side is not None else ""
-        if "卖" not in side_raw:
-            continue
         day = compact_day(str(row[c_time]))
         if not day:
             continue
@@ -1850,6 +1951,11 @@ def enrich_detail_raw_hold_metrics(
                 shares = int(float(row[c_shares]))
             except (TypeError, ValueError):
                 shares = 0
+        if "买" in side_raw:
+            out.at[idx, "是否加仓"] = "是" if _pick_add_buy(code, day, shares) else "否"
+            continue
+        if "卖" not in side_raw:
+            continue
         t = _pick(code, day, shares)
         if not t:
             continue
@@ -1879,6 +1985,7 @@ def analyze_detail(
     trades = _normalize_trades(rounds)
     log = Path(log_path) if log_path else sibling_log_path(path)
     trades = enrich_trades_signals_from_log(trades, log)
+    trades = mark_add_lots(trades)
     meta_d = meta or {
         "tag": "HlBand",
         "ver": "local",
@@ -1900,6 +2007,7 @@ def analyze_detail(
             default_stock=default_stock,
         )
     stats = mod.compute_stats(meta_d, trades, diag={}, price_info={"source": "terminal", "terminal_csv": str(path)})
+    stats.update(add_stats_from_trades(trades))
     eq = mod.equity_curve(trades, float(budget))
     return {
         "path": str(path.resolve()),
@@ -1947,13 +2055,18 @@ def trades_to_dataframe(trades: list[dict]) -> pd.DataFrame:
         "hold_calendar_days",
         "hold_max_dd",
         "hold_max_up",
+        "is_add",
         "buy_signal",
         "sell_signal",
     ]
     if not trades:
         empty = pd.DataFrame(columns=eng_cols)
         return insert_name_column(rename_columns(empty, TRADES_DISPLAY_COLUMNS), code_col="代码")
-    rows = [{c: t.get(c) for c in eng_cols} for t in trades]
+    rows = []
+    for t in trades:
+        row = {c: t.get(c) for c in eng_cols}
+        row["is_add"] = "是" if t.get("is_add") else "否"
+        rows.append(row)
     out = rename_columns(pd.DataFrame(rows), TRADES_DISPLAY_COLUMNS)
     if "代码" in out.columns and out["代码"].notna().any():
         return insert_name_column(out, code_col="代码")
@@ -1989,20 +2102,36 @@ def summarize_detail(
         "avg_ret": float(stats.get("avg_ret") or 0.0),
         "max_win": float(stats.get("max_win") or 0.0),
         "max_loss": float(stats.get("max_loss") or 0.0),
+        "n_add": int(stats.get("n_add") or 0),
+        "add_win_rate": float(stats.get("add_win_rate") or 0.0),
+        "add_sum_pnl": float(stats.get("add_sum_pnl") or 0.0),
+        "add_avg_ret": float(stats.get("add_avg_ret") or 0.0),
+        "add_max_win": float(stats.get("add_max_win") or 0.0),
+        "add_max_loss": float(stats.get("add_max_loss") or 0.0),
     }
 
 
 def summarize_batch_row(row: dict[str, Any]) -> dict[str, Any]:
     """把 run_batch 一行补上 KPI / 中文状态。"""
     out = dict(row)
+    _kpi_none = (
+        "n_buy",
+        "sum_pnl",
+        "win_rate",
+        "avg_ret",
+        "max_win",
+        "max_loss",
+        "n_add",
+        "add_win_rate",
+        "add_sum_pnl",
+        "add_avg_ret",
+        "add_max_win",
+        "add_max_loss",
+    )
     if not out.get("ok"):
         out["status"] = "失败"
-        out.setdefault("n_buy", None)
-        out.setdefault("sum_pnl", None)
-        out.setdefault("win_rate", None)
-        out.setdefault("avg_ret", None)
-        out.setdefault("max_win", None)
-        out.setdefault("max_loss", None)
+        for k in _kpi_none:
+            out.setdefault(k, None)
         return out
     detail = out.get("detail") or ""
     try:
@@ -2017,12 +2146,8 @@ def summarize_batch_row(row: dict[str, Any]) -> dict[str, Any]:
         out["ok"] = False
         out["status"] = "失败"
         out["error"] = "analyze: %s" % e
-        out.setdefault("n_buy", None)
-        out.setdefault("sum_pnl", None)
-        out.setdefault("win_rate", None)
-        out.setdefault("avg_ret", None)
-        out.setdefault("max_win", None)
-        out.setdefault("max_loss", None)
+        for k in _kpi_none:
+            out.setdefault(k, None)
     return out
 
 
@@ -2055,6 +2180,12 @@ def batch_summary_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
                 "平均收益%": r.get("avg_ret"),
                 "最大单笔%": r.get("max_win"),
                 "最大亏损%": r.get("max_loss"),
+                "加仓次数": r.get("n_add"),
+                "加仓总盈亏": r.get("add_sum_pnl"),
+                "加仓胜率": r.get("add_win_rate"),
+                "加仓平均收益%": r.get("add_avg_ret"),
+                "加仓最大单笔%": r.get("add_max_win"),
+                "加仓最大亏损%": r.get("add_max_loss"),
                 "说明": r.get("error") or "",
             }
         )
@@ -2075,18 +2206,35 @@ def batch_summary_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
         "平均收益%",
         "最大单笔%",
         "最大亏损%",
+        "加仓次数",
+        "加仓总盈亏",
+        "加仓胜率",
+        "加仓平均收益%",
+        "加仓最大单笔%",
+        "加仓最大亏损%",
         "说明",
     ]
     df = pd.DataFrame(recs, columns=cols)
-    for col in ("轮次",):
+    for col in ("轮次", "加仓次数"):
         df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
-    for col in ("总盈亏", "胜率", "平均收益%", "最大单笔%", "最大亏损%"):
+    for col in (
+        "总盈亏",
+        "胜率",
+        "平均收益%",
+        "最大单笔%",
+        "最大亏损%",
+        "加仓胜率",
+        "加仓总盈亏",
+        "加仓平均收益%",
+        "加仓最大单笔%",
+        "加仓最大亏损%",
+    ):
         df[col] = pd.to_numeric(df[col], errors="coerce")
     return insert_name_column(df, code_col="代码")
 
 
 def summarize_batch_by_year(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """按年汇总：胜率 / 平均收益% 按轮次加权。多种复权时按 年×复权 拆开。"""
+    """按年汇总：胜率 / 平均收益% 按轮次加权；加仓胜率/平均收益% 按加仓次数加权。多种复权时按 年×复权 拆开。"""
     by_key: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for r in rows:
         y = str(r.get("year") or "").strip()
@@ -2105,8 +2253,14 @@ def summarize_batch_by_year(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         sum_pnl = 0.0
         win_n = 0.0
         ret_w = 0.0
+        n_add = 0.0
+        add_win_n = 0.0
+        add_sum_pnl = 0.0
+        add_ret_w = 0.0
         max_win: float | None = None
         max_loss: float | None = None
+        add_max_win: float | None = None
+        add_max_loss: float | None = None
         for r in xs:
             if not r.get("ok"):
                 continue
@@ -2115,6 +2269,11 @@ def summarize_batch_by_year(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             sum_pnl += float(r.get("sum_pnl") or 0)
             win_n += float(r.get("win_rate") or 0) / 100.0 * nb
             ret_w += float(r.get("avg_ret") or 0) * nb
+            na = float(r.get("n_add") or 0)
+            n_add += na
+            add_win_n += float(r.get("add_win_rate") or 0) / 100.0 * na
+            add_sum_pnl += float(r.get("add_sum_pnl") or 0)
+            add_ret_w += float(r.get("add_avg_ret") or 0) * na
             mw = r.get("max_win")
             ml = r.get("max_loss")
             if mw is not None and mw != "":
@@ -2123,6 +2282,14 @@ def summarize_batch_by_year(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if ml is not None and ml != "":
                 fv = float(ml)
                 max_loss = fv if max_loss is None else min(max_loss, fv)
+            amw = r.get("add_max_win")
+            aml = r.get("add_max_loss")
+            if na and amw is not None and amw != "":
+                fv = float(amw)
+                add_max_win = fv if add_max_win is None else max(add_max_win, fv)
+            if na and aml is not None and aml != "":
+                fv = float(aml)
+                add_max_loss = fv if add_max_loss is None else min(add_max_loss, fv)
         out.append(
             {
                 "year": y,
@@ -2135,6 +2302,12 @@ def summarize_batch_by_year(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "avg_ret": (ret_w / n_buy) if n_buy else None,
                 "max_win": max_win,
                 "max_loss": max_loss,
+                "n_add": int(n_add) if n_add == int(n_add) else n_add,
+                "add_win_rate": (100.0 * add_win_n / n_add) if n_add else None,
+                "add_sum_pnl": add_sum_pnl if n_add else None,
+                "add_avg_ret": (add_ret_w / n_add) if n_add else None,
+                "add_max_win": add_max_win,
+                "add_max_loss": add_max_loss,
             }
         )
     return out
@@ -2158,6 +2331,12 @@ def batch_year_summary_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
                 "平均收益%": r.get("avg_ret"),
                 "最大单笔%": r.get("max_win"),
                 "最大亏损%": r.get("max_loss"),
+                "加仓次数": r.get("n_add"),
+                "加仓总盈亏": r.get("add_sum_pnl"),
+                "加仓胜率": r.get("add_win_rate"),
+                "加仓平均收益%": r.get("add_avg_ret"),
+                "加仓最大单笔%": r.get("add_max_win"),
+                "加仓最大亏损%": r.get("add_max_loss"),
             }
         )
         recs.append(rec)
@@ -2171,13 +2350,30 @@ def batch_year_summary_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
         "平均收益%",
         "最大单笔%",
         "最大亏损%",
+        "加仓次数",
+        "加仓总盈亏",
+        "加仓胜率",
+        "加仓平均收益%",
+        "加仓最大单笔%",
+        "加仓最大亏损%",
     ]
     if has_div:
         cols = ["年份", "复权"] + [c for c in cols if c != "年份"]
     df = pd.DataFrame(recs, columns=cols)
-    for col in ("标的数", "成功数", "轮次"):
+    for col in ("标的数", "成功数", "轮次", "加仓次数"):
         df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
-    for col in ("总盈亏", "胜率", "平均收益%", "最大单笔%", "最大亏损%"):
+    for col in (
+        "总盈亏",
+        "胜率",
+        "平均收益%",
+        "最大单笔%",
+        "最大亏损%",
+        "加仓胜率",
+        "加仓总盈亏",
+        "加仓平均收益%",
+        "加仓最大单笔%",
+        "加仓最大亏损%",
+    ):
         df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
 
@@ -2201,6 +2397,12 @@ def write_batch_summary_csv(rows: list[dict[str, Any]], path: str | Path) -> Pat
         "avg_ret",
         "max_win",
         "max_loss",
+        "n_add",
+        "add_win_rate",
+        "add_sum_pnl",
+        "add_avg_ret",
+        "add_max_win",
+        "add_max_loss",
         "budget",
         "error",
         "csv",
@@ -2226,6 +2428,12 @@ def write_batch_year_summary_csv(rows: list[dict[str, Any]], path: str | Path) -
         "avg_ret",
         "max_win",
         "max_loss",
+        "n_add",
+        "add_win_rate",
+        "add_sum_pnl",
+        "add_avg_ret",
+        "add_max_win",
+        "add_max_loss",
     ]
     recs = [{k: r.get(k) for k in fields} for r in summarize_batch_by_year(rows)]
     pd.DataFrame(recs, columns=fields).to_csv(dest, index=False, encoding="utf-8-sig")

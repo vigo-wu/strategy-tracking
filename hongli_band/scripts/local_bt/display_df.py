@@ -42,6 +42,7 @@ TRADES_DISPLAY_COLUMNS: dict[str, str] = {
     "hold_calendar_days": "持有天数",
     "hold_max_dd": "持有回撤%",
     "hold_max_up": "持有浮盈%",
+    "is_add": "是否加仓",
     "buy_signal": "买入信号",
     "sell_signal": "卖出信号",
 }
