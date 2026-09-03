@@ -23,7 +23,7 @@ BOOK_STOCKS = {
     "600938.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"}, # 中国海油
 }
 # 单实例共享信号账本（不是 STATE_FILE；禁止按标的分文件）
-BOOK_FILE = r"D:\HlBandV5\hlband_book.json"
+BOOK_FILE = r"D:\HlBandV6\hlband_book.json"
 # 账本冻结截止：确认窗内打卡，到点（或打卡满 N）冻结；须在收盘集合竞价前完成分档下单
 BOOK_FREEZE_CLOSE = "145640"
 BOOK_FREEZE_OPEN = "093030"
@@ -213,14 +213,14 @@ PENDING_ORPHAN_SEC = 60
 
 # QMT 模型无 __file__；状态绝对路径（含 {stock}，宇宙循环按票分文件）
 #   513530.SH → ...\hlband_513530_SH.json
-STATE_FILE = r"D:\HlBandV5\hlband_{stock}.json"
+STATE_FILE = r"D:\HlBandV6\hlband_{stock}.json"
 # 实盘结构化日志根目录；落盘为 LOG_DIR/<stock_tag>/{tag}_events.jsonl 等
 # 空字符串关闭落盘（仍保留终端 print）
-LOG_DIR = r"D:\HlBandV5\logs"
+LOG_DIR = r"D:\HlBandV6\logs"
 # True=回测也写日志（默认关，避免回测刷爆磁盘）
 LOG_IN_BACKTEST = False
 
-STRATEGY_NAME = "HlBandV5"
+STRATEGY_NAME = "HlBandV6"
 STRATEGY_VER = "v1.63"
 # =======================================================
 
