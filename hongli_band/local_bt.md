@@ -145,7 +145,7 @@ hongli_band/回测记录/      ← 旧终端导出；「仅分析」会一并列
 
 #### 固定标的回放
 
-- 默认载入 [`hlband/config.py`](./scripts/qmt/hlband/config.py) 的 `BOOK_STOCKS`（含 `ma_type` / `dividend_type`）；可在表单 `data_editor` 增删改；「从 config 重载」恢复。
+- 默认载入 [`hlband/config.py`](./scripts/qmt/hlband/config.py) 的 `BOOK_STOCKS`（含 `ma_type` / `dividend_type`）；可在表单 `data_editor` 增删改；「从 config 重载」恢复；「导入」弹窗可粘贴单篮子 `BOOK_STOCKS` 字典（含 `# 名称` 注释，不写回 config）。按年字典请用 Walk-forward 各段导入。
 - 区间：数据起始/结束年 → `YYYY0101`–`YYYY1231` 连续回放（复利在区间内滚动，不按年重置钱包）。
 - 仓位：与 Walk-forward 相同（资金帽 / `BOOK_LOT_MAX` / 分档）；默认开复利；可强制重跑。
 - 产物：`report/<type>/local_bt_book_fixed_{start}_{end}_k{hash8}_*`；总表 `report/local_bt_fixed_book.csv`。
@@ -209,7 +209,8 @@ python hongli_band/scripts/local_bt/select_analysis.py \
 | 数据区间 | 数据起始/结束年 | 持有自然年（含端点）；默认扫描到的最早/最晚年 |
 | Walk-forward | 换仓周期 `rebalance_years` | 几个持有年共用一篮子 |
 | | 各段标的表 | 默认拷贝 `BOOK_STOCKS`；「从 config 重载各段」恢复；每段「导入」弹窗可粘贴 config 字典（含 `# 名称` 注释） |
-| | 强制重跑回放 | 忽略已有 book_hold 缓存 |
+| 固定标的 | 标的表 | 默认 `BOOK_STOCKS`；「从 config 重载」恢复；「导入」弹窗粘贴单篮子字典（按年 dict 请用 Walk-forward） |
+| 共用 | 强制重跑回放 | 忽略已有 book_hold / book_fixed 缓存 |
 | 组合仓位 | 组合资金帽 | 对应 `TRADE_BUDGET` |
 | | BOOK_LOT_MAX | 同时持仓槽位数 |
 | | 大仓档 / 加仓档 | `LOT_OPEN_FRAC` / `LOT_ADD_FRAC` |

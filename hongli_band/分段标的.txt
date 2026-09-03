@@ -1,0 +1,57 @@
+2021：
+BOOK_STOCKS = {
+    "601799.SH": {"ma_type": "SMA", "dividend_type": "front_ratio"},
+    "000338.SZ": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "002180.SZ": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "002050.SZ": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "002179.SZ": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "603806.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+}
+2022：
+BOOK_STOCKS = {
+      "002841.SZ": {"ma_type": "EMA", "dividend_type": "front"},
+      "601155.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+      "603806.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+      "601799.SH": {"ma_type": "SMA", "dividend_type": "front_ratio"},
+      "600900.SH": {"ma_type": "EMA", "dividend_type": "front"},
+      "002812.SZ": {"ma_type": "SMA", "dividend_type": "front_ratio"},
+}
+
+2023：
+BOOK_STOCKS = {
+    "002841.SZ": {"ma_type": "EMA", "dividend_type": "front"},
+    "601155.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "000625.SZ": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "603806.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "000301.SZ": {"ma_type": "EMA", "dividend_type": "front"},
+    "601799.SH": {"ma_type": "SMA", "dividend_type": "front_ratio"},
+}
+2024：
+BOOK_STOCKS = {
+    "600741.SH": {"ma_type": "SMA", "dividend_type": "front"},
+    "601155.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "000301.SZ": {"ma_type": "EMA", "dividend_type": "front"},
+    "002050.SZ": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "002841.SZ": {"ma_type": "EMA", "dividend_type": "front"},
+    "603259.SH": {"ma_type": "SMA", "dividend_type": "front_ratio"},
+}
+
+2025：
+BOOK_STOCKS = {
+    "000301.SZ": {"ma_type": "EMA", "dividend_type": "front"},
+    "002841.SZ": {"ma_type": "EMA", "dividend_type": "front"},
+    "600028.SH": {"ma_type": "EMA", "dividend_type": "front"},
+    "601155.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "600741.SH": {"ma_type": "SMA", "dividend_type": "front"},
+    "600900.SH": {"ma_type": "EMA", "dividend_type": "front"},
+}
+
+2026：
+BOOK_STOCKS = {
+    "002001.SZ": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "600741.SH": {"ma_type": "SMA", "dividend_type": "front"},
+    "000301.SZ": {"ma_type": "EMA", "dividend_type": "front"},
+    "600188.SH": {"ma_type": "EMA", "dividend_type": "front"},
+    "002050.SZ": {"ma_type": "SMA", "dividend_type": "front_ratio"},
+    "605499.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+}

@@ -20,6 +20,7 @@ BOOK_STOCKS = {
     "600028.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 中国石油
     "600188.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 兖矿能源
     "603259.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 药明康德
+    "600938.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"}, # 中国海油
 }
 # 单实例共享信号账本（不是 STATE_FILE；禁止按标的分文件）
 BOOK_FILE = r"D:\HlBandV5\hlband_book.json"
