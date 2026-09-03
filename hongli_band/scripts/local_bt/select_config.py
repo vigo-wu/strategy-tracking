@@ -467,11 +467,13 @@ def coerce_book_stocks_dict(raw: Any) -> dict[str, dict[str, str]]:
     return out
 
 
-def basket_from_import_text(text: str, select_year: str) -> dict[str, dict[str, str]]:
-    """弹窗导入：单篮子整段写入；按年 dict 取 select_year。"""
+def basket_from_import_text(text: str, select_year: str = "") -> dict[str, dict[str, str]]:
+    """弹窗导入：单篮子整段写入；按年 dict 须给 select_year。"""
     data = parse_book_stocks_text(text)
     year = str(select_year or "").strip()
     if is_year_keyed_baskets(data):
+        if not year:
+            raise ValueError("这是按年字典；固定标的请粘贴单篮子 BOOK_STOCKS")
         raw = None
         for k, v in data.items():
             if str(k).strip() == year:

@@ -124,6 +124,22 @@ class BookStocksParseTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             basket_from_import_text(text, "2024")
 
+    def test_import_without_year_single_basket(self) -> None:
+        book = basket_from_import_text(SAMPLE_BOOK)
+        self.assertIn("600350.SH", book)
+        self.assertEqual(book["601939.SH"]["ma_type"], "SMA")
+
+    def test_import_without_year_rejects_year_map(self) -> None:
+        text = (
+            "{\n"
+            '  "2022": {"600350.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"}},\n'
+            '  "2023": {"601988.SH": "SMA"},\n'
+            "}"
+        )
+        with self.assertRaises(ValueError) as ctx:
+            basket_from_import_text(text)
+        self.assertIn("固定标的", str(ctx.exception))
+
     def test_empty_and_invalid(self) -> None:
         with self.assertRaises(ValueError):
             parse_book_stocks_text("   ")

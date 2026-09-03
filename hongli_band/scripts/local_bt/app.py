@@ -1971,25 +1971,37 @@ def _clear_wf_period_editor(select_year: str) -> None:
 
 
 @st.dialog("导入篮子")
-def _dialog_import_period_book(select_year: str) -> None:
-    year = str(select_year)
-    st.caption("写入换仓年 **%s**（只改这一段，不写回 config）" % year)
+def _dialog_import_book(select_year: str = "") -> None:
+    year = str(select_year or "").strip()
+    if year:
+        st.caption("写入换仓年 **%s**（只改这一段，不写回 config）" % year)
+        text_key = "analysis_wf_import_text_%s" % year
+        ok_key = "analysis_wf_import_ok_%s" % year
+    else:
+        st.caption("写入固定标的表（不写回 config）")
+        text_key = "analysis_fixed_import_text"
+        ok_key = "analysis_fixed_import_ok"
     text = st.text_area(
         "BOOK_STOCKS 字典",
         height=260,
-        key="analysis_wf_import_text_%s" % year,
+        key=text_key,
         placeholder=(
             '{\n'
             '    "600350.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"}, # 山东高速\n'
             "}"
         ),
     )
-    if st.button("确定导入", key="analysis_wf_import_ok_%s" % year):
+    if st.button("确定导入", key=ok_key):
         try:
             book = basket_from_import_text(str(text or ""), year)
-            rows_map = st.session_state.setdefault("analysis_wf_rows", {})
-            rows_map[year] = book_stocks_to_editor_rows(book)
-            _clear_wf_period_editor(year)
+            if year:
+                rows_map = st.session_state.setdefault("analysis_wf_rows", {})
+                rows_map[year] = book_stocks_to_editor_rows(book)
+                _clear_wf_period_editor(year)
+            else:
+                st.session_state["analysis_book_rows"] = book_stocks_to_editor_rows(book)
+                if "analysis_book_editor" in st.session_state:
+                    del st.session_state["analysis_book_editor"]
             st.rerun()
         except Exception as e:
             st.error(str(e))
@@ -2033,9 +2045,22 @@ def _collect_analysis_form(avail: tuple[str, ...], defaults: dict[str, Any]) -> 
     hold_years: tuple[str, ...] = ()
     rebalance = int(defaults.get("rebalance_years") or 1)
     if analysis_type == "固定标的":
-        if st.button("从 config 重载 BOOK_STOCKS", key="analysis_reload_book"):
-            st.session_state["analysis_book_rows"] = book_stocks_to_editor_rows(load_book_stocks_full())
-            st.rerun()
+        c_r, c_i = st.columns([4, 1], vertical_alignment="bottom")
+        with c_r:
+            if st.button("从 config 重载 BOOK_STOCKS", key="analysis_reload_book"):
+                st.session_state["analysis_book_rows"] = book_stocks_to_editor_rows(
+                    load_book_stocks_full()
+                )
+                if "analysis_book_editor" in st.session_state:
+                    del st.session_state["analysis_book_editor"]
+                st.rerun()
+        with c_i:
+            if st.button(
+                str(cfg.get("import_period_label") or "导入"),
+                key="analysis_fixed_import_btn",
+                width="stretch",
+            ):
+                _dialog_import_book("")
         if "analysis_book_rows" not in st.session_state:
             st.session_state["analysis_book_rows"] = book_stocks_to_editor_rows(
                 defaults.get("book_stocks") or load_book_stocks_full()
@@ -2086,7 +2111,7 @@ def _collect_analysis_form(avail: tuple[str, ...], defaults: dict[str, Any]) -> 
                     key="analysis_wf_import_btn_%s" % sy,
                     use_container_width=True,
                 ):
-                    _dialog_import_period_book(sy)
+                    _dialog_import_book(sy)
 
     with st.form(str(cfg["form_key"])):
         st.subheader(str(cfg["title"]))
