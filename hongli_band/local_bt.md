@@ -66,7 +66,7 @@ python hongli_band/local_bt_ui.py
 
 成功标志：能列出 `csv/<type>/` 里的标的，或「仅分析」能看到已有操作明细。
 
-界面表格统一 **中文表头**；凡含标的代码的列，列名用「代码」，并在旁紧跟「名称」（来自 `STOCK_META`，未知则显示裸代码）。磁盘 CSV schema 不变。
+界面表格统一 **中文表头**；凡含标的代码的列，列名用「代码」，并在旁紧跟「名称」（来自 `stock_meta.json` / `stock_meta()`，未知则显示裸代码）。磁盘 CSV schema 不变。全市场名单可用 `python hongli_band/scripts/local_bt/fetch_stock_meta.py` 从交易所刷新。
 
 ## 目录约定
 
