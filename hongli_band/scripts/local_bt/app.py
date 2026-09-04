@@ -326,15 +326,47 @@ _POS_MAIN_CONFIG = {
     "doubleClick": "reset",
 }
 
+_POS_SLOT_COLORS = {
+    0: "#bdbdbd",
+    1: "#81c784",
+    2: "#ffb74d",
+}
+_POS_SLOT_FULL = "#e53935"
+_POS_SLOT_MID = "#ffb74d"
+
+
+def _slot_bar_colors(slots: pd.Series, book_lot_max: int) -> list:
+    n_max = max(1, int(book_lot_max))
+    out = []
+    for v in slots.tolist():
+        s = int(v) if pd.notna(v) else 0
+        if s <= 0:
+            out.append(_POS_SLOT_COLORS[0])
+        elif s >= n_max:
+            out.append(_POS_SLOT_FULL)
+        elif s in _POS_SLOT_COLORS:
+            out.append(_POS_SLOT_COLORS[s])
+        else:
+            out.append(_POS_SLOT_MID)
+    return out
+
 
 def _plot_daily_position(
     daily: pd.DataFrame,
     budget: float,
     *,
     highlight_stock: str = "",
-    title: str = "日度仓位（槽位 + 资金占用率）",
+    book_lot_max: int = 3,
+    title: str = "日度仓位（资金占用 + 槽位）",
 ) -> go.Figure:
-    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    fig = make_subplots(
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        row_heights=[0.62, 0.38],
+        vertical_spacing=0.06,
+        specs=[[{"secondary_y": True}], [{"secondary_y": False}]],
+    )
     if daily is None or daily.empty:
         fig.add_annotation(text="无日度仓位", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
         fig.update_layout(title=title, height=360, margin=dict(l=40, r=40, t=50, b=40))
@@ -344,6 +376,7 @@ def _plot_daily_position(
     pts["date"] = pd.to_datetime(pts["date"])
     x = pts["date"]
     bud = float(budget) if float(budget) > 0 else 1.0
+    n_max = max(1, int(book_lot_max))
     if "exposure_base" in pts.columns:
         base = pd.to_numeric(pts["exposure_base"], errors="coerce").fillna(bud)
         base = base.mask(base <= 0, bud)
@@ -372,19 +405,10 @@ def _plot_daily_position(
                 legendgroup="stack",
                 showlegend=(not hi) or (stock == hi),
             ),
+            row=1,
+            col=1,
             secondary_y=True,
         )
-    fig.add_trace(
-        go.Scatter(
-            x=x,
-            y=pts["slots"],
-            name="占用槽位",
-            mode="lines",
-            line=dict(color="#212121", width=2, shape="hv"),
-            hovertemplate="%{x|%Y/%m/%d}<br>槽位 %{y}<extra></extra>",
-        ),
-        secondary_y=False,
-    )
     fig.add_trace(
         go.Scatter(
             x=x,
@@ -394,26 +418,57 @@ def _plot_daily_position(
             line=dict(color="#c62828", width=2, shape="hv"),
             hovertemplate="%{x|%Y/%m/%d}<br>占用率 %{y:.1f}%<extra></extra>",
         ),
+        row=1,
+        col=1,
         secondary_y=True,
+    )
+    slot_vals = pd.to_numeric(pts["slots"], errors="coerce").fillna(0).astype(int)
+    fig.add_trace(
+        go.Bar(
+            x=x,
+            y=slot_vals,
+            name="占用槽位",
+            marker_color=_slot_bar_colors(slot_vals, n_max),
+            hovertemplate="%{x|%Y/%m/%d}<br>槽位 %{y}<extra></extra>",
+            showlegend=False,
+        ),
+        row=2,
+        col=1,
     )
     fig.update_layout(
         title=dict(text=title, x=0.0, xanchor="left", y=0.98, yanchor="top"),
-        height=460,
+        height=580,
         margin=dict(l=50, r=50, t=56, b=96),
         legend=dict(
             orientation="h",
             yanchor="top",
-            y=-0.22,
+            y=-0.18,
             x=0.0,
             xanchor="left",
             bgcolor="rgba(0,0,0,0)",
         ),
         dragmode="select",
         selectdirection="h",
+        barmode="overlay",
     )
-    fig.update_xaxes(title_text="日期", tickformat="%Y/%m/%d", title_standoff=8)
-    fig.update_yaxes(title_text="占用槽位", secondary_y=False, rangemode="tozero")
-    fig.update_yaxes(title_text="资金占用率 %（成本/当前权益）", secondary_y=True, rangemode="tozero")
+    fig.update_xaxes(tickformat="%Y/%m/%d", row=1, col=1)
+    fig.update_xaxes(title_text="日期", tickformat="%Y/%m/%d", title_standoff=8, row=2, col=1)
+    fig.update_yaxes(
+        title_text="资金占用率 %（成本/当前权益）",
+        secondary_y=True,
+        rangemode="tozero",
+        row=1,
+        col=1,
+    )
+    fig.update_yaxes(showticklabels=False, showgrid=False, secondary_y=False, row=1, col=1)
+    fig.update_yaxes(
+        title_text="占用槽位",
+        rangemode="tozero",
+        range=[-0.05, n_max + 0.35],
+        dtick=1,
+        row=2,
+        col=1,
+    )
     return fig
 
 
@@ -1167,7 +1222,8 @@ def _render_daily_position_section(
     st.caption(
         "口径：持仓区间 [买入日, 卖出日)；槽位=重叠 lot 数；"
         "资金占用=Σ成本/当前权益（预算+已实现盈亏阶梯）。"
-        "主图框选日期同步副图；点按票条形高亮该票成本堆叠。窗口 %s–%s · %s 日"
+        "上图资金占用；下图槽位柱；主图框选日期同步副图；点按票条形高亮该票成本堆叠。"
+        "窗口 %s–%s · %s 日"
         % (_fmt_date_zh(start_ymd), _fmt_date_zh(end_ymd), kpi["n_days"])
     )
 
@@ -1176,7 +1232,8 @@ def _render_daily_position_section(
             daily_view,
             budget,
             highlight_stock=highlight,
-            title="日度仓位（槽位 + 成本/当前权益%）",
+            book_lot_max=book_lot_max,
+            title="日度仓位（资金占用 + 槽位）",
         ),
         use_container_width=True,
         config=_POS_MAIN_CONFIG,
