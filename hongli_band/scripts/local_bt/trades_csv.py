@@ -282,14 +282,23 @@ def wrap_fill_hooks(
     ns: dict,
     ledger: TradeLedger | CombinedTradeLedger,
     wallet: Any | None = None,
+    *,
+    dynamic_cap: bool = True,
 ) -> None:
     orig_buy = ns["_apply_buy_fill"]
     orig_sell = ns["_apply_sell_fill"]
 
     def _snap_before():
-        if wallet is not None and wallet.enabled:
+        if wallet is None or not wallet.enabled:
+            return None
+        if dynamic_cap:
             return wallet.snapshot(ns)
-        return None
+        cap_fn = ns.get("_trade_budget_cap")
+        try:
+            cap = float(cap_fn() or 0) if callable(cap_fn) else 0.0
+        except (TypeError, ValueError):
+            cap = 0.0
+        return {"deploy_cap": cap, "equity": wallet.equity(ns)}
 
     def _buy(vol, price, opened_at, **extra):
         snap = _snap_before()

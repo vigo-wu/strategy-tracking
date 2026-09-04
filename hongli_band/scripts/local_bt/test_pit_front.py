@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import datetime
 import json
+import sys
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -196,6 +197,27 @@ class PitFrontTests(unittest.TestCase):
                     self.assertAlmostEqual(
                         p, rmap[d], places=9, msg="%s ratio %s" % (code, d)
                     )
+
+
+class LogicalDividendTypeTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        here = Path(__file__).resolve().parent
+        if str(here) not in sys.path:
+            sys.path.insert(0, str(here))
+
+    def test_book_override_and_pit_factors(self):
+        from analyze import load_divid_factors_json, logical_dividend_type, uses_pit_front
+
+        self.assertEqual(logical_dividend_type("603259.SH", ""), "front")
+        self.assertTrue(uses_pit_front(logical_dividend_type("603259.SH", "")))
+        self.assertEqual(logical_dividend_type("603259.SH", "front_ratio"), "front_ratio")
+        self.assertEqual(logical_dividend_type("600350.SH", ""), "front_ratio")
+        fac_path = CSV_ROOT / "divid_factors" / "603259_SH.json"
+        if not fac_path.is_file():
+            self.skipTest("no 603259 divid_factors")
+        fac = load_divid_factors_json(CSV_ROOT, "603259.SH")
+        self.assertTrue(isinstance(fac, dict) and fac)
 
 
 if __name__ == "__main__":

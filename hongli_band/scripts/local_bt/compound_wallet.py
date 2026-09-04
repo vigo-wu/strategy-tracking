@@ -100,6 +100,22 @@ def make_wallet(
     return CompoundWallet(cash, cash_ratio=ratio, enabled=True)
 
 
+def make_ledger_wallet(
+    ns: dict[str, Any],
+    overrides: Mapping[str, Any] | None,
+    default_budget: float,
+) -> tuple[CompoundWallet, bool]:
+    """明细列用账本：有复利接交易钱包；无复利也记账，但不改下单 cap。
+
+    返回 (wallet, compound_on)。
+    """
+    trade = make_wallet(ns, overrides, default_budget)
+    if trade is not None:
+        return trade, True
+    ratio = float(ns.get("CASH_RATIO") or 0.90)
+    return CompoundWallet(float(default_budget), cash_ratio=ratio, enabled=True), False
+
+
 def read_wallet_end(ns: dict[str, Any], wallet: CompoundWallet) -> float:
     return wallet.equity(ns)
 

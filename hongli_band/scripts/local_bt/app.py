@@ -43,7 +43,6 @@ from analyze import (  # noqa: E402
     dividend_from_detail_path,
     div_compare_dataframe,
     dividend_label,
-    enrich_detail_raw_hold_metrics,
     enrich_trades_hold_metrics,
     filter_trades_by_range,
     list_daily_csvs,
@@ -61,6 +60,7 @@ from analyze import (  # noqa: E402
     parse_budget_from_log,
     parse_stock_filter_tokens,
     peek_daily_csv_meta,
+    prepare_detail_raw_display,
     resolve_chart_ma_kind,
     resolve_typed_dir,
     stock_from_detail_path,
@@ -925,6 +925,7 @@ def _show_detail_raw(
     csv_root: str | None = None,
     dividend_type: str = "",
     stock: str = "",
+    budget: float = 0.0,
 ) -> None:
     """操作明细（原始）：卖出行附带持有回撤%/浮盈%。"""
     st.subheader("操作明细（原始）")
@@ -936,8 +937,39 @@ def _show_detail_raw(
             dividend_type=dividend_type,
             stock=stock,
         )
-        raw = enrich_detail_raw_hold_metrics(load_detail_raw(detail_path), trades)
-        st.dataframe(raw, use_container_width=True, hide_index=True)
+        raw = prepare_detail_raw_display(
+            load_detail_raw(detail_path),
+            trades,
+            detail_path,
+            budget=budget,
+        )
+        st.dataframe(
+            raw,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "可部署资金": st.column_config.NumberColumn(
+                    "可部署资金",
+                    help="成交前可部署资金（未开复利=预算×现金比例）",
+                    format="%.2f",
+                ),
+                "组合权益": st.column_config.NumberColumn(
+                    "组合权益",
+                    help="成交后现金 + 持仓成本",
+                    format="%.2f",
+                ),
+                "持有回撤%": st.column_config.NumberColumn(
+                    "持有回撤%",
+                    help="该笔卖出对应持仓区间收盘峰值回撤（≤0）；买入行空白",
+                    format="%.2f",
+                ),
+                "持有浮盈%": st.column_config.NumberColumn(
+                    "持有浮盈%",
+                    help="该笔卖出对应持仓区间最高价相对买价最大浮盈（≥0）；买入行空白",
+                    format="%.2f",
+                ),
+            },
+        )
     except Exception as e:
         st.warning("无法读取原始明细：%s" % e)
 
@@ -1087,6 +1119,7 @@ def _render_analysis(
         csv_root=csv_root,
         dividend_type=dividend_type,
         stock=stock,
+        budget=budget,
     )
     return result
 
@@ -1418,6 +1451,7 @@ def _render_book_detail_panel(
         trades,
         csv_root=csv_root,
         dividend_type=dividend_type,
+        budget=budget,
     )
 
 
@@ -3200,6 +3234,8 @@ elif mode == "跑本地回测":
                                 quiet=bool(quiet),
                                 ma_type=kind,
                                 overrides=bt_ov,
+                                dividend_type=div,
+                                csv_root=csv_root,
                             )
                         detail = trades_csv_path(log_path)
                         packs[kind] = {
@@ -3225,6 +3261,8 @@ elif mode == "跑本地回测":
                             out_dir=out_dir,
                             quiet=bool(quiet),
                             overrides=bt_ov,
+                            dividend_type=div,
+                            csv_root=csv_root,
                         )
                     detail = trades_csv_path(log_path)
                     by_div[div] = {

@@ -11,9 +11,11 @@ import pandas as pd
 from analyze import (
     enrich_detail_raw_hold_metrics,
     enrich_trades_hold_metrics,
+    fill_detail_wallet_columns,
     hold_max_dd_from_closes,
     hold_max_up_from_highs,
     infer_dividend_type_from_path,
+    resolve_ohlc_csv_dir,
 )
 
 
@@ -115,6 +117,60 @@ class HoldMaxDdTests(unittest.TestCase):
         self.assertTrue(pd.isna(out.iloc[0]["持有浮盈%"]) or out.iloc[0]["持有浮盈%"] is None)
         self.assertEqual(out.iloc[1]["持有回撤%"], -5.0)
         self.assertEqual(out.iloc[1]["持有浮盈%"], 12.5)
+
+
+    def test_resolve_ohlc_csv_dir_pit_prefers_none(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            none_dir = root / "none"
+            none_dir.mkdir()
+            (none_dir / "600350_SH_1d_20240102_20240110.csv").write_text(
+                "stock,period,datetime,open,high,low,close,volume,amount\n",
+                encoding="utf-8",
+            )
+            got = resolve_ohlc_csv_dir(root, "front")
+            self.assertEqual(got.resolve(), none_dir.resolve())
+
+    def test_resolve_ohlc_csv_dir_falls_back_to_logical(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            logical = root / "front_ratio"
+            logical.mkdir()
+            (logical / "600350_SH_1d_20240102_20240110.csv").write_text(
+                "stock,period,datetime,open,high,low,close,volume,amount\n",
+                encoding="utf-8",
+            )
+            got = resolve_ohlc_csv_dir(root, "front_ratio")
+            self.assertEqual(got.resolve(), logical.resolve())
+
+    def test_fill_detail_wallet_columns_fixed_budget(self):
+        raw = pd.DataFrame(
+            [
+                {
+                    "代码": "600350",
+                    "操作时间": "2024-01-02 15:00:00",
+                    "操作类型": "买入",
+                    "操作价格": 10.0,
+                    "数量": 1000,
+                    "可部署资金": "",
+                    "组合权益": "",
+                },
+                {
+                    "代码": "600350",
+                    "操作时间": "2024-01-10 15:00:00",
+                    "操作类型": "卖出",
+                    "操作价格": 12.0,
+                    "数量": 1000,
+                    "可部署资金": "",
+                    "组合权益": "",
+                },
+            ]
+        )
+        out = fill_detail_wallet_columns(raw, 100000.0, cash_ratio=0.9, compound=False)
+        self.assertAlmostEqual(float(out.iloc[0]["可部署资金"]), 90000.0)
+        self.assertAlmostEqual(float(out.iloc[0]["组合权益"]), 100000.0)
+        self.assertAlmostEqual(float(out.iloc[1]["可部署资金"]), 90000.0)
+        self.assertAlmostEqual(float(out.iloc[1]["组合权益"]), 102000.0)
 
 
 if __name__ == "__main__":

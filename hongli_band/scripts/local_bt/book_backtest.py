@@ -35,7 +35,7 @@ from run import (  # noqa: E402
 from book_pool_patch import install_book_pool_patch  # noqa: E402
 from compound_wallet import (  # noqa: E402
     install_compound_patch,
-    make_wallet,
+    make_ledger_wallet,
     read_wallet_end,
 )
 from trades_csv import CombinedTradeLedger, trades_csv_path, wrap_fill_hooks  # noqa: E402
@@ -235,19 +235,19 @@ def run_book_backtest(
     if quiet:
         _patch_quiet_status(ns)
 
-    wallet = make_wallet(ns, merged_overrides, budget)
+    wallet, compound_on = make_ledger_wallet(ns, merged_overrides, budget)
     install_book_pool_patch(ns)
-    if wallet is not None:
+    if compound_on:
         install_compound_patch(ns, wallet)
     ledger = CombinedTradeLedger(lambda: str(getattr(ns.get("A"), "stock", "") or ""))
-    wrap_fill_hooks(ns, ledger, wallet)
-    wallet_start = float(wallet.cash) if wallet is not None else budget
+    wrap_fill_hooks(ns, ledger, wallet, dynamic_cap=compound_on)
+    wallet_start = float(wallet.cash) if compound_on else budget
 
     banner = (
         "local_bt_book n=%s walk=%s %s chart=%s budget=%s pit=%s"
         % (len(norm), walk[0].day, walk[-1].day, chart, budget, "1" if any_pit else "0")
     )
-    if wallet is not None:
+    if compound_on:
         banner += " compound=1 wallet_start=%.2f" % wallet_start
     log_f = open(log_path, "w", encoding="utf-8", newline="\n")
     log_f.write(banner + "\n")
@@ -282,14 +282,14 @@ def run_book_backtest(
             except Exception:
                 pass
             sys.stdout, sys.stderr = old_out, old_err
-        if wallet is not None:
+        if compound_on:
             wallet_end = read_wallet_end(ns, wallet)
             log_f.write("wallet_end=%.2f\n" % float(wallet_end))
         log_f.close()
 
     trades_path = trades_csv_path(log_path)
     ledger.write(trades_path)
-    wallet_end_val = read_wallet_end(ns, wallet) if wallet is not None else None
+    wallet_end_val = read_wallet_end(ns, wallet) if compound_on else None
     meta = {
         "log_path": str(log_path),
         "trades_path": str(trades_path),
@@ -299,8 +299,8 @@ def run_book_backtest(
         "walk_start": walk[0].day,
         "walk_end": walk[-1].day,
         "n_bars": len(walk),
-        "compound": wallet is not None,
-        "wallet_cash_start": wallet_start if wallet is not None else None,
+        "compound": compound_on,
+        "wallet_cash_start": wallet_start if compound_on else None,
         "wallet_cash_end": wallet_end_val,
     }
     return log_path, meta

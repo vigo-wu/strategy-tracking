@@ -40,13 +40,14 @@ from mock_qmt import MockContext, _as_tag, inject_qmt_globals  # noqa: E402
 from book_pool_patch import install_book_pool_patch  # noqa: E402
 from compound_wallet import (  # noqa: E402
     install_compound_patch,
-    make_wallet,
+    make_ledger_wallet,
     read_wallet_end,
 )
 from trades_csv import TradeLedger, trades_csv_path, wrap_fill_hooks  # noqa: E402
 from analyze import (  # noqa: E402
     csv_source_dividend_type,
     load_divid_factors_json,
+    logical_dividend_type,
     normalize_dividend_type,
     typed_dir_root,
     uses_pit_front,
@@ -557,7 +558,7 @@ def run_backtest(
         raise SystemExit("no bars in walk range start=%s end=%s" % (start, end))
     weekly_src = str(getattr(store, "weekly_src", "") or "aggregate drop_forming")
 
-    div = normalize_dividend_type(dividend_type)
+    div = logical_dividend_type(code, dividend_type)
     root = Path(csv_root) if csv_root else typed_dir_root(path.parent)
     factors = None
     if uses_pit_front(div):
@@ -628,13 +629,13 @@ def run_backtest(
     budget = float(
         (overrides or {}).get("TRADE_BUDGET") or ns.get("TRADE_BUDGET") or 100000.0
     )
-    wallet = make_wallet(ns, overrides, budget)
+    wallet, compound_on = make_ledger_wallet(ns, overrides, budget)
     install_book_pool_patch(ns)
-    if wallet is not None:
+    if compound_on:
         install_compound_patch(ns, wallet)
     ledger = TradeLedger(code)
-    wrap_fill_hooks(ns, ledger, wallet)
-    wallet_start = wallet.cash if wallet is not None else None
+    wrap_fill_hooks(ns, ledger, wallet, dynamic_cap=compound_on)
+    wallet_start = wallet.cash if compound_on else None
     log_f = open(log_path, "w", encoding="utf-8", newline="\n", buffering=1024 * 1024)
     log_f.write(banner + "\n")
     if n_w0 < 60:
@@ -664,7 +665,7 @@ def run_backtest(
         except Exception:
             pass
         sys.stdout, sys.stderr = old_out, old_err
-        if wallet is not None:
+        if compound_on:
             wallet_end = read_wallet_end(ns, wallet)
             line = "compound=1 wallet_start=%.2f wallet_end=%.2f\n" % (
                 float(wallet_start or wallet.initial_cash),

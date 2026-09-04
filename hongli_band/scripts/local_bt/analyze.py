@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import re
 import sys
+from collections import deque
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -56,12 +57,87 @@ def uses_pit_front(dividend_type: Any) -> bool:
     return normalize_dividend_type(dividend_type) in PIT_LOGICAL_DIVS
 
 
+_BOOK_DIV_CACHE: dict[str, str] | None = None
+
+
+def _book_dividend_map() -> dict[str, str]:
+    """BOOK_STOCKS[code].dividend_type；缺键回落 config.DIVIDEND_TYPE / 默认等比。"""
+    global _BOOK_DIV_CACHE
+    if _BOOK_DIV_CACHE is not None:
+        return _BOOK_DIV_CACHE
+    out: dict[str, str] = {}
+    path = HLBAND_CONFIG
+    default_div = DEFAULT_DIVIDEND_TYPE
+    if path.is_file():
+        spec = importlib.util.spec_from_file_location("hlband_config_div", path)
+        if spec is not None and spec.loader is not None:
+            mod = importlib.util.module_from_spec(spec)
+            try:
+                spec.loader.exec_module(mod)
+                default_div = (
+                    normalize_dividend_type(getattr(mod, "DIVIDEND_TYPE", ""))
+                    or DEFAULT_DIVIDEND_TYPE
+                )
+                raw = getattr(mod, "BOOK_STOCKS", None)
+                items: list[tuple[Any, Any]] = []
+                if isinstance(raw, dict):
+                    items = list(raw.items())
+                elif isinstance(raw, (list, tuple)):
+                    items = [(str(x), {}) for x in raw]
+                for k, v in items:
+                    code = str(k or "").strip().upper()
+                    if not code:
+                        continue
+                    if isinstance(v, dict):
+                        d = normalize_dividend_type(v.get("dividend_type")) or default_div
+                    else:
+                        d = default_div
+                    out[code] = d
+            except Exception:
+                out = {}
+    _BOOK_DIV_CACHE = out
+    return out
+
+
+def logical_dividend_type(stock: str = "", override: str = "") -> str:
+    """显式 override 优先，否则 BOOK_STOCKS[stock].dividend_type。"""
+    d = normalize_dividend_type(override)
+    if d:
+        return d
+    code = str(stock or "").strip().upper()
+    if not code:
+        return ""
+    book = _book_dividend_map()
+    if code in book:
+        return book[code]
+    nodot = code.replace(".", "_")
+    for k, v in book.items():
+        if str(k).replace(".", "_") == nodot:
+            return v
+    return ""
+
+
 def csv_source_dividend_type(dividend_type: Any = "") -> str:
     """逻辑复权 → 实际读取的 CSV 子目录（front* → none）。"""
     div = normalize_dividend_type(dividend_type) or DEFAULT_DIVIDEND_TYPE
     if div in PIT_LOGICAL_DIVS:
         return "none"
     return div
+
+
+def resolve_ohlc_csv_dir(root: str | Path, dividend_type: Any = "") -> Path:
+    """持有回撤等读日线：PIT 逻辑复权优先 none；none 无文件时回落逻辑目录（单测夹具）。"""
+    base = Path(root)
+    div = normalize_dividend_type(dividend_type) or DEFAULT_DIVIDEND_TYPE
+    logical = resolve_typed_dir(base, div)
+    source = resolve_typed_dir(base, csv_source_dividend_type(div))
+    if source == logical:
+        return logical
+    if list_daily_csvs(source):
+        return source
+    if list_daily_csvs(logical):
+        return logical
+    return source
 
 
 def divid_factors_json_path(csv_root: str | Path, stock: str) -> Path:
@@ -1790,7 +1866,7 @@ def enrich_trades_hold_metrics(
     div = normalize_dividend_type(dividend_type)
     if not div:
         div = infer_dividend_type_from_path(detail_path)
-    csv_dir = resolve_typed_dir(root, div)
+    csv_dir = resolve_ohlc_csv_dir(root, div)
     fallback = str(default_stock or "").strip().upper()
     if not fallback and detail_path:
         fallback = stock_from_detail_path(detail_path, read_csv=True)
@@ -1888,9 +1964,9 @@ def enrich_detail_raw_hold_metrics(
     if raw_df is None:
         return pd.DataFrame()
     out = raw_df.copy()
-    out["持有回撤%"] = None
-    out["持有浮盈%"] = None
-    out["是否加仓"] = None
+    out["持有回撤%"] = np.nan
+    out["持有浮盈%"] = np.nan
+    out["是否加仓"] = ""
     if out.empty:
         return out
 
@@ -1997,9 +2073,130 @@ def enrich_detail_raw_hold_metrics(
         t = _pick(code, day, shares)
         if not t:
             continue
-        out.at[idx, "持有回撤%"] = t.get("hold_max_dd")
-        out.at[idx, "持有浮盈%"] = t.get("hold_max_up")
+        dd = t.get("hold_max_dd")
+        up = t.get("hold_max_up")
+        out.at[idx, "持有回撤%"] = dd if dd is not None else np.nan
+        out.at[idx, "持有浮盈%"] = up if up is not None else np.nan
+    out["持有回撤%"] = pd.to_numeric(out["持有回撤%"], errors="coerce")
+    out["持有浮盈%"] = pd.to_numeric(out["持有浮盈%"], errors="coerce")
     return out
+
+
+def _detail_col(df: pd.DataFrame, *aliases: str, fallback: int | None = None) -> Any:
+    cols = {str(c).strip(): c for c in df.columns}
+    for a in aliases:
+        if a in cols:
+            return cols[a]
+    if fallback is not None and df.shape[1] > fallback:
+        return df.columns[fallback]
+    return None
+
+
+def _col_all_missing(df: pd.DataFrame, name: str) -> bool:
+    if name not in df.columns:
+        return True
+    s = df[name]
+    num = pd.to_numeric(s, errors="coerce")
+    raw = s.astype(str).str.strip().str.lower()
+    return bool((num.isna() | raw.isin(["", "nan", "none", "nat"])).all())
+
+
+def fill_detail_wallet_columns(
+    raw_df: pd.DataFrame,
+    budget: float,
+    *,
+    cash_ratio: float = 0.90,
+    compound: bool = False,
+) -> pd.DataFrame:
+    """空的「可部署资金 / 组合权益」按成交回补；已有数字则只做数值化。"""
+    if raw_df is None:
+        return pd.DataFrame()
+    out = raw_df.copy()
+    if out.empty:
+        if "可部署资金" not in out.columns:
+            out["可部署资金"] = pd.Series(dtype=float)
+        if "组合权益" not in out.columns:
+            out["组合权益"] = pd.Series(dtype=float)
+        return out
+    if "可部署资金" not in out.columns:
+        out["可部署资金"] = np.nan
+    if "组合权益" not in out.columns:
+        out["组合权益"] = np.nan
+    need = _col_all_missing(out, "可部署资金") or _col_all_missing(out, "组合权益")
+    if not need:
+        out["可部署资金"] = pd.to_numeric(out["可部署资金"], errors="coerce")
+        out["组合权益"] = pd.to_numeric(out["组合权益"], errors="coerce")
+        return out
+
+    c_side = _detail_col(out, "操作类型", "买卖方向", "方向", fallback=6)
+    c_price = _detail_col(out, "操作价格", "成交价格", "成交价", "价格", fallback=7)
+    c_shares = _detail_col(out, "数量", "成交数量", "股数", fallback=12)
+    if c_side is None or c_price is None or c_shares is None:
+        out["可部署资金"] = pd.to_numeric(out["可部署资金"], errors="coerce")
+        out["组合权益"] = pd.to_numeric(out["组合权益"], errors="coerce")
+        return out
+
+    cash = float(budget)
+    lots: deque[dict[str, float]] = deque()
+    caps: list[float] = []
+    eqs: list[float] = []
+    bud = float(budget)
+    ratio = float(cash_ratio)
+
+    def _book() -> float:
+        return sum(int(l["shares"]) * float(l["price"]) for l in lots)
+
+    for _, row in out.iterrows():
+        eq_before = cash + _book()
+        cap = (ratio * eq_before) if compound else (ratio * bud)
+        side = str(row[c_side] or "").strip()
+        try:
+            px = float(row[c_price] or 0)
+        except (TypeError, ValueError):
+            px = 0.0
+        try:
+            qty = int(float(row[c_shares] or 0))
+        except (TypeError, ValueError):
+            qty = 0
+        if "买" in side and qty > 0 and px > 0:
+            cash -= px * qty
+            lots.append({"shares": qty, "price": px})
+        elif "卖" in side and qty > 0 and px > 0:
+            remain = qty
+            while remain > 0 and lots:
+                lot = lots[0]
+                take = min(int(lot["shares"]), remain)
+                cash += px * take
+                lot["shares"] = int(lot["shares"]) - take
+                remain -= take
+                if int(lot["shares"]) <= 0:
+                    lots.popleft()
+            if remain > 0:
+                cash += px * remain
+        eq_after = cash + _book()
+        caps.append(round(cap, 2))
+        eqs.append(round(eq_after, 2))
+    out["可部署资金"] = caps
+    out["组合权益"] = eqs
+    return out
+
+
+def prepare_detail_raw_display(
+    raw_df: pd.DataFrame,
+    trades: list[dict[str, Any]],
+    detail_path: str | Path | None = None,
+    *,
+    budget: float = 0.0,
+    cash_ratio: float = 0.90,
+) -> pd.DataFrame:
+    """操作明细展示：回补资金列 + 卖出行持有回撤/浮盈。"""
+    log = sibling_log_path(detail_path) if detail_path else None
+    bud = float(budget or 0) or parse_budget_from_log(log, 100000.0)
+    compound = False
+    if log is not None and log.is_file():
+        compound = "compound=1" in log.read_text(encoding="utf-8", errors="replace")
+    out = fill_detail_wallet_columns(raw_df, bud, cash_ratio=cash_ratio, compound=compound)
+    return enrich_detail_raw_hold_metrics(out, trades)
 
 
 def analyze_detail(
