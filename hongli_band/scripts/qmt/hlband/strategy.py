@@ -697,6 +697,12 @@ def _clear_hold_meta():
     A.time_force_grace_until = None
     A.time_force_trend_skip = False
     A.round_scaled = False
+    clr = globals().get("_clear_ex_rights_state")
+    if callable(clr):
+        clr()
+    else:
+        A.ex_rights_applied = []
+        A.ex_rights_allot_pending = []
 
 
 def _bump_hold_bars(day):
@@ -1832,6 +1838,14 @@ def _handle_stock(C, ctx):
     sell_reasons = []
 
     holding = _has_position() or (bt and _bt_held_vol() >= 100)
+    if holding and _lots_enabled():
+        _ensure_lots()
+    if holding:
+        try:
+            _maybe_apply_ex_rights(C, day)
+        except Exception as e:
+            print(_strategy_tag(), "ex_rights fail", e)
+            _event_log("ex_rights_fail", error=str(e), day=day)
     cost = _pos_cost_price()
     exit_ids = []
     exit_shares = 0

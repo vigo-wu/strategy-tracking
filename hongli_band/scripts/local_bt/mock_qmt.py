@@ -135,6 +135,13 @@ class MockContext:
     def get_market_data(self, *args: Any, **kwargs: Any):
         return self._md(*args, **kwargs)
 
+    def get_divid_factors(self, stock: str = ""):
+        """除权除息因子；默认空。测试可设 self.divid_factors。"""
+        raw = getattr(self, "divid_factors", None)
+        if isinstance(raw, dict):
+            return raw
+        return {}
+
     def _md(self, *args: Any, **kwargs: Any):
         spec = _parse_md_call(args, kwargs)
         stocks = spec["stocks"] or [self.stockcode + "." + self.market]

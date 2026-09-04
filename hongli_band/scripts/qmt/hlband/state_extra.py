@@ -31,6 +31,16 @@ def _state_extra_load(raw):
     A._skip_sell_eval_day = str(raw.get("skip_sell_eval_day", "") or "")
     A._last_add_day = str(raw.get("last_add_day", "") or "")
     A._last_add_signal = str(raw.get("last_add_signal", "") or "")
+    applied = raw.get("ex_rights_applied")
+    if isinstance(applied, list):
+        A.ex_rights_applied = [str(x) for x in applied if x]
+    else:
+        A.ex_rights_applied = []
+    pending = raw.get("ex_rights_allot_pending")
+    if isinstance(pending, list):
+        A.ex_rights_allot_pending = [x for x in pending if isinstance(x, dict)]
+    else:
+        A.ex_rights_allot_pending = []
 
 
 def _reset_stock_ctx():
@@ -67,6 +77,8 @@ def _reset_stock_ctx():
     A.bt_locked = 0
     A.bt_lock_day = ""
     A.bt_opened_at = ""
+    A.ex_rights_applied = []
+    A.ex_rights_allot_pending = []
 
 
 def _state_extra_save(data):
@@ -87,3 +99,13 @@ def _state_extra_save(data):
     data["skip_sell_eval_day"] = str(getattr(A, "_skip_sell_eval_day", "") or "")
     data["last_add_day"] = str(getattr(A, "_last_add_day", "") or "")
     data["last_add_signal"] = str(getattr(A, "_last_add_signal", "") or "")
+    applied = getattr(A, "ex_rights_applied", None)
+    data["ex_rights_applied"] = (
+        [str(x) for x in applied if x] if isinstance(applied, list) else []
+    )
+    pending = getattr(A, "ex_rights_allot_pending", None)
+    data["ex_rights_allot_pending"] = (
+        [x for x in pending if isinstance(x, dict)]
+        if isinstance(pending, list)
+        else []
+    )

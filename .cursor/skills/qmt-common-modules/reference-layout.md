@@ -46,6 +46,7 @@ MODULE_ORDER = [
     "common:backtest.py",
     "common:single/state_pos.py",
     "common:single/lots.py",      # 同标的多仓；SCALE_LOTS 默认关
+    "common:single/ex_rights.py", # 持仓除权缩放 cost/peak；卖点评估前调用
     "common:single/bt_recover.py",
     # 可选: "helpers.py",
     "indicators.py",

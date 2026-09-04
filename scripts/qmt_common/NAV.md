@@ -26,6 +26,7 @@
 | `single/bt_recover.py` | 单仓 | 回测仓恢复 |
 | `single/broker.py` | 单仓 | `_max_sell_vol` |
 | `single/lots.py` | 单仓 | 同标的多笔 `A.lots`；`SCALE_LOTS` 默认关，开则 `add` 记独立笔、`_order_sell(lot_ids=)` 按笔平 |
+| `single/ex_rights.py` | 单仓 | 持仓过除权：按 `get_divid_factors` 缩放 cost/peak/送转股数；配股默认未认购，实盘 pending 延后判定；回测复权非 `none` 跳过 |
 | `single/orders.py` | 单仓 | `_order_buy` / `_order_sell` / fill；`add=True` 加仓。尾盘窗限价挂卖一/买一，开盘窗仍市价 |
 
 红利 T（双浮仓）用 `broker_base` + `orders_pending`，自带 `hongli/broker.py` / `orders.py`。
@@ -60,7 +61,7 @@ LOG_DIR/<stock_tag>/
 ## 典型拼接顺序（单仓）
 
 ```
-config → ctx → live_log → time_util → period → state_io → backtest → state_pos → lots → bt_recover
+config → ctx → live_log → time_util → period → state_io → backtest → state_pos → lots → ex_rights → bt_recover
 → indicators → market_util → market → mode → broker_base → single/broker
 → orders_pending → single/orders → strategy → runtime
 ```

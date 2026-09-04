@@ -136,6 +136,7 @@
 | 放鹰吃肉 | ≥ 10% | 4% | — |
 
 优先级（挂 pending 主因）：`weekly_bear` > `stop_loss` > `trail_stop` > `time_force`。  
+持仓过除权除息：卖点评估前按 `get_divid_factors` 的 `dr` 缩放该票 `cost`/`hold_peak`（送转同步股数）；**配股默认按未认购**（股数不含配股部分），实盘用券商量延后判定认购后再加权成本；除权日当日开仓不缩放。回测若行情已是 `front`/`front_ratio`/`back`/`back_ratio`/`follow` 则跳过（避免双重调整）。  
 `SCALE_LOTS` 开启时，除 `weekly_bear` 一次出清外，其余卖点只平触发的那几笔（日志 `lots=[id]`）。  
 买卖委托失败/T+1 skip 时**保留**对应 pending（及持仓元数据）；实盘报单成功亦保留至成交，废单后尾盘或次日开盘窗可重试。当日新买的笔 T+1 不可卖，不清仓状态。  
 加仓成交后当日状态行可见 `skip_add_bar`，不应再出现新的 `pending_exit set`。T+1 部分成交且目标笔仍在应看到 `pending_exit keep after partial fill`。卖出前有 `SELL lot-can_use`；`risk=True` 时说明目标笔当日新开、可卖可能来自旧仓。
