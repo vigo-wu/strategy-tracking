@@ -111,7 +111,6 @@ class BookStocksParseTests(unittest.TestCase):
 
     def test_year_keyed_extract(self) -> None:
         text = (
-            "{\n"
             '  "2022": {"600350.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"}},\n'
             '  "2023": {"601988.SH": "SMA"},\n'
             "}"

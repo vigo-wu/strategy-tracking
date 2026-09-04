@@ -4,7 +4,7 @@
 口径:
 - 持仓区间半开: [buy_open_day, sell_exec_day)
 - 日轴: pd.bdate_range（工作日近似，不依赖行情 CSV）
-- 资金占用率: Σ(持仓 cost) / budget
+- 资金占用率: Σ(持仓 cost) / 当日权益 × 100（权益=预算+已实现盈亏阶梯，无点回落 budget）
 - 槽位: 当日重叠 lot 数（每笔 trade 一行；同票加仓分别计）
 """
 from __future__ import annotations
@@ -53,20 +53,91 @@ def _lot_windows(trades: list[dict] | None) -> list[tuple[pd.Timestamp, pd.Times
     return out
 
 
+def _positive_base(raw: float | None, fallback: float) -> float:
+    try:
+        v = float(raw) if raw is not None else float(fallback)
+    except (TypeError, ValueError):
+        v = float(fallback)
+    if v <= 0:
+        v = float(fallback) if float(fallback) > 0 else 1.0
+    return v if v > 0 else 1.0
+
+
+def apply_current_equity(
+    daily: pd.DataFrame | None,
+    daily_eq: pd.DataFrame | None,
+    budget: float,
+) -> pd.DataFrame:
+    """按「当日权益」重算占用率：分母=权益曲线上 date<=当日 的最后一档（无则 budget）。"""
+    if daily is None or daily.empty or "cost" not in getattr(daily, "columns", []):
+        return pd.DataFrame(columns=["date", "slots", "cost", "exposure_pct", "exposure_base"])
+    out = daily.copy()
+    out["date"] = pd.to_datetime(out["date"])
+    out = out.sort_values("date").reset_index(drop=True)
+    bud = _positive_base(budget, 1.0)
+    if daily_eq is None or daily_eq.empty or "date" not in daily_eq.columns:
+        out["exposure_base"] = bud
+        out["exposure_pct"] = pd.to_numeric(out["cost"], errors="coerce").fillna(0.0) / bud * 100.0
+        return out
+    eq = daily_eq.dropna(subset=["date"]).copy()
+    eq["date"] = pd.to_datetime(eq["date"])
+    eq = eq.sort_values("date")[["date", "equity"]]
+    merged = pd.merge_asof(out, eq, on="date", direction="backward")
+    base = pd.to_numeric(merged["equity"], errors="coerce")
+    base = base.fillna(bud)
+    base = base.mask(base <= 0, bud)
+    merged["exposure_base"] = base
+    cost = pd.to_numeric(merged["cost"], errors="coerce").fillna(0.0)
+    merged["exposure_pct"] = cost / merged["exposure_base"] * 100.0
+    return merged.drop(columns=["equity"], errors="ignore")
+
+
+def equity_at_or_before(
+    daily_eq: pd.DataFrame | None,
+    day: str | pd.Timestamp | None,
+    *,
+    default: float,
+) -> float:
+    """取 date<=day 的最后一档权益；无则 default。"""
+    base = _positive_base(default, 1.0)
+    if daily_eq is None or daily_eq.empty or "date" not in daily_eq.columns:
+        return base
+    ts = _coerce_bound(day)
+    if ts is None:
+        return base
+    df = daily_eq.dropna(subset=["date"]).copy()
+    if df.empty:
+        return base
+    df["date"] = pd.to_datetime(df["date"])
+    prior = df.loc[df["date"] <= ts]
+    if prior.empty:
+        return base
+    try:
+        return _positive_base(float(prior["equity"].iloc[-1]), base)
+    except (TypeError, ValueError):
+        return base
+
+
 def build_daily_position_frame(
     trades: list[dict] | None,
     budget: float = 100000.0,
+    *,
+    start_equity: float | None = None,
 ) -> pd.DataFrame:
-    """日度 slots / cost / exposure_pct + 各票 cost 列 cost_<stock>。"""
+    """日度 slots / cost / exposure_pct + 各票 cost 列 cost_<stock>。
+
+    默认 exposure_pct = Σcost / budget（或 start_equity）；
+    展示「相对当前权益」时请再调用 apply_current_equity。
+    """
     lots = _lot_windows(trades)
-    bud = float(budget) if float(budget) > 0 else 1.0
+    bud = _positive_base(budget, 1.0)
+    base = _positive_base(start_equity, bud)
     empty_cols = ["date", "slots", "cost", "exposure_pct"]
     if not lots:
         return pd.DataFrame(columns=empty_cols)
 
     start = min(b for b, _, _, _ in lots)
     end = max(s for _, s, _, _ in lots)
-    # 半开上界：最后一天为 max(sell)-1 个工作日；bdate_range 含端点，用 end-1day
     last = end - pd.Timedelta(days=1)
     if last < start:
         return pd.DataFrame(columns=empty_cols)
@@ -90,7 +161,7 @@ def build_daily_position_frame(
             "date": d,
             "slots": int(slots),
             "cost": float(total_cost),
-            "exposure_pct": float(total_cost / bud * 100.0),
+            "exposure_pct": float(total_cost / base * 100.0),
         }
         for s in stocks:
             row["cost_%s" % s] = float(by_stock.get(s, 0.0))

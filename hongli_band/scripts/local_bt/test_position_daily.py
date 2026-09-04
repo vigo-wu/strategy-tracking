@@ -4,12 +4,14 @@ import unittest
 import pandas as pd
 
 from position_daily import (
+    apply_current_equity,
     build_daily_position_frame,
     position_kpis,
     slice_daily,
     slot_day_hist,
     stock_hold_days,
 )
+from equity_yearly import build_daily_equity
 
 
 def _t(stock, buy, sell, cost=10000.0, shares=100, buy_price=100.0):
@@ -106,6 +108,45 @@ class PositionDailyTests(unittest.TestCase):
         self.assertEqual(hist["days"].sum(), 0)
         kpi = position_kpis(daily, book_lot_max=3)
         self.assertEqual(kpi["n_days"], 0)
+
+    def test_exposure_vs_current_equity(self):
+        # 先平一笔赚 50k → 权益 150k；再开 30k 仓，相对当前权益=20%
+        trades = [
+            _t("600000.SH", "20240102", "20240105", cost=50000.0),
+            {
+                "stock": "600000.SH",
+                "buy_open_day": "20240102",
+                "sell_exec_day": "20240105",
+                "cost": 50000.0,
+                "shares": 500,
+                "buy_price": 100.0,
+                "pnl": 50000.0,
+            },
+            _t("601988.SH", "20240108", "20240112", cost=30000.0),
+        ]
+        # fix first trade pnl
+        trades[0] = {
+            "stock": "600000.SH",
+            "buy_open_day": "20240102",
+            "sell_exec_day": "20240105",
+            "cost": 50000.0,
+            "shares": 500,
+            "buy_price": 100.0,
+            "pnl": 50000.0,
+        }
+        trades = [trades[0], trades[2]]
+        budget = 100000.0
+        daily = build_daily_position_frame(trades, budget=budget)
+        eq = build_daily_equity(trades, budget=budget)
+        daily = apply_current_equity(daily, eq, budget)
+        # after sell 20240105, equity=150000; hold 601988 from 20240108
+        row = daily.loc[daily["date"] == pd.Timestamp("2024-01-08")].iloc[0]
+        self.assertAlmostEqual(float(row["exposure_base"]), 150000.0, places=2)
+        self.assertAlmostEqual(float(row["exposure_pct"]), 20.0, places=2)
+        # before first sell, base stays budget
+        row0 = daily.loc[daily["date"] == pd.Timestamp("2024-01-02")].iloc[0]
+        self.assertAlmostEqual(float(row0["exposure_base"]), 100000.0, places=2)
+        self.assertAlmostEqual(float(row0["exposure_pct"]), 50.0, places=2)
 
 
 if __name__ == "__main__":

@@ -111,6 +111,7 @@ from select_analysis import (  # noqa: E402
 )
 from book_backtest import analyze_book_detail  # noqa: E402
 from position_daily import (  # noqa: E402
+    apply_current_equity,
     build_daily_position_frame,
     cost_stock_columns,
     position_kpis,
@@ -118,6 +119,11 @@ from position_daily import (  # noqa: E402
     slot_day_hist,
     stock_from_cost_col,
     stock_hold_days,
+)
+from equity_yearly import (  # noqa: E402
+    build_daily_equity,
+    daily_equity_for_year,
+    year_performance_table,
 )
 from stock_select import (  # noqa: E402
     SCORE_YEARS,
@@ -174,6 +180,14 @@ def _fmt_ymd(d: date) -> str:
     return d.strftime("%Y%m%d")
 
 
+def _fmt_date_zh(v: Any) -> str:
+    """日期展示：YYYY/MM/DD。"""
+    ts = pd.to_datetime(v, errors="coerce")
+    if pd.isna(ts):
+        return ""
+    return pd.Timestamp(ts).strftime("%Y/%m/%d")
+
+
 def _daily_csv_label(path: Path) -> str:
     div = normalize_dividend_type(path.parent.name)
     lab = DIVIDEND_LABELS.get(div, path.parent.name) if div else path.parent.name
@@ -186,14 +200,16 @@ def _plot_equity(eq: pd.DataFrame, budget: float, title: str, *, name: str = "�
     if pts is None or pts.empty:
         fig.add_annotation(text="无已平仓成交", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
     else:
+        x = pd.to_datetime(pts["date"])
         fig.add_trace(
             go.Scatter(
-                x=pts["date"],
+                x=x,
                 y=pts["equity"],
                 mode="lines+markers",
                 name=name,
                 line=dict(color=color, width=2),
                 marker=dict(size=6),
+                hovertemplate="%{x|%Y/%m/%d}<br>权益 %{y:,.2f}<extra></extra>",
             )
         )
         fig.add_hline(y=budget, line_dash="dash", line_color="#9e9e9e", annotation_text="预算")
@@ -204,6 +220,7 @@ def _plot_equity(eq: pd.DataFrame, budget: float, title: str, *, name: str = "�
         height=360,
         margin=dict(l=40, r=20, t=50, b=40),
         legend=dict(orientation="h"),
+        xaxis=dict(tickformat="%Y/%m/%d"),
     )
     return fig
 
@@ -222,12 +239,13 @@ def _plot_equity_overlay(
             continue
         fig.add_trace(
             go.Scatter(
-                x=pts["date"],
+                x=pd.to_datetime(pts["date"]),
                 y=pts["equity"],
                 mode="lines+markers",
                 name=name,
                 line=dict(color=color, width=2),
                 marker=dict(size=6),
+                hovertemplate="%{x|%Y/%m/%d}<br>" + name + " %{y:,.2f}<extra></extra>",
             )
         )
     fig.add_hline(y=budget, line_dash="dash", line_color="#9e9e9e", annotation_text="预算")
@@ -238,6 +256,7 @@ def _plot_equity_overlay(
         height=360,
         margin=dict(l=40, r=20, t=50, b=40),
         legend=dict(orientation="h"),
+        xaxis=dict(tickformat="%Y/%m/%d"),
     )
     return fig
 
@@ -325,11 +344,16 @@ def _plot_daily_position(
     pts["date"] = pd.to_datetime(pts["date"])
     x = pts["date"]
     bud = float(budget) if float(budget) > 0 else 1.0
+    if "exposure_base" in pts.columns:
+        base = pd.to_numeric(pts["exposure_base"], errors="coerce").fillna(bud)
+        base = base.mask(base <= 0, bud)
+    else:
+        base = pd.Series([bud] * len(pts), index=pts.index)
     hi = str(highlight_stock or "").strip()
     cost_cols = cost_stock_columns(pts)
     for i, col in enumerate(cost_cols):
         stock = stock_from_cost_col(col)
-        y = (pts[col].fillna(0.0) / bud * 100.0).tolist()
+        y = (pd.to_numeric(pts[col], errors="coerce").fillna(0.0) / base * 100.0).tolist()
         if hi:
             opacity = 1.0 if stock == hi else 0.12
         else:
@@ -344,7 +368,7 @@ def _plot_daily_position(
                 stackgroup="cost_pct",
                 fillcolor=_POS_STACK_COLORS[i % len(_POS_STACK_COLORS)],
                 opacity=opacity,
-                hovertemplate="%{x|%Y-%m-%d}<br>" + stock + " 成本占用 %{y:.1f}%<extra></extra>",
+                hovertemplate="%{x|%Y/%m/%d}<br>" + stock + " 成本占用 %{y:.1f}%<extra></extra>",
                 legendgroup="stack",
                 showlegend=(not hi) or (stock == hi),
             ),
@@ -357,7 +381,7 @@ def _plot_daily_position(
             name="占用槽位",
             mode="lines",
             line=dict(color="#212121", width=2, shape="hv"),
-            hovertemplate="%{x|%Y-%m-%d}<br>槽位 %{y}<extra></extra>",
+            hovertemplate="%{x|%Y/%m/%d}<br>槽位 %{y}<extra></extra>",
         ),
         secondary_y=False,
     )
@@ -368,21 +392,28 @@ def _plot_daily_position(
             name="资金占用率%",
             mode="lines",
             line=dict(color="#c62828", width=2, shape="hv"),
-            hovertemplate="%{x|%Y-%m-%d}<br>占用率 %{y:.1f}%<extra></extra>",
+            hovertemplate="%{x|%Y/%m/%d}<br>占用率 %{y:.1f}%<extra></extra>",
         ),
         secondary_y=True,
     )
     fig.update_layout(
-        title=title,
-        height=400,
-        margin=dict(l=40, r=40, t=50, b=40),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+        title=dict(text=title, x=0.0, xanchor="left", y=0.98, yanchor="top"),
+        height=460,
+        margin=dict(l=50, r=50, t=56, b=96),
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.22,
+            x=0.0,
+            xanchor="left",
+            bgcolor="rgba(0,0,0,0)",
+        ),
         dragmode="select",
         selectdirection="h",
     )
-    fig.update_xaxes(title_text="日期")
+    fig.update_xaxes(title_text="日期", tickformat="%Y/%m/%d", title_standoff=8)
     fig.update_yaxes(title_text="占用槽位", secondary_y=False, rangemode="tozero")
-    fig.update_yaxes(title_text="资金占用率 %（成本/预算）", secondary_y=True, rangemode="tozero")
+    fig.update_yaxes(title_text="资金占用率 %（成本/当前权益）", secondary_y=True, rangemode="tozero")
     return fig
 
 
@@ -1034,7 +1065,9 @@ def _render_daily_position_section(
 ) -> None:
     """日度仓位：主图框选日期 → 副图重算；点条形 → 主图高亮该票。"""
     st.subheader("日度仓位")
+    daily_eq = build_daily_equity(trades, budget=budget)
     daily_full = build_daily_position_frame(trades, budget=budget)
+    daily_full = apply_current_equity(daily_full, daily_eq, budget)
     if daily_full.empty:
         st.info("无已平仓轮次，无法推导日度仓位。")
         return
@@ -1045,6 +1078,8 @@ def _render_daily_position_section(
     stock_key = "book_pos_stock_%s" % key_suffix
     dates_key = "book_pos_dates_%s" % key_suffix
     stock_sel_key = "book_pos_stock_sel_%s" % key_suffix
+    dates_pending_key = "book_pos_dates_pending_%s" % key_suffix
+    stock_pending_key = "book_pos_stock_pending_%s" % key_suffix
     clear_key = "book_pos_clear_%s" % key_suffix
     main_ver_key = "book_pos_main_ver_%s" % key_suffix
     if main_ver_key not in st.session_state:
@@ -1052,7 +1087,12 @@ def _render_daily_position_section(
 
     d_min = pd.Timestamp(daily_full["date"].min()).date()
     d_max = pd.Timestamp(daily_full["date"].max()).date()
-    if dates_key not in st.session_state:
+
+    # 须在 date_input / selectbox 实例化前写回 widget key（框选/重置/点条的 pending）
+    pending_dates = st.session_state.pop(dates_pending_key, None)
+    if pending_dates is not None:
+        st.session_state[dates_key] = pending_dates
+    elif dates_key not in st.session_state:
         cur_range = st.session_state.get(range_key)
         if (
             isinstance(cur_range, (tuple, list))
@@ -1072,13 +1112,16 @@ def _render_daily_position_section(
 
     stocks = [stock_from_cost_col(c) for c in cost_stock_columns(daily_full)]
     hi_options = ["（全部）"] + stocks
-    if stock_sel_key not in st.session_state:
+    pending_stock = st.session_state.pop(stock_pending_key, None)
+    if pending_stock is not None and pending_stock in hi_options:
+        st.session_state[stock_sel_key] = pending_stock
+    elif stock_sel_key not in st.session_state:
         hi_cur = str(st.session_state.get(stock_key) or "")
         st.session_state[stock_sel_key] = hi_cur if hi_cur in hi_options else "（全部）"
     elif st.session_state.get(stock_sel_key) not in hi_options:
         st.session_state[stock_sel_key] = "（全部）"
 
-    c1, c2, c3 = st.columns([2, 2, 1])
+    c1, c2, c3 = st.columns([2, 2, 1], vertical_alignment="bottom")
     with c1:
         picked = st.date_input(
             "日期窗（框选主图或手改）",
@@ -1093,11 +1136,11 @@ def _render_daily_position_section(
             key=stock_sel_key,
         )
     with c3:
-        if st.button("重置窗/高亮", key=clear_key):
+        if st.button("重置窗/高亮", key=clear_key, use_container_width=True):
             st.session_state[range_key] = None
             st.session_state[stock_key] = ""
-            st.session_state[dates_key] = (d_min, d_max)
-            st.session_state[stock_sel_key] = "（全部）"
+            st.session_state[dates_pending_key] = (d_min, d_max)
+            st.session_state[stock_pending_key] = "（全部）"
             st.session_state[main_ver_key] = int(st.session_state.get(main_ver_key, 0)) + 1
             st.rerun()
 
@@ -1122,9 +1165,10 @@ def _render_daily_position_section(
     k3.metric("平均资金占用率", "%.1f%%" % float(kpi["avg_exposure"]))
     k4.metric("最长连续空仓日", "%s" % int(kpi["max_empty_streak"]))
     st.caption(
-        "口径：持仓区间 [买入日, 卖出日)；槽位=重叠 lot 数；资金占用=Σ成本/预算。"
+        "口径：持仓区间 [买入日, 卖出日)；槽位=重叠 lot 数；"
+        "资金占用=Σ成本/当前权益（预算+已实现盈亏阶梯）。"
         "主图框选日期同步副图；点按票条形高亮该票成本堆叠。窗口 %s–%s · %s 日"
-        % (start_ymd, end_ymd, kpi["n_days"])
+        % (_fmt_date_zh(start_ymd), _fmt_date_zh(end_ymd), kpi["n_days"])
     )
 
     main_event = st.plotly_chart(
@@ -1132,7 +1176,7 @@ def _render_daily_position_section(
             daily_view,
             budget,
             highlight_stock=highlight,
-            title="日度仓位（槽位 + 成本/预算%）",
+            title="日度仓位（槽位 + 成本/当前权益%）",
         ),
         use_container_width=True,
         config=_POS_MAIN_CONFIG,
@@ -1143,7 +1187,10 @@ def _render_daily_position_section(
     bounds = _parse_plotly_x_bounds(getattr(main_event, "selection", None))
     if bounds and bounds != (start_ymd, end_ymd):
         try:
-            st.session_state[dates_key] = (ymd_to_date(bounds[0]), ymd_to_date(bounds[1]))
+            st.session_state[dates_pending_key] = (
+                ymd_to_date(bounds[0]),
+                ymd_to_date(bounds[1]),
+            )
             st.session_state[range_key] = bounds
             # 换 key 清掉框选残留，避免改 date_input 后又被旧 box 盖写
             st.session_state[main_ver_key] = int(st.session_state.get(main_ver_key, 0)) + 1
@@ -1165,10 +1212,81 @@ def _render_daily_position_section(
         picked_stock = _parse_plotly_bar_stock(getattr(bar_event, "selection", None), hold)
         if picked_stock and picked_stock != highlight:
             st.session_state[stock_key] = picked_stock
-            st.session_state[stock_sel_key] = picked_stock
+            st.session_state[stock_pending_key] = picked_stock
             st.rerun()
     with right:
         st.plotly_chart(_plot_slot_hist(hist), use_container_width=True)
+
+
+def _year_perf_display_df(tbl: pd.DataFrame) -> pd.DataFrame:
+    if tbl is None or tbl.empty:
+        return pd.DataFrame(
+            columns=[
+                "年份",
+                "年化盈亏%",
+                "当年盈亏",
+                "最大回撤%",
+                "开仓次数",
+                "夏普",
+                "期初权益",
+                "期末权益",
+            ]
+        )
+    return pd.DataFrame(
+        {
+            "年份": tbl["year"].astype(str),
+            "年化盈亏%": tbl["year_ret_pct"],
+            "当年盈亏": tbl["year_pnl"],
+            "最大回撤%": tbl["max_dd_pct"],
+            "开仓次数": tbl["n_open"],
+            "夏普": tbl["sharpe"],
+            "期初权益": tbl["start_equity"],
+            "期末权益": tbl["end_equity"],
+        }
+    )
+
+
+def _render_year_performance_section(
+    trades: list[dict],
+    budget: float,
+    *,
+    key_suffix: str = "book",
+) -> None:
+    st.subheader("按年分析")
+    tbl = year_performance_table(trades, budget=budget)
+    if tbl.empty:
+        st.info("无成交轮次，无法按年汇总。")
+        return
+    st.caption(
+        "年化盈亏% = 相对期初权益的简单年收益；盈亏按卖出年；开仓按买入年；"
+        "最大回撤/夏普基于该年日度权益阶梯。下方下拉切换年份查看日度权益曲线。"
+    )
+    display = _year_perf_display_df(tbl)
+    st.dataframe(display, use_container_width=True, hide_index=True)
+
+    years = [str(y) for y in tbl["year"].tolist()]
+    year_key = "year_eq_sel_%s" % key_suffix
+    if year_key not in st.session_state or st.session_state.get(year_key) not in years:
+        st.session_state[year_key] = years[-1]
+    year = st.selectbox(
+        "权益曲线年份",
+        options=years,
+        key=year_key,
+    )
+    match = tbl.loc[tbl["year"].astype(str) == str(year)]
+    if match.empty:
+        st.info("该年无权益点。")
+        return
+    daily_eq = build_daily_equity(trades, budget=budget)
+    eq_y = daily_equity_for_year(
+        daily_eq,
+        str(year),
+        start_equity=float(match.iloc[0]["start_equity"]),
+    )
+    st.plotly_chart(
+        _plot_equity(eq_y, budget, "%s 年权益曲线（预算 + 已实现盈亏累计）" % year),
+        use_container_width=True,
+    )
 
 
 def _render_book_detail_panel(
@@ -1191,6 +1309,7 @@ def _render_book_detail_panel(
         )
     stats = combo.get("stats") or {}
     trades = combo.get("trades") or []
+    key_suffix = detail_path.stem.replace(" ", "_")[:48] or "book"
     st.caption(
         (caption + " · " if caption else "")
         + "明细 `%s` · 预算 %s 元"
@@ -1202,10 +1321,11 @@ def _render_book_detail_panel(
         _plot_equity(combo.get("equity"), budget, "组合权益曲线（预算 + 已实现盈亏累计）"),
         use_container_width=True,
     )
+    _render_year_performance_section(trades, budget, key_suffix=key_suffix)
     _render_daily_position_section(
         trades,
         budget,
-        key_suffix=detail_path.stem.replace(" ", "_")[:48] or "book",
+        key_suffix=key_suffix,
     )
     per = combo.get("per_stock") or {}
     if per:
