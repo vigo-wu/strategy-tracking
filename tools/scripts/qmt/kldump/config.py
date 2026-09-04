@@ -24,14 +24,18 @@ HIST_START = "20180101"
 HIST_MAX_LOOKBACK_DAYS = 0
 
 # 复权，传给 get_market_data_ex 的 dividend_type。每种写到 OUT_DIR/<type>/
-#   none         不复权
+#   none         不复权（PIT 时点前复权原料；local_bt front* 会读 none + divid_factors）
 #   front        前复权（价差）
 #   back         后复权（价差）
 #   front_ratio  等比前复权（最新价贴近市价）
 #   back_ratio   等比后复权
-# 可改成子集以缩短导出；改完须 re-deploy 再编译
+# 可改成子集以缩短导出；改完须 re-deploy 再编译。
+# PIT 要求 DIVIDEND_TYPES 必须含 none；DUMP_STOCKS 须覆盖要做 PIT 的标的（可与 BOOK 对齐）。
 DIVIDEND_TYPES = ("none", "front", "back", "front_ratio", "back_ratio")
 DOWNLOAD_HIST = True
+
+# 导出 get_divid_factors → OUT_DIR/divid_factors/{CODE}_{MKT}.json（local_bt PIT 用）
+DUMP_DIVID_FACTORS = True
 
 # 额外周期。本地回测优先读同目录 {code}_1w_*.csv，对齐 QMT 原生周线
 EXTRA_PERIODS = ("1w",)

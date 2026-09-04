@@ -39,6 +39,7 @@ MODULE_ORDER = [
     "common:single/bt_recover.py",
     "indicators.py",
     "common:market_util.py",
+    "common:pit_front.py",
     "market.py",
     "common:mode.py",
     "common:broker_base.py",

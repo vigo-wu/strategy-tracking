@@ -1394,7 +1394,10 @@ def _ex_parse_row(row):
 
 
 def _ex_skip_adjusted_backtest():
+    """回测且行情已是静态复权时跳过 STATE 缩放；PIT（none+因子）激活则不跳过。"""
     if not getattr(A, "is_backtest", False):
+        return False
+    if bool(getattr(A, "_pit_front_active", False)):
         return False
     fn = globals().get("_dividend_type")
     div = ""
@@ -2196,6 +2199,283 @@ def _live_heartbeat(reason=""):
         )
     )
 
+# === qmt_common/pit_front.py ===
+# 作用: 回测时点前复权（PIT）— none 价 + divid factors
+# 主要符号: pit_parse_events, pit_parse_full_events, pit_adjust_ohlc, pit_adjust_ohlc_cached
+# front_ratio: P_adj(t;T) = P_raw(t) / Π{dr | t < e.day <= T}
+# front: 事件序 P <- (P - interest + allot*px) / (1+bonus+gift+allot)
+# volume 不调整
+def pit_day_from_key(key):
+    """除权 dict key → YYYYMMDD（东八区）。"""
+    norm = globals().get("_norm_bar_day")
+    try:
+        ms = int(float(key))
+    except Exception:
+        if callable(norm):
+            return str(norm(key) or "")
+        s = str(key or "").strip()
+        return s[:8] if len(s) >= 8 and s[:8].isdigit() else ""
+    if ms > 10**12:
+        sec = ms / 1000.0
+    elif ms > 10**9:
+        sec = float(ms)
+    else:
+        if callable(norm):
+            return str(norm(key) or "")
+        return ""
+    try:
+        dt = datetime.datetime.utcfromtimestamp(sec) + datetime.timedelta(hours=8)
+        return dt.strftime("%Y%m%d")
+    except Exception:
+        return ""
+
+
+def pit_mode_from_div(logical_div):
+    """logical_div → ratio|diff|""。"""
+    d = str(logical_div or "").strip().lower()
+    if d == "front_ratio":
+        return "ratio"
+    if d == "front":
+        return "diff"
+    return ""
+
+
+def pit_parse_full_events(factors_dict):
+    """factors → [(day, interest, bonus, gift, allot, allot_px, dr), ...] 升序。"""
+    out = []
+    if not isinstance(factors_dict, dict):
+        return out
+    for key, row in factors_dict.items():
+        day = pit_day_from_key(key)
+        if not day:
+            continue
+        interest = bonus = gift = allot = allot_px = 0.0
+        dr = 0.0
+        if isinstance(row, (list, tuple)) and len(row) >= 7:
+            try:
+                interest = float(row[0] or 0)
+                bonus = float(row[1] or 0)
+                gift = float(row[2] or 0)
+                allot = float(row[3] or 0)
+                allot_px = float(row[4] or 0)
+                dr = float(row[6] or 0)
+            except Exception:
+                continue
+        elif isinstance(row, (int, float)):
+            try:
+                dr = float(row)
+            except Exception:
+                continue
+        else:
+            continue
+        # 无有效调整则跳过
+        if (
+            (dr is None or dr <= 1.0)
+            and interest == 0.0
+            and bonus == 0.0
+            and gift == 0.0
+            and allot == 0.0
+        ):
+            continue
+        out.append((day, interest, bonus, gift, allot, allot_px, dr))
+    out.sort(key=lambda x: x[0])
+    return out
+
+
+def pit_parse_events(factors_dict):
+    """factors dict → [(day, dr), ...] 升序；仅 dr>1（等比路径 / 旧单测）。"""
+    out = []
+    for day, _i, _b, _g, _a, _ap, dr in pit_parse_full_events(factors_dict):
+        try:
+            d = float(dr)
+        except Exception:
+            continue
+        if d > 1.0:
+            out.append((day, d))
+    return out
+
+
+def pit_cum_dr(events, bar_day, asof_day):
+    """Π dr for events with bar_day < e.day <= asof_day；无则 1.0。
+
+    events 可为 [(day, dr), ...] 或 full 元组（取末位 dr）。
+    """
+    bd = str(bar_day or "")
+    ad = str(asof_day or "")
+    if not bd or not ad or bd > ad:
+        return 1.0
+    prod = 1.0
+    for item in events or ():
+        if not item:
+            continue
+        day = item[0]
+        dr = item[1] if len(item) == 2 else item[6]
+        if day <= bd:
+            continue
+        if day > ad:
+            break
+        try:
+            d = float(dr)
+        except Exception:
+            continue
+        if d > 1.0:
+            prod *= d
+    return prod if prod > 0 else 1.0
+
+
+def pit_apply_diff_one(price, interest, bonus, gift, allot, allot_px):
+    """单事件价差一步。"""
+    try:
+        p = float(price)
+    except Exception:
+        return price
+    try:
+        interest = float(interest or 0)
+        bonus = float(bonus or 0)
+        gift = float(gift or 0)
+        allot = float(allot or 0)
+        allot_px = float(allot_px or 0)
+    except Exception:
+        return p
+    mul = 1.0 + bonus + gift + allot
+    if mul <= 0:
+        mul = 1.0
+    return (p - interest + allot * allot_px) / mul
+
+
+def pit_cum_diff(full_events, bar_day, asof_day, price):
+    """对 price 按 (bar, asof] 内事件升序做价差逐步调整。"""
+    bd = str(bar_day or "")
+    ad = str(asof_day or "")
+    if not bd or not ad or bd > ad:
+        return price
+    p = price
+    for item in full_events or ():
+        if not item or len(item) < 7:
+            continue
+        day, interest, bonus, gift, allot, allot_px, _dr = item[:7]
+        if day <= bd:
+            continue
+        if day > ad:
+            break
+        p = pit_apply_diff_one(p, interest, bonus, gift, allot, allot_px)
+    return p
+
+
+def _pit_norm_mode(mode):
+    m = str(mode or "ratio").strip().lower()
+    if m in ("diff", "price", "front"):
+        return "diff"
+    return "ratio"
+
+
+def pit_adjust_ohlc(days, opens, highs, lows, closes, events, asof_day, mode="ratio"):
+    """按 asof_day 调整 OHLC；mode=ratio|diff。volume 调用方自理。"""
+    asof = str(asof_day or "")
+    n = len(days) if days is not None else 0
+    if n <= 0:
+        return opens, highs, lows, closes
+    mode = _pit_norm_mode(mode)
+    ev = events or ()
+    o2, h2, l2, c2 = [], [], [], []
+    for i in range(n):
+        d = str(days[i] or "")
+
+        def _one(seq):
+            if seq is None or i >= len(seq):
+                return None
+            try:
+                raw = float(seq[i])
+            except Exception:
+                return seq[i]
+            if mode == "diff":
+                return pit_cum_diff(ev, d, asof, raw)
+            mul = pit_cum_dr(ev, d, asof)
+            inv = (1.0 / mul) if mul > 0 else 1.0
+            return raw * inv
+
+        o2.append(_one(opens))
+        h2.append(_one(highs))
+        l2.append(_one(lows))
+        c2.append(_one(closes))
+    return o2, h2, l2, c2
+
+
+def pit_cache_map():
+    cache = getattr(A, "_pit_ohlc_cache", None)
+    if not isinstance(cache, dict):
+        cache = {}
+        A._pit_ohlc_cache = cache
+    return cache
+
+
+def pit_adjust_ohlc_cached(
+    stock, days, opens, highs, lows, closes, events, asof_day, mode="ratio"
+):
+    """带 (stock, asof, mode) 缓存；ratio 可 asof 增量 / 新 dr；diff 全量。"""
+    stock = str(stock or "")
+    asof = str(asof_day or "")
+    mode = _pit_norm_mode(mode)
+    cache = pit_cache_map()
+    key = (stock, asof, mode)
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
+    days = list(days or [])
+    ev = list(events or ())
+    if mode == "ratio":
+        prev_asof = None
+        for ck, _val in list(cache.items()):
+            if not (isinstance(ck, tuple) and len(ck) >= 3):
+                continue
+            st, a, m = ck[0], ck[1], ck[2]
+            if st != stock or m != "ratio":
+                continue
+            if a < asof and (prev_asof is None or a > prev_asof):
+                prev_asof = a
+        if prev_asof is not None:
+            prev = cache.get((stock, prev_asof, "ratio"))
+            if prev is not None:
+                po, ph, pl, pc = prev
+                new_prod = 1.0
+                for item in ev:
+                    if not item:
+                        continue
+                    day = item[0]
+                    dr = item[1] if len(item) == 2 else item[6]
+                    if day <= prev_asof:
+                        continue
+                    if day > asof:
+                        break
+                    try:
+                        d = float(dr)
+                    except Exception:
+                        continue
+                    if d > 1.0:
+                        new_prod *= d
+                if new_prod > 1.0 + 1e-15:
+                    inv = 1.0 / new_prod
+                    o2 = [float(x) * inv for x in po]
+                    h2 = [float(x) * inv for x in ph]
+                    l2 = [float(x) * inv for x in pl]
+                    c2 = [float(x) * inv for x in pc]
+                    if len(o2) == len(days):
+                        cache[key] = (o2, h2, l2, c2)
+                        return cache[key]
+    o2, h2, l2, c2 = pit_adjust_ohlc(
+        days, opens, highs, lows, closes, ev, asof, mode=mode
+    )
+    cache[key] = (o2, h2, l2, c2)
+    return cache[key]
+
+
+def pit_should_apply(logical_div):
+    """回测且逻辑复权为 front/front_ratio 时启用 PIT。"""
+    if not getattr(A, "is_backtest", False):
+        return False
+    d = str(logical_div or "").strip().lower()
+    return d in ("front", "front_ratio")
+
 # === hlband/market.py ===
 _VALID_DIVIDEND = (
     "follow",
@@ -2373,7 +2653,7 @@ def _get_daily_bar_days(C, stock, count=8):
         end = end[:8]
     fields = ["close"]
     md = None
-    div = _dividend_type_for(stock)
+    div = _api_dividend_type(stock)
     try:
         md = C.get_market_data_ex(
             fields=fields,
@@ -2419,7 +2699,10 @@ def _is_weekly_period(period):
 
 
 def _drop_unclosed_week_ohlcv(open_, high, low, close, volume, days, end_day):
-    """丢掉 end_day 所在自然周，对齐 QMT 回测 0000 原生 1w（周五当天也不含本周）。"""
+    """丢掉 end_day 所在自然周，对齐 QMT 回测 0000 原生 1w（周五当天也不含本周）。
+
+    返回 (o,h,l,c,v, days_out)；days_out 与 OHLC 对齐，可能为 None。
+    """
     if not close:
         return None
     n = len(close)
@@ -2431,14 +2714,89 @@ def _drop_unclosed_week_ohlcv(open_, high, low, close, volume, days, end_day):
         keep = list(range(n - 1))
         _diag_once("w1_drop_last_no_days", "end=", end_day, "n=", n)
     if keep is None:
-        return open_, high, low, close, volume
+        return open_, high, low, close, volume, days
     if len(keep) < 1:
         return None
 
     def _take(seq):
+        if seq is None:
+            return None
         return [seq[i] for i in keep]
 
-    return _take(open_), _take(high), _take(low), _take(close), _take(volume)
+    days_out = _take(days) if days and len(days) == n else None
+    return (
+        _take(open_),
+        _take(high),
+        _take(low),
+        _take(close),
+        _take(volume),
+        days_out,
+    )
+
+
+def _api_dividend_type(stock):
+    """回测 front/front_ratio → 请求 none，由 PIT 调整；实盘仍 QMT front*。"""
+    logical = _dividend_type_for(stock)
+    apply = globals().get("pit_should_apply")
+    if callable(apply) and apply(logical):
+        A._pit_front_active = True
+        return "none"
+    return logical
+
+
+def _maybe_pit_ohlcv(C, stock, open_, high, low, close, volume, days, end, logical_div):
+    """对 none 原料按 asof=end 做时点前复权；空因子按 raw 用（不回退 QMT front*）。"""
+    apply = globals().get("pit_should_apply")
+    if not (callable(apply) and apply(logical_div)):
+        return open_, high, low, close, volume
+    A._pit_front_active = True
+    asof = str(end or "")[:8]
+    n = len(close) if close is not None else 0
+    if n <= 0:
+        return open_, high, low, close, volume
+    if (not days) or len(days) != n:
+        _diag_once("pit_no_days", "stock=", stock, "end=", asof, "n=", n)
+        return open_, high, low, close, volume
+    mode_fn = globals().get("pit_mode_from_div")
+    mode = mode_fn(logical_div) if callable(mode_fn) else "ratio"
+    if not mode:
+        mode = "ratio"
+    fac_fn = globals().get("_divid_factors_cached")
+    factors = None
+    if callable(fac_fn):
+        try:
+            factors = fac_fn(C, stock)
+        except Exception:
+            factors = None
+    if not isinstance(factors, dict):
+        factors = {}
+    if mode == "diff":
+        parse_fn = globals().get("pit_parse_full_events")
+        events = parse_fn(factors) if callable(parse_fn) else []
+    else:
+        parse_fn = globals().get("pit_parse_events")
+        events = parse_fn(factors) if callable(parse_fn) else []
+    if not events:
+        _diag_once("pit_no_factors", "stock=", stock, "end=", asof, "mode=", mode)
+        return open_, high, low, close, volume
+    adj = globals().get("pit_adjust_ohlc_cached")
+    if not callable(adj):
+        adj = globals().get("pit_adjust_ohlc")
+    if not callable(adj):
+        return open_, high, low, close, volume
+    try:
+        if adj is globals().get("pit_adjust_ohlc_cached"):
+            o2, h2, l2, c2 = adj(
+                stock, days, open_, high, low, close, events, asof, mode
+            )
+        else:
+            o2, h2, l2, c2 = adj(
+                days, open_, high, low, close, events, asof, mode
+            )
+    except Exception as e:
+        _diag_once("pit_adjust_fail", "stock=", stock, "mode=", mode, e)
+        return open_, high, low, close, volume
+    return o2, h2, l2, c2, volume
 
 
 def _bar_end_str(C):
@@ -2547,7 +2905,7 @@ def _call_market_data_ex(C, fields, stocks, period, end, count, div):
 
 
 def _parse_ohlcv_tuple(md, stock, period, end):
-    """md → OHLCV 元组；周线仍丢掉未收盘周。不打 diag。"""
+    """md → (o,h,l,c,v, days)；周线仍丢掉未收盘周。不打 diag。"""
     if md is None:
         return None
     open_ = _series_from_ex_matched(md, stock, "open")
@@ -2566,15 +2924,15 @@ def _parse_ohlcv_tuple(md, stock, period, end):
         low = list(close)
     if not volume or len(volume) != n:
         volume = [0.0] * n
+    days = _days_from_ex(md, stock)
     if _is_weekly_period(period):
-        days = _days_from_ex(md, stock)
         trimmed = _drop_unclosed_week_ohlcv(
             open_, high, low, close, volume, days, end
         )
         if trimmed is None:
             return None
-        open_, high, low, close, volume = trimmed
-    return open_, high, low, close, volume
+        open_, high, low, close, volume, days = trimmed
+    return open_, high, low, close, volume, days
 
 
 def _accept_ohlcv(tup, need, diag_key, source, period, end, div, C):
@@ -2624,22 +2982,33 @@ def _accept_ohlcv(tup, need, diag_key, source, period, end, div, C):
     return tup
 
 
+def _ohlcv5_from_parsed(C, stock, parsed, end, logical_div):
+    if parsed is None:
+        return None
+    open_, high, low, close, volume, days = parsed
+    return _maybe_pit_ohlcv(
+        C, stock, open_, high, low, close, volume, days, end, logical_div
+    )
+
+
 def _get_ohlcv_period(C, stock, period, count, need, diag_key):
     end = _ohlcv_end_for_period(C, period)
     fields = ["open", "high", "low", "close", "volume"]
-    div = _dividend_type_for(stock)
+    logical = _dividend_type_for(stock)
+    api_div = _api_dividend_type(stock)
     cache = _ohlcv_cache_map()
-    key = _ohlcv_cache_key(stock, period, count, end, div)
+    key = _ohlcv_cache_key(stock, period, count, end, logical)
     if cache is not None:
         hit = cache.get(key)
         if hit is not None and len(hit[3]) >= int(need):
             return hit
     md, source, err = _call_market_data_ex(
-        C, fields, [stock], period, end, count, div
+        C, fields, [stock], period, end, count, api_div
     )
     if err is not None:
         _diag_once(diag_key + "_ex_fail", err)
-    tup = _parse_ohlcv_tuple(md, stock, period, end) if md is not None else None
+    parsed = _parse_ohlcv_tuple(md, stock, period, end) if md is not None else None
+    tup = _ohlcv5_from_parsed(C, stock, parsed, end, logical)
     if tup is None or len(tup[3]) < int(need):
         try:
             md2 = C.get_market_data(
@@ -2648,15 +3017,16 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
                 period=period,
                 end_time=end,
                 count=count,
-                dividend_type=div,
+                dividend_type=api_div,
             )
             source = "get_market_data"
-            tup2 = _parse_ohlcv_tuple(md2, stock, period, end)
+            parsed2 = _parse_ohlcv_tuple(md2, stock, period, end)
+            tup2 = _ohlcv5_from_parsed(C, stock, parsed2, end, logical)
             if tup2 is not None:
                 tup = tup2
         except Exception as e:
             _diag_once(diag_key + "_gmd_fail", e)
-    tup = _accept_ohlcv(tup, need, diag_key, source, period, end, div, C)
+    tup = _accept_ohlcv(tup, need, diag_key, source, period, end, logical, C)
     if tup is not None and cache is not None:
         cache[key] = tup
     return tup
@@ -2697,9 +3067,12 @@ def _prefetch_watch_ohlcv(C, stocks):
     need_w = _ohlcv_need_1w()
     fields = ["open", "high", "low", "close", "volume"]
     groups = {}
+    logical_of = {}
     for code in codes:
-        div = _dividend_type_for(code)
-        groups.setdefault(div, []).append(code)
+        logical = _dividend_type_for(code)
+        logical_of[code] = logical
+        api_div = _api_dividend_type(code)
+        groups.setdefault(api_div, []).append(code)
     cache = getattr(A, "_ohlcv_cache", None)
     if not isinstance(cache, dict):
         cache = {}
@@ -2708,9 +3081,9 @@ def _prefetch_watch_ohlcv(C, stocks):
 
     def _fill(period, count, end, need, diag_base):
         n_rpc = 0
-        for div, group in groups.items():
+        for api_div, group in groups.items():
             md, source, err = _call_market_data_ex(
-                C, fields, list(group), period, end, count, div
+                C, fields, list(group), period, end, count, api_div
             )
             n_rpc += 1
             missing = []
@@ -2721,19 +3094,23 @@ def _prefetch_watch_ohlcv(C, stocks):
                     if _md_match_key(md, code) is None:
                         missing.append(code)
                         continue
+                    logical = logical_of.get(code) or _dividend_type_for(code)
                     parsed = _parse_ohlcv_tuple(md, code, period, end)
+                    tup5 = _ohlcv5_from_parsed(C, code, parsed, end, logical)
                     tup = _accept_ohlcv(
-                        parsed,
+                        tup5,
                         need,
                         _ohlcv_diag_key(diag_base, code),
                         source or "get_market_data_ex",
                         period,
                         end,
-                        div,
+                        logical,
                         C,
                     )
                     if tup is not None:
-                        cache[_ohlcv_cache_key(code, period, count, end, div)] = tup
+                        cache[
+                            _ohlcv_cache_key(code, period, count, end, logical)
+                        ] = tup
             for code in missing:
                 n_rpc += 1
                 _get_ohlcv_period(

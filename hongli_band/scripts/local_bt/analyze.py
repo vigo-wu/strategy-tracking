@@ -48,6 +48,44 @@ DEFAULT_DIVIDEND_TYPE = "front_ratio"
 DEFAULT_CSV_ROOT = REPO / "tools" / "csv"
 DEFAULT_REPORT_ROOT = THEME / "report"
 HLBAND_CONFIG = THEME / "scripts" / "qmt" / "hlband" / "config.py"
+# front/front_ratio 回测改读 none CSV + divid_factors 做 PIT；报告目录名仍为逻辑复权
+PIT_LOGICAL_DIVS = frozenset({"front", "front_ratio"})
+
+
+def uses_pit_front(dividend_type: Any) -> bool:
+    return normalize_dividend_type(dividend_type) in PIT_LOGICAL_DIVS
+
+
+def csv_source_dividend_type(dividend_type: Any = "") -> str:
+    """逻辑复权 → 实际读取的 CSV 子目录（front* → none）。"""
+    div = normalize_dividend_type(dividend_type) or DEFAULT_DIVIDEND_TYPE
+    if div in PIT_LOGICAL_DIVS:
+        return "none"
+    return div
+
+
+def divid_factors_json_path(csv_root: str | Path, stock: str) -> Path:
+    root = Path(csv_root)
+    if root.name in DIVIDEND_TYPES:
+        root = root.parent
+    tag = str(stock or "").strip().upper().replace(".", "_")
+    return root / "divid_factors" / ("%s.json" % tag)
+
+
+def load_divid_factors_json(csv_root: str | Path, stock: str) -> dict[str, Any]:
+    import json
+
+    path = divid_factors_json_path(csv_root, stock)
+    if not path.is_file():
+        raise FileNotFoundError(
+            "缺 divid_factors: %s（请跑 KlineDump，DUMP_STOCKS 须含该票且 DUMP_DIVID_FACTORS=True）"
+            % path
+        )
+    with open(path, encoding="utf-8") as f:
+        raw = json.load(f)
+    if not isinstance(raw, dict):
+        raise ValueError("divid_factors 非 dict: %s" % path)
+    return raw
 
 
 def normalize_dividend_type(raw: Any) -> str:

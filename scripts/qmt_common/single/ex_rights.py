@@ -124,7 +124,10 @@ def _ex_parse_row(row):
 
 
 def _ex_skip_adjusted_backtest():
+    """回测且行情已是静态复权时跳过 STATE 缩放；PIT（none+因子）激活则不跳过。"""
     if not getattr(A, "is_backtest", False):
+        return False
+    if bool(getattr(A, "_pit_front_active", False)):
         return False
     fn = globals().get("_dividend_type")
     div = ""

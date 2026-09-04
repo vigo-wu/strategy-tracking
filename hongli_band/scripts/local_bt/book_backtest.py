@@ -106,21 +106,31 @@ def load_stores_for_book(
     book_stocks: Mapping[str, Any],
     csv_root: str | Path,
 ) -> tuple[dict[str, Any], list[str]]:
+    from analyze import (  # noqa: WPS433
+        csv_source_dividend_type,
+        load_divid_factors_json,
+        uses_pit_front,
+    )
+
     stores: dict[str, Any] = {}
     errors: list[str] = []
+    factors_by_stock: dict[str, dict] = {}
     root = Path(csv_root)
     norm = normalize_book_stocks(book_stocks)
     for stock, cfg in norm.items():
         div = str(cfg.get("dividend_type") or DEFAULT_DIVIDEND_TYPE)
-        path = daily_csv_for_stock(resolve_typed_dir(root, div), stock)
+        data_div = csv_source_dividend_type(div)
+        path = daily_csv_for_stock(resolve_typed_dir(root, data_div), stock)
         if path is None or not Path(path).is_file():
-            errors.append("%s 缺 CSV (%s)" % (stock, div))
+            errors.append("%s 缺 CSV (%s→%s)" % (stock, div, data_div))
             continue
         try:
+            if uses_pit_front(div):
+                factors_by_stock[stock] = load_divid_factors_json(root, stock)
             stores[stock] = get_market_store(path, stock=stock)
         except Exception as e:
             errors.append("%s 加载失败: %s" % (stock, e))
-    return stores, errors
+    return stores, errors, factors_by_stock
 
 
 def attribute_portfolio_kpi(
@@ -182,7 +192,7 @@ def run_book_backtest(
     norm = normalize_book_stocks(book_stocks)
     if not norm:
         raise ValueError("BOOK_STOCKS 为空")
-    stores, load_err = load_stores_for_book(norm, csv_root)
+    stores, load_err, factors_by_stock = load_stores_for_book(norm, csv_root)
     if not stores:
         raise ValueError("无可用 CSV: %s" % ("; ".join(load_err) or "空池"))
     chart = sorted(stores.keys())[0]
@@ -195,6 +205,16 @@ def run_book_backtest(
     ctx.start = start or walk[0].day
     ctx.end = end or walk[-1].day
     ctx.barpos = 0
+    if factors_by_stock:
+        ctx.divid_factors_by_stock = factors_by_stock
+        # 任一票 PIT → 指纹；ex_rights 按票 logical div + 取数时置 _pit_front_active
+        any_pit = any(
+            str((norm.get(s) or {}).get("dividend_type") or "").lower()
+            in ("front", "front_ratio")
+            for s in stores
+        )
+    else:
+        any_pit = False
 
     dest = Path(out_dir) if out_dir else THEME / "report"
     dest.mkdir(parents=True, exist_ok=True)
@@ -224,8 +244,8 @@ def run_book_backtest(
     wallet_start = float(wallet.cash) if wallet is not None else budget
 
     banner = (
-        "local_bt_book n=%s walk=%s %s chart=%s budget=%s"
-        % (len(norm), walk[0].day, walk[-1].day, chart, budget)
+        "local_bt_book n=%s walk=%s %s chart=%s budget=%s pit=%s"
+        % (len(norm), walk[0].day, walk[-1].day, chart, budget, "1" if any_pit else "0")
     )
     if wallet is not None:
         banner += " compound=1 wallet_start=%.2f" % wallet_start

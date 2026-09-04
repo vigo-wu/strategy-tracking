@@ -36,6 +36,7 @@ from analyze import (  # noqa: E402
     batch_summary_dataframe,
     batch_year_summary_dataframe,
     chart_ma_periods,
+    csv_source_dividend_type,
     daily_csvs_by_stock,
     date_to_ymd,
     daily_csv_for_stock,
@@ -68,6 +69,7 @@ from analyze import (  # noqa: E402
     trades_to_dataframe,
     unique_dividend_types,
     union_date_range,
+    uses_pit_front,
     ymd_to_date,
 )
 from display_df import (  # noqa: E402
@@ -1825,7 +1827,7 @@ def _render_batch_run(
     empty_types = []
     skip_notes: list[str] = []
     for div in divs:
-        csv_dir = str(resolve_typed_dir(csv_root, div))
+        csv_dir = str(resolve_typed_dir(csv_root, csv_source_dividend_type(div)))
         fp = _daily_dir_fingerprint(csv_dir)
         metas = _cached_daily_metas(csv_dir, fp)
         n_files = int(fp[0]) if fp else 0
@@ -3024,7 +3026,7 @@ with st.sidebar:
         )
         if divs:
             st.caption(
-                "已选 %s 种 · 行情 `csv/<type>/` · 产物 `report/<type>/`"
+                "已选 %s 种 · front→价差PIT / front_ratio→等比PIT（读 none+divid_factors）· 产物 `report/<type>/`"
                 % len(divs)
             )
         else:
@@ -3032,8 +3034,12 @@ with st.sidebar:
     else:
         st.caption(str(SELECT_SIDEBAR["scan_caption"]) if mode == "选股方案" else str(ANALYSIS_SIDEBAR["scan_caption"]))
     report_dirs = [str(resolve_typed_dir(DEFAULT_REPORT_ROOT, d)) for d in divs]
-    csv_dirs = [str(resolve_typed_dir(csv_root, d)) for d in divs]
-    csv_dir = csv_dirs[0] if csv_dirs else str(resolve_typed_dir(csv_root, DEFAULT_DIVIDEND_TYPE))
+    csv_dirs = [str(resolve_typed_dir(csv_root, csv_source_dividend_type(d))) for d in divs]
+    csv_dir = (
+        csv_dirs[0]
+        if csv_dirs
+        else str(resolve_typed_dir(csv_root, csv_source_dividend_type(DEFAULT_DIVIDEND_TYPE)))
+    )
     report_dir = report_dirs[0] if report_dirs else str(resolve_typed_dir(DEFAULT_REPORT_ROOT, DEFAULT_DIVIDEND_TYPE))
     uploaded = None
     quiet = True
@@ -3078,7 +3084,7 @@ elif mode == "跑本地回测" and scope == "批量（按标的汇总）":
 elif mode == "跑本地回测":
     union_by: dict[str, dict] = {}
     for div in divs:
-        d = str(resolve_typed_dir(csv_root, div))
+        d = str(resolve_typed_dir(csv_root, csv_source_dividend_type(div)))
         for m in _cached_daily_metas(d, _daily_dir_fingerprint(d)):
             stock = str(m.get("stock") or "").strip().upper()
             if not stock:
@@ -3171,7 +3177,9 @@ elif mode == "跑本地回测":
                 if uploaded is not None:
                     csv_one = selected_csv
                 else:
-                    csv_one = daily_csv_for_stock(resolve_typed_dir(csv_root, div), stock)
+                    csv_one = daily_csv_for_stock(
+                        resolve_typed_dir(csv_root, csv_source_dividend_type(div)), stock
+                    )
                 if csv_one is None or not Path(csv_one).is_file():
                     skipped.append(div)
                     continue

@@ -321,6 +321,26 @@ class ExRightsTests(unittest.TestCase):
         self.assertAlmostEqual(A.position["price"], 10.0, places=6)
         self.assertEqual(A.ex_rights_applied, [])
 
+    def test_front_ratio_pit_backtest_applies(self):
+        ns = _load_ex_ns(dividend_type="front_ratio")
+        A = ns["A"]
+        A.is_backtest = True
+        A._pit_front_active = True
+        A.position = {
+            "shares": 1000,
+            "price": 10.0,
+            "cost": 10000.0,
+            "opened_at": "20240101093000",
+        }
+        A.hold_peak = 10.0
+        C = SimpleNamespace()
+        C.get_divid_factors = lambda stock: {
+            _ms_for_day("20240601"): [0.5, 0.0, 0.0, 0.0, 0.0, 0, 1.05],
+        }
+        ns["_maybe_apply_ex_rights"](C, "20240601")
+        self.assertAlmostEqual(A.position["price"], 10.0 / 1.05, places=6)
+        self.assertEqual(A.ex_rights_applied, ["20240601"])
+
     def test_catchup_after_missed_day(self):
         ns = _load_ex_ns()
         A = ns["A"]

@@ -34,14 +34,18 @@ HIST_START = "20180101"
 HIST_MAX_LOOKBACK_DAYS = 0
 
 # 复权，传给 get_market_data_ex 的 dividend_type。每种写到 OUT_DIR/<type>/
-#   none         不复权
+#   none         不复权（PIT 时点前复权原料；local_bt front* 会读 none + divid_factors）
 #   front        前复权（价差）
 #   back         后复权（价差）
 #   front_ratio  等比前复权（最新价贴近市价）
 #   back_ratio   等比后复权
-# 可改成子集以缩短导出；改完须 re-deploy 再编译
+# 可改成子集以缩短导出；改完须 re-deploy 再编译。
+# PIT 要求 DIVIDEND_TYPES 必须含 none；DUMP_STOCKS 须覆盖要做 PIT 的标的（可与 BOOK 对齐）。
 DIVIDEND_TYPES = ("none", "front", "back", "front_ratio", "back_ratio")
 DOWNLOAD_HIST = True
+
+# 导出 get_divid_factors → OUT_DIR/divid_factors/{CODE}_{MKT}.json（local_bt PIT 用）
+DUMP_DIVID_FACTORS = True
 
 # 额外周期。本地回测优先读同目录 {code}_1w_*.csv，对齐 QMT 原生周线
 EXTRA_PERIODS = ("1w",)
@@ -919,6 +923,67 @@ def _dump_period(C, stock, period, dividend_type):
     return path
 
 
+def _divid_factors_path(stock):
+    out_dir = str(globals().get("OUT_DIR") or "")
+    tag = _stock_tag(stock)
+    return os.path.join(out_dir, "divid_factors", "%s.json" % tag)
+
+
+def _coerce_divid_row(row):
+    if isinstance(row, (list, tuple)):
+        out = []
+        for x in row:
+            try:
+                if isinstance(x, bool):
+                    out.append(int(x))
+                else:
+                    out.append(float(x))
+            except Exception:
+                try:
+                    out.append(int(x))
+                except Exception:
+                    out.append(x)
+        return out
+    try:
+        return float(row)
+    except Exception:
+        return row
+
+
+def _dump_divid_factors(C, stock):
+    if not bool(globals().get("DUMP_DIVID_FACTORS", True)):
+        return None
+    path = _divid_factors_path(stock)
+    try:
+        raw = C.get_divid_factors(stock)
+    except Exception as e:
+        print(_strategy_tag(), "divid_factors fail", stock, e)
+        return None
+    payload = {}
+    if isinstance(raw, dict):
+        for k, v in raw.items():
+            payload[str(k)] = _coerce_divid_row(v)
+    try:
+        parent = os.path.dirname(path)
+        if parent and (not os.path.isdir(parent)):
+            os.makedirs(parent)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=0)
+    except Exception as e:
+        print(_strategy_tag(), "divid_factors write fail", stock, e)
+        return None
+    print(
+        _strategy_tag(),
+        "divid_factors n=",
+        len(payload),
+        "stock=",
+        stock,
+        "path=",
+        path,
+    )
+    return path
+
+
 def _infer_dump_market(code6):
     if not code6:
         return ""
@@ -1017,6 +1082,10 @@ def _dump_periods(C):
     print(_strategy_tag(), "batch stocks=", stocks, "periods=", periods, "divs=", divs)
     do_dl = bool(globals().get("DOWNLOAD_HIST", True))
     for stock in stocks:
+        try:
+            _dump_divid_factors(C, stock)
+        except Exception as e:
+            print(_strategy_tag(), "divid_factors abort-safe", stock, e)
         for period in periods:
             if do_dl:
                 try:

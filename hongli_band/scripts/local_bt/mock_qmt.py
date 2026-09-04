@@ -136,7 +136,18 @@ class MockContext:
         return self._md(*args, **kwargs)
 
     def get_divid_factors(self, stock: str = ""):
-        """除权除息因子；默认空。测试可设 self.divid_factors。"""
+        """除权除息因子；优先 per-stock map，其次 self.divid_factors。"""
+        by = getattr(self, "divid_factors_by_stock", None)
+        if isinstance(by, dict):
+            key = str(stock or "").strip().upper()
+            if not key:
+                key = str(self.stockcode + "." + self.market).upper()
+            if key in by:
+                return by[key]
+            code, mkt = split_stock(key)
+            alt = "%s.%s" % (code, mkt)
+            if alt in by:
+                return by[alt]
         raw = getattr(self, "divid_factors", None)
         if isinstance(raw, dict):
             return raw

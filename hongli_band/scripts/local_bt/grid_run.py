@@ -34,6 +34,7 @@ if str(HERE) not in sys.path:
 from analyze import (  # noqa: E402
     DEFAULT_CSV_ROOT,
     DEFAULT_DIVIDEND_TYPE,
+    csv_source_dividend_type,
     daily_csvs_by_stock,
     normalize_dividend_type,
     normalize_ma_type,
@@ -275,7 +276,7 @@ def csv_for(stock: str, div: str) -> Path | None:
     if key in _CSV_INDEX:
         p = _CSV_INDEX[key]
         return p if p.is_file() else None
-    root = resolve_typed_dir(DEFAULT_CSV_ROOT, div)
+    root = resolve_typed_dir(DEFAULT_CSV_ROOT, csv_source_dividend_type(div))
     for meta in daily_csvs_by_stock(root):
         code = str(meta.get("stock") or "").strip().upper()
         path = Path(str(meta.get("path") or ""))

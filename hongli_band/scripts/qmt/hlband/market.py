@@ -175,7 +175,7 @@ def _get_daily_bar_days(C, stock, count=8):
         end = end[:8]
     fields = ["close"]
     md = None
-    div = _dividend_type_for(stock)
+    div = _api_dividend_type(stock)
     try:
         md = C.get_market_data_ex(
             fields=fields,
@@ -221,7 +221,10 @@ def _is_weekly_period(period):
 
 
 def _drop_unclosed_week_ohlcv(open_, high, low, close, volume, days, end_day):
-    """丢掉 end_day 所在自然周，对齐 QMT 回测 0000 原生 1w（周五当天也不含本周）。"""
+    """丢掉 end_day 所在自然周，对齐 QMT 回测 0000 原生 1w（周五当天也不含本周）。
+
+    返回 (o,h,l,c,v, days_out)；days_out 与 OHLC 对齐，可能为 None。
+    """
     if not close:
         return None
     n = len(close)
@@ -233,14 +236,89 @@ def _drop_unclosed_week_ohlcv(open_, high, low, close, volume, days, end_day):
         keep = list(range(n - 1))
         _diag_once("w1_drop_last_no_days", "end=", end_day, "n=", n)
     if keep is None:
-        return open_, high, low, close, volume
+        return open_, high, low, close, volume, days
     if len(keep) < 1:
         return None
 
     def _take(seq):
+        if seq is None:
+            return None
         return [seq[i] for i in keep]
 
-    return _take(open_), _take(high), _take(low), _take(close), _take(volume)
+    days_out = _take(days) if days and len(days) == n else None
+    return (
+        _take(open_),
+        _take(high),
+        _take(low),
+        _take(close),
+        _take(volume),
+        days_out,
+    )
+
+
+def _api_dividend_type(stock):
+    """回测 front/front_ratio → 请求 none，由 PIT 调整；实盘仍 QMT front*。"""
+    logical = _dividend_type_for(stock)
+    apply = globals().get("pit_should_apply")
+    if callable(apply) and apply(logical):
+        A._pit_front_active = True
+        return "none"
+    return logical
+
+
+def _maybe_pit_ohlcv(C, stock, open_, high, low, close, volume, days, end, logical_div):
+    """对 none 原料按 asof=end 做时点前复权；空因子按 raw 用（不回退 QMT front*）。"""
+    apply = globals().get("pit_should_apply")
+    if not (callable(apply) and apply(logical_div)):
+        return open_, high, low, close, volume
+    A._pit_front_active = True
+    asof = str(end or "")[:8]
+    n = len(close) if close is not None else 0
+    if n <= 0:
+        return open_, high, low, close, volume
+    if (not days) or len(days) != n:
+        _diag_once("pit_no_days", "stock=", stock, "end=", asof, "n=", n)
+        return open_, high, low, close, volume
+    mode_fn = globals().get("pit_mode_from_div")
+    mode = mode_fn(logical_div) if callable(mode_fn) else "ratio"
+    if not mode:
+        mode = "ratio"
+    fac_fn = globals().get("_divid_factors_cached")
+    factors = None
+    if callable(fac_fn):
+        try:
+            factors = fac_fn(C, stock)
+        except Exception:
+            factors = None
+    if not isinstance(factors, dict):
+        factors = {}
+    if mode == "diff":
+        parse_fn = globals().get("pit_parse_full_events")
+        events = parse_fn(factors) if callable(parse_fn) else []
+    else:
+        parse_fn = globals().get("pit_parse_events")
+        events = parse_fn(factors) if callable(parse_fn) else []
+    if not events:
+        _diag_once("pit_no_factors", "stock=", stock, "end=", asof, "mode=", mode)
+        return open_, high, low, close, volume
+    adj = globals().get("pit_adjust_ohlc_cached")
+    if not callable(adj):
+        adj = globals().get("pit_adjust_ohlc")
+    if not callable(adj):
+        return open_, high, low, close, volume
+    try:
+        if adj is globals().get("pit_adjust_ohlc_cached"):
+            o2, h2, l2, c2 = adj(
+                stock, days, open_, high, low, close, events, asof, mode
+            )
+        else:
+            o2, h2, l2, c2 = adj(
+                days, open_, high, low, close, events, asof, mode
+            )
+    except Exception as e:
+        _diag_once("pit_adjust_fail", "stock=", stock, "mode=", mode, e)
+        return open_, high, low, close, volume
+    return o2, h2, l2, c2, volume
 
 
 def _bar_end_str(C):
@@ -349,7 +427,7 @@ def _call_market_data_ex(C, fields, stocks, period, end, count, div):
 
 
 def _parse_ohlcv_tuple(md, stock, period, end):
-    """md → OHLCV 元组；周线仍丢掉未收盘周。不打 diag。"""
+    """md → (o,h,l,c,v, days)；周线仍丢掉未收盘周。不打 diag。"""
     if md is None:
         return None
     open_ = _series_from_ex_matched(md, stock, "open")
@@ -368,15 +446,15 @@ def _parse_ohlcv_tuple(md, stock, period, end):
         low = list(close)
     if not volume or len(volume) != n:
         volume = [0.0] * n
+    days = _days_from_ex(md, stock)
     if _is_weekly_period(period):
-        days = _days_from_ex(md, stock)
         trimmed = _drop_unclosed_week_ohlcv(
             open_, high, low, close, volume, days, end
         )
         if trimmed is None:
             return None
-        open_, high, low, close, volume = trimmed
-    return open_, high, low, close, volume
+        open_, high, low, close, volume, days = trimmed
+    return open_, high, low, close, volume, days
 
 
 def _accept_ohlcv(tup, need, diag_key, source, period, end, div, C):
@@ -426,22 +504,33 @@ def _accept_ohlcv(tup, need, diag_key, source, period, end, div, C):
     return tup
 
 
+def _ohlcv5_from_parsed(C, stock, parsed, end, logical_div):
+    if parsed is None:
+        return None
+    open_, high, low, close, volume, days = parsed
+    return _maybe_pit_ohlcv(
+        C, stock, open_, high, low, close, volume, days, end, logical_div
+    )
+
+
 def _get_ohlcv_period(C, stock, period, count, need, diag_key):
     end = _ohlcv_end_for_period(C, period)
     fields = ["open", "high", "low", "close", "volume"]
-    div = _dividend_type_for(stock)
+    logical = _dividend_type_for(stock)
+    api_div = _api_dividend_type(stock)
     cache = _ohlcv_cache_map()
-    key = _ohlcv_cache_key(stock, period, count, end, div)
+    key = _ohlcv_cache_key(stock, period, count, end, logical)
     if cache is not None:
         hit = cache.get(key)
         if hit is not None and len(hit[3]) >= int(need):
             return hit
     md, source, err = _call_market_data_ex(
-        C, fields, [stock], period, end, count, div
+        C, fields, [stock], period, end, count, api_div
     )
     if err is not None:
         _diag_once(diag_key + "_ex_fail", err)
-    tup = _parse_ohlcv_tuple(md, stock, period, end) if md is not None else None
+    parsed = _parse_ohlcv_tuple(md, stock, period, end) if md is not None else None
+    tup = _ohlcv5_from_parsed(C, stock, parsed, end, logical)
     if tup is None or len(tup[3]) < int(need):
         try:
             md2 = C.get_market_data(
@@ -450,15 +539,16 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
                 period=period,
                 end_time=end,
                 count=count,
-                dividend_type=div,
+                dividend_type=api_div,
             )
             source = "get_market_data"
-            tup2 = _parse_ohlcv_tuple(md2, stock, period, end)
+            parsed2 = _parse_ohlcv_tuple(md2, stock, period, end)
+            tup2 = _ohlcv5_from_parsed(C, stock, parsed2, end, logical)
             if tup2 is not None:
                 tup = tup2
         except Exception as e:
             _diag_once(diag_key + "_gmd_fail", e)
-    tup = _accept_ohlcv(tup, need, diag_key, source, period, end, div, C)
+    tup = _accept_ohlcv(tup, need, diag_key, source, period, end, logical, C)
     if tup is not None and cache is not None:
         cache[key] = tup
     return tup
@@ -499,9 +589,12 @@ def _prefetch_watch_ohlcv(C, stocks):
     need_w = _ohlcv_need_1w()
     fields = ["open", "high", "low", "close", "volume"]
     groups = {}
+    logical_of = {}
     for code in codes:
-        div = _dividend_type_for(code)
-        groups.setdefault(div, []).append(code)
+        logical = _dividend_type_for(code)
+        logical_of[code] = logical
+        api_div = _api_dividend_type(code)
+        groups.setdefault(api_div, []).append(code)
     cache = getattr(A, "_ohlcv_cache", None)
     if not isinstance(cache, dict):
         cache = {}
@@ -510,9 +603,9 @@ def _prefetch_watch_ohlcv(C, stocks):
 
     def _fill(period, count, end, need, diag_base):
         n_rpc = 0
-        for div, group in groups.items():
+        for api_div, group in groups.items():
             md, source, err = _call_market_data_ex(
-                C, fields, list(group), period, end, count, div
+                C, fields, list(group), period, end, count, api_div
             )
             n_rpc += 1
             missing = []
@@ -523,19 +616,23 @@ def _prefetch_watch_ohlcv(C, stocks):
                     if _md_match_key(md, code) is None:
                         missing.append(code)
                         continue
+                    logical = logical_of.get(code) or _dividend_type_for(code)
                     parsed = _parse_ohlcv_tuple(md, code, period, end)
+                    tup5 = _ohlcv5_from_parsed(C, code, parsed, end, logical)
                     tup = _accept_ohlcv(
-                        parsed,
+                        tup5,
                         need,
                         _ohlcv_diag_key(diag_base, code),
                         source or "get_market_data_ex",
                         period,
                         end,
-                        div,
+                        logical,
                         C,
                     )
                     if tup is not None:
-                        cache[_ohlcv_cache_key(code, period, count, end, div)] = tup
+                        cache[
+                            _ohlcv_cache_key(code, period, count, end, logical)
+                        ] = tup
             for code in missing:
                 n_rpc += 1
                 _get_ohlcv_period(

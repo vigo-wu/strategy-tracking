@@ -156,6 +156,12 @@ class _ColPack:
             self.volume[lo:hi],
         )
 
+    def as_ohlcv_with_days(self, lo: int, hi: int):
+        pack = self.as_ohlcv(lo, hi)
+        if pack is None:
+            return None
+        return pack + (list(self.days[lo:hi]),)
+
 
 def digits_only(s: str) -> str:
     return "".join(ch for ch in str(s or "") if ch.isdigit())
@@ -658,11 +664,24 @@ class MarketStore:
         start_day: str = "",
     ):
         """与 frame() 相同切片，返回 (open, high, low, close, volume) 的 numpy 视图。"""
+        pack = self.ohlcv_with_days(period, end_day, count, start_day)
+        if pack is None:
+            return None
+        return pack[:5]
+
+    def ohlcv_with_days(
+        self,
+        period: str,
+        end_day: str,
+        count: int | None = None,
+        start_day: str = "",
+    ):
+        """返回 (open, high, low, close, volume, days)。"""
         if _is_weekly_period(period):
             lo, hi = self._weekly.bounds(end_day, start_day, count=None)
             hi = self._weekly.drop_forming_hi(lo, hi, end_day)
             if count is not None and int(count) > 0 and hi - lo > int(count):
                 lo = hi - int(count)
-            return self._weekly.as_ohlcv(lo, hi)
+            return self._weekly.as_ohlcv_with_days(lo, hi)
         lo, hi = self._daily.bounds(end_day, start_day, count)
-        return self._daily.as_ohlcv(lo, hi)
+        return self._daily.as_ohlcv_with_days(lo, hi)

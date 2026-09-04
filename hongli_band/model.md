@@ -8,7 +8,7 @@
 ## 核心逻辑
 
 红利资产慢牛爬坡、震荡抗跌。脚本做 **周线估值/斜率过滤 + 日线缩量低吸 + 动态锁利卖出**。  
-行情复权按标的：`BOOK_STOCKS[code].dividend_type`（默认 601939=`front` 价差前复权，其余=`front_ratio` 等比前复权）；缺键回落全局 `DIVIDEND_TYPE`（`front_ratio`）。公式「基本信息 → 复权方式」只影响看图，不叠加。改复权会改变均线与买卖点。主图 **日线**；实盘信号在收盘确认窗评估（默认 14:56 起），**尾盘成交窗**（`PENDING_EXEC_START`～`PENDING_EXEC_END`，默认 14:56:00–14:57:00）在连续竞价最后一分钟按 **卖一价限价**买入、买一价限价卖出（`prType=11`）。**14:57 起已是收盘集合竞价，本窗不再报单。** 错过则保留到下一交易日 **开盘兜底窗**（`OPEN_EXEC_START`～`OPEN_EXEC_END`，默认 09:30–09:45）按开盘价补成交（连续竞价走市价）。若收盘窗未跑到，开盘对上一根已收盘日兜底评估（`confirmed_eval_day < 上一完整交易日`），同日开盘窗可成交。回测与尾盘主路径对齐：信号日按**收盘价**成交；T+1 隔夜残留按下一日开盘价。  
+行情复权按标的：`BOOK_STOCKS[code].dividend_type`（默认 601939=`front` 价差前复权，其余=`front_ratio` 等比前复权）；缺键回落全局 `DIVIDEND_TYPE`（`front_ratio`）。公式「基本信息 → 复权方式」只影响看图，不叠加。改复权会改变均线与买卖点。**回测**时 `front`/`front_ratio` 自动改为：请求 `none` + `get_divid_factors` 做**时点前复权（PIT）**——`front_ratio` 用 `Πdr`，`front` 用价差事件序；日线/周线各自按 bar 标签日。实盘仍走 QMT `front*`。旧静态 CSV / 早期同结果 PIT 报告不可直接比。主图 **日线**；实盘信号在收盘确认窗评估（默认 14:56 起），**尾盘成交窗**（`PENDING_EXEC_START`～`PENDING_EXEC_END`，默认 14:56:00–14:57:00）在连续竞价最后一分钟按 **卖一价限价**买入、买一价限价卖出（`prType=11`）。**14:57 起已是收盘集合竞价，本窗不再报单。** 错过则保留到下一交易日 **开盘兜底窗**（`OPEN_EXEC_START`～`OPEN_EXEC_END`，默认 09:30–09:45）按开盘价补成交（连续竞价走市价）。若收盘窗未跑到，开盘对上一根已收盘日兜底评估（`confirmed_eval_day < 上一完整交易日`），同日开盘窗可成交。回测与尾盘主路径对齐：信号日按**收盘价**成交；T+1 隔夜残留按下一日开盘价。  
 实盘报单成功后**保留**信号 pending / 止盈元数据，**仅成交回调**后清除；废单/撤单后下一尾盘或开盘窗自动重试。  
 **加仓成交后当日不再评新卖点**（`skip_sell_eval_day`，实盘同一根日 K 的后续 tick 也跳过）；已挂的 `pending_exit` 仍可成交。T+1 导致整仓/多笔只卖掉一部分时，若 `pending_exit.lot_ids` 还有剩余笔则**保留** pending，不因部分成交清掉。
 
@@ -136,7 +136,7 @@
 | 放鹰吃肉 | ≥ 10% | 4% | — |
 
 优先级（挂 pending 主因）：`weekly_bear` > `stop_loss` > `trail_stop` > `time_force`。  
-持仓过除权除息：卖点评估前按 `get_divid_factors` 的 `dr` 缩放该票 `cost`/`hold_peak`（送转同步股数）；**配股默认按未认购**（股数不含配股部分），实盘用券商量延后判定认购后再加权成本；除权日当日开仓不缩放。回测若行情已是 `front`/`front_ratio`/`back`/`back_ratio`/`follow` 则跳过（避免双重调整）。  
+持仓过除权除息：卖点评估前按 `get_divid_factors` 的 `dr` 缩放该票 `cost`/`hold_peak`（送转同步股数）；**配股默认按未认购**（股数不含配股部分），实盘用券商量延后判定认购后再加权成本；除权日当日开仓不缩放。回测若行情是**静态** `front`/`front_ratio`/`back`/`back_ratio`/`follow`（未走 PIT）则跳过；**PIT 激活**（回测 front*→none+因子）时与实盘一样缩放。  
 `SCALE_LOTS` 开启时，除 `weekly_bear` 一次出清外，其余卖点只平触发的那几笔（日志 `lots=[id]`）。  
 买卖委托失败/T+1 skip 时**保留**对应 pending（及持仓元数据）；实盘报单成功亦保留至成交，废单后尾盘或次日开盘窗可重试。当日新买的笔 T+1 不可卖，不清仓状态。  
 加仓成交后当日状态行可见 `skip_add_bar`，不应再出现新的 `pending_exit set`。T+1 部分成交且目标笔仍在应看到 `pending_exit keep after partial fill`。卖出前有 `SELL lot-can_use`；`risk=True` 时说明目标笔当日新开、可卖可能来自旧仓。
@@ -238,6 +238,6 @@
 
 ## 六、本地 CSV 回放
 
-不经过国金编辑器，用 KlineDump 日线回放同一套拼接脚本。行情在 `tools/csv/<复权>/`，产物在 `hongli_band/report/<复权>/`。启动：`python hongli_band/local_bt_ui.py`。
+不经过国金编辑器，用 KlineDump 日线回放同一套拼接脚本。行情在 `tools/csv/<复权>/`，产物在 `hongli_band/report/<复权>/`。**`front`/`front_ratio` 任务读 `csv/none` + `csv/divid_factors/*.json` 做时点前复权（PIT）**（`mode=diff` / `mode=ratio`），报告目录名仍为逻辑复权；日志指纹含 `pit=1 mode=…`。缺 none CSV 或因子 JSON 会硬失败——须先跑 KlineDump（`DUMP_STOCKS` 覆盖要测的票，`DIVIDEND_TYPES` 含 `none`，`DUMP_DIVID_FACTORS=True`）。启动：`python hongli_band/local_bt_ui.py`。
 
 目录、复权多选、按年批量、SMA/EMA 对照、选股择优见 **[`local_bt.md`](./local_bt.md)**。买卖规则仍以本文 §1–§4 与 `config.py` 为准。

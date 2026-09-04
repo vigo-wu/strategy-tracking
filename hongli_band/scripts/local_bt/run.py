@@ -44,6 +44,13 @@ from compound_wallet import (  # noqa: E402
     read_wallet_end,
 )
 from trades_csv import TradeLedger, trades_csv_path, wrap_fill_hooks  # noqa: E402
+from analyze import (  # noqa: E402
+    csv_source_dividend_type,
+    load_divid_factors_json,
+    normalize_dividend_type,
+    typed_dir_root,
+    uses_pit_front,
+)
 
 from qmt_common._deploy_lib import build_bundle  # noqa: E402
 
@@ -211,6 +218,28 @@ def _apply_ma_type(ns: dict, kind: str) -> str:
     return k
 
 
+def _apply_dividend_type(ns: dict, kind: str) -> str:
+    """强制逻辑复权（front* 会激活 PIT）。"""
+    d = normalize_dividend_type(kind)
+    if not d:
+        return ""
+    ns["DIVIDEND_TYPE"] = d
+    ns["_DIVIDEND_TYPE_BAD"] = False
+
+    def _for(_stock=None, _d=d):
+        return _d
+
+    ns["_dividend_type_for"] = _for
+    ns["_dividend_type"] = lambda _d=d: _d
+    A = ns.get("A")
+    apply = ns.get("pit_should_apply")
+    pit_on = bool(callable(apply) and apply(d))
+    if A is not None:
+        A._pit_front_active = pit_on
+    ns["_local_bt_pit"] = pit_on
+    return d
+
+
 def _bundle_code():
     global _BUNDLE_CODE
     if _BUNDLE_CODE is None:
@@ -235,7 +264,7 @@ def _patch_quiet_status(ns: dict) -> None:
 
 
 def _patch_fast_ohlcv(ns: dict) -> None:
-    """本地 Mock：按 barpos 切 numpy 列，跳过 list 往返与二次丢未收盘周。"""
+    """本地 Mock：按 barpos 切 numpy 列，跳过 list 往返与二次丢未收盘周；front* 做 PIT。"""
     orig_series = ns.get("_series_from_ex")
 
     def _series_from_ex(md, stock, field):
@@ -254,28 +283,115 @@ def _patch_fast_ohlcv(ns: dict) -> None:
             return orig_series(md, stock, field)
         return None
 
+    def _logical_div(stock):
+        fn = ns.get("_dividend_type_for")
+        if callable(fn):
+            try:
+                return str(fn(stock) or "")
+            except TypeError:
+                try:
+                    return str(fn() or "")
+                except Exception:
+                    pass
+            except Exception:
+                pass
+        fn2 = ns.get("_dividend_type")
+        if callable(fn2):
+            try:
+                return str(fn2() or "")
+            except Exception:
+                pass
+        return str(ns.get("DIVIDEND_TYPE") or "")
+
+    def _apply_pit_local(C, stock, open_, high, low, close, volume, days, end, logical):
+        apply = ns.get("pit_should_apply")
+        if not (callable(apply) and apply(logical)):
+            return open_, high, low, close, volume
+        A = ns.get("A")
+        if A is not None:
+            A._pit_front_active = True
+        asof = str(end or "")[:8]
+        n = len(close) if close is not None else 0
+        if n <= 0:
+            return open_, high, low, close, volume
+        if (not days) or len(days) != n:
+            diag = ns.get("_diag_once")
+            if callable(diag):
+                diag("pit_no_days", "stock=", stock, "end=", asof, "n=", n)
+            return open_, high, low, close, volume
+        mode_fn = ns.get("pit_mode_from_div")
+        mode = mode_fn(logical) if callable(mode_fn) else "ratio"
+        if not mode:
+            mode = "ratio"
+        try:
+            factors = C.get_divid_factors(stock or "")
+        except Exception:
+            factors = {}
+        if not isinstance(factors, dict):
+            factors = {}
+        if mode == "diff":
+            parse_fn = ns.get("pit_parse_full_events")
+            events = parse_fn(factors) if callable(parse_fn) else []
+        else:
+            parse_fn = ns.get("pit_parse_events")
+            events = parse_fn(factors) if callable(parse_fn) else []
+        if not events:
+            diag = ns.get("_diag_once")
+            if callable(diag):
+                diag("pit_no_factors", "stock=", stock, "end=", asof, "mode=", mode)
+            return open_, high, low, close, volume
+        adj = ns.get("pit_adjust_ohlc_cached") or ns.get("pit_adjust_ohlc")
+        if not callable(adj):
+            return open_, high, low, close, volume
+        try:
+            if adj is ns.get("pit_adjust_ohlc_cached"):
+                o2, h2, l2, c2 = adj(
+                    stock, list(days), open_, high, low, close, events, asof, mode
+                )
+            else:
+                o2, h2, l2, c2 = adj(
+                    list(days), open_, high, low, close, events, asof, mode
+                )
+        except Exception as e:
+            diag = ns.get("_diag_once")
+            if callable(diag):
+                diag("pit_adjust_fail", "stock=", stock, "mode=", mode, e)
+            return open_, high, low, close, volume
+        return o2, h2, l2, c2, volume
+
     def _ohlcv_from_ctx(C, period, count, need, diag_key, stock=None):
         end_fn = getattr(C, "walk_end_day", None)
         end = end_fn() if callable(end_fn) else ""
         if not end:
             return None
-        # 组合回放：必须按当前 A.stock 路由，不能总读 chart 主 store
         store = None
         store_for = getattr(C, "_store_for", None)
         if callable(store_for) and stock:
             store = store_for(str(stock))
         if store is None:
             store = getattr(C, "_store", None)
-        if store is not None and hasattr(store, "ohlcv"):
+        days = None
+        if store is not None and hasattr(store, "ohlcv_with_days"):
+            pack = store.ohlcv_with_days(period, end, count)
+            if pack is None:
+                return None
+            open_, high, low, close, volume, days = pack
+            tup = (open_, high, low, close, volume)
+        elif store is not None and hasattr(store, "ohlcv"):
             tup = store.ohlcv(period, end, count)
         else:
             fn = getattr(C, "ohlcv", None)
             tup = fn(period, count) if callable(fn) else None
         if tup is None:
             return None
-        _open, _high, _low, close, _volume = tup
+        open_, high, low, close, volume = tup
         if close is None or len(close) < int(need):
             return None
+        logical = _logical_div(stock)
+        open_, high, low, close, volume = _apply_pit_local(
+            C, stock, open_, high, low, close, volume, days, end, logical
+        )
+        tup = (open_, high, low, close, volume)
         tail = close[-min(20, len(close)) :]
         if np.std(np.asarray(tail, dtype=float)) < 1e-8:
             diag = ns.get("_diag_once")
@@ -291,8 +407,9 @@ def _patch_fast_ohlcv(ns: dict) -> None:
                     chart = chart_fn(C) or "-"
                 except Exception:
                     chart = "-"
-            div_fn = ns.get("_dividend_type")
-            div = div_fn() if callable(div_fn) else ""
+            pit = "1" if uses_pit_front(logical) else "0"
+            mode_fn = ns.get("pit_mode_from_div")
+            mode = mode_fn(logical) if callable(mode_fn) and uses_pit_front(logical) else "-"
             diag(
                 diag_key + "_ok",
                 "source=",
@@ -306,7 +423,11 @@ def _patch_fast_ohlcv(ns: dict) -> None:
                 "last=",
                 round(float(close[-1]), 4),
                 "div=",
-                div,
+                logical,
+                "pit=",
+                pit,
+                "mode=",
+                mode or "-",
                 "chart=",
                 chart,
                 "stock=",
@@ -423,6 +544,8 @@ def run_backtest(
     ma_type: str = "",
     store: MarketStore | None = None,
     overrides: Mapping[str, Any] | None = None,
+    dividend_type: str = "",
+    csv_root: str | Path | None = None,
 ) -> Path:
     path = Path(csv_path)
     if store is None:
@@ -434,11 +557,19 @@ def run_backtest(
         raise SystemExit("no bars in walk range start=%s end=%s" % (start, end))
     weekly_src = str(getattr(store, "weekly_src", "") or "aggregate drop_forming")
 
+    div = normalize_dividend_type(dividend_type)
+    root = Path(csv_root) if csv_root else typed_dir_root(path.parent)
+    factors = None
+    if uses_pit_front(div):
+        factors = load_divid_factors_json(root, code)
+
     tags = [_as_tag(b.dt) for b in walk]
     ctx = MockContext(store, tags, code)
     ctx.start = start or walk[0].day
     ctx.end = end or walk[-1].day
     ctx.barpos = 0
+    if factors is not None:
+        ctx.divid_factors = factors
 
     dest = Path(out_dir) if out_dir else THEME / "report"
     dest.mkdir(parents=True, exist_ok=True)
@@ -457,8 +588,12 @@ def run_backtest(
     w0 = store.ohlcv("1w", walk[0].day, count=120)
     if w0 is not None:
         n_w0 = len(w0[3])
+    pit_flag = "1" if uses_pit_front(div) else "0"
+    mode = ""
+    if uses_pit_front(div):
+        mode = "diff" if normalize_dividend_type(div) == "front" else "ratio"
     banner = (
-        "local_bt %s csv= %s walk= %s %s n= %s hist_n= %s weekly= %s n_w_start= %s ma_type= %s"
+        "local_bt %s csv= %s walk= %s %s n= %s hist_n= %s weekly= %s n_w_start= %s ma_type= %s div= %s pit= %s mode= %s"
         % (
             code,
             csv_path,
@@ -469,6 +604,9 @@ def run_backtest(
             weekly_src,
             n_w0,
             ma or "config",
+            div or "config",
+            pit_flag,
+            mode or "-",
         )
     )
     print(banner)
@@ -482,6 +620,8 @@ def run_backtest(
     _patch_fast_ohlcv(ns)
     if ma:
         _apply_ma_type(ns, ma)
+    if div:
+        _apply_dividend_type(ns, div)
     install_config_overrides(ns, overrides)
     if quiet:
         _patch_quiet_status(ns)
@@ -513,6 +653,8 @@ def run_backtest(
     try:
         ns["init"](ctx)
         apply_config_overrides(ns, overrides)
+        if div:
+            _apply_dividend_type(ns, div)
         for i, _bar in enumerate(walk):
             ctx.barpos = i
             ns["handlebar"](ctx)
@@ -593,6 +735,8 @@ def backtest_one_result(
             ma_type=ma,
             store=store,
             overrides=overrides,
+            dividend_type=div,
+            csv_root=typed_dir_root(path.parent),
         )
         detail = trades_csv_path(log_path)
         row["log"] = str(log_path)
@@ -1044,6 +1188,7 @@ def main(argv: list[str] | None = None) -> None:
         DEFAULT_CSV_ROOT,
         DEFAULT_DIVIDEND_TYPE,
         DEFAULT_REPORT_ROOT,
+        csv_source_dividend_type,
         daily_csv_for_stock,
         daily_csvs_by_stock,
         pair_ma_batch_rows,
@@ -1052,6 +1197,7 @@ def main(argv: list[str] | None = None) -> None:
         resolve_typed_dir,
         summarize_batch_row,
         typed_dir_root,
+        uses_pit_front,
         write_ma_compare_csv,
     )
 
@@ -1075,13 +1221,32 @@ def main(argv: list[str] | None = None) -> None:
     if args.csv_dir:
         all_payloads: list[dict[str, Any]] = []
         for div in divs:
-            csv_dir = str(resolve_typed_dir(csv_root, div))
+            csv_dir = str(resolve_typed_dir(csv_root, csv_source_dividend_type(div)))
             out_dir = str(resolve_typed_dir(out_root, div))
             metas = daily_csvs_by_stock(csv_dir)
             paths = [Path(m["path"]) for m in metas]
             if not paths:
-                print("skip empty *_1d_*.csv in %s" % csv_dir, flush=True)
+                print(
+                    "skip empty *_1d_*.csv in %s (logical=%s)"
+                    % (csv_dir, div),
+                    flush=True,
+                )
                 continue
+            if uses_pit_front(div):
+                from analyze import load_divid_factors_json  # noqa: WPS433
+
+                missing_fac = []
+                for m in metas:
+                    st = str(m.get("stock") or "")
+                    try:
+                        load_divid_factors_json(csv_root, st)
+                    except Exception as e:
+                        missing_fac.append("%s: %s" % (st, e))
+                if missing_fac:
+                    raise SystemExit(
+                        "PIT 缺 divid_factors（先跑 KlineDump）:\n%s"
+                        % "\n".join(missing_fac[:20])
+                    )
             all_payloads.extend(
                 build_batch_payloads(
                     paths,
@@ -1129,9 +1294,10 @@ def main(argv: list[str] | None = None) -> None:
     src_root = typed_dir_root(csv_file.parent) if csv_file.parent else DEFAULT_CSV_ROOT
 
     def _single_csv_for(div: str) -> Path | None:
-        if len(divs) == 1:
-            return csv_file if csv_file.is_file() else None
-        found = daily_csv_for_stock(resolve_typed_dir(src_root, div), stock)
+        data_div = csv_source_dividend_type(div)
+        if len(divs) == 1 and csv_file.is_file() and not uses_pit_front(div):
+            return csv_file
+        found = daily_csv_for_stock(resolve_typed_dir(src_root, data_div), stock)
         return found if found and found.is_file() else None
 
     last_log = None
@@ -1141,6 +1307,10 @@ def main(argv: list[str] | None = None) -> None:
         if csv_one is None:
             print("skip missing csv div=", div, "stock=", stock, flush=True)
             continue
+        if uses_pit_front(div):
+            from analyze import load_divid_factors_json  # noqa: WPS433
+
+            load_divid_factors_json(src_root, stock or peek_daily_csv_meta(csv_one).get("stock"))
         out_dir = str(resolve_typed_dir(out_root, div))
         if compare_ma:
             rows = []
@@ -1157,6 +1327,8 @@ def main(argv: list[str] | None = None) -> None:
                     quiet=quiet,
                     ma_type=kind,
                     store=store,
+                    dividend_type=div,
+                    csv_root=src_root,
                 )
                 last_log = log_path
                 last_out = out_dir
@@ -1187,6 +1359,8 @@ def main(argv: list[str] | None = None) -> None:
                 weekly_csv=args.weekly_csv or None,
                 quiet=quiet,
                 ma_type=ma_type,
+                dividend_type=div,
+                csv_root=src_root,
             )
             last_out = out_dir
     if args.report and last_log and last_out:

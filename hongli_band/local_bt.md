@@ -38,13 +38,16 @@
 
    | 目录名 | 含义 |
    | :--- | :--- |
-   | `none` | 不复权 |
-   | `front` | 前复权（价差） |
+   | `none` | 不复权（**PIT 原料**；勾选 front/front_ratio 时实际读这里） |
+   | `front` | 前复权（价差；本地任务改为 PIT，不再直接读此目录 CSV） |
    | `back` | 后复权（价差） |
-   | `front_ratio` | 等比前复权（默认） |
+   | `front_ratio` | 等比前复权逻辑名（默认；实际读 `none` + `divid_factors`） |
    | `back_ratio` | 等比后复权 |
+   | `divid_factors/` | `get_divid_factors` JSON（`{CODE}_{MKT}.json`），PIT 必需 |
 
    文件名形如 `600350_SH_1d_20180102_20260827.csv`。有周线时同目录再放 `*_1w_*.csv`。
+
+   **时点前复权（PIT）**：勾选 `front` / `front_ratio` 时，回放读 `csv/none` + `csv/divid_factors/`。`front_ratio`→等比 `Πdr`（`mode=ratio`）；`front`→价差事件序（`mode=diff`）。报告仍写到 `report/front*`，日志含 `pit=1 mode=…`。两条结果应不同。缺 none 或因子 JSON → 硬失败。`DUMP_STOCKS` 须覆盖要测的票；`DIVIDEND_TYPES` 须含 `none`。图表价差 PIT 配股按全认购；持仓除权仍默认未认购。
 
 3. 没有 CSV 时，在国金里跑 **KlineDump / 行情导出**（改完片段须先 deploy）：
 
@@ -52,7 +55,7 @@
    python tools/scripts/qmt/_deploy_qmt_gbk.py
    ```
 
-   导出名单、起始日、复权种类见 [`tools/scripts/qmt/kldump/config.py`](../tools/scripts/qmt/kldump/config.py)（`DUMP_STOCKS`、`HIST_START`、`DIVIDEND_TYPES`、`OUT_DIR`）。`FOLLOW_CHART_RANGE=False` 时从 `HIST_START` 起导，给周线暖机留长度。
+   导出名单、起始日、复权种类见 [`tools/scripts/qmt/kldump/config.py`](../tools/scripts/qmt/kldump/config.py)（`DUMP_STOCKS`、`HIST_START`、`DIVIDEND_TYPES`、`DUMP_DIVID_FACTORS`、`OUT_DIR`）。`FOLLOW_CHART_RANGE=False` 时从 `HIST_START` 起导，给周线暖机留长度。
 
 ## 启动界面
 

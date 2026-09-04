@@ -51,6 +51,7 @@ MODULE_ORDER = [
     # 可选: "helpers.py",
     "indicators.py",
     "common:market_util.py",
+    "common:pit_front.py",  # 回测 front* → none + 时点前复权
     "market.py",
     "common:mode.py",
     "common:broker_base.py",
