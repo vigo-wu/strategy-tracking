@@ -201,6 +201,7 @@ python hongli_band/scripts/local_bt/select_analysis.py \
 
 - 产物：`report/<type>/local_bt_book_hold_{YYYY}_p{段号}_k{hash8}_操作明细.csv`
 - `naive_pnl`：仅当传入了分年 scan KPI 时，才用单票明细 `sum_pnl` 之和作对照；界面默认不 scan，该列为空。
+- **日度仓位**（组合明细面板）：由成交轮次推导，持仓区间 `[买入日, 卖出日)`；槽位=当日重叠 lot 数；资金占用率=`Σ成本/预算`（非市值）。主图双轴阶梯 + 按票成本堆叠；副图为按票持仓天数条形与槽位占用直方。主图框选日期（或手改日期窗）同步重算副图/KPI；点条形或下拉可高亮该票堆叠。
 
 #### 界面参数说明
 

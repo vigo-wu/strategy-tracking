@@ -110,6 +110,15 @@ from select_analysis import (  # noqa: E402
     write_fixed_book_csv,
 )
 from book_backtest import analyze_book_detail  # noqa: E402
+from position_daily import (  # noqa: E402
+    build_daily_position_frame,
+    cost_stock_columns,
+    position_kpis,
+    slice_daily,
+    slot_day_hist,
+    stock_from_cost_col,
+    stock_hold_days,
+)
 from stock_select import (  # noqa: E402
     SCORE_YEARS,
     coverage_notes,
@@ -280,6 +289,212 @@ def _plot_pnl_hist(trades: list[dict]) -> go.Figure:
         margin=dict(l=40, r=20, t=50, b=40),
     )
     return fig
+
+
+_POS_STACK_COLORS = (
+    "#1565c0",
+    "#ef6c00",
+    "#2e7d32",
+    "#6a1b9a",
+    "#00838f",
+    "#c62828",
+    "#5d4037",
+    "#455a64",
+)
+
+_POS_MAIN_CONFIG = {
+    "displayModeBar": True,
+    "doubleClick": "reset",
+}
+
+
+def _plot_daily_position(
+    daily: pd.DataFrame,
+    budget: float,
+    *,
+    highlight_stock: str = "",
+    title: str = "日度仓位（槽位 + 资金占用率）",
+) -> go.Figure:
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    if daily is None or daily.empty:
+        fig.add_annotation(text="无日度仓位", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
+        fig.update_layout(title=title, height=360, margin=dict(l=40, r=40, t=50, b=40))
+        return fig
+
+    pts = daily.copy()
+    pts["date"] = pd.to_datetime(pts["date"])
+    x = pts["date"]
+    bud = float(budget) if float(budget) > 0 else 1.0
+    hi = str(highlight_stock or "").strip()
+    cost_cols = cost_stock_columns(pts)
+    for i, col in enumerate(cost_cols):
+        stock = stock_from_cost_col(col)
+        y = (pts[col].fillna(0.0) / bud * 100.0).tolist()
+        if hi:
+            opacity = 1.0 if stock == hi else 0.12
+        else:
+            opacity = 0.35
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=y,
+                name=stock_axis_label(stock) if hi == "" or stock == hi else stock,
+                mode="lines",
+                line=dict(width=0.5, color=_POS_STACK_COLORS[i % len(_POS_STACK_COLORS)]),
+                stackgroup="cost_pct",
+                fillcolor=_POS_STACK_COLORS[i % len(_POS_STACK_COLORS)],
+                opacity=opacity,
+                hovertemplate="%{x|%Y-%m-%d}<br>" + stock + " 成本占用 %{y:.1f}%<extra></extra>",
+                legendgroup="stack",
+                showlegend=(not hi) or (stock == hi),
+            ),
+            secondary_y=True,
+        )
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=pts["slots"],
+            name="占用槽位",
+            mode="lines",
+            line=dict(color="#212121", width=2, shape="hv"),
+            hovertemplate="%{x|%Y-%m-%d}<br>槽位 %{y}<extra></extra>",
+        ),
+        secondary_y=False,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=pts["exposure_pct"],
+            name="资金占用率%",
+            mode="lines",
+            line=dict(color="#c62828", width=2, shape="hv"),
+            hovertemplate="%{x|%Y-%m-%d}<br>占用率 %{y:.1f}%<extra></extra>",
+        ),
+        secondary_y=True,
+    )
+    fig.update_layout(
+        title=title,
+        height=400,
+        margin=dict(l=40, r=40, t=50, b=40),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+        dragmode="select",
+        selectdirection="h",
+    )
+    fig.update_xaxes(title_text="日期")
+    fig.update_yaxes(title_text="占用槽位", secondary_y=False, rangemode="tozero")
+    fig.update_yaxes(title_text="资金占用率 %（成本/预算）", secondary_y=True, rangemode="tozero")
+    return fig
+
+
+def _plot_stock_hold_days(hold: pd.DataFrame, *, title: str = "按票持仓天数") -> go.Figure:
+    fig = go.Figure()
+    if hold is None or hold.empty:
+        fig.add_annotation(text="无持仓天数", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
+        fig.update_layout(title=title, height=280, margin=dict(l=40, r=20, t=50, b=40))
+        return fig
+    labels = [stock_axis_label(str(s)) for s in hold["stock"].tolist()]
+    fig.add_trace(
+        go.Bar(
+            x=hold["days"],
+            y=labels,
+            orientation="h",
+            customdata=hold[["stock", "days_pct"]].values,
+            marker_color="#1565c0",
+            hovertemplate="%{customdata[0]}<br>天数 %{x}<br>占窗口 %{customdata[1]}%<extra></extra>",
+            name="持仓天数",
+        )
+    )
+    fig.update_layout(
+        title=title,
+        xaxis_title="持仓交易日数",
+        height=max(280, 22 * len(hold) + 80),
+        margin=dict(l=120, r=20, t=50, b=40),
+        yaxis=dict(autorange="reversed"),
+        dragmode=False,
+    )
+    return fig
+
+
+def _plot_slot_hist(hist: pd.DataFrame, *, title: str = "槽位占用分布") -> go.Figure:
+    fig = go.Figure()
+    if hist is None or hist.empty:
+        fig.add_annotation(text="无槽位分布", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
+    else:
+        fig.add_trace(
+            go.Bar(
+                x=hist["slots"].astype(str),
+                y=hist["days"],
+                marker_color="#455a64",
+                name="交易日数",
+                hovertemplate="槽位 %{x}<br>天数 %{y}<extra></extra>",
+            )
+        )
+    fig.update_layout(
+        title=title,
+        xaxis_title="占用槽位数",
+        yaxis_title="交易日数",
+        height=320,
+        margin=dict(l=40, r=20, t=50, b=40),
+    )
+    return fig
+
+
+def _parse_plotly_x_bounds(selection: Any) -> tuple[str, str] | None:
+    """从 plotly box/points selection 取 YYYYMMDD 起止。"""
+    if selection is None:
+        return None
+    boxes = []
+    points = []
+    if isinstance(selection, dict):
+        boxes = list(selection.get("box") or [])
+        points = list(selection.get("points") or [])
+    else:
+        boxes = list(getattr(selection, "box", None) or [])
+        points = list(getattr(selection, "points", None) or [])
+    xs: list[pd.Timestamp] = []
+    for box in boxes:
+        raw = box.get("x") if isinstance(box, dict) else getattr(box, "x", None)
+        if not raw:
+            continue
+        for v in raw:
+            ts = pd.to_datetime(v, errors="coerce")
+            if pd.notna(ts):
+                xs.append(pd.Timestamp(ts).normalize())
+    if not xs and points:
+        for p in points:
+            v = p.get("x") if isinstance(p, dict) else getattr(p, "x", None)
+            ts = pd.to_datetime(v, errors="coerce")
+            if pd.notna(ts):
+                xs.append(pd.Timestamp(ts).normalize())
+    if not xs:
+        return None
+    lo, hi = min(xs), max(xs)
+    return lo.strftime("%Y%m%d"), hi.strftime("%Y%m%d")
+
+
+def _parse_plotly_bar_stock(selection: Any, hold: pd.DataFrame) -> str | None:
+    """横向条形点选 → 原始 stock 代码。"""
+    if selection is None or hold is None or hold.empty:
+        return None
+    points = []
+    if isinstance(selection, dict):
+        points = list(selection.get("points") or [])
+    else:
+        points = list(getattr(selection, "points", None) or [])
+    if not points:
+        return None
+    p0 = points[0]
+    cd = p0.get("customdata") if isinstance(p0, dict) else getattr(p0, "customdata", None)
+    if isinstance(cd, (list, tuple)) and cd:
+        return str(cd[0])
+    y = p0.get("y") if isinstance(p0, dict) else getattr(p0, "y", None)
+    if y is None:
+        return None
+    label = str(y)
+    for stock in hold["stock"].tolist():
+        if stock_axis_label(str(stock)) == label or str(stock) == label:
+            return str(stock)
+    return None
 
 
 def _ohlc_x_pos(ohlc: pd.DataFrame, ts: pd.Timestamp) -> int:
@@ -811,6 +1026,151 @@ def _resolve_hold_detail(row: dict[str, Any], out_dir: Path) -> Path | None:
     return None
 
 
+def _render_daily_position_section(
+    trades: list[dict],
+    budget: float,
+    *,
+    key_suffix: str = "book",
+) -> None:
+    """日度仓位：主图框选日期 → 副图重算；点条形 → 主图高亮该票。"""
+    st.subheader("日度仓位")
+    daily_full = build_daily_position_frame(trades, budget=budget)
+    if daily_full.empty:
+        st.info("无已平仓轮次，无法推导日度仓位。")
+        return
+
+    book = load_book_defaults()
+    book_lot_max = int(book.get("book_lot_max") or book.get("BOOK_LOT_MAX") or 3)
+    range_key = "book_pos_range_%s" % key_suffix
+    stock_key = "book_pos_stock_%s" % key_suffix
+    dates_key = "book_pos_dates_%s" % key_suffix
+    stock_sel_key = "book_pos_stock_sel_%s" % key_suffix
+    clear_key = "book_pos_clear_%s" % key_suffix
+    main_ver_key = "book_pos_main_ver_%s" % key_suffix
+    if main_ver_key not in st.session_state:
+        st.session_state[main_ver_key] = 0
+
+    d_min = pd.Timestamp(daily_full["date"].min()).date()
+    d_max = pd.Timestamp(daily_full["date"].max()).date()
+    if dates_key not in st.session_state:
+        cur_range = st.session_state.get(range_key)
+        if (
+            isinstance(cur_range, (tuple, list))
+            and len(cur_range) == 2
+            and cur_range[0]
+            and cur_range[1]
+        ):
+            try:
+                st.session_state[dates_key] = (
+                    ymd_to_date(str(cur_range[0])),
+                    ymd_to_date(str(cur_range[1])),
+                )
+            except ValueError:
+                st.session_state[dates_key] = (d_min, d_max)
+        else:
+            st.session_state[dates_key] = (d_min, d_max)
+
+    stocks = [stock_from_cost_col(c) for c in cost_stock_columns(daily_full)]
+    hi_options = ["（全部）"] + stocks
+    if stock_sel_key not in st.session_state:
+        hi_cur = str(st.session_state.get(stock_key) or "")
+        st.session_state[stock_sel_key] = hi_cur if hi_cur in hi_options else "（全部）"
+    elif st.session_state.get(stock_sel_key) not in hi_options:
+        st.session_state[stock_sel_key] = "（全部）"
+
+    c1, c2, c3 = st.columns([2, 2, 1])
+    with c1:
+        picked = st.date_input(
+            "日期窗（框选主图或手改）",
+            min_value=d_min,
+            max_value=d_max,
+            key=dates_key,
+        )
+    with c2:
+        hi_pick = st.selectbox(
+            "高亮标的（点条形或下拉）",
+            options=hi_options,
+            key=stock_sel_key,
+        )
+    with c3:
+        if st.button("重置窗/高亮", key=clear_key):
+            st.session_state[range_key] = None
+            st.session_state[stock_key] = ""
+            st.session_state[dates_key] = (d_min, d_max)
+            st.session_state[stock_sel_key] = "（全部）"
+            st.session_state[main_ver_key] = int(st.session_state.get(main_ver_key, 0)) + 1
+            st.rerun()
+
+    if isinstance(picked, (tuple, list)) and len(picked) == 2:
+        start_ymd, end_ymd = _fmt_ymd(picked[0]), _fmt_ymd(picked[1])
+    else:
+        start_ymd, end_ymd = _fmt_ymd(d_min), _fmt_ymd(d_max)
+    st.session_state[range_key] = (start_ymd, end_ymd)
+
+    highlight = "" if hi_pick == "（全部）" else str(hi_pick)
+    st.session_state[stock_key] = highlight
+
+    daily_view = slice_daily(daily_full, start_ymd, end_ymd)
+    if daily_view.empty:
+        st.info("当前日期窗无交易日。")
+        return
+
+    kpi = position_kpis(daily_view, book_lot_max=book_lot_max)
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("平均占用槽位", "%.2f" % float(kpi["avg_slots"]))
+    k2.metric("满仓日占比%", "%.1f%%" % float(kpi["full_slot_day_pct"]))
+    k3.metric("平均资金占用率", "%.1f%%" % float(kpi["avg_exposure"]))
+    k4.metric("最长连续空仓日", "%s" % int(kpi["max_empty_streak"]))
+    st.caption(
+        "口径：持仓区间 [买入日, 卖出日)；槽位=重叠 lot 数；资金占用=Σ成本/预算。"
+        "主图框选日期同步副图；点按票条形高亮该票成本堆叠。窗口 %s–%s · %s 日"
+        % (start_ymd, end_ymd, kpi["n_days"])
+    )
+
+    main_event = st.plotly_chart(
+        _plot_daily_position(
+            daily_view,
+            budget,
+            highlight_stock=highlight,
+            title="日度仓位（槽位 + 成本/预算%）",
+        ),
+        use_container_width=True,
+        config=_POS_MAIN_CONFIG,
+        on_select="rerun",
+        selection_mode="box",
+        key="book_pos_main_%s_%s" % (key_suffix, int(st.session_state.get(main_ver_key, 0))),
+    )
+    bounds = _parse_plotly_x_bounds(getattr(main_event, "selection", None))
+    if bounds and bounds != (start_ymd, end_ymd):
+        try:
+            st.session_state[dates_key] = (ymd_to_date(bounds[0]), ymd_to_date(bounds[1]))
+            st.session_state[range_key] = bounds
+            # 换 key 清掉框选残留，避免改 date_input 后又被旧 box 盖写
+            st.session_state[main_ver_key] = int(st.session_state.get(main_ver_key, 0)) + 1
+            st.rerun()
+        except ValueError:
+            pass
+
+    hold = stock_hold_days(trades, start_ymd, end_ymd)
+    hist = slot_day_hist(daily_view, book_lot_max=book_lot_max)
+    left, right = st.columns(2)
+    with left:
+        bar_event = st.plotly_chart(
+            _plot_stock_hold_days(hold),
+            use_container_width=True,
+            on_select="rerun",
+            selection_mode="points",
+            key="book_pos_bars_%s" % key_suffix,
+        )
+        picked_stock = _parse_plotly_bar_stock(getattr(bar_event, "selection", None), hold)
+        if picked_stock and picked_stock != highlight:
+            st.session_state[stock_key] = picked_stock
+            st.session_state[stock_sel_key] = picked_stock
+            st.rerun()
+    with right:
+        st.plotly_chart(_plot_slot_hist(hist), use_container_width=True)
+
+
 def _render_book_detail_panel(
     detail_path: Path,
     budget: float,
@@ -841,6 +1201,11 @@ def _render_book_detail_panel(
     st.plotly_chart(
         _plot_equity(combo.get("equity"), budget, "组合权益曲线（预算 + 已实现盈亏累计）"),
         use_container_width=True,
+    )
+    _render_daily_position_section(
+        trades,
+        budget,
+        key_suffix=detail_path.stem.replace(" ", "_")[:48] or "book",
     )
     per = combo.get("per_stock") or {}
     if per:
