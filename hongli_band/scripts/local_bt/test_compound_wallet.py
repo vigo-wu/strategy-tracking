@@ -18,6 +18,38 @@ class CompoundWalletTests(unittest.TestCase):
         self.assertAlmostEqual(cap0, 90000.0)
         self.assertGreater(cap1, cap0)
 
+    def test_deploy_cap_fixed_base_does_not_grow_after_sell_profit(self):
+        w = CompoundWallet(
+            100000.0,
+            cash_ratio=0.9,
+            budget_base="fixed",
+            fixed_amount=100000.0,
+        )
+        ns = {
+            "A": type("A", (), {"stock": "600350.SH", "position": None})(),
+            "TRADE_BUDGET": 100000.0,
+            "BUDGET_BASE": "fixed",
+        }
+        cap0 = w.deploy_cap(ns)
+        w.on_buy(1000, 10.0)
+        ns["A"].position = {"shares": 1000, "price": 10.0, "cost": 10000.0}
+        w.on_sell(1000, 12.0)
+        ns["A"].position = None
+        cap1 = w.deploy_cap(ns)
+        self.assertAlmostEqual(cap0, 90000.0)
+        self.assertAlmostEqual(cap1, 90000.0)
+
+    def test_norm_budget_base_accepts_panel_chinese(self):
+        from compound_wallet import _norm_budget_base, make_wallet
+
+        self.assertEqual(_norm_budget_base("固定金额"), "fixed")
+        self.assertEqual(_norm_budget_base("总资产减其它"), "equity")
+        ns = {"CASH_RATIO": 0.9, "TRADE_BUDGET": 200000.0, "BUDGET_BASE": "固定金额"}
+        w = make_wallet(ns, {"compound_backtest": True}, 100000.0)
+        self.assertIsNotNone(w)
+        self.assertEqual(w.budget_base, "fixed")
+        self.assertAlmostEqual(w.deploy_cap(ns), 180000.0)
+
     def test_ledger_writes_cap_columns(self):
         lg = TradeLedger("600350.SH")
         snap = {"deploy_cap": 90000.0, "equity": 100000.0}

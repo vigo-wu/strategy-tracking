@@ -300,7 +300,7 @@ python hongli_band/scripts/local_bt/select_analysis.py \
 
 | 项 | 说明 |
 | :--- | :--- |
-| 口径 | `cap = CASH_RATIO × (现金 + 池内持仓 cost)`；买卖更新现金 |
+| 口径 | `BUDGET_BASE=equity`（默认）：`cap = CASH_RATIO × (现金 + 池内持仓 cost)`；`fixed`：`cap = CASH_RATIO × TRADE_BUDGET`（不随盈利变大）。买卖更新现金 |
 | 定仓 | patch `_trade_budget_cap` → 动态 cap × 50%/30%/剩余档 |
 | 明细列 | `买入权重(%)` / `当前权重(%)` 填 cap 占比；追加 `可部署资金` / `组合权益` |
 | walk-forward 持有 | **跨年传递**期末权益作下年初始现金；`portfolio_pnl = wallet_end - wallet_start` |

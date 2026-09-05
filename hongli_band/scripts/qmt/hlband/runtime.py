@@ -35,6 +35,8 @@ def _apply_panel():
             new = float(val)
         else:
             new = str(val)
+        if const == "BUDGET_BASE":
+            new = _norm_budget_base(new)
         g[const] = new
         applied.append(const)
         if new != cur:
@@ -289,6 +291,8 @@ def _init_impl(C):
         A.is_backtest,
         "DRY_RUN=",
         DRY_RUN,
+        "budget_base=",
+        _cfg_budget_base(),
         "budget=",
         _trade_budget_cap(),
         "BOOK_N=",
@@ -360,6 +364,8 @@ def _init_impl(C):
         chart_div=_chart_dividend(C) or "",
         backtest=A.is_backtest,
         dry_run=DRY_RUN,
+        budget_base=_cfg_budget_base(),
+        budget=_trade_budget_cap(),
         scale=SCALE_ENABLE,
         scale_lots=SCALE_LOTS,
         scale_once=SCALE_ONCE_PER_ROUND,
@@ -388,7 +394,6 @@ def _init_impl(C):
             globals().get("SIGNAL_CONFIRM_START", "145600"),
             globals().get("SIGNAL_CONFIRM_END", "150000"),
         ),
-        budget=_trade_budget_cap(),
         book_n=_cfg_book_n(),
         book_stocks=len(_book_stock_set()),
         watch=len(getattr(A, "watch", None) or []),

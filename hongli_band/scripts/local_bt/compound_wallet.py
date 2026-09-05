@@ -9,6 +9,14 @@ def _norm_stock(code: str) -> str:
     return str(code or "").strip().upper()
 
 
+def _norm_budget_base(raw: Any) -> str:
+    s = str(raw or "").strip()
+    sl = s.lower()
+    if sl in ("fixed", "fix") or s == "固定金额":
+        return "fixed"
+    return "equity"
+
+
 def _pos_dict_mv(pos: dict | None) -> float:
     if not isinstance(pos, dict):
         return 0.0
@@ -26,13 +34,23 @@ def _pos_dict_mv(pos: dict | None) -> float:
 
 
 class CompoundWallet:
-    """回测现金账本：E = cash + book_mv；cap = cash_ratio × E。"""
+    """回测现金账本。equity：cap = cash_ratio × (cash + book_mv)；fixed：cap = cash_ratio × TRADE_BUDGET。"""
 
-    def __init__(self, cash: float, *, cash_ratio: float = 0.90, enabled: bool = True):
+    def __init__(
+        self,
+        cash: float,
+        *,
+        cash_ratio: float = 0.90,
+        enabled: bool = True,
+        budget_base: str = "equity",
+        fixed_amount: float = 0.0,
+    ):
         self.cash = float(cash)
         self.initial_cash = float(cash)
         self.cash_ratio = float(cash_ratio)
         self.enabled = bool(enabled)
+        self.budget_base = _norm_budget_base(budget_base)
+        self.fixed_amount = float(fixed_amount or 0)
 
     def book_mv(self, ns: dict[str, Any]) -> float:
         a = ns.get("A")
@@ -54,6 +72,18 @@ class CompoundWallet:
         return float(self.cash) + self.book_mv(ns)
 
     def deploy_cap(self, ns: dict[str, Any]) -> float:
+        if self.budget_base == "fixed":
+            amt = float(self.fixed_amount or 0)
+            if amt <= 0:
+                try:
+                    amt = float((ns or {}).get("TRADE_BUDGET") or 0)
+                except (TypeError, ValueError):
+                    amt = 0.0
+            if amt <= 0:
+                amt = float(self.initial_cash or 0)
+            if amt <= 0:
+                return 0.0
+            return float(self.cash_ratio) * amt
         e = self.equity(ns)
         if e <= 0:
             return 0.0
@@ -97,7 +127,28 @@ def make_wallet(
         return None
     cash = wallet_cash_from_overrides(overrides, default_budget)
     ratio = float(ns.get("CASH_RATIO") or 0.90)
-    return CompoundWallet(cash, cash_ratio=ratio, enabled=True)
+    raw_base = None
+    if overrides:
+        raw_base = overrides.get("BUDGET_BASE")
+    if raw_base is None:
+        raw_base = ns.get("BUDGET_BASE")
+    base = _norm_budget_base(raw_base)
+    try:
+        fixed_amt = float(ns.get("TRADE_BUDGET") or default_budget)
+    except (TypeError, ValueError):
+        fixed_amt = float(default_budget)
+    if overrides and overrides.get("TRADE_BUDGET") is not None:
+        try:
+            fixed_amt = float(overrides.get("TRADE_BUDGET"))
+        except (TypeError, ValueError):
+            pass
+    return CompoundWallet(
+        cash,
+        cash_ratio=ratio,
+        enabled=True,
+        budget_base=base,
+        fixed_amount=fixed_amt,
+    )
 
 
 def make_ledger_wallet(

@@ -97,6 +97,33 @@ def _cfg_cash_ratio():
     return v
 
 
+def _norm_budget_base(raw):
+    s = str(raw or "").strip()
+    sl = s.lower()
+    if sl in ("fixed", "fix") or s == "固定金额":
+        return "fixed"
+    return "equity"
+
+
+def _cfg_budget_base():
+    return _norm_budget_base(globals().get("BUDGET_BASE"))
+
+
+def _cfg_budget_base_fixed():
+    return _cfg_budget_base() == "fixed"
+
+
+def _fixed_sleeve_amount():
+    """全池固定基数：只读 TRADE_BUDGET，不走按标的覆盖。"""
+    try:
+        v = float(globals().get("TRADE_BUDGET") or 0)
+    except Exception:
+        v = 0.0
+    if v > 0:
+        return v
+    return 0.0
+
+
 def _cfg_book_lot_max():
     try:
         n = int(globals().get("BOOK_LOT_MAX") or 3)
@@ -822,6 +849,16 @@ def _account_equity(cash, book_mv, other_mv=0.0):
     return c + float(book_mv or 0)
 
 
+def _sleeve_equity(cash, book_mv, other_mv=0.0):
+    """可部署基数：fixed 用 TRADE_BUDGET；否则 E_s。"""
+    if _cfg_budget_base_fixed():
+        v = _fixed_sleeve_amount()
+        if v > 0:
+            return v
+        return None
+    return _account_equity(cash, book_mv, other_mv)
+
+
 def _empty_fill_snap():
     return {
         "E": 0.0,
@@ -852,6 +889,7 @@ def _empty_fill_snap():
         "n_held": 0,
         "vacant": "",
         "src": "",
+        "base": "",
     }
 
 
@@ -1210,7 +1248,7 @@ def _allocate_equal(cash, now_s):
     except Exception:
         cash_v = 0.0
     other_mv = float(broker.get("other_mv") or 0)
-    equity = _account_equity(cash, float(broker.get("book_mv") or 0), other_mv)
+    equity = _sleeve_equity(cash, float(broker.get("book_mv") or 0), other_mv)
     ratio = _cfg_cash_ratio()
     n = _cfg_book_n()
     stock = _norm_code(getattr(A, "stock", ""))
@@ -1220,7 +1258,7 @@ def _allocate_equal(cash, now_s):
     book_mv = 0.0
     for mv in held.values():
         book_mv += float(mv or 0)
-    if sells:
+    if sells and (not _cfg_budget_base_fixed()):
         equity = cash_v + book_mv
     k = len([1 for mv in held.values() if float(mv or 0) > 1e-6])
     n_new = 0
@@ -1248,6 +1286,7 @@ def _allocate_equal(cash, now_s):
             "opening": name_mv <= 1e-6,
             "rsv_empty": False,
             "fill_res": False,
+            "base": _cfg_budget_base(),
         }
     )
     if equity is None or equity <= 0:
@@ -1359,6 +1398,7 @@ def _allocate_equal(cash, now_s):
             "frac": my_frac,
             "n_held": n_held,
             "vacant": ",".join(["%.2f" % float(x) for x in vacant]),
+            "base": _cfg_budget_base(),
         }
     )
     return lots, snap
@@ -1413,7 +1453,7 @@ def _fill_budget_snapshot(cash, opening=None):
     n = _cfg_book_n()
     empty = max(0, n - k_after)
     reserve = 0.0
-    equity = _account_equity(cash, book_mv, other_mv)
+    equity = _sleeve_equity(cash, book_mv, other_mv)
     try:
         cash_v = float(cash) if cash is not None else 0.0
     except Exception:
@@ -1433,6 +1473,7 @@ def _fill_budget_snapshot(cash, opening=None):
             "cash": cash_v,
             "rsv_empty": False,
             "fill_res": False,
+            "base": _cfg_budget_base(),
         }
     )
     if equity is None or equity <= 0:
@@ -1472,6 +1513,7 @@ def _fill_budget_snapshot(cash, opening=None):
             "frac": frac,
             "why": why,
             "src": str(book.get("src") or "broker"),
+            "base": _cfg_budget_base(),
         }
     )
     return snap
@@ -1482,7 +1524,7 @@ def _log_fill_budget(snap, tag=""):
     print(
         "%s fill%s E=%.0f N=%s k=%s k_other=%s reserve=%.0f lot=%.0f fill_cap=%.0f "
         "name_lim=%.0f scale_lim=%.0f book_mv=%.0f other_mv=%.0f name_mv=%.0f "
-        "n_buy=%s n_held=%s frac=%.2f vacant=%s split=%.0f why=%s src=%s"
+        "n_buy=%s n_held=%s frac=%.2f vacant=%s split=%.0f why=%s src=%s base=%s"
         % (
             STRATEGY_NAME,
             (" " + str(tag)) if tag else "",
@@ -1505,6 +1547,7 @@ def _log_fill_budget(snap, tag=""):
             float(snap.get("split") or 0),
             snap.get("why") or "-",
             snap.get("src") or "-",
+            snap.get("base") or _cfg_budget_base(),
         )
     )
     _event_log(
@@ -1531,6 +1574,7 @@ def _log_fill_budget(snap, tag=""):
         name_lim=snap.get("name_lim"),
         scale_lim=snap.get("scale_lim"),
         src=snap.get("src"),
+        base=snap.get("base") or _cfg_budget_base(),
     )
 
 
@@ -1597,7 +1641,7 @@ def _heartbeat_extra():
             parts.append(
                 "E=%.0f N=%s k=%s k_other=%s reserve=%.0f lot=%.0f fill_cap=%.0f "
                 "name_lim=%.0f scale_lim=%.0f book_mv=%.0f other_mv=%.0f name_mv=%.0f "
-                "n_buy=%s n_held=%s frac=%.2f vacant=%s why=%s src=%s"
+                "n_buy=%s n_held=%s frac=%.2f vacant=%s why=%s src=%s base=%s"
                 % (
                     float(snap.get("E") or 0),
                     snap.get("N"),
@@ -1617,6 +1661,7 @@ def _heartbeat_extra():
                     snap.get("vacant") or "-",
                     snap.get("why") or "-",
                     snap.get("src") or "-",
+                    snap.get("base") or _cfg_budget_base(),
                 )
             )
         except Exception:

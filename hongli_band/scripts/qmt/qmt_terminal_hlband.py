@@ -20,24 +20,29 @@ ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 # 第 1 笔开仓：大仓空则 LOT_OPEN_FRAC×cap。第 2 笔：LOT_ADD_FRAC×cap（加仓或其它标的开仓）。
 # 第 3 笔：金额吃剩余可部署资金；book_frac 仍记空档（0.50 / 0.30 / 剩余档）。
 # 同标的一轮只加一次；加过仓后该只须全平才能再开。卖掉大仓由其他空仓标的开仓补回。
-# cap = CASH_RATIO * E_s；E_s = 总资产 - 非白名单股票市值。
+# cap = CASH_RATIO * 基数。BUDGET_BASE=equity：基数=E_s=总资产-非白名单股票市值；
+# BUDGET_BASE=fixed：基数=TRADE_BUDGET（不读其它市值、不读按标的覆盖）。
 # k / book_mv 只统计 BOOK_STOCKS。N = 字典长度。实盘单实例监视全池并写账本；回测用 TRADE_BUDGET。
 # 形态：code → 配置字典。ma_type（EMA|SMA）；dividend_type 见下方复权注释。
 # 简写兼容：value 写成 "SMA" 视为 {"ma_type": "SMA"}；旧纯字符串 tuple 仍认作白名单。
 BOOK_STOCKS = {
-    # "600350.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"}, # 山东高速
-    # "601939.SH": {"ma_type": "SMA", "dividend_type": "front"}, # 建设银行
-    # "600028.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 中国石油
-    # "600188.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 兖矿能源
-    # "603259.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 药明康德
-    # "600938.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"}, # 中国海油
+    "600938.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "603259.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "601615.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "603659.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "002001.SZ": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "600350.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "601857.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
 }
+
 # 单实例共享信号账本（不是 STATE_FILE；禁止按标的分文件）
-BOOK_FILE = r"D:\HlBandV6\hlband_book.json"
+BOOK_FILE = r"D:\HlBandV7\hlband_book.json"
 # 账本冻结截止：确认窗内打卡，到点（或打卡满 N）冻结；须在收盘集合竞价前完成分档下单
 BOOK_FREEZE_CLOSE = "145640"
 BOOK_FREEZE_OPEN = "093030"
-# 可部署比例（相对 E_s = 总资产-其它股票市值）；其余留作 T+1 / 废单重试
+# 资金基数：equity=总资产减其它股票市值；fixed=下面 TRADE_BUDGET。面板下拉会写成中文，代码归一成这两值。
+BUDGET_BASE = "equity"
+# 可部署比例（相对所选基数）；其余留作 T+1 / 废单重试
 CASH_RATIO = 0.90
 # 全池同时最多几笔（开仓+加仓）。第 4 笔不下。
 BOOK_LOT_MAX = 3
@@ -46,7 +51,7 @@ LOT_OPEN_FRAC = 0.50
 # 第二笔（加仓或其它标的开仓）30%。全池最后一槽不锁此值，改吃剩余资金（约 20% cap）。
 # 大仓空且只剩 1 个槽时不加仓，留给开仓补大仓（该笔会吃剩余，约等于 50%）。
 LOT_ADD_FRAC = 0.30
-# 回测无全账户账本时的单笔回落（元）
+# 固定金额（元）：实盘 BUDGET_BASE=fixed 时的基数；编辑器回测袖子也用此值（回测不乘 CASH_RATIO）
 TRADE_BUDGET = 100000.0
 # 按标的覆盖预算（key 须与 A.stock 一致）；仅回测生效
 TRADE_BUDGET_BY_STOCK = {}
@@ -153,11 +158,12 @@ SCALE_PLAT_BREAK_BUF = 0.0           # 收盘超过平台高点的缓冲；0=收
 SCALE_W_HIST_EXPAND_RATIO = 1.2
 
 # 策略交易面板 bind → 模块常量。编辑器/回测无注入时用上面默认值。
-# 只上屏：开关 / 可部署比例 / 硬风控。买点窗口、时间成本、加仓细节、SCALE_LOTS、
+# 只上屏：开关 / 资金基数 / 固定金额 / 可部署比例 / 硬风控。买点窗口、时间成本、加仓细节、SCALE_LOTS、
 # TRAIL_TIERS、均线周期、BOOK_STOCKS 子配置（ma_type / dividend_type）、
 # MA_TYPE、路径、账号仍只在 config（N 以 BOOK_STOCKS 长度为准）。
 PANEL_BINDS = (
     ("panel_dry_run", "DRY_RUN", "bool"),
+    ("panel_budget_base", "BUDGET_BASE", "str"),
     ("panel_budget", "TRADE_BUDGET", "float"),
     ("panel_cash_ratio", "CASH_RATIO", "float"),
     ("panel_w_bias_hard", "W_BIAS_HARD", "float"),
@@ -223,15 +229,15 @@ PENDING_ORPHAN_SEC = 60
 
 # QMT 模型无 __file__；状态绝对路径（含 {stock}，宇宙循环按票分文件）
 #   513530.SH → ...\hlband_513530_SH.json
-STATE_FILE = r"D:\HlBandV6\hlband_{stock}.json"
+STATE_FILE = r"D:\HlBandV7\hlband_{stock}.json"
 # 实盘结构化日志根目录；落盘为 LOG_DIR/<stock_tag>/{tag}_events.jsonl 等
 # 空字符串关闭落盘（仍保留终端 print）
-LOG_DIR = r"D:\HlBandV6\logs"
+LOG_DIR = r"D:\HlBandV7\logs"
 # True=回测也写日志（默认关，避免回测刷爆磁盘）
 LOG_IN_BACKTEST = False
 
-STRATEGY_NAME = "HlBandV6"
-STRATEGY_VER = "v1.63"
+STRATEGY_NAME = "HlBandV7"
+STRATEGY_VER = "v1.64"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
@@ -4316,6 +4322,33 @@ def _cfg_cash_ratio():
     return v
 
 
+def _norm_budget_base(raw):
+    s = str(raw or "").strip()
+    sl = s.lower()
+    if sl in ("fixed", "fix") or s == "固定金额":
+        return "fixed"
+    return "equity"
+
+
+def _cfg_budget_base():
+    return _norm_budget_base(globals().get("BUDGET_BASE"))
+
+
+def _cfg_budget_base_fixed():
+    return _cfg_budget_base() == "fixed"
+
+
+def _fixed_sleeve_amount():
+    """全池固定基数：只读 TRADE_BUDGET，不走按标的覆盖。"""
+    try:
+        v = float(globals().get("TRADE_BUDGET") or 0)
+    except Exception:
+        v = 0.0
+    if v > 0:
+        return v
+    return 0.0
+
+
 def _cfg_book_lot_max():
     try:
         n = int(globals().get("BOOK_LOT_MAX") or 3)
@@ -5041,6 +5074,16 @@ def _account_equity(cash, book_mv, other_mv=0.0):
     return c + float(book_mv or 0)
 
 
+def _sleeve_equity(cash, book_mv, other_mv=0.0):
+    """可部署基数：fixed 用 TRADE_BUDGET；否则 E_s。"""
+    if _cfg_budget_base_fixed():
+        v = _fixed_sleeve_amount()
+        if v > 0:
+            return v
+        return None
+    return _account_equity(cash, book_mv, other_mv)
+
+
 def _empty_fill_snap():
     return {
         "E": 0.0,
@@ -5071,6 +5114,7 @@ def _empty_fill_snap():
         "n_held": 0,
         "vacant": "",
         "src": "",
+        "base": "",
     }
 
 
@@ -5429,7 +5473,7 @@ def _allocate_equal(cash, now_s):
     except Exception:
         cash_v = 0.0
     other_mv = float(broker.get("other_mv") or 0)
-    equity = _account_equity(cash, float(broker.get("book_mv") or 0), other_mv)
+    equity = _sleeve_equity(cash, float(broker.get("book_mv") or 0), other_mv)
     ratio = _cfg_cash_ratio()
     n = _cfg_book_n()
     stock = _norm_code(getattr(A, "stock", ""))
@@ -5439,7 +5483,7 @@ def _allocate_equal(cash, now_s):
     book_mv = 0.0
     for mv in held.values():
         book_mv += float(mv or 0)
-    if sells:
+    if sells and (not _cfg_budget_base_fixed()):
         equity = cash_v + book_mv
     k = len([1 for mv in held.values() if float(mv or 0) > 1e-6])
     n_new = 0
@@ -5467,6 +5511,7 @@ def _allocate_equal(cash, now_s):
             "opening": name_mv <= 1e-6,
             "rsv_empty": False,
             "fill_res": False,
+            "base": _cfg_budget_base(),
         }
     )
     if equity is None or equity <= 0:
@@ -5578,6 +5623,7 @@ def _allocate_equal(cash, now_s):
             "frac": my_frac,
             "n_held": n_held,
             "vacant": ",".join(["%.2f" % float(x) for x in vacant]),
+            "base": _cfg_budget_base(),
         }
     )
     return lots, snap
@@ -5632,7 +5678,7 @@ def _fill_budget_snapshot(cash, opening=None):
     n = _cfg_book_n()
     empty = max(0, n - k_after)
     reserve = 0.0
-    equity = _account_equity(cash, book_mv, other_mv)
+    equity = _sleeve_equity(cash, book_mv, other_mv)
     try:
         cash_v = float(cash) if cash is not None else 0.0
     except Exception:
@@ -5652,6 +5698,7 @@ def _fill_budget_snapshot(cash, opening=None):
             "cash": cash_v,
             "rsv_empty": False,
             "fill_res": False,
+            "base": _cfg_budget_base(),
         }
     )
     if equity is None or equity <= 0:
@@ -5691,6 +5738,7 @@ def _fill_budget_snapshot(cash, opening=None):
             "frac": frac,
             "why": why,
             "src": str(book.get("src") or "broker"),
+            "base": _cfg_budget_base(),
         }
     )
     return snap
@@ -5701,7 +5749,7 @@ def _log_fill_budget(snap, tag=""):
     print(
         "%s fill%s E=%.0f N=%s k=%s k_other=%s reserve=%.0f lot=%.0f fill_cap=%.0f "
         "name_lim=%.0f scale_lim=%.0f book_mv=%.0f other_mv=%.0f name_mv=%.0f "
-        "n_buy=%s n_held=%s frac=%.2f vacant=%s split=%.0f why=%s src=%s"
+        "n_buy=%s n_held=%s frac=%.2f vacant=%s split=%.0f why=%s src=%s base=%s"
         % (
             STRATEGY_NAME,
             (" " + str(tag)) if tag else "",
@@ -5724,6 +5772,7 @@ def _log_fill_budget(snap, tag=""):
             float(snap.get("split") or 0),
             snap.get("why") or "-",
             snap.get("src") or "-",
+            snap.get("base") or _cfg_budget_base(),
         )
     )
     _event_log(
@@ -5750,6 +5799,7 @@ def _log_fill_budget(snap, tag=""):
         name_lim=snap.get("name_lim"),
         scale_lim=snap.get("scale_lim"),
         src=snap.get("src"),
+        base=snap.get("base") or _cfg_budget_base(),
     )
 
 
@@ -5816,7 +5866,7 @@ def _heartbeat_extra():
             parts.append(
                 "E=%.0f N=%s k=%s k_other=%s reserve=%.0f lot=%.0f fill_cap=%.0f "
                 "name_lim=%.0f scale_lim=%.0f book_mv=%.0f other_mv=%.0f name_mv=%.0f "
-                "n_buy=%s n_held=%s frac=%.2f vacant=%s why=%s src=%s"
+                "n_buy=%s n_held=%s frac=%.2f vacant=%s why=%s src=%s base=%s"
                 % (
                     float(snap.get("E") or 0),
                     snap.get("N"),
@@ -5836,6 +5886,7 @@ def _heartbeat_extra():
                     snap.get("vacant") or "-",
                     snap.get("why") or "-",
                     snap.get("src") or "-",
+                    snap.get("base") or _cfg_budget_base(),
                 )
             )
         except Exception:
@@ -8783,6 +8834,8 @@ def _apply_panel():
             new = float(val)
         else:
             new = str(val)
+        if const == "BUDGET_BASE":
+            new = _norm_budget_base(new)
         g[const] = new
         applied.append(const)
         if new != cur:
@@ -9037,6 +9090,8 @@ def _init_impl(C):
         A.is_backtest,
         "DRY_RUN=",
         DRY_RUN,
+        "budget_base=",
+        _cfg_budget_base(),
         "budget=",
         _trade_budget_cap(),
         "BOOK_N=",
@@ -9108,6 +9163,8 @@ def _init_impl(C):
         chart_div=_chart_dividend(C) or "",
         backtest=A.is_backtest,
         dry_run=DRY_RUN,
+        budget_base=_cfg_budget_base(),
+        budget=_trade_budget_cap(),
         scale=SCALE_ENABLE,
         scale_lots=SCALE_LOTS,
         scale_once=SCALE_ONCE_PER_ROUND,
@@ -9136,7 +9193,6 @@ def _init_impl(C):
             globals().get("SIGNAL_CONFIRM_START", "145600"),
             globals().get("SIGNAL_CONFIRM_END", "150000"),
         ),
-        budget=_trade_budget_cap(),
         book_n=_cfg_book_n(),
         book_stocks=len(_book_stock_set()),
         watch=len(getattr(A, "watch", None) or []),

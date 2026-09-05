@@ -3,8 +3,9 @@
     <control note="控件">
         <variable note="控件">
             <item bind="panel_dry_run" name="模拟下单" note="勾选=只打日志不下单（DRY_RUN）" value="False" type="checkBox"/>
-            <item bind="panel_budget" name="回测单笔预算" note="元；仅编辑器回测。实盘按 50%/30%/剩余资金 分档，不锁此值" value="100000" type="intput"/>
-            <item bind="panel_cash_ratio" name="可部署比例" note="相对 E_s=总资产减去其它股票市值，0.90=策略袖子最多用 90%。单实例监视全池，只开一个 HlBand" value="0.90" type="intput"/>
+            <item bind="panel_budget_base" name="资金基数" note="总资产减其它=E_s；固定金额=下一栏。可部署比例都相对所选基数。切到固定金额后务必改金额，默认10万会立刻变小。不强制卖已持仓" value="总资产减其它" type="combo" list="总资产减其它,固定金额"/>
+            <item bind="panel_budget" name="固定金额" note="元。实盘选固定金额时作基数（再乘可部署比例）；选总资产减其它时实盘忽略。编辑器回测始终用此值作袖子" value="100000" type="intput"/>
+            <item bind="panel_cash_ratio" name="可部署比例" note="相对上方所选基数，0.90=袖子最多用90%。单实例监视全池，只开一个 HlBand" value="0.90" type="intput"/>
             <item bind="panel_w_bias_hard" name="周线 高位乖离禁开" note="(MA5-MA34)/MA34 达到此值禁开，0.08=8%；生命线=W_MA_LIFE=34" value="0.08" type="intput"/>
             <item bind="panel_chase_pct" name="买入 追高禁开" note="当日涨幅达到此比例禁开，0.05=5%" value="0.05" type="intput"/>
             <item bind="panel_stop_loss" name="卖出 硬止损" note="收盘相对成本回撤达到此比例清仓，0.08=8%" value="0.08" type="intput"/>

@@ -10,7 +10,8 @@ ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 # 第 1 笔开仓：大仓空则 LOT_OPEN_FRAC×cap。第 2 笔：LOT_ADD_FRAC×cap（加仓或其它标的开仓）。
 # 第 3 笔：金额吃剩余可部署资金；book_frac 仍记空档（0.50 / 0.30 / 剩余档）。
 # 同标的一轮只加一次；加过仓后该只须全平才能再开。卖掉大仓由其他空仓标的开仓补回。
-# cap = CASH_RATIO * E_s；E_s = 总资产 - 非白名单股票市值。
+# cap = CASH_RATIO * 基数。BUDGET_BASE=equity：基数=E_s=总资产-非白名单股票市值；
+# BUDGET_BASE=fixed：基数=TRADE_BUDGET（不读其它市值、不读按标的覆盖）。
 # k / book_mv 只统计 BOOK_STOCKS。N = 字典长度。实盘单实例监视全池并写账本；回测用 TRADE_BUDGET。
 # 形态：code → 配置字典。ma_type（EMA|SMA）；dividend_type 见下方复权注释。
 # 简写兼容：value 写成 "SMA" 视为 {"ma_type": "SMA"}；旧纯字符串 tuple 仍认作白名单。
@@ -29,7 +30,9 @@ BOOK_FILE = r"D:\HlBandV7\hlband_book.json"
 # 账本冻结截止：确认窗内打卡，到点（或打卡满 N）冻结；须在收盘集合竞价前完成分档下单
 BOOK_FREEZE_CLOSE = "145640"
 BOOK_FREEZE_OPEN = "093030"
-# 可部署比例（相对 E_s = 总资产-其它股票市值）；其余留作 T+1 / 废单重试
+# 资金基数：equity=总资产减其它股票市值；fixed=下面 TRADE_BUDGET。面板下拉会写成中文，代码归一成这两值。
+BUDGET_BASE = "equity"
+# 可部署比例（相对所选基数）；其余留作 T+1 / 废单重试
 CASH_RATIO = 0.90
 # 全池同时最多几笔（开仓+加仓）。第 4 笔不下。
 BOOK_LOT_MAX = 3
@@ -38,7 +41,7 @@ LOT_OPEN_FRAC = 0.50
 # 第二笔（加仓或其它标的开仓）30%。全池最后一槽不锁此值，改吃剩余资金（约 20% cap）。
 # 大仓空且只剩 1 个槽时不加仓，留给开仓补大仓（该笔会吃剩余，约等于 50%）。
 LOT_ADD_FRAC = 0.30
-# 回测无全账户账本时的单笔回落（元）
+# 固定金额（元）：实盘 BUDGET_BASE=fixed 时的基数；编辑器回测袖子也用此值（回测不乘 CASH_RATIO）
 TRADE_BUDGET = 100000.0
 # 按标的覆盖预算（key 须与 A.stock 一致）；仅回测生效
 TRADE_BUDGET_BY_STOCK = {}
@@ -145,11 +148,12 @@ SCALE_PLAT_BREAK_BUF = 0.0           # 收盘超过平台高点的缓冲；0=收
 SCALE_W_HIST_EXPAND_RATIO = 1.2
 
 # 策略交易面板 bind → 模块常量。编辑器/回测无注入时用上面默认值。
-# 只上屏：开关 / 可部署比例 / 硬风控。买点窗口、时间成本、加仓细节、SCALE_LOTS、
+# 只上屏：开关 / 资金基数 / 固定金额 / 可部署比例 / 硬风控。买点窗口、时间成本、加仓细节、SCALE_LOTS、
 # TRAIL_TIERS、均线周期、BOOK_STOCKS 子配置（ma_type / dividend_type）、
 # MA_TYPE、路径、账号仍只在 config（N 以 BOOK_STOCKS 长度为准）。
 PANEL_BINDS = (
     ("panel_dry_run", "DRY_RUN", "bool"),
+    ("panel_budget_base", "BUDGET_BASE", "str"),
     ("panel_budget", "TRADE_BUDGET", "float"),
     ("panel_cash_ratio", "CASH_RATIO", "float"),
     ("panel_w_bias_hard", "W_BIAS_HARD", "float"),
@@ -223,7 +227,7 @@ LOG_DIR = r"D:\HlBandV7\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBandV7"
-STRATEGY_VER = "v1.63"
+STRATEGY_VER = "v1.64"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）

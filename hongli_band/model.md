@@ -1,7 +1,7 @@
 # 红利板块波段策略：周线定方向，日线找买卖点
 
-**主题目录**：`hongli_band/`｜**版本**：v1.59｜**形态**：单仓骨架 / 分笔多仓｜**运行**：国金 QMT 终端模型（见 §5）；本地 CSV 回放（见 §6）  
-**参数默认值**：`hongli_band/scripts/qmt/hlband/config.py`（文档以该文件为准）。实盘在「模型交易 → 新建/编辑策略交易」面板只覆盖开关 / 可部署比例 / 硬风控（`hlband/panel.xml`）；编辑器回测无注入时用 config。买点窗口、时间成本、加仓细节、`SCALE_LOTS`、阶梯止盈 `TRAIL_TIERS`、均线周期、`BOOK_STOCKS` 子配置 / `MA_TYPE`、路径仍只在 config。
+**主题目录**：`hongli_band/`｜**版本**：v1.64｜**形态**：单仓骨架 / 分笔多仓｜**运行**：国金 QMT 终端模型（见 §5）；本地 CSV 回放（见 §6）  
+**参数默认值**：`hongli_band/scripts/qmt/hlband/config.py`（文档以该文件为准）。实盘在「模型交易 → 新建/编辑策略交易」面板只覆盖开关 / 资金基数 / 固定金额 / 可部署比例 / 硬风控（`hlband/panel.xml`）；编辑器回测无注入时用 config。买点窗口、时间成本、加仓细节、`SCALE_LOTS`、阶梯止盈 `TRAIL_TIERS`、均线周期、`BOOK_STOCKS` 子配置 / `MA_TYPE`、路径仍只在 config。
 
 ---
 
@@ -63,9 +63,10 @@
 
 ## 仓位：全池三笔分档（50% / 30% / 剩余资金）
 
-跟踪池以 config `BOOK_STOCKS` 为准。N = 字典长度。**一个** HlBand 实例用 `run_time` 扫全池，**当天买单写入同一份账本**，冻结后按空档赋额。全池最多 `BOOK_LOT_MAX=3` 笔（开仓+加仓合计）。已从池中移除但仍持仓的票，其市值算其它股票，从 `E_s` 扣掉；须先停掉旧多图实例，勿再并行打卡。
+跟踪池以 config `BOOK_STOCKS` 为准。N = 字典长度。**一个** HlBand 实例用 `run_time` 扫全池，**当天买单写入同一份账本**，冻结后按空档赋额。全池最多 `BOOK_LOT_MAX=3` 笔（开仓+加仓合计）。已从池中移除但仍持仓的票，其市值算其它股票，从 `E_s` 扣掉（仅 `BUDGET_BASE=equity`）；须先停掉旧多图实例，勿再并行打卡。
 
-`E_s = 账户总资产 − 其它股票市值`。`cap = CASH_RATIO×E_s`（20 万账户、0.90 → 约 18 万）。`k` / `book_mv` 只统计白名单。
+`BUDGET_BASE=equity`（默认）：`E_s = 账户总资产 − 其它股票市值`，`cap = CASH_RATIO×E_s`（20 万账户、0.90 → 约 18 万）。  
+`BUDGET_BASE=fixed`：基数=`TRADE_BUDGET`，`cap = CASH_RATIO×TRADE_BUDGET`（10 万、0.90 → 9 万；空池三笔约 4.5 万 / 2.7 万 / 1.8 万）。其它股票市值不进基数。从较大 E_s 切到更小固定金额**不强制卖**，只停买。`k` / `book_mv` 只统计白名单。
 
 | 槽位 | 占 cap | 谁来填 |
 | :--- | :--- | :--- |
@@ -93,7 +94,7 @@
 3. **大仓空时开仓优先于加仓**；前两笔按 50%/30% 赋额；**全池最后一槽金额吃 `remain_free`**（标签仍是该空档的 0.50 / 0.30 / 剩余档）
 4. 向下到 100 股。满 3 笔 `book_lot_cap`；加仓被大仓空档拦住则 `scale_cap`
 
-回测无全账户账本：本图 `frac × TRADE_BUDGET`（10 万袖子 → 开仓 5 万或加仓 3 万；最后一槽按剩余比例）。第一笔按 50% 档，不会打满 cap。
+回测无全账户账本：本图 `frac × TRADE_BUDGET`（10 万袖子 → 开仓 5 万或加仓 3 万；最后一槽按剩余比例）。第一笔按 50% 档，不会打满 cap。编辑器回测 / local_bt 非复利**不乘** `CASH_RATIO`；实盘固定金额会乘，同一组 10 万 / 0.90 回测第一笔 5 万、实盘约 4.5 万。
 
 日志含：`frac=` `n_held=` `vacant=` `lot=` `why=`（`split` 分档成功 / `book_lot_cap` / `scale_cap` / `wait` / `book_fail`）。
 
@@ -165,7 +166,7 @@
 **报告**：`python hongli_band/gen_report.py` → `report/`  
 **片段**：`hongli_band/scripts/qmt/hlband/`（只改片段 / `panel.xml` 后 re-deploy，勿手改终端 GBK 或 `formulaLayout`）
 
-实盘改参：模型交易里打开**这一个**策略实例，改「模拟下单 / 可部署比例 / 高位禁开 / 追高 / 硬止损 / 加仓开关」后确定再运行。跟踪池只数以 `BOOK_STOCKS` 长度为准，不要在面板改 N。增减标的改 `BOOK_STOCKS` 后 deploy 并重启这一实例。`TRADE_BUDGET` 仅回测回落；策略交易注入了该值时**不再**读 `TRADE_BUDGET_BY_STOCK`。编辑器回测仍用 config 与按标的覆盖（一图一票，主图挂池内那只）。
+实盘改参：模型交易里打开**这一个**策略实例，改「模拟下单 / 资金基数 / 固定金额 / 可部署比例 / 高位禁开 / 追高 / 硬止损 / 加仓开关」后确定再运行。跟踪池只数以 `BOOK_STOCKS` 长度为准，不要在面板改 N。增减标的改 `BOOK_STOCKS` 后 deploy 并重启这一实例。`TRADE_BUDGET` 在 `BUDGET_BASE=fixed` 时是实盘基数；`equity` 时实盘忽略此栏。策略交易注入了该值时**不再**读 `TRADE_BUDGET_BY_STOCK`。编辑器回测仍用 config 与按标的覆盖（一图一票，主图挂池内那只）。
 
 实盘：**主图只当时钟**（建议挂不在 `BOOK_STOCKS` 的日线指数）；扫池只走 `run_time`（`1nSecond`，起始空串立即启动）。勿勾独立运行/简易运行。确认窗/开盘兜底才拉全量 K，盘中只处理 pending。账本同一轮先 eval 打卡再 exec 买入。上线前必须停掉旧多图实例。定时下单 `quickTrade=2`。
 
@@ -174,11 +175,12 @@
 | `DRY_RUN` | `False` | **默认真下单**；联调可改 `True` 或面板勾选「模拟下单」。C1–C11 通过前请保持模拟 |
 | `LIVE_OHLCV_POLICY` | `"window"` | `window`=按时段分流；`always`=决策窗内每次当确认窗拉 K |
 | `DIVIDEND_TYPE` | `"follow"` | 池外/未写 `dividend_type` 时的复权缺省（仅 config）；池内以 `BOOK_STOCKS` 为准 |
-| `TRADE_BUDGET` | `100000` | 回测单笔回落；实盘不锁此值；可被 `TRADE_BUDGET_BY_STOCK` 覆盖 |
+| `TRADE_BUDGET` | `100000` | 固定金额；实盘 `BUDGET_BASE=fixed` 时作基数；编辑器回测袖子；可被 `TRADE_BUDGET_BY_STOCK` 覆盖（仅回测） |
+| `BUDGET_BASE` | `"equity"` | `equity`=总资产减其它市值；`fixed`=上面固定金额。面板下拉「总资产减其它 / 固定金额」 |
 | `BOOK_STOCKS` | 见 config | 单实例监视名单 + 按标的配置（仅 config）；N=字典长度 |
 | `BOOK_FILE` | `D:\tradingStrategy\hlband_book.json` | 单实例信号账本；不是 STATE |
 | `BOOK_FREEZE_CLOSE/OPEN` | `145630` / `093200` | 打卡截止；到点或打卡满 N 即冻结（14:57 竞价前） |
-| `CASH_RATIO` | `0.90` | 可部署比例（相对 E_s=总资产−其它市值） |
+| `CASH_RATIO` | `0.90` | 可部署比例（相对所选基数） |
 | `BOOK_LOT_MAX` | `3` | 全池同时最多 3 笔（仅 config） |
 | `LOT_OPEN_FRAC` | `0.50` | 开仓：大仓空则 50%；大仓已在且非最后一槽则 30%（仅 config） |
 | `LOT_ADD_FRAC` | `0.30` | 第二笔 30%；全池最后一槽不锁此值，改吃剩余约 20% cap（仅 config） |
@@ -213,7 +215,7 @@
 | `STATE_FILE` | `D:\tradingStrategy\hlband_{stock}.json` | 实盘状态；宇宙循环按票分文件 |
 | `LOG_DIR` | `D:\tradingStrategy\logs` | 实盘结构化日志根目录 |
 
-日志确认 `HlBand v1.59 init` 且 `UNIVERSE n=` 与 `book_stocks=` 一致、`chart=` 不在池内（建议指数）、`drive=timer`、`ohlcv_policy= window`、`DIVIDEND= per-stock`、`cash_ratio= 0.9`、`BOOK_N=` 与名单只数一致后再挂实盘。策略交易下应另有 `panel applied ...` 与 `run_time _universe_on_timer` 行。只开**一个**实例写 `BOOK_FILE`；无信号也要打卡。切 live 后 `state loaded path=` 应为 `hlband_600350_SH.json` 等池内票，**不应**出现时钟指数后缀。10:00 心跳 `work=pending drive=timer`，无全池 `n1d=`；14:56 后每只 `phase=confirm`；15:00 后仍应有定时心跳直到确认结束。实盘买入应看到 `fill ... frac= n_held= vacant= lot= why=split`（持股查询失败备用为 `src=local`）；未冻结为 `why=wait`。空池第一笔 `frac=0.50`（20 万账户约 9 万），第二笔 `frac=0.30`（约 5.4 万），第三笔 `frac` 仍是空档 0.50/0.30/0.20、`lot` 接近 `cap - book_mv`。满 3 笔 `book_lot_cap`。本轮已加过仓后再出买点应 `scale_once`，无第 3 笔。验收：回测先见 `diag: ok`（主图挂池内一只）；买卖日志为 `@close=`（同日）或残留 `@open=`；买卖闭合、无孤儿仓。第一笔仍为 `pullback_vol`；加仓应为 `pullback_vol` / `plat_break` / `w_macd_golden`（状态行 `scale= True`），成交附近有 `lots now n=2`、`book_frac` 与 `skip sell eval after add fill`。加仓当日状态行 `sellR` 应含 `skip_add_bar`，且不应新挂卖点。本轮已加过仓后再出第一笔时，不应再出现 `BUY add`（可见 `scale_once` 或 `pending_entry cancel scale_once`）。执行日已触发卖点时应看到 `pending_entry cancel scale_sell_block` 且不出现 `BUY add`。只出一笔时应看到 `SELL ... lots=[1]` 且另一笔仍持有。卖出前应有 `SELL lot-can_use`；若 `BUY add` 后同日仍出现 `SELL lots=[2]`，看 `risk=True` 的 WARN（券商成交未必是第二笔）。T+1 部分成交应看到 `pending_exit keep after partial fill`。趋势仓满 30 日且峰值≥3%、仍站上 EMA60 时应看到 `time_force skip trend`，之后由 `trail_stop` / `weekly_bear` / 破 EMA60 出场；磨人仓仍应看到 `time_force grace`。
+日志确认 `HlBand v1.64 init` 且 `UNIVERSE n=` 与 `book_stocks=` 一致、`chart=` 不在池内（建议指数）、`drive=timer`、`ohlcv_policy= window`、`DIVIDEND= per-stock`、`budget_base= equity`（或 `fixed`）、`cash_ratio= 0.9`、`BOOK_N=` 与名单只数一致后再挂实盘。策略交易下应另有 `panel applied ...` 与 `run_time _universe_on_timer` 行。只开**一个**实例写 `BOOK_FILE`；无信号也要打卡。切 live 后 `state loaded path=` 应为 `hlband_600350_SH.json` 等池内票，**不应**出现时钟指数后缀。10:00 心跳 `work=pending drive=timer`，无全池 `n1d=`；14:56 后每只 `phase=confirm`；15:00 后仍应有定时心跳直到确认结束。实盘买入应看到 `fill ... frac= n_held= vacant= lot= why=split base=`（持股查询失败备用为 `src=local`）；未冻结为 `why=wait`。空池第一笔 `frac=0.50`（equity 且 20 万账户约 9 万；fixed 且 10 万约 4.5 万），第二笔 `frac=0.30`，第三笔 `frac` 仍是空档 0.50/0.30/0.20、`lot` 接近 `cap - book_mv`。满 3 笔 `book_lot_cap`。本轮已加过仓后再出买点应 `scale_once`，无第 3 笔。验收：回测先见 `diag: ok`（主图挂池内一只）；买卖日志为 `@close=`（同日）或残留 `@open=`；买卖闭合、无孤儿仓。第一笔仍为 `pullback_vol`；加仓应为 `pullback_vol` / `plat_break` / `w_macd_golden`（状态行 `scale= True`），成交附近有 `lots now n=2`、`book_frac` 与 `skip sell eval after add fill`。加仓当日状态行 `sellR` 应含 `skip_add_bar`，且不应新挂卖点。本轮已加过仓后再出第一笔时，不应再出现 `BUY add`（可见 `scale_once` 或 `pending_entry cancel scale_once`）。执行日已触发卖点时应看到 `pending_entry cancel scale_sell_block` 且不出现 `BUY add`。只出一笔时应看到 `SELL ... lots=[1]` 且另一笔仍持有。卖出前应有 `SELL lot-can_use`；若 `BUY add` 后同日仍出现 `SELL lots=[2]`，看 `risk=True` 的 WARN（券商成交未必是第二笔）。T+1 部分成交应看到 `pending_exit keep after partial fill`。趋势仓满 30 日且峰值≥3%、仍站上 EMA60 时应看到 `time_force skip trend`，之后由 `trail_stop` / `weekly_bear` / 破 EMA60 出场；磨人仓仍应看到 `time_force grace`。
 
 ### 上线后确认事项（C1–C12）
 
