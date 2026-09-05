@@ -79,6 +79,15 @@ def _num(val: float, digits: int) -> str:
     return ("%." + str(int(digits)) + "f") % float(val)
 
 
+def _ex_round_shares(shares: Any) -> int:
+    """与 qmt_common/single/ex_rights._ex_round_shares 一致。"""
+    try:
+        n = int(round(float(shares)))
+    except (TypeError, ValueError):
+        return 0
+    return max(n, 0)
+
+
 def _pct(num: float, den: float) -> str:
     if den is None or float(den) <= 0:
         return "0.00%"
@@ -142,6 +151,52 @@ class TradeLedger:
         if stock_mv is None:
             stock_mv = sum(int(l["shares"]) * float(l["price"]) for l in self._lots)
         self.rows.append(self._row("卖出", when, price, vol, pnl, snap, snap_after, float(price) * vol, stock_mv))
+
+    def on_ex_rights(
+        self,
+        when: Any,
+        dr: Any,
+        share_mul: Any,
+        *,
+        snap: dict[str, float] | None = None,
+        snap_after: dict[str, float] | None = None,
+        stock_mv: float | None = None,
+    ) -> None:
+        """持仓送转/除权：未平 lot 原地缩价加股，写「送转」行（不碰现金）。"""
+        try:
+            mul = float(share_mul or 1.0)
+        except (TypeError, ValueError):
+            mul = 1.0
+        try:
+            div = float(dr or 0)
+        except (TypeError, ValueError):
+            div = 0.0
+        px_div = div if div > 1.0 else (mul if mul > 1.0 else 0.0)
+        if (abs(mul - 1.0) < 1e-12) and px_div <= 1.0:
+            return
+        add_total = 0
+        last_px = 0.0
+        for lot in self._lots:
+            old_sh = int(lot.get("shares") or 0)
+            try:
+                old_px = float(lot.get("price") or 0)
+            except (TypeError, ValueError):
+                old_px = 0.0
+            new_sh = _ex_round_shares(old_sh * mul) if mul > 1.0 else old_sh
+            new_px = (old_px / px_div) if (px_div > 1.0 and old_px > 0) else old_px
+            add_total += max(new_sh - old_sh, 0)
+            lot["shares"] = new_sh
+            lot["price"] = new_px
+            if new_px > 0:
+                last_px = new_px
+        if add_total < 1:
+            return
+        if stock_mv is None:
+            stock_mv = sum(int(l["shares"]) * float(l["price"]) for l in self._lots)
+        mv = float(last_px) * int(add_total)
+        self.rows.append(
+            self._row("送转", when, last_px, add_total, 0.0, snap, snap_after, mv, stock_mv)
+        )
 
     def _row(
         self,
@@ -268,6 +323,33 @@ class CombinedTradeLedger:
             stock_mv=stock_mv,
         )
 
+    def on_ex_rights(
+        self,
+        when: Any,
+        dr: Any,
+        share_mul: Any,
+        *,
+        snap: dict[str, float] | None = None,
+        snap_after: dict[str, float] | None = None,
+        stock_mv: float | None = None,
+        ns: dict | None = None,
+    ) -> None:
+        stock = str(self._stock_getter() or "").strip().upper()
+        if not stock:
+            return
+        if stock_mv is None and ns is not None:
+            from compound_wallet import _pos_dict_mv  # noqa: WPS433
+
+            stock_mv = _pos_dict_mv(getattr(ns.get("A"), "position", None))
+        self._ledger(stock).on_ex_rights(
+            when,
+            dr,
+            share_mul,
+            snap=snap,
+            snap_after=snap_after,
+            stock_mv=stock_mv,
+        )
+
     def write(self, path: str | Path) -> Path:
         dest = Path(path)
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -329,8 +411,16 @@ def wrap_fill_hooks(
             kw["ns"] = ns
         ledger.on_sell(filled_vol, last_hint, now, **kw)
 
+    def _ex_rights(day, dr, share_mul):
+        snap = _snap_before()
+        kw: dict[str, Any] = {"snap": snap, "snap_after": snap}
+        if isinstance(ledger, CombinedTradeLedger):
+            kw["ns"] = ns
+        ledger.on_ex_rights(day, dr, share_mul, **kw)
+
     ns["_apply_buy_fill"] = _buy
     ns["_apply_sell_fill"] = _sell
+    ns["_on_ex_rights_ledger"] = _ex_rights
 
 
 def trades_csv_path(log_path: Path) -> Path:

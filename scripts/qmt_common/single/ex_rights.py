@@ -428,8 +428,9 @@ def _ex_apply_one_event(day, parsed, live_pending):
     changed = False
     vol0 = _ex_total_shares()
     cost_snap = _ex_cost_snapshot()
-    if dr > 1.0:
-        if _ex_scale_price_fields(dr):
+    px_div = dr if dr > 1.0 else (base_mul if base_mul > 1.0 else 0.0)
+    if px_div > 1.0:
+        if _ex_scale_price_fields(px_div):
             changed = True
     if _ex_scale_shares(base_mul):
         changed = True
@@ -451,6 +452,15 @@ def _ex_apply_one_event(day, parsed, live_pending):
         )
         A.ex_rights_allot_pending = pending
         changed = True
+    if changed:
+        fn = globals().get("_on_ex_rights_ledger")
+        if callable(fn):
+            try:
+                fn(day, dr if dr > 1.0 else px_div, base_mul)
+            except Exception as e:
+                diag = globals().get("_diag_once")
+                if callable(diag):
+                    diag("ex_rights_ledger_fail", e)
     return changed, False
 
 

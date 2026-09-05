@@ -8,6 +8,7 @@ from pathlib import Path
 
 from analyze import (
     add_stats_from_trades,
+    enrich_trades_ex_rights,
     enrich_trades_signals_from_log,
     mark_add_lots,
     parse_fill_signals_from_log,
@@ -249,6 +250,84 @@ class ParseTerminalRoundsTests(unittest.TestCase):
         self.assertEqual(stats["add_avg_ret"], 1.5)
         self.assertEqual(stats["add_max_win"], 1.5)
         self.assertEqual(stats["add_max_loss"], 1.5)
+
+    def test_bonus_row_scales_round(self):
+        lines = [
+            "000963,华东医药,股票,医药,多,2017-05-19 15:00:00,买入,93.58,93.58,0,0,0,500,0,46790,普通",
+            "000963,华东医药,股票,医药,多,2017-05-24 15:00:00,送转,46.11,46.11,0,0,0,500,0,23055,送转",
+            "000963,华东医药,股票,医药,多,2017-06-06 15:00:00,卖出,44.81,44.81,-1980,0,0,1000,0,44810,普通",
+        ]
+        with tempfile.TemporaryDirectory() as td:
+            p = _write_detail(Path(td) / "bonus_操作明细.csv", lines)
+            rounds = report_mod().parse_terminal_rounds(p)
+        self.assertEqual(len(rounds), 1)
+        r = rounds[0]
+        self.assertEqual(r["shares"], 1000)
+        self.assertAlmostEqual(r["buy_price"], 46.79, places=2)
+        self.assertAlmostEqual(r["buy_price_raw"], 93.58, places=2)
+        self.assertLess(abs(r["ret_pct"]), 5.0)
+        self.assertGreater(r["ret_pct"], -6.0)
+
+    def test_plain_buy_sell_ret_unchanged(self):
+        lines = [
+            "600350,山东高速,股票,交运,多,2024-01-09 15:00:00,买入,10.00,10.00,0,0,0,1000,0,10000,普通",
+            "600350,山东高速,股票,交运,多,2024-01-30 15:00:00,卖出,11.00,11.00,1000,0,0,1000,0,11000,普通",
+        ]
+        with tempfile.TemporaryDirectory() as td:
+            p = _write_detail(Path(td) / "plain_操作明细.csv", lines)
+            rounds = report_mod().parse_terminal_rounds(p)
+        self.assertEqual(len(rounds), 1)
+        self.assertAlmostEqual(rounds[0]["ret_pct"], 10.0, places=4)
+        self.assertEqual(rounds[0]["shares"], 1000)
+
+    def test_enrich_ex_rights_skips_bonus_csv(self):
+        lines = [
+            "000963,华东医药,股票,医药,多,2017-05-19 15:00:00,买入,93.58,93.58,0,0,0,500,0,46790,普通",
+            "000963,华东医药,股票,医药,多,2017-05-24 15:00:00,送转,46.11,46.11,0,0,0,500,0,23055,送转",
+            "000963,华东医药,股票,医药,多,2017-06-06 15:00:00,卖出,44.81,44.81,-1980,0,0,1000,0,44810,普通",
+        ]
+        with tempfile.TemporaryDirectory() as td:
+            p = _write_detail(Path(td) / "bonus_操作明细.csv", lines)
+            rounds = report_mod().parse_terminal_rounds(p)
+            out = enrich_trades_ex_rights(
+                rounds, csv_root=td, dividend_type="front_ratio", detail_path=p
+            )
+        self.assertEqual(out[0]["shares"], 1000)
+        self.assertAlmostEqual(out[0]["buy_price"], 46.79, places=2)
+
+    def test_enrich_ex_rights_old_csv(self):
+        import json
+        from datetime import datetime, timedelta, timezone
+
+        def _ms(day: str) -> int:
+            dt = datetime.strptime(day, "%Y%m%d")
+            utc = dt - timedelta(hours=8)
+            return int(utc.replace(tzinfo=timezone.utc).timestamp() * 1000)
+
+        lines = [
+            "000963,华东医药,股票,医药,多,2017-05-19 15:00:00,买入,93.58,93.58,0,0,0,500,0,46790,普通",
+            "000963,华东医药,股票,医药,多,2017-06-06 15:00:00,卖出,44.81,44.81,-24385,0,0,1000,0,44810,普通",
+        ]
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "divid_factors").mkdir()
+            (root / "divid_factors" / "000963_SZ.json").write_text(
+                json.dumps({str(_ms("20170524")): [1.35, 0.0, 1.0, 0.0, 0.0, 0.0, 2.029398]}),
+                encoding="utf-8",
+            )
+            p = _write_detail(root / "old_操作明细.csv", lines)
+            rounds = report_mod().parse_terminal_rounds(p)
+            # 旧表：买 500 vs 卖 1000 → 轮次仍 500 股、假 -52%
+            self.assertEqual(rounds[0]["shares"], 500)
+            out = enrich_trades_ex_rights(
+                rounds,
+                csv_root=root,
+                dividend_type="front_ratio",
+                detail_path=p,
+                default_stock="000963.SZ",
+            )
+        self.assertEqual(out[0]["shares"], 1000)
+        self.assertLess(abs(out[0]["ret_pct"]), 8.0)
 
 
 if __name__ == "__main__":

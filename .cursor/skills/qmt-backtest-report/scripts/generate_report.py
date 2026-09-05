@@ -333,11 +333,40 @@ def _col_by_aliases(df: pd.DataFrame, *aliases: str) -> str | None:
     return None
 
 
+def _apply_bonus_pending(pending: list[dict], add_shares: int) -> None:
+    """送转：按股数比例把新增股摊到未平买入 lot，总成本守恒。"""
+    add = int(add_shares or 0)
+    if add < 1 or not pending:
+        return
+    old_total = sum(int(x.get("shares") or 0) for x in pending)
+    if old_total <= 0:
+        return
+    assigned = 0
+    n = len(pending)
+    for i, lot in enumerate(pending):
+        old_sh = int(lot.get("shares") or 0)
+        try:
+            old_px = float(lot.get("price") or 0)
+        except (TypeError, ValueError):
+            old_px = 0.0
+        old_cost = old_px * old_sh
+        if i == n - 1:
+            extra = max(add - assigned, 0)
+        else:
+            extra = int(round(add * old_sh / float(old_total)))
+            assigned += extra
+        new_sh = old_sh + extra
+        lot["shares"] = new_sh
+        if new_sh > 0 and old_cost > 0:
+            lot["price"] = old_cost / float(new_sh)
+
+
 def parse_terminal_rounds(path: Path, *, quiet: bool = False) -> list[dict]:
     """解析 QMT「操作明细」CSV → 买卖轮次（按代码各自 FIFO）。
 
     卖出若吃掉多笔买入，按买入 lot 拆成多轮（保留各笔买入日/买价）；
     盈亏按股数分摊卖出行「盈利」（末笔吃尾差）。
+    「送转」行按成本守恒给未平买入加股缩价。
     quiet=True 时不向 stderr 刷 open-buy/orphan 警告（批量扫描/打分用）。
     """
     df = _read_csv_auto(path)
@@ -369,10 +398,12 @@ def parse_terminal_rounds(path: Path, *, quiet: bool = False) -> list[dict]:
             side = "buy"
         elif "卖" in side_raw:
             side = "sell"
+        elif "送转" in side_raw:
+            side = "bonus"
         else:
             continue
         try:
-            price = float(r[c_price])
+            price = float(r[c_price]) if pd.notna(r[c_price]) else 0.0
             shares = int(float(r[c_shares]))
         except Exception:
             continue
@@ -393,6 +424,7 @@ def parse_terminal_rounds(path: Path, *, quiet: bool = False) -> list[dict]:
                 "shares": shares,
                 "pnl": pnl,
                 "code": code,
+                "raw_price": price,
             }
         )
 
@@ -403,6 +435,9 @@ def parse_terminal_rounds(path: Path, *, quiet: bool = False) -> list[dict]:
         code = str(r.get("code") or "")
         if r["side"] == "buy":
             pending_by_code.setdefault(code, []).append(r)
+            continue
+        if r["side"] == "bonus":
+            _apply_bonus_pending(pending_by_code.get(code) or [], int(r["shares"]))
             continue
         pending_buys = pending_by_code.get(code) or []
         if not pending_buys:
@@ -459,10 +494,16 @@ def parse_terminal_rounds(path: Path, *, quiet: bool = False) -> list[dict]:
                 lot_pnl = float(sell_pnl) * (lot_sh / float(sh)) if sh else 0.0
                 allocated += lot_pnl
             ret = (sell_p - buy_p) / buy_p * 100.0 if buy_p else 0.0
+            raw_px = lot.get("raw_price", buy_p)
+            try:
+                raw_px = float(raw_px)
+            except (TypeError, ValueError):
+                raw_px = buy_p
             round_row = {
                 "buy_open_day": lot["day"],
                 "sell_exec_day": r["day"],
                 "buy_price": buy_p,
+                "buy_price_raw": raw_px,
                 "sell_price": sell_p,
                 "shares": lot_sh,
                 "cost": round(buy_p * lot_sh, 2),

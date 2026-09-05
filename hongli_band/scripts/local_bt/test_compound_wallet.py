@@ -71,6 +71,56 @@ class CompoundWalletTests(unittest.TestCase):
         self.assertEqual(lg.rows[0][16], "90000.00")
         self.assertEqual(lg.rows[0][17], "100000.00")
 
+    def test_on_ex_rights_scales_lots_and_writes_bonus_row(self):
+        w = CompoundWallet(100000.0, cash_ratio=0.9, enabled=True)
+        cash0 = w.cash
+        lg = TradeLedger("000963.SZ")
+        lg.on_buy(500, 93.58, "20170519")
+        lg.on_ex_rights("20170524", 2.029398, 2.0)
+        self.assertEqual(len(lg.rows), 2)
+        self.assertEqual(lg.rows[1][6], "送转")
+        self.assertEqual(lg.rows[1][12], "500")
+        self.assertEqual(int(lg._lots[0]["shares"]), 1000)
+        self.assertAlmostEqual(float(lg._lots[0]["price"]), 93.58 / 2.029398, places=4)
+        w.on_buy(500, 93.58)
+        # 送转不碰现金
+        self.assertAlmostEqual(w.cash, cash0 - 500 * 93.58)
+        lg.on_sell(1000, 44.81, "20170606")
+        pnl = float(lg.rows[-1][9])
+        self.assertGreater(pnl, -4000)
+
+
+    def test_wrap_fill_hooks_registers_ex_rights(self):
+        class Acc:
+            stock = "000963.SZ"
+            position = None
+
+        a = Acc()
+
+        def _buy(vol, price, opened_at, **extra):
+            a.position = {
+                "shares": int(vol),
+                "price": float(price),
+                "cost": float(vol) * float(price),
+            }
+
+        def _sell(now, reason, last_hint, filled_vol, mark_half=False, lot_ids=None):
+            a.position = None
+
+        ns = {
+            "A": a,
+            "_apply_buy_fill": _buy,
+            "_apply_sell_fill": _sell,
+            "_per_stock_map": lambda: {},
+        }
+        lg = TradeLedger("000963.SZ")
+        wrap_fill_hooks(ns, lg, None, dynamic_cap=False)
+        ns["_apply_buy_fill"](500, 93.58, "20170519")
+        ns["_on_ex_rights_ledger"]("20170524", 2.0, 2.0)
+        self.assertEqual(lg.rows[1][6], "送转")
+        ns["_apply_sell_fill"]("20170606", "weekly_bear", 44.81, 1000)
+        self.assertEqual(lg.rows[-1][12], "1000")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -47,7 +47,7 @@
 
    文件名形如 `600350_SH_1d_20180102_20260827.csv`。有周线时同目录再放 `*_1w_*.csv`。
 
-   **时点前复权（PIT）**：勾选 `front` / `front_ratio` 时，回放读 `csv/none` + `csv/divid_factors/`。`front_ratio`→等比 `Πdr`（`mode=ratio`）；`front`→价差事件序（`mode=diff`）。报告仍写到 `report/front*`，日志含 `pit=1 mode=…`。两条结果应不同。缺 none 或因子 JSON → 硬失败。`DUMP_STOCKS` 须覆盖要测的票；`DIVIDEND_TYPES` 须含 `none`。图表价差 PIT 配股按全认购；持仓除权仍默认未认购。
+   **时点前复权（PIT）**：勾选 `front` / `front_ratio` 时，回放读 `csv/none` + `csv/divid_factors/`。`front_ratio`→等比 `Πdr`（`mode=ratio`）；`front`→价差事件序（`mode=diff`）。报告仍写到 `report/front*`，日志含 `pit=1 mode=…`。两条结果应不同。缺 none 或因子 JSON → 硬失败。`DUMP_STOCKS` 须覆盖要测的票；`DIVIDEND_TYPES` 须含 `none`。图表价差 PIT 配股按全认购；持仓除权仍默认未认购。成交轮次认操作明细「送转」行；持有回撤在 PIT 下按 none 收盘 × 累计送转股数（市值口径），避免除权跳空当成 −50% 回撤。
 
 3. 没有 CSV 时，在国金里跑 **KlineDump / 行情导出**（改完片段须先 deploy）：
 

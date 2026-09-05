@@ -6,7 +6,7 @@ import importlib.util
 import re
 import sys
 from collections import deque
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -162,6 +162,183 @@ def load_divid_factors_json(csv_root: str | Path, stock: str) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ValueError("divid_factors 非 dict: %s" % path)
     return raw
+
+
+def _divid_event_day(key: Any) -> str:
+    """divid_factors key → YYYYMMDD（东八区），与 pit_day_from_key 同口径。"""
+    try:
+        ms = int(float(key))
+    except (TypeError, ValueError):
+        s = str(key or "").strip()
+        return s[:8] if len(s) >= 8 and s[:8].isdigit() else ""
+    if ms > 10**11:
+        sec = ms / 1000.0
+    elif ms > 10**9:
+        sec = float(ms)
+    else:
+        return ""
+    try:
+        dt = datetime.fromtimestamp(sec, tz=timezone.utc) + timedelta(hours=8)
+        return dt.strftime("%Y%m%d")
+    except (OSError, OverflowError, ValueError):
+        return ""
+
+
+def iter_divid_share_events(factors: dict[str, Any] | None) -> list[tuple[str, float, float]]:
+    """[(day, share_mul, dr), ...]，仅 share_mul>1 的送转。"""
+    out: list[tuple[str, float, float]] = []
+    if not isinstance(factors, dict):
+        return out
+    for key, row in factors.items():
+        day = _divid_event_day(key)
+        if not day or not isinstance(row, (list, tuple)) or len(row) < 7:
+            continue
+        try:
+            bonus = float(row[1] or 0)
+            gift = float(row[2] or 0)
+            dr = float(row[6] or 0)
+        except (TypeError, ValueError):
+            continue
+        mul = 1.0 + bonus + gift
+        if mul <= 1.0 + 1e-12:
+            continue
+        out.append((day, mul, dr))
+    out.sort(key=lambda x: x[0])
+    return out
+
+
+def _load_share_events(csv_root: str | Path, stock: str) -> list[tuple[str, float, float]]:
+    s = str(stock or "").strip().upper()
+    candidates: list[str] = []
+    if s:
+        candidates.append(s)
+    if s and "." not in s:
+        if s.startswith(("6", "9")):
+            candidates.append(s + ".SH")
+        else:
+            candidates.append(s + ".SZ")
+            candidates.append(s + ".SH")
+    seen: set[str] = set()
+    for c in candidates:
+        if c in seen:
+            continue
+        seen.add(c)
+        try:
+            return iter_divid_share_events(load_divid_factors_json(csv_root, c))
+        except (OSError, ValueError):
+            continue
+    return []
+
+
+def _detail_has_bonus_row(path: str | Path) -> bool:
+    try:
+        df = report_mod()._read_csv_auto(Path(path))
+    except Exception:
+        return False
+    if df is None or df.empty:
+        return False
+    col = None
+    for name in ("操作类型", "买卖方向", "方向"):
+        if name in df.columns:
+            col = name
+            break
+    if col is None and df.shape[1] > 6:
+        col = list(df.columns)[6]
+    if col is None:
+        return False
+    return any("送转" in str(x) for x in df[col].tolist())
+
+
+def _share_mul_between(
+    events: list[tuple[str, float, float]],
+    start_day: str,
+    end_day: str,
+) -> tuple[float, float]:
+    mul = 1.0
+    dr_prod = 1.0
+    a = str(start_day or "")
+    b = str(end_day or "")
+    for eday, sm, dr in events or ():
+        if a < eday <= b:
+            mul *= float(sm)
+            try:
+                d = float(dr)
+            except (TypeError, ValueError):
+                d = 0.0
+            if d > 1.0:
+                dr_prod *= d
+    return mul, dr_prod
+
+
+def enrich_trades_ex_rights(
+    trades: list[dict[str, Any]],
+    csv_root: str | Path | None = None,
+    dividend_type: str = "",
+    *,
+    detail_path: str | Path | None = None,
+    default_stock: str = "",
+) -> list[dict[str, Any]]:
+    """旧 PIT 明细无送转行时，按因子把买价/股数扳到除权后口径。新表（有送转行）跳过。"""
+    if not trades:
+        return trades
+    div = normalize_dividend_type(dividend_type)
+    if not div:
+        div = infer_dividend_type_from_path(detail_path)
+    if div and div not in PIT_LOGICAL_DIVS and div != "none":
+        return trades
+    if detail_path and _detail_has_bonus_row(detail_path):
+        return trades
+    root = Path(csv_root) if csv_root else DEFAULT_CSV_ROOT
+    fallback = str(default_stock or "").strip().upper()
+    if not fallback and detail_path:
+        fallback = stock_from_detail_path(detail_path, read_csv=True)
+    cache: dict[str, list[tuple[str, float, float]]] = {}
+    out: list[dict[str, Any]] = [dict(t) for t in trades]
+    for t in out:
+        if t.get("buy_price_raw") is not None:
+            try:
+                raw = float(t.get("buy_price_raw"))
+                px = float(t.get("buy_price") or 0)
+            except (TypeError, ValueError):
+                raw = 0.0
+                px = 0.0
+            if raw > 0 and px > 0 and abs(raw - px) / max(raw, 1e-9) > 0.02:
+                continue
+        stock = str(t.get("stock") or "").strip().upper() or fallback
+        buy_d = compact_day(str(t.get("buy_open_day") or ""))
+        sell_d = compact_day(str(t.get("sell_exec_day") or ""))
+        if not stock or not buy_d or not sell_d:
+            continue
+        if stock not in cache:
+            cache[stock] = _load_share_events(root, stock)
+        events = cache[stock]
+        if not events:
+            continue
+        mul, dr_prod = _share_mul_between(events, buy_d, sell_d)
+        if mul <= 1.0 + 1e-9:
+            continue
+        try:
+            old_sh = int(float(t.get("shares") or 0))
+            old_px = float(t.get("buy_price") or 0)
+            sell_p = float(t.get("sell_price") or 0)
+        except (TypeError, ValueError):
+            continue
+        if old_sh < 100 or old_px <= 0:
+            continue
+        new_sh = int(round(old_sh * mul))
+        if new_sh < 100:
+            continue
+        px_div = dr_prod if dr_prod > 1.0 else mul
+        new_px = old_px / px_div
+        if new_sh == old_sh and abs(new_px - old_px) / old_px < 0.02:
+            continue
+        t["buy_price_raw"] = old_px
+        t["buy_price"] = new_px
+        t["shares"] = new_sh
+        t["cost"] = round(new_px * new_sh, 2)
+        t["pnl"] = (sell_p - new_px) * new_sh if sell_p > 0 else t.get("pnl")
+        t["ret_pct"] = ((sell_p - new_px) / new_px * 100.0) if (sell_p > 0 and new_px > 0) else t.get("ret_pct")
+    return out
 
 
 def normalize_dividend_type(raw: Any) -> str:
@@ -1885,6 +2062,8 @@ def enrich_trades_hold_metrics(
 
     # stock -> day -> (close, high)
     ohlc_by_stock: dict[str, dict[str, tuple[float, float]]] = {}
+    share_ev_by_stock: dict[str, list[tuple[str, float, float]]] = {}
+    pit_like = uses_pit_front(div) or div == "none"
     for stock, items in groups.items():
         start = min(b for _i, b, _s in items)
         end = max(s for _i, _b, s in items)
@@ -1920,18 +2099,30 @@ def enrich_trades_hold_metrics(
             m[day] = (c, high)
         if m:
             ohlc_by_stock[stock] = m
+        if pit_like:
+            share_ev_by_stock[stock] = _load_share_events(root, stock)
 
     for stock, items in groups.items():
         cmap = ohlc_by_stock.get(stock) or {}
         if not cmap:
             continue
         days_sorted = sorted(cmap.keys())
+        events = share_ev_by_stock.get(stock) or []
         for i, buy_d, sell_d in items:
             closes = [cmap[d][0] for d in days_sorted if buy_d <= d <= sell_d]
             highs = [cmap[d][1] for d in days_sorted if buy_d <= d <= sell_d]
+            if events:
+                closes = []
+                highs = []
+                for d in days_sorted:
+                    if not (buy_d <= d <= sell_d):
+                        continue
+                    sm, _dr = _share_mul_between(events, buy_d, d)
+                    closes.append(cmap[d][0] * sm)
+                    highs.append(cmap[d][1] * sm)
             out[i]["hold_max_dd"] = hold_max_dd_from_closes(closes)
             try:
-                bp = float(out[i].get("buy_price") or 0)
+                bp = float(out[i].get("buy_price_raw") or out[i].get("buy_price") or 0)
             except (TypeError, ValueError):
                 bp = 0.0
             out[i]["hold_max_up"] = hold_max_up_from_highs(highs, bp)
@@ -2230,10 +2421,17 @@ def analyze_detail(
     }
     if "budget" not in meta_d:
         meta_d["budget"] = float(budget)
+    default_stock = str(meta_d.get("stock") or "")
+    if default_stock in ("?", ""):
+        default_stock = stock_from_detail_path(path, read_csv=True)
+    trades = enrich_trades_ex_rights(
+        trades,
+        csv_root=csv_root,
+        dividend_type=dividend_type,
+        detail_path=path,
+        default_stock=default_stock,
+    )
     if hold_metrics:
-        default_stock = str(meta_d.get("stock") or "")
-        if default_stock in ("?", ""):
-            default_stock = stock_from_detail_path(path, read_csv=True)
         trades = enrich_trades_hold_metrics(
             trades,
             csv_root=csv_root,

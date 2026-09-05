@@ -417,6 +417,50 @@ class ExRightsTests(unittest.TestCase):
         self.assertEqual(int(A.lots[1]["shares"]), 520)
         self.assertAlmostEqual(float(A.lots[0]["price"]), 10.0 / 1.3, places=6)
 
+    def test_bonus_without_dr_still_scales_price(self):
+        ns = _load_ex_ns()
+        A = ns["A"]
+        A.position = {
+            "shares": 1000,
+            "price": 10.0,
+            "cost": 10000.0,
+            "opened_at": "20240101093000",
+        }
+        A.hold_peak = 10.0
+        C = SimpleNamespace()
+        C.get_divid_factors = lambda stock: {
+            _ms_for_day("20240601"): [0.0, 1.0, 0.0, 0.0, 0.0, 0, 1.0],
+        }
+        ns["_maybe_apply_ex_rights"](C, "20240601")
+        self.assertEqual(A.position["shares"], 2000)
+        self.assertAlmostEqual(A.position["price"], 5.0, places=6)
+
+    def test_ledger_hook_on_bonus(self):
+        called = []
+        ns = _load_ex_ns(
+            ns_extra={
+                "_on_ex_rights_ledger": lambda day, dr, mul: called.append((day, dr, mul)),
+            }
+        )
+        A = ns["A"]
+        A.position = {
+            "shares": 500,
+            "price": 93.58,
+            "cost": 46790.0,
+            "opened_at": "20170519000000",
+        }
+        A.hold_peak = 93.58
+        C = SimpleNamespace()
+        C.get_divid_factors = lambda stock: {
+            _ms_for_day("20170524"): [1.35, 0.0, 1.0, 0.0, 0.0, 0.0, 2.029398],
+        }
+        ns["_maybe_apply_ex_rights"](C, "20170524")
+        self.assertEqual(A.position["shares"], 1000)
+        self.assertEqual(len(called), 1)
+        self.assertEqual(called[0][0], "20170524")
+        self.assertAlmostEqual(float(called[0][1]), 2.029398, places=6)
+        self.assertAlmostEqual(float(called[0][2]), 2.0, places=6)
+
 
 if __name__ == "__main__":
     unittest.main()

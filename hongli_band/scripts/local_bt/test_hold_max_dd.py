@@ -172,6 +172,53 @@ class HoldMaxDdTests(unittest.TestCase):
         self.assertAlmostEqual(float(out.iloc[1]["可部署资金"]), 90000.0)
         self.assertAlmostEqual(float(out.iloc[1]["组合权益"]), 102000.0)
 
+    def test_hold_dd_share_mul_not_split_gap(self):
+        import json
+        from datetime import datetime, timedelta, timezone
+
+        def _ms(day: str) -> int:
+            dt = datetime.strptime(day, "%Y%m%d")
+            utc = dt - timedelta(hours=8)
+            return int(utc.replace(tzinfo=timezone.utc).timestamp() * 1000)
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            none_dir = root / "none"
+            none_dir.mkdir()
+            fac_dir = root / "divid_factors"
+            fac_dir.mkdir()
+            daily = none_dir / "600350_SH_1d_20240102_20240110.csv"
+            daily.write_text(
+                "stock,period,datetime,open,high,low,close,volume,amount\n"
+                "600350.SH,1d,20240102,93,94,92,93,100,100\n"
+                "600350.SH,1d,20240103,94,95,93,94,100,100\n"
+                "600350.SH,1d,20240108,47,48,46,47,100,100\n"
+                "600350.SH,1d,20240110,47,47.5,46.5,47,100,100\n",
+                encoding="utf-8",
+            )
+            (fac_dir / "600350_SH.json").write_text(
+                json.dumps({str(_ms("20240108")): [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 2.0]}),
+                encoding="utf-8",
+            )
+            detail = root / "front_ratio" / "x_操作明细.csv"
+            detail.parent.mkdir(parents=True)
+            trades = [
+                {
+                    "stock": "600350.SH",
+                    "buy_open_day": "20240102",
+                    "sell_exec_day": "20240110",
+                    "buy_price": 93.0,
+                    "buy_price_raw": 93.0,
+                    "shares": 500,
+                }
+            ]
+            out = enrich_trades_hold_metrics(
+                trades, csv_root=root, dividend_type="front_ratio", detail_path=detail
+            )
+            dd = float(out[0]["hold_max_dd"])
+            self.assertGreater(dd, -10.0)
+            self.assertGreater(float(out[0]["hold_max_up"]), -1.0)
+
 
 if __name__ == "__main__":
     unittest.main()
