@@ -15,13 +15,13 @@ ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 # 形态：code → 配置字典。ma_type（EMA|SMA）；dividend_type 见下方复权注释。
 # 简写兼容：value 写成 "SMA" 视为 {"ma_type": "SMA"}；旧纯字符串 tuple 仍认作白名单。
 BOOK_STOCKS = {
-"600938.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
-"603259.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
-"601615.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
-"603659.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
-"002001.SZ": {"ma_type": "EMA", "dividend_type": "front_ratio"},
-"600350.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
-"601857.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "600938.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "603259.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "601615.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "603659.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "002001.SZ": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "600350.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+    "601857.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
 }
 
 # 单实例共享信号账本（不是 STATE_FILE；禁止按标的分文件）
