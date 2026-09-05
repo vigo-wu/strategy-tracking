@@ -35,8 +35,7 @@ class SelectConfigTest(unittest.TestCase):
             {
                 "min_n_buy",
                 "min_n_buy_per_year",
-                "min_years_traded",
-                "min_pos_years",
+                "min_years_traded_ratio",
                 "min_pos_ratio",
                 "max_win_pnl_share",
                 "vol_drop_top",
@@ -63,13 +62,13 @@ class SelectConfigTest(unittest.TestCase):
     def test_year_max_widget_kwargs_clamp(self) -> None:
         self.assertEqual(year_max_for_window(2), 5)
         self.assertEqual(year_max_for_window(8), 8)
-        spec = FILTER_BY_KEY["min_years_traded"]
+        spec = FILTER_BY_KEY["min_years_traded_ratio"]
         kw = widget_kwargs(spec, year_max=5)
-        self.assertEqual(kw["max_value"], 5)
-        self.assertEqual(kw["value"], 2)
-        kw = widget_kwargs(spec, year_max=1)
-        self.assertEqual(kw["max_value"], 1)
-        self.assertEqual(kw["value"], 1)
+        self.assertEqual(kw["max_value"], 1.0)
+        self.assertAlmostEqual(kw["value"], 0.50)
+        spec_n = FILTER_BY_KEY["min_n_buy"]
+        kw_n = widget_kwargs(spec_n, year_max=1)
+        self.assertEqual(kw_n["max_value"], 50)
 
     def test_weights_sum_to_one(self) -> None:
         self.assertAlmostEqual(sum(WEIGHTS.values()), 1.0, places=6)

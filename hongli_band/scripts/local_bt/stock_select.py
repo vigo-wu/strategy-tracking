@@ -1034,8 +1034,7 @@ def score_universe(
 
     min_n_buy = int(flt.get("min_n_buy") or 0)
     min_per_year = int(flt.get("min_n_buy_per_year") or 0)
-    min_years = int(flt.get("min_years_traded") or 0)
-    min_pos = int(flt.get("min_pos_years") or 0)
+    min_traded_ratio = float(flt.get("min_years_traded_ratio") or 0.0)
     min_ratio = float(flt.get("min_pos_ratio") or 0.0)
     max_win_share = float(flt.get("max_win_pnl_share") or 1.0)
 
@@ -1051,12 +1050,14 @@ def score_universe(
             reasons.append("轮次不足")
         if min_per_year > 0 and n_buy_year_min < min_per_year:
             reasons.append("每年轮次不足")
-        if int(agg["n_years_traded"] or 0) < min_years:
-            reasons.append("成交年数不足")
-        n_pos = int(agg["n_years_pos"] or 0)
+        n_files = int(agg["n_years_files"] or 0)
         n_tr = int(agg["n_years_traded"] or 0)
+        n_pos = int(agg["n_years_pos"] or 0)
+        traded_ratio = (n_tr / n_files) if n_files else 0.0
+        if min_traded_ratio > 0 and traded_ratio < min_traded_ratio:
+            reasons.append("成交年占比不足")
         ratio = (n_pos / n_tr) if n_tr else 0.0
-        if n_pos < min_pos and ratio < min_ratio:
+        if min_ratio > 0 and ratio < min_ratio:
             reasons.append("盈利年不稳定")
         share = agg.get("max_win_pnl_share")
         if share is not None and share > max_win_share and float(agg.get("gross_profit") or 0) > 0:
@@ -1387,8 +1388,12 @@ def main(argv: list[str] | None = None) -> None:
         default=DEFAULT_FILTERS["min_n_buy_per_year"],
         help="窗口内每一年最少买入轮次（缺文件按 0；0 表示不启用）",
     )
-    ap.add_argument("--min-years", type=int, default=DEFAULT_FILTERS["min_years_traded"])
-    ap.add_argument("--min-pos-years", type=int, default=DEFAULT_FILTERS["min_pos_years"])
+    ap.add_argument(
+        "--min-years-ratio",
+        type=float,
+        default=DEFAULT_FILTERS["min_years_traded_ratio"],
+        help="成交年占有数据年下限（0 不启用）",
+    )
     ap.add_argument("--min-pos-ratio", type=float, default=DEFAULT_FILTERS["min_pos_ratio"])
     ap.add_argument("--max-win-share", type=float, default=DEFAULT_FILTERS["max_win_pnl_share"])
     ap.add_argument("--vol-drop-top", type=float, default=DEFAULT_FILTERS["vol_drop_top"])
@@ -1405,8 +1410,7 @@ def main(argv: list[str] | None = None) -> None:
     filters = {
         "min_n_buy": args.min_n_buy,
         "min_n_buy_per_year": args.min_n_buy_year,
-        "min_years_traded": args.min_years,
-        "min_pos_years": args.min_pos_years,
+        "min_years_traded_ratio": args.min_years_ratio,
         "min_pos_ratio": args.min_pos_ratio,
         "max_win_pnl_share": args.max_win_share,
         "vol_drop_top": args.vol_drop_top,

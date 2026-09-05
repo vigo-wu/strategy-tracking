@@ -772,8 +772,7 @@ class ResolveMaTests(unittest.TestCase):
             scanned,
             filters={
                 "min_n_buy": 0,
-                "min_years_traded": 0,
-                "min_pos_years": 0,
+                "min_years_traded_ratio": 0.0,
                 "min_pos_ratio": 0.0,
                 "max_win_pnl_share": 1.0,
                 "vol_drop_top": 0.0,
@@ -846,8 +845,7 @@ class ScoreWindowTests(unittest.TestCase):
     def _loose(self) -> dict:
         return {
             "min_n_buy": 0,
-            "min_years_traded": 0,
-            "min_pos_years": 0,
+            "min_years_traded_ratio": 0.0,
             "min_pos_ratio": 0.0,
             "max_win_pnl_share": 1.0,
             "vol_drop_top": 0.0,
@@ -986,8 +984,7 @@ class PerYearBuyFilterTests(unittest.TestCase):
         flt = {
             "min_n_buy": 0,
             "min_n_buy_per_year": 0,
-            "min_years_traded": 0,
-            "min_pos_years": 0,
+            "min_years_traded_ratio": 0.0,
             "min_pos_ratio": 0.0,
             "max_win_pnl_share": 1.0,
             "vol_drop_top": 0.0,
@@ -1067,6 +1064,56 @@ class PerYearBuyFilterTests(unittest.TestCase):
         self.assertEqual(int(row["n_buy_year_min"]), 0)
         peer = scored["df"][scored["df"]["stock"] == "000001.SZ"].iloc[0]
         self.assertTrue(bool(peer["passed"]))
+
+    def test_traded_year_ratio_fails_sparse_coverage(self):
+        from stock_select import score_universe
+
+        scanned = self._scanned(
+            {
+                "2021": self._kpi(5),
+                "2022": self._kpi(0),
+                "2023": self._kpi(0),
+                "2024": self._kpi(0),
+            }
+        )
+        fail = score_universe(
+            scanned,
+            filters=self._loose(min_years_traded_ratio=0.50),
+            score_years=("2021", "2022", "2023", "2024"),
+        )
+        row = fail["df"].iloc[0]
+        self.assertFalse(bool(row["passed"]))
+        self.assertIn("成交年占比不足", str(row["fail_reason"]))
+
+        ok = score_universe(
+            scanned,
+            filters=self._loose(min_years_traded_ratio=0.0),
+            score_years=("2021", "2022", "2023", "2024"),
+        )
+        self.assertTrue(bool(ok["df"].iloc[0]["passed"]))
+
+    def test_pos_ratio_only_fails_few_profit_years(self):
+        from stock_select import score_universe
+
+        scanned = self._scanned(
+            {
+                "2020": self._kpi(5, 10.0),
+                "2021": self._kpi(5, 10.0),
+                "2022": self._kpi(5, -1.0),
+                "2023": self._kpi(5, -1.0),
+                "2024": self._kpi(5, -1.0),
+            }
+        )
+        fail = score_universe(
+            scanned,
+            filters=self._loose(min_pos_ratio=0.50),
+            score_years=("2020", "2021", "2022", "2023", "2024"),
+        )
+        row = fail["df"].iloc[0]
+        self.assertFalse(bool(row["passed"]))
+        self.assertIn("盈利年不稳定", str(row["fail_reason"]))
+        self.assertEqual(int(row["n_years_pos"]), 2)
+        self.assertEqual(int(row["n_years_traded"]), 5)
 
 
 class TypedDirTests(unittest.TestCase):

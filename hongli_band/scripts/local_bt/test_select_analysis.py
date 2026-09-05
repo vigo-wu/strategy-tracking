@@ -170,7 +170,12 @@ class SelectAnalysisTests(unittest.TestCase):
         self.assertEqual(resolved["600350.SH"]["years"]["2020"]["n_buy"], 2)
         scored = score_universe(
             scanned,
-            filters={"min_n_buy": 0, "min_years_traded": 1, "min_pos_years": 0, "top_n": 3},
+            filters={
+                "min_n_buy": 0,
+                "min_years_traded_ratio": 0.0,
+                "min_pos_ratio": 0.0,
+                "top_n": 3,
+            },
             score_years=("2020",),
             kpi_source="portfolio",
         )

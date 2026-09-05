@@ -311,7 +311,9 @@ def build_score_pool(
     if filters:
         flt.update(filters)
     flt["min_n_buy"] = max(0, int(flt.get("min_n_buy") or 0) // 2)
-    flt["min_years_traded"] = max(1, int(flt.get("min_years_traded") or 1) - 1)
+    flt["min_years_traded_ratio"] = max(
+        0.0, float(flt.get("min_years_traded_ratio") or 0.0) - 0.10
+    )
     sub = {k: v for k, v in stocks.items() if k in resolved}
     if not sub:
         return resolved
