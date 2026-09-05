@@ -122,6 +122,7 @@ from position_daily import (  # noqa: E402
     stock_from_cost_col,
     stock_hold_days,
 )
+from batch_year_perf import batch_naive_year_perf  # noqa: E402
 from equity_yearly import (  # noqa: E402
     build_daily_equity,
     daily_equity_for_year,
@@ -131,10 +132,12 @@ from stock_select import (  # noqa: E402
     SCORE_YEARS,
     coverage_notes,
     csv_dir_fingerprint,
+    div_suggest_label,
     format_book_snippet,
     glob_fingerprint,
     infer_score_years,
     list_score_years,
+    ma_suggest_label,
     report_fingerprint,
     scan_reports,
     score_universe,
@@ -1381,6 +1384,110 @@ def _render_year_performance_section(
     )
 
 
+def _render_batch_year_perf_section(
+    view_rows: list[dict],
+    *,
+    split: str,
+    compare_ma: bool,
+    picked_div: str,
+    n_divs: int,
+) -> None:
+    """批量结果：单票合计分年绩效（不复用 _render_year_performance_section）。"""
+    if n_divs >= 2 and not picked_div:
+        st.info("多种复权未单选，分年绩效不混加。请先选一种复权。")
+        return
+
+    ma_type = ""
+    found_ma: list[str] = []
+    for r in view_rows or []:
+        m = normalize_ma_type(r.get("ma_type"))
+        if m and m not in found_ma:
+            found_ma.append(m)
+    if len(found_ma) >= 2:
+        picked_ma = st.segmented_control(
+            "对照均线",
+            ["EMA", "SMA"],
+            default="EMA",
+            required=True,
+            key="batch_year_perf_ma",
+        )
+        ma_type = normalize_ma_type(picked_ma) or "EMA"
+    elif compare_ma and found_ma:
+        ma_type = found_ma[0]
+
+    cache = st.session_state.setdefault("_batch_detail_trade_cache", {})
+    with st.spinner("汇总分年绩效…"):
+        result = batch_naive_year_perf(
+            view_rows,
+            split=split,
+            ma_type=ma_type,
+            cache=cache,
+        )
+    if not result.get("ok"):
+        reason = str(result.get("reason") or "")
+        if reason:
+            st.info(reason)
+        return
+
+    n_ok = int(result.get("n_ok") or 0)
+    n_buy = int(result.get("n_buy") or 0)
+    sum_pnl = float(result.get("sum_pnl") or 0)
+    pos_ratio = result.get("pos_ratio")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("成功任务数", n_ok)
+    m2.metric("轮次合计", n_buy)
+    m3.metric("总盈亏", "%.2f" % sum_pnl)
+    if pos_ratio is None:
+        m4.metric("盈利任务占比", "—")
+    else:
+        m4.metric("盈利任务占比", "%.1f%%" % (float(pos_ratio) * 100.0))
+
+    st.subheader("分年绩效（权益口径 · 单票合计）")
+    year_note = (
+        "与上一张「按年汇总」的总盈亏应接近。"
+        if str(split) == "year"
+        else "与上面「按标的汇总」的合计盈亏应接近。"
+    )
+    st.caption(
+        "各票独立账户的已实现盈亏按卖出年相加（数据分析里的「单票合计盈亏」），"
+        "不是共享钱包的组合净值。年化 / 回撤分母 = 成功任务数 × 单票预算"
+        "（整段用全部成功标的数；按年分段用该年成功任务数）。"
+        + year_note
+        + "本表多了年化、回撤、夏普。真组合请走「数据分析 → 固定标的」。"
+    )
+    tbl = result.get("table")
+    if tbl is None or getattr(tbl, "empty", True):
+        st.info("无成交轮次，无法按年汇总。")
+        return
+    st.dataframe(_year_perf_display_df(tbl), use_container_width=True, hide_index=True)
+
+    years = [str(y) for y in tbl["year"].tolist()]
+    key_suffix = "batch_%s_%s_%s" % (picked_div or "one", ma_type or "na", split)
+    year_key = "year_eq_sel_%s" % key_suffix
+    if year_key not in st.session_state or st.session_state.get(year_key) not in years:
+        st.session_state[year_key] = years[-1]
+    year = st.selectbox("权益曲线年份", options=years, key=year_key)
+    match = tbl.loc[tbl["year"].astype(str) == str(year)]
+    if match.empty:
+        st.info("该年无权益点。")
+        return
+    start_eq = float(match.iloc[0]["start_equity"])
+    if str(split) == "year":
+        trades_y = list((result.get("trades_by_year") or {}).get(year) or [])
+        bud_y = float((result.get("budget_by_year") or {}).get(year) or result.get("budget") or 0)
+        daily = build_daily_equity(trades_y, bud_y)
+        eq_y = daily_equity_for_year(daily, year, start_equity=start_eq)
+        hline = bud_y
+    else:
+        daily = build_daily_equity(list(result.get("trades") or []), float(result.get("budget") or 0))
+        eq_y = daily_equity_for_year(daily, year, start_equity=start_eq)
+        hline = float(result.get("budget") or 0)
+    st.plotly_chart(
+        _plot_equity(eq_y, hline, "%s 年权益曲线（单票合计 · 预算 + 已实现盈亏累计）" % year),
+        use_container_width=True,
+    )
+
+
 def _render_book_detail_panel(
     detail_path: Path,
     budget: float,
@@ -2103,6 +2210,13 @@ def _render_batch_run(
     st.subheader("按标的汇总")
     st.caption("各标的独立账户、独立预算；合计盈亏不是组合净值。")
     st.dataframe(batch_summary_dataframe(view_rows), width="stretch", hide_index=True)
+    _render_batch_year_perf_section(
+        view_rows,
+        split=split_saved,
+        compare_ma=compare_saved,
+        picked_div=picked_div,
+        n_divs=len(divs_in),
+    )
 
     show_div_in_label = (not picked_div) and len(unique_dividend_types(view_rows if not compare_saved else view_pairs)) >= 2
 
@@ -2210,13 +2324,15 @@ def _select_display_df(df: pd.DataFrame, *, passed_only: bool = False, score_yea
     out["名次"] = src["rank"]
     out["代码"] = src["stock"]
     out["得分"] = pd.to_numeric(src["score"], errors="coerce") * 100.0
-    out["建议均线"] = src["ma_type_suggest"].map(lambda x: x if str(x or "").strip() else "缺对照")
+    out["建议均线"] = [
+        ma_suggest_label(s, m) for s, m in zip(src["stock"], src["ma_type_suggest"])
+    ]
     if "ma_type_why" in src.columns:
         out["均线来源"] = src["ma_type_why"]
     if "div_type_suggest" in src.columns:
-        out["建议复权"] = src["div_type_suggest"].map(
-            lambda x: dividend_label(x) if str(x or "").strip() else "缺对照"
-        )
+        out["建议复权"] = [
+            div_suggest_label(s, d) for s, d in zip(src["stock"], src["div_type_suggest"])
+        ]
     if "div_type_why" in src.columns:
         out["复权来源"] = src["div_type_why"]
     if "ma_pnl_delta" in src.columns:
@@ -2371,7 +2487,7 @@ def _render_select(
         if n_rec < top_n:
             st.caption("过线仅 %s 只，不足侧栏推荐池 N=%s。" % (n_rec, top_n))
         st.dataframe(_select_display_df(rec, score_years=years), use_container_width=True, hide_index=True)
-        st.caption("建议均线/复权按侧栏选定年重算；缺对照的票不写入 snippet。不自动改 `BOOK_STOCKS`。")
+        st.caption("建议均线/复权按侧栏选定年重算；缺对照回落当前实跑默认（config `MA_TYPE` / `DIVIDEND_TYPE`）。不自动改 `BOOK_STOCKS`。")
         st.code(format_book_snippet(rec), language="python")
 
     st.subheader("打分总表")

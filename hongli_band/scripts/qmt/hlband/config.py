@@ -15,13 +15,15 @@ ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 # 形态：code → 配置字典。ma_type（EMA|SMA）；dividend_type 见下方复权注释。
 # 简写兼容：value 写成 "SMA" 视为 {"ma_type": "SMA"}；旧纯字符串 tuple 仍认作白名单。
 BOOK_STOCKS = {
-    "600350.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"}, # 山东高速
-    "601939.SH": {"ma_type": "SMA", "dividend_type": "front"}, # 建设银行
-    "600028.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 中国石油
-    "600188.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 兖矿能源
-    "603259.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 药明康德
-    "600938.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"}, # 中国海油
+"600938.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+"603259.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+"601615.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+"603659.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+"002001.SZ": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+"600350.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
+"601857.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},
 }
+
 # 单实例共享信号账本（不是 STATE_FILE；禁止按标的分文件）
 BOOK_FILE = r"D:\HlBandV6\hlband_book.json"
 # 账本冻结截止：确认窗内打卡，到点（或打卡满 N）冻结；须在收盘集合竞价前完成分档下单
@@ -200,7 +202,7 @@ LIVE_OHLCV_POLICY = "window"
 #   back         后复权（价差）
 #   front_ratio  等比前复权（池外/未写字段的缺省）
 #   back_ratio   等比后复权
-DIVIDEND_TYPE = "follow"
+DIVIDEND_TYPE = "front_ratio"
 
 # download_history_data 最长回溯（自然日）；回测暖机用
 HIST_MAX_LOOKBACK_DAYS = 800

@@ -53,7 +53,7 @@ def _bt_held_set(vol):
     if not getattr(A, "is_backtest", False):
         return
     A.bt_held = max(0, int(vol))
-    if A.bt_held < 100:
+    if A.bt_held <= 0:
         A.bt_opened_at = ""
         A.bt_locked = 0
     else:

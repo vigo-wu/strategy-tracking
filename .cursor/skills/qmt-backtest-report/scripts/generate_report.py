@@ -361,6 +361,43 @@ def _apply_bonus_pending(pending: list[dict], add_shares: int) -> None:
             lot["price"] = old_cost / float(new_sh)
 
 
+def _merge_lot_cost(dst: dict, src: dict) -> dict:
+    d_sh = int(dst.get("shares") or 0)
+    s_sh = int(src.get("shares") or 0)
+    try:
+        d_px = float(dst.get("price") or 0)
+    except (TypeError, ValueError):
+        d_px = 0.0
+    try:
+        s_px = float(src.get("price") or 0)
+    except (TypeError, ValueError):
+        s_px = 0.0
+    new_sh = d_sh + s_sh
+    dst["shares"] = new_sh
+    if new_sh > 0:
+        dst["price"] = (d_px * d_sh + s_px * s_sh) / float(new_sh)
+    return dst
+
+
+def _fold_odd_taken_lots(taken: list[dict]) -> list[dict]:
+    """同一次卖出里不足一手的送转零股不单独成轮，并进 >=100 股的 lot。"""
+    if not taken:
+        return taken
+    main = [dict(x) for x in taken if int(x.get("shares") or 0) >= 100]
+    stubs = [x for x in taken if int(x.get("shares") or 0) < 100]
+    if not stubs:
+        return taken
+    if not main:
+        acc = dict(stubs[0])
+        for s in stubs[1:]:
+            _merge_lot_cost(acc, s)
+        return [acc]
+    target = main[-1]
+    for s in stubs:
+        _merge_lot_cost(target, s)
+    return main
+
+
 def parse_terminal_rounds(path: Path, *, quiet: bool = False) -> list[dict]:
     """解析 QMT「操作明细」CSV → 买卖轮次（按代码各自 FIFO）。
 
@@ -450,7 +487,7 @@ def parse_terminal_rounds(path: Path, *, quiet: bool = False) -> list[dict]:
         sell_p = float(r["price"])
         remain_sh = int(r["shares"])
         taken: list[dict] = []
-        while remain_sh >= 100 and pending_buys:
+        while remain_sh > 0 and pending_buys:
             b = pending_buys[0]
             bsh = int(b["shares"])
             if bsh <= remain_sh:
@@ -471,6 +508,10 @@ def parse_terminal_rounds(path: Path, *, quiet: bool = False) -> list[dict]:
                     f"warn: orphan sell {r['day']} code={code or '-'} in terminal csv",
                     file=sys.stderr,
                 )
+            continue
+        taken = _fold_odd_taken_lots(taken)
+        taken = [x for x in taken if int(x.get("shares") or 0) >= 100]
+        if not taken:
             continue
         tot_sh = sum(int(x["shares"]) for x in taken)
         sh = int(r["shares"] or tot_sh)

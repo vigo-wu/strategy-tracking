@@ -271,6 +271,19 @@ class TradeLedgerTests(unittest.TestCase):
         self.assertEqual(book.rows[2][9], "3891.00")
         self.assertEqual(len(book.rows[0]), len(HEADER))
 
+    def test_odd_lot_sell_is_recorded(self):
+        from trades_csv import TradeLedger
+
+        book = TradeLedger("603659.SH")
+        book.on_buy(1800, 51.0, "20230504150000")
+        book.on_ex_rights("20230509150000", 1.45, 1.45)
+        book.on_sell(2600, 37.3, "20230526150000")
+        book.on_sell(10, 37.3, "20230527150000")
+        sells = [r for r in book.rows if r[6] == "卖出"]
+        self.assertEqual(len(sells), 2)
+        self.assertEqual(sells[1][12], "10")
+        self.assertEqual(len(book._lots), 0)
+
     def test_etf_decimals_and_write_gbk(self):
         from pathlib import Path
         from trades_csv import HEADER, TradeLedger
@@ -1744,19 +1757,39 @@ class BookSnippetTests(unittest.TestCase):
         self.assertIn('"dividend_type": "front"', text)
         self.assertIn("600350.SH", text)
 
-    def test_skips_without_ma(self):
+    def test_no_compare_uses_run_default(self):
+        from stock_select import format_book_snippet, ma_suggest_label
+
+        df = pd.DataFrame(
+            [
+                {
+                    "stock": "000000.SZ",
+                    "ma_type_suggest": "",
+                    "div_type_suggest": "",
+                }
+            ]
+        )
+        text = format_book_snippet(df)
+        self.assertIn("000000.SZ", text)
+        self.assertIn('"ma_type": "EMA"', text)
+        self.assertIn('"dividend_type": "front_ratio"', text)
+        self.assertEqual(ma_suggest_label("000000.SZ", ""), "EMA（默认）")
+
+    def test_keeps_suggested_div_when_ma_missing(self):
         from stock_select import format_book_snippet
 
         df = pd.DataFrame(
             [
                 {
-                    "stock": "600350.SH",
+                    "stock": "000000.SZ",
                     "ma_type_suggest": "",
                     "div_type_suggest": "front",
                 }
             ]
         )
-        self.assertEqual(format_book_snippet(df), "BOOK_STOCKS = {}")
+        text = format_book_snippet(df)
+        self.assertIn('"ma_type": "EMA"', text)
+        self.assertIn('"dividend_type": "front"', text)
 
 
 class PayloadGroupTests(unittest.TestCase):

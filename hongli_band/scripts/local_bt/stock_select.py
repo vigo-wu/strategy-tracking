@@ -36,7 +36,11 @@ from analyze import (  # noqa: E402
     agg_kpi_pnl,
     analyze_detail,
     daily_csvs_by_stock,
+    dividend_label,
+    load_chart_ma_config,
+    logical_dividend_type,
     normalize_dividend_type,
+    normalize_ma_type,
     parse_budget_from_log,
     pick_div_winner,
     pick_ma_winner,
@@ -1203,20 +1207,59 @@ def score_universe(
     }
 
 
+def run_default_ma_div(stock: str = "") -> tuple[str, str]:
+    """当前实跑缺省：池内用 BOOK_STOCKS 子配置，否则 config MA_TYPE / DIVIDEND_TYPE。"""
+    cfg = load_chart_ma_config()
+    code = str(stock or "").strip().upper()
+    book_ma = (cfg.get("book") or {}).get(code) if code else ""
+    ma = normalize_ma_type(book_ma) or normalize_ma_type(cfg.get("ma_type")) or "EMA"
+    div = logical_dividend_type(code) or DEFAULT_DIVIDEND_TYPE
+    return ma, div
+
+
+def snippet_ma_type(row: dict[str, Any] | pd.Series) -> str:
+    kind = str(row.get("ma_type_suggest") or "").strip().upper()
+    if kind in ("SMA", "EMA"):
+        return kind
+    return run_default_ma_div(str(row.get("stock") or ""))[0]
+
+
+def snippet_div_type(row: dict[str, Any] | pd.Series) -> str:
+    div = normalize_dividend_type(row.get("div_type_suggest"))
+    if div:
+        return div
+    return run_default_ma_div(str(row.get("stock") or ""))[1]
+
+
+def ma_suggest_label(stock: str, suggest: Any) -> str:
+    s = str(suggest or "").strip()
+    if s:
+        return s
+    return "%s（默认）" % run_default_ma_div(stock)[0]
+
+
+def div_suggest_label(stock: str, suggest: Any) -> str:
+    s = str(suggest or "").strip()
+    if s:
+        return dividend_label(s)
+    return "%s（默认）" % dividend_label(run_default_ma_div(stock)[1])
+
+
 def format_book_snippet(recommend: pd.DataFrame) -> str:
     if recommend is None or recommend.empty:
         return "BOOK_STOCKS = {}"
     lines = ["BOOK_STOCKS = {"]
     n = 0
     for _, r in recommend.iterrows():
-        kind = str(r.get("ma_type_suggest") or "").strip().upper()
-        if kind not in ("SMA", "EMA"):
+        stock = str(r.get("stock") or "").strip()
+        if not stock:
             continue
+        kind = snippet_ma_type(r)
+        div = snippet_div_type(r)
         fields = ['"ma_type": "%s"' % kind]
-        div = str(r.get("div_type_suggest") or "").strip().lower()
         if div in DIVIDEND_TYPES:
             fields.append('"dividend_type": "%s"' % div)
-        lines.append('    "%s": {%s},' % (r["stock"], ", ".join(fields)))
+        lines.append('    "%s": {%s},' % (stock, ", ".join(fields)))
         n += 1
     lines.append("}")
     if n == 0:

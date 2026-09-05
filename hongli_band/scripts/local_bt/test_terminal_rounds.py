@@ -295,6 +295,42 @@ class ParseTerminalRoundsTests(unittest.TestCase):
         self.assertEqual(out[0]["shares"], 1000)
         self.assertAlmostEqual(out[0]["buy_price"], 46.79, places=2)
 
+    def test_bonus_odd_lot_not_separate_round(self):
+        """送转后 2610 vs 卖 2600 的 10 股残仓，不得单独成轮刷出 −50% 收益%。"""
+        lines = [
+            "603659,璞泰来,股票,电气,多,2023-05-04 15:00:00,买入,51.00,51.00,0,0,0,1800,0,91800,普通",
+            "603659,璞泰来,股票,电气,多,2023-05-09 15:00:00,送转,34.94,34.94,0,0,0,810,0,28291,送转",
+            "603659,璞泰来,股票,电气,多,2023-05-26 15:00:00,卖出,37.30,37.30,6139,0,0,2600,0,96980,普通",
+            "603659,璞泰来,股票,电气,多,2023-07-28 15:00:00,买入,39.11,39.11,0,0,0,2400,0,93864,普通",
+            "603659,璞泰来,股票,电气,多,2023-08-14 15:00:00,卖出,37.76,37.76,-3198,0,0,2400,0,90624,普通",
+            "603659,璞泰来,股票,电气,多,2024-03-22 15:00:00,买入,18.98,18.98,0,0,0,5400,0,102492,普通",
+            "603659,璞泰来,股票,电气,多,2024-03-27 15:00:00,卖出,18.95,18.95,-363,0,0,5400,0,102330,普通",
+        ]
+        with tempfile.TemporaryDirectory() as td:
+            p = _write_detail(Path(td) / "odd_操作明细.csv", lines)
+            rounds = report_mod().parse_terminal_rounds(p, quiet=True)
+        self.assertTrue(all(int(r["shares"]) >= 100 for r in rounds))
+        self.assertTrue(all(abs(float(r["ret_pct"])) < 20 for r in rounds))
+        worst = min(float(r["ret_pct"]) for r in rounds)
+        self.assertGreater(worst, -20.0)
+
+    def test_sell_board_lot_absorbs_leading_odd_stub(self):
+        """卖出刚好 100 股且 FIFO 先碰到 10 股残仓时，不得停成 10 股轮次。"""
+        lines = [
+            "603659,璞泰来,股票,电气,多,2023-05-04 15:00:00,买入,51.00,51.00,0,0,0,1800,0,91800,普通",
+            "603659,璞泰来,股票,电气,多,2023-05-09 15:00:00,送转,34.94,34.94,0,0,0,810,0,28291,送转",
+            "603659,璞泰来,股票,电气,多,2023-05-26 15:00:00,卖出,37.30,37.30,6139,0,0,2600,0,96980,普通",
+            "603659,璞泰来,股票,电气,多,2023-07-28 15:00:00,买入,39.11,39.11,0,0,0,200,0,7822,普通",
+            "603659,璞泰来,股票,电气,多,2024-03-27 15:00:00,卖出,18.95,18.95,-2016,0,0,100,0,1895,普通",
+        ]
+        with tempfile.TemporaryDirectory() as td:
+            p = _write_detail(Path(td) / "stub100_操作明细.csv", lines)
+            rounds = report_mod().parse_terminal_rounds(p, quiet=True)
+        self.assertTrue(all(int(r["shares"]) >= 100 for r in rounds))
+        last = rounds[-1]
+        self.assertEqual(int(last["shares"]), 100)
+        self.assertEqual(len(rounds), 2)
+
     def test_enrich_ex_rights_old_csv(self):
         import json
         from datetime import datetime, timedelta, timezone

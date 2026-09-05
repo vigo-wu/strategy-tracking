@@ -25,12 +25,12 @@ ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 # 形态：code → 配置字典。ma_type（EMA|SMA）；dividend_type 见下方复权注释。
 # 简写兼容：value 写成 "SMA" 视为 {"ma_type": "SMA"}；旧纯字符串 tuple 仍认作白名单。
 BOOK_STOCKS = {
-    "600350.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"}, # 山东高速
-    "601939.SH": {"ma_type": "SMA", "dividend_type": "front"}, # 建设银行
-    "600028.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 中国石油
-    "600188.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 兖矿能源
-    "603259.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 药明康德
-    "600938.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"}, # 中国海油
+    # "600350.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"}, # 山东高速
+    # "601939.SH": {"ma_type": "SMA", "dividend_type": "front"}, # 建设银行
+    # "600028.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 中国石油
+    # "600188.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 兖矿能源
+    # "603259.SH": {"ma_type": "EMA", "dividend_type": "front"}, # 药明康德
+    # "600938.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"}, # 中国海油
 }
 # 单实例共享信号账本（不是 STATE_FILE；禁止按标的分文件）
 BOOK_FILE = r"D:\HlBandV6\hlband_book.json"
@@ -210,7 +210,7 @@ LIVE_OHLCV_POLICY = "window"
 #   back         后复权（价差）
 #   front_ratio  等比前复权（池外/未写字段的缺省）
 #   back_ratio   等比后复权
-DIVIDEND_TYPE = "follow"
+DIVIDEND_TYPE = "front_ratio"
 
 # download_history_data 最长回溯（自然日）；回测暖机用
 HIST_MAX_LOOKBACK_DAYS = 800
@@ -768,7 +768,7 @@ def _load_state(log=True):
         )
         return
     pos = raw.get("position")
-    if isinstance(pos, dict) and int(pos.get("shares", 0) or 0) >= 100:
+    if isinstance(pos, dict) and int(pos.get("shares", 0) or 0) > 0:
         A.position = dict(pos)
         A.position["shares"] = int(pos["shares"])
         A.position["price"] = float(pos.get("price", 0) or 0)
@@ -778,7 +778,7 @@ def _load_state(log=True):
     cleaned = []
     if isinstance(lots, list):
         for lot in lots:
-            if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) >= 100:
+            if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) > 0:
                 cleaned.append(dict(lot))
     A.lots = cleaned
     A.acted_day = str(raw.get("acted_day", "") or "")
@@ -895,7 +895,7 @@ def _bt_held_set(vol):
     if not getattr(A, "is_backtest", False):
         return
     A.bt_held = max(0, int(vol))
-    if A.bt_held < 100:
+    if A.bt_held <= 0:
         A.bt_opened_at = ""
         A.bt_locked = 0
     else:
@@ -916,7 +916,7 @@ def _reset_day(day):
 
 def _has_position():
     pos = getattr(A, "position", None)
-    return isinstance(pos, dict) and int(pos.get("shares", 0) or 0) >= 100
+    return isinstance(pos, dict) and int(pos.get("shares", 0) or 0) > 0
 
 
 def _pos_shares():
@@ -986,7 +986,7 @@ def _ensure_lots():
     cleaned = []
     if isinstance(lots, list):
         for lot in lots:
-            if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) >= 100:
+            if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) > 0:
                 cleaned.append(lot)
     if cleaned:
         A.lots = cleaned
@@ -1033,7 +1033,7 @@ def _new_lot(shares, price, opened_at=""):
 def _sync_position_from_lots():
     lots = []
     for lot in getattr(A, "lots", None) or []:
-        if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) >= 100:
+        if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) > 0:
             lots.append(lot)
     A.lots = lots
     if not lots:
@@ -1059,7 +1059,7 @@ def _sync_position_from_lots():
     }
     if getattr(A, "is_backtest", False):
         held = _bt_held_vol()
-        if held < 100 and total >= 100:
+        if held <= 0 and total > 0:
             print(_strategy_tag(), "restore bt_held from lots", total)
             A.bt_held = total
         elif held != total:
@@ -1150,13 +1150,19 @@ def _lots_want_vol(lot_ids):
     except Exception:
         return None
     total = 0
+    odd = 0
     for lot in getattr(A, "lots", None) or []:
         try:
-            if int(lot.get("id") or 0) in idset:
-                total += int(lot.get("shares") or 0)
+            sh = int(lot.get("shares") or 0)
+            lid = int(lot.get("id") or 0)
         except Exception:
-            pass
-    if total < 100:
+            continue
+        if lid in idset:
+            total += sh
+        elif 0 < sh < 100:
+            odd += sh
+    total += odd
+    if total <= 0:
         return None
     return int(total)
 
@@ -1235,7 +1241,7 @@ def _lots_on_sell_fill(lot_ids, filled_vol):
         if idset is not None and lid not in idset:
             new_lots.append(lot)
             continue
-        if remain_fill < 100:
+        if remain_fill <= 0:
             new_lots.append(lot)
             continue
         sh = int(lot.get("shares") or 0)
@@ -1245,7 +1251,22 @@ def _lots_on_sell_fill(lot_ids, filled_vol):
             lot = dict(lot)
             lot["shares"] = sh - remain_fill
             remain_fill = 0
-            new_lots.append(lot)
+            if int(lot["shares"]) > 0:
+                new_lots.append(lot)
+    if remain_fill > 0:
+        swept = []
+        for lot in new_lots:
+            sh = int(lot.get("shares") or 0)
+            if remain_fill > 0 and 0 < sh < 100:
+                take = min(sh, remain_fill)
+                remain_fill -= take
+                sh -= take
+                if sh <= 0:
+                    continue
+                lot = dict(lot)
+                lot["shares"] = sh
+            swept.append(lot)
+        new_lots = swept
     A.lots = new_lots
     _sync_position_from_lots()
     _mirror_hold_from_lots()
@@ -1366,6 +1387,28 @@ def _ex_round_shares(shares):
     except Exception:
         return 0
     return max(n, 0)
+
+
+def _ex_sell_volume(want, avail):
+    """卖出量：先按 100 股取整，本笔 want 里不足一手的送转零股并进。
+    可卖本身已不足一手时，允许单独卖掉残仓（不从整手仓里拆 99 股）。"""
+    try:
+        w = int(want)
+        a = int(avail)
+    except Exception:
+        return 0
+    raw = min(w, a)
+    if raw <= 0:
+        return 0
+    vol = (raw // _EX_LOT) * _EX_LOT
+    if vol >= _EX_LOT:
+        odd = raw - vol
+        if 0 < odd < _EX_LOT:
+            vol += odd
+        return vol
+    if a < _EX_LOT:
+        return raw
+    return 0
 
 
 def _ex_parse_row(row):
@@ -1698,8 +1741,9 @@ def _ex_apply_one_event(day, parsed, live_pending):
     changed = False
     vol0 = _ex_total_shares()
     cost_snap = _ex_cost_snapshot()
-    if dr > 1.0:
-        if _ex_scale_price_fields(dr):
+    px_div = dr if dr > 1.0 else (base_mul if base_mul > 1.0 else 0.0)
+    if px_div > 1.0:
+        if _ex_scale_price_fields(px_div):
             changed = True
     if _ex_scale_shares(base_mul):
         changed = True
@@ -1721,6 +1765,15 @@ def _ex_apply_one_event(day, parsed, live_pending):
         )
         A.ex_rights_allot_pending = pending
         changed = True
+    if changed:
+        fn = globals().get("_on_ex_rights_ledger")
+        if callable(fn):
+            try:
+                fn(day, dr if dr > 1.0 else px_div, base_mul)
+            except Exception as e:
+                diag = globals().get("_diag_once")
+                if callable(diag):
+                    diag("ex_rights_ledger_fail", e)
     return changed, False
 
 
@@ -1926,7 +1979,7 @@ def _bt_recover_position(now=None, last=None):
     if not getattr(A, "is_backtest", False):
         return False
     held = _bt_held_vol()
-    if held < 100:
+    if held <= 0:
         return False
     if _has_position():
         return False
@@ -3329,7 +3382,7 @@ def _can_use_vol(stock):
 def _dry_t1_sellable(want, now):
     """DRY_RUN 可卖: 默认禁止同日历日卖出当日买入仓; ALLOW_T0 则放行。"""
     want = int(want)
-    if want < 100:
+    if want <= 0:
         return 0
     if not _has_position():
         return 0
@@ -3349,7 +3402,7 @@ def _max_sell_vol(now=None):
             _bt_roll_t1(now.strftime("%Y%m%d"))
         want = max(want, _bt_held_vol())
         return max(0, min(want, _bt_available_vol()))
-    if want < 100:
+    if want <= 0:
         return 0
     if DRY_RUN:
         return _dry_t1_sellable(want, now or datetime.datetime.now())
@@ -3542,12 +3595,14 @@ def _process_pending(C, now):
 
     filled = globals().get("_ORDER_FILLED") or (56, 8)
     dead = globals().get("_ORDER_DEAD") or (54, 57, 53, 5, 6, 9)
-    done_fill = traded >= target and target >= 100
+    odd_sell = str(side) != "buy" and 0 < target < 100
+    min_ok = 1 if odd_sell else 100
+    done_fill = traded >= target and target >= min_ok
     status_filled = status in filled
     status_dead = status in dead
 
-    if done_fill or (status_filled and traded >= 100):
-        use_vol = traded if traded >= 100 else deal_vol
+    if done_fill or (status_filled and traded >= min_ok):
+        use_vol = traded if traded >= min_ok else deal_vol
         if side == "buy":
             _pending_on_buy_fill(pend, use_vol, px)
         else:
@@ -3556,7 +3611,7 @@ def _process_pending(C, now):
         return False
 
     if status_dead:
-        if traded >= 100:
+        if traded >= min_ok:
             if side == "buy":
                 _pending_on_buy_fill(pend, traded, px)
             else:
@@ -3708,21 +3763,19 @@ def _apply_buy_fill(vol, price, opened_at, **extra):
 
 def _apply_sell_fill(now, reason, last_hint, filled_vol, mark_half=False, lot_ids=None):
     """卖出成交后清空或缩减持仓. 仅按实际成交量改状态.
-    SCALE_LOTS + lot_ids: 按笔减仓，不因 95% 误清剩余笔。"""
+    不足一手的送转残仓保留，不按 95% 误清；SCALE_LOTS + lot_ids 按笔减仓。"""
     want = _pos_shares()
     if getattr(A, "is_backtest", False):
         want = max(want, _bt_held_vol())
     filled_vol = int(filled_vol)
-    if filled_vol < 100:
+    if filled_vol <= 0:
         return
     partial_lots = False
     if bool(globals().get("SCALE_LOTS")) and lot_ids:
         fn = globals().get("_exit_is_partial")
         if callable(fn):
             partial_lots = bool(fn(lot_ids))
-    if (not partial_lots) and (
-        filled_vol >= max(100, int(want * 0.95)) or filled_vol >= want
-    ):
+    if (not partial_lots) and filled_vol >= want and want > 0:
         _clear_after_sell(now, reason, last=last_hint)
         if mark_half:
             A.acted.add("HALF")
@@ -3744,7 +3797,7 @@ def _apply_sell_fill(now, reason, last_hint, filled_vol, mark_half=False, lot_id
         lots_fn(lot_ids, filled_vol)
     elif A.position:
         A.position["shares"] = remain
-    if remain < 100 or not _has_position():
+    if remain <= 0 or not _has_position():
         _clear_after_sell(now, str(reason) + "/partial", last=last_hint)
     else:
         if mark_half:
@@ -3951,7 +4004,7 @@ def _order_buy(C, price, now, budget=None, add=False, **extra_pos):
         _event_log("buy_skip", reason="pending_active")
         return False
     holding_now = _has_position() or (
-        getattr(A, "is_backtest", False) and _bt_held_vol() >= 100
+        getattr(A, "is_backtest", False) and _bt_held_vol() > 0
     )
     if holding_now and not add:
         print(_strategy_tag(), "buy skip: already holding")
@@ -4026,7 +4079,7 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False, lot_ids=N
         print(_strategy_tag(), "sell skip: pending active")
         _event_log("sell_skip", reason="pending_active", sell_reason=reason)
         return False
-    if not _has_position() and not (getattr(A, "is_backtest", False) and _bt_held_vol() >= 100):
+    if not _has_position() and not (getattr(A, "is_backtest", False) and _bt_held_vol() > 0):
         return False
     if lot_ids:
         fn = globals().get("_exit_is_partial")
@@ -4042,12 +4095,19 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False, lot_ids=N
     want = int(want_vol) if want_vol is not None else _pos_shares()
     if getattr(A, "is_backtest", False):
         want = max(want, _bt_held_vol()) if want_vol is None else want
-    if want < 100:
+    if want <= 0:
         return False
 
     avail = _max_sell_vol(now)
-    vol = int(min(want, avail) // 100) * 100
-    if vol < 100:
+    vol_fn = globals().get("_ex_sell_volume")
+    if callable(vol_fn):
+        vol = int(vol_fn(want, avail) or 0)
+    else:
+        raw = int(min(want, avail))
+        vol = (raw // 100) * 100
+        if vol <= 0 and 0 < raw < 100 and int(avail) < 100:
+            vol = raw
+    if vol <= 0:
         if getattr(A, "is_backtest", False):
             print(
                 _strategy_tag(),
@@ -4689,7 +4749,7 @@ def _buy_budget_fixed(cash):
     budget = _trade_budget_cap()
     opening = not (
         _has_position()
-        or (getattr(A, "is_backtest", False) and _bt_held_vol() >= 100)
+        or (getattr(A, "is_backtest", False) and _bt_held_vol() > 0)
     )
     frac = _chart_next_frac(opening)
     lot = float(budget or 0) * float(frac or 0)
@@ -5528,7 +5588,7 @@ def _fill_budget_snapshot(cash, opening=None):
     if opening is None:
         opening = not (
             _has_position()
-            or (getattr(A, "is_backtest", False) and _bt_held_vol() >= 100)
+            or (getattr(A, "is_backtest", False) and _bt_held_vol() > 0)
         )
     opening = bool(opening)
     if not _dynamic_budget_on():
@@ -6332,10 +6392,10 @@ def _scale_gate(w_detail=None, price=None):
     """加仓门槛：(ok, why)。why 仅失败时有值。"""
     if not bool(globals().get("SCALE_ENABLE")):
         return False, "scale_off"
-    holding_now = _has_position() or (
-        getattr(A, "is_backtest", False) and _bt_held_vol() >= 100
-    )
-    if not holding_now:
+    sh = _pos_shares()
+    if getattr(A, "is_backtest", False):
+        sh = max(sh, _bt_held_vol())
+    if sh < 100:
         return False, "scale_no_pos"
     if bool(globals().get("SCALE_ONCE_PER_ROUND", True)) and _round_scaled_now():
         return False, "scale_once"
@@ -7621,7 +7681,7 @@ def _handle_stock(C, ctx):
     sell_ok = False
     sell_reasons = []
 
-    holding = _has_position() or (bt and _bt_held_vol() >= 100)
+    holding = _has_position() or (bt and _bt_held_vol() > 0)
     if holding and _lots_enabled():
         _ensure_lots()
     if holding:

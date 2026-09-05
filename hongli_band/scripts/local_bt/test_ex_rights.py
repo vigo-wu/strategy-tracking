@@ -41,7 +41,7 @@ def _load_ex_ns(**extra):
 
     def _has_position():
         pos = getattr(A, "position", None)
-        return isinstance(pos, dict) and int(pos.get("shares", 0) or 0) >= 100
+        return isinstance(pos, dict) and int(pos.get("shares", 0) or 0) > 0
 
     def _bt_held_vol():
         return int(getattr(A, "bt_held", 0) or 0)
@@ -83,7 +83,7 @@ def _load_ex_ns(**extra):
         cleaned = []
         if isinstance(lots, list):
             for lot in lots:
-                if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) >= 100:
+                if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) > 0:
                     cleaned.append(lot)
         if cleaned:
             A.lots = cleaned
@@ -460,6 +460,17 @@ class ExRightsTests(unittest.TestCase):
         self.assertEqual(called[0][0], "20170524")
         self.assertAlmostEqual(float(called[0][1]), 2.029398, places=6)
         self.assertAlmostEqual(float(called[0][2]), 2.0, places=6)
+
+    def test_ex_sell_volume_keeps_bonus_odd_lot(self):
+        fn = _load_ex_ns()["_ex_sell_volume"]
+        self.assertEqual(fn(2610, 2610), 2610)
+        self.assertEqual(fn(2400, 2400), 2400)
+        self.assertEqual(fn(500, 2610), 500)
+        self.assertEqual(fn(2410, 2410), 2410)
+        self.assertEqual(fn(99, 2610), 0)
+        self.assertEqual(fn(10, 10), 10)
+        self.assertEqual(fn(2610, 10), 10)
+        self.assertEqual(fn(99, 99), 99)
 
 
 if __name__ == "__main__":

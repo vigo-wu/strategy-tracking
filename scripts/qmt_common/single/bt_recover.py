@@ -4,7 +4,7 @@ def _bt_recover_position(now=None, last=None):
     if not getattr(A, "is_backtest", False):
         return False
     held = _bt_held_vol()
-    if held < 100:
+    if held <= 0:
         return False
     if _has_position():
         return False

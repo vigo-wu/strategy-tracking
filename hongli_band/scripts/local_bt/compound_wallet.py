@@ -18,7 +18,7 @@ def _pos_dict_mv(pos: dict | None) -> float:
             return cost
         shares = int(pos.get("shares") or 0)
         price = float(pos.get("price") or 0)
-        if shares >= 100 and price > 0:
+        if shares > 0 and price > 0:
             return float(shares) * float(price)
     except (TypeError, ValueError):
         return 0.0

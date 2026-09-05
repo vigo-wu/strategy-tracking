@@ -136,7 +136,7 @@ class TradeLedger:
     ) -> None:
         vol = int(vol)
         price = float(price)
-        if vol < 100 or price <= 0:
+        if vol <= 0 or price <= 0:
             return
         remain = vol
         pnl = 0.0

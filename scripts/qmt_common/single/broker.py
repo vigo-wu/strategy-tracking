@@ -4,7 +4,7 @@
 def _dry_t1_sellable(want, now):
     """DRY_RUN 可卖: 默认禁止同日历日卖出当日买入仓; ALLOW_T0 则放行。"""
     want = int(want)
-    if want < 100:
+    if want <= 0:
         return 0
     if not _has_position():
         return 0
@@ -24,7 +24,7 @@ def _max_sell_vol(now=None):
             _bt_roll_t1(now.strftime("%Y%m%d"))
         want = max(want, _bt_held_vol())
         return max(0, min(want, _bt_available_vol()))
-    if want < 100:
+    if want <= 0:
         return 0
     if DRY_RUN:
         return _dry_t1_sellable(want, now or datetime.datetime.now())

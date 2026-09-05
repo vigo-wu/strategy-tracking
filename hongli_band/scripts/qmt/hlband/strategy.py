@@ -548,10 +548,10 @@ def _scale_gate(w_detail=None, price=None):
     """加仓门槛：(ok, why)。why 仅失败时有值。"""
     if not bool(globals().get("SCALE_ENABLE")):
         return False, "scale_off"
-    holding_now = _has_position() or (
-        getattr(A, "is_backtest", False) and _bt_held_vol() >= 100
-    )
-    if not holding_now:
+    sh = _pos_shares()
+    if getattr(A, "is_backtest", False):
+        sh = max(sh, _bt_held_vol())
+    if sh < 100:
         return False, "scale_no_pos"
     if bool(globals().get("SCALE_ONCE_PER_ROUND", True)) and _round_scaled_now():
         return False, "scale_once"
@@ -1837,7 +1837,7 @@ def _handle_stock(C, ctx):
     sell_ok = False
     sell_reasons = []
 
-    holding = _has_position() or (bt and _bt_held_vol() >= 100)
+    holding = _has_position() or (bt and _bt_held_vol() > 0)
     if holding and _lots_enabled():
         _ensure_lots()
     if holding:

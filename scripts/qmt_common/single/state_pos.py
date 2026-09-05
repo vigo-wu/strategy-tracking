@@ -13,7 +13,7 @@ def _reset_day(day):
 
 def _has_position():
     pos = getattr(A, "position", None)
-    return isinstance(pos, dict) and int(pos.get("shares", 0) or 0) >= 100
+    return isinstance(pos, dict) and int(pos.get("shares", 0) or 0) > 0
 
 
 def _pos_shares():

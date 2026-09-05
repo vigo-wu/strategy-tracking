@@ -108,21 +108,19 @@ def _apply_buy_fill(vol, price, opened_at, **extra):
 
 def _apply_sell_fill(now, reason, last_hint, filled_vol, mark_half=False, lot_ids=None):
     """卖出成交后清空或缩减持仓. 仅按实际成交量改状态.
-    SCALE_LOTS + lot_ids: 按笔减仓，不因 95% 误清剩余笔。"""
+    不足一手的送转残仓保留，不按 95% 误清；SCALE_LOTS + lot_ids 按笔减仓。"""
     want = _pos_shares()
     if getattr(A, "is_backtest", False):
         want = max(want, _bt_held_vol())
     filled_vol = int(filled_vol)
-    if filled_vol < 100:
+    if filled_vol <= 0:
         return
     partial_lots = False
     if bool(globals().get("SCALE_LOTS")) and lot_ids:
         fn = globals().get("_exit_is_partial")
         if callable(fn):
             partial_lots = bool(fn(lot_ids))
-    if (not partial_lots) and (
-        filled_vol >= max(100, int(want * 0.95)) or filled_vol >= want
-    ):
+    if (not partial_lots) and filled_vol >= want and want > 0:
         _clear_after_sell(now, reason, last=last_hint)
         if mark_half:
             A.acted.add("HALF")
@@ -144,7 +142,7 @@ def _apply_sell_fill(now, reason, last_hint, filled_vol, mark_half=False, lot_id
         lots_fn(lot_ids, filled_vol)
     elif A.position:
         A.position["shares"] = remain
-    if remain < 100 or not _has_position():
+    if remain <= 0 or not _has_position():
         _clear_after_sell(now, str(reason) + "/partial", last=last_hint)
     else:
         if mark_half:
@@ -351,7 +349,7 @@ def _order_buy(C, price, now, budget=None, add=False, **extra_pos):
         _event_log("buy_skip", reason="pending_active")
         return False
     holding_now = _has_position() or (
-        getattr(A, "is_backtest", False) and _bt_held_vol() >= 100
+        getattr(A, "is_backtest", False) and _bt_held_vol() > 0
     )
     if holding_now and not add:
         print(_strategy_tag(), "buy skip: already holding")
@@ -426,7 +424,7 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False, lot_ids=N
         print(_strategy_tag(), "sell skip: pending active")
         _event_log("sell_skip", reason="pending_active", sell_reason=reason)
         return False
-    if not _has_position() and not (getattr(A, "is_backtest", False) and _bt_held_vol() >= 100):
+    if not _has_position() and not (getattr(A, "is_backtest", False) and _bt_held_vol() > 0):
         return False
     if lot_ids:
         fn = globals().get("_exit_is_partial")
@@ -442,12 +440,19 @@ def _order_sell(C, reason, price, now, want_vol=None, mark_half=False, lot_ids=N
     want = int(want_vol) if want_vol is not None else _pos_shares()
     if getattr(A, "is_backtest", False):
         want = max(want, _bt_held_vol()) if want_vol is None else want
-    if want < 100:
+    if want <= 0:
         return False
 
     avail = _max_sell_vol(now)
-    vol = int(min(want, avail) // 100) * 100
-    if vol < 100:
+    vol_fn = globals().get("_ex_sell_volume")
+    if callable(vol_fn):
+        vol = int(vol_fn(want, avail) or 0)
+    else:
+        raw = int(min(want, avail))
+        vol = (raw // 100) * 100
+        if vol <= 0 and 0 < raw < 100 and int(avail) < 100:
+            vol = raw
+    if vol <= 0:
         if getattr(A, "is_backtest", False):
             print(
                 _strategy_tag(),

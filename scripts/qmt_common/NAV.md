@@ -22,13 +22,13 @@
 | `orders_pending.py` | P0 | pending、成交查询、撤单；钩子 `_pending_on_*` |
 | `market_util.py` | P1 | `_series_from_ex`、补历史、诊断、心跳 |
 | `single/state_io.py` | 单仓 | JSON 仓位读写（按 `A.stock` 分文件） |
-| `single/state_pos.py` | 单仓 | `A.position` 辅助 |
-| `single/bt_recover.py` | 单仓 | 回测仓恢复 |
-| `single/broker.py` | 单仓 | `_max_sell_vol` |
-| `single/lots.py` | 单仓 | 同标的多笔 `A.lots`；`SCALE_LOTS` 默认关，开则 `add` 记独立笔、`_order_sell(lot_ids=)` 按笔平 |
-| `single/ex_rights.py` | 单仓 | 持仓过除权：按 `get_divid_factors` 缩放 cost/peak/送转股数；配股默认未认购，实盘 pending 延后判定；回测静态 front*/back*/follow 跳过，PIT 激活则缩放 |
+| `single/state_pos.py` | 单仓 | `A.position` 辅助；送转零股 `shares>0` 仍算持仓 |
+| `single/bt_recover.py` | 单仓 | 回测影子仓恢复为 `A.position` |
+| `single/broker.py` | 单仓 | `_max_sell_vol`（残仓可卖） |
+| `single/lots.py` | 单仓 | 同标的多笔 `A.lots`；`SCALE_LOTS` 默认关，开则 `add` 记独立笔、`_order_sell(lot_ids=)` 按笔平；保留送转零股 |
+| `single/ex_rights.py` | 单仓 | 持仓过除权：按 `get_divid_factors` 缩放 cost/peak/送转股数；配股默认未认购，实盘 pending 延后判定；回测静态 front*/back*/follow 跳过，PIT 激活则缩放；`_ex_sell_volume` 并进零股 |
 | `pit_front.py` | P1 | 回测时点前复权：`none`+factors；`front_ratio`→`Πdr`，`front`→价差事件序；hlband/local_bt 共用 |
-| `single/orders.py` | 单仓 | `_order_buy` / `_order_sell` / fill；`add=True` 加仓。尾盘窗限价挂卖一/买一，开盘窗仍市价 |
+| `single/orders.py` | 单仓 | `_order_buy` / `_order_sell` / fill；`add=True` 加仓。买入仍须一手；卖出可平送转残仓。尾盘窗限价挂卖一/买一，开盘窗仍市价 |
 
 红利 T（双浮仓）用 `broker_base` + `orders_pending`，自带 `hongli/broker.py` / `orders.py`。
 

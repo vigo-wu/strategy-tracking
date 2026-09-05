@@ -98,6 +98,28 @@ def _ex_round_shares(shares):
     return max(n, 0)
 
 
+def _ex_sell_volume(want, avail):
+    """卖出量：先按 100 股取整，本笔 want 里不足一手的送转零股并进。
+    可卖本身已不足一手时，允许单独卖掉残仓（不从整手仓里拆 99 股）。"""
+    try:
+        w = int(want)
+        a = int(avail)
+    except Exception:
+        return 0
+    raw = min(w, a)
+    if raw <= 0:
+        return 0
+    vol = (raw // _EX_LOT) * _EX_LOT
+    if vol >= _EX_LOT:
+        odd = raw - vol
+        if 0 < odd < _EX_LOT:
+            vol += odd
+        return vol
+    if a < _EX_LOT:
+        return raw
+    return 0
+
+
 def _ex_parse_row(row):
     """→ dict interest/bonus/gift/allot/allot_px/dr；非法 None。"""
     if not isinstance(row, (list, tuple)) or len(row) < 7:

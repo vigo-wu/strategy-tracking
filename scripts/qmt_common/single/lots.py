@@ -40,7 +40,7 @@ def _ensure_lots():
     cleaned = []
     if isinstance(lots, list):
         for lot in lots:
-            if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) >= 100:
+            if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) > 0:
                 cleaned.append(lot)
     if cleaned:
         A.lots = cleaned
@@ -87,7 +87,7 @@ def _new_lot(shares, price, opened_at=""):
 def _sync_position_from_lots():
     lots = []
     for lot in getattr(A, "lots", None) or []:
-        if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) >= 100:
+        if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) > 0:
             lots.append(lot)
     A.lots = lots
     if not lots:
@@ -113,7 +113,7 @@ def _sync_position_from_lots():
     }
     if getattr(A, "is_backtest", False):
         held = _bt_held_vol()
-        if held < 100 and total >= 100:
+        if held <= 0 and total > 0:
             print(_strategy_tag(), "restore bt_held from lots", total)
             A.bt_held = total
         elif held != total:
@@ -204,13 +204,19 @@ def _lots_want_vol(lot_ids):
     except Exception:
         return None
     total = 0
+    odd = 0
     for lot in getattr(A, "lots", None) or []:
         try:
-            if int(lot.get("id") or 0) in idset:
-                total += int(lot.get("shares") or 0)
+            sh = int(lot.get("shares") or 0)
+            lid = int(lot.get("id") or 0)
         except Exception:
-            pass
-    if total < 100:
+            continue
+        if lid in idset:
+            total += sh
+        elif 0 < sh < 100:
+            odd += sh
+    total += odd
+    if total <= 0:
         return None
     return int(total)
 
@@ -289,7 +295,7 @@ def _lots_on_sell_fill(lot_ids, filled_vol):
         if idset is not None and lid not in idset:
             new_lots.append(lot)
             continue
-        if remain_fill < 100:
+        if remain_fill <= 0:
             new_lots.append(lot)
             continue
         sh = int(lot.get("shares") or 0)
@@ -299,7 +305,22 @@ def _lots_on_sell_fill(lot_ids, filled_vol):
             lot = dict(lot)
             lot["shares"] = sh - remain_fill
             remain_fill = 0
-            new_lots.append(lot)
+            if int(lot["shares"]) > 0:
+                new_lots.append(lot)
+    if remain_fill > 0:
+        swept = []
+        for lot in new_lots:
+            sh = int(lot.get("shares") or 0)
+            if remain_fill > 0 and 0 < sh < 100:
+                take = min(sh, remain_fill)
+                remain_fill -= take
+                sh -= take
+                if sh <= 0:
+                    continue
+                lot = dict(lot)
+                lot["shares"] = sh
+            swept.append(lot)
+        new_lots = swept
     A.lots = new_lots
     _sync_position_from_lots()
     _mirror_hold_from_lots()

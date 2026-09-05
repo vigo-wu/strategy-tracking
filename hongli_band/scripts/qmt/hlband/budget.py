@@ -530,7 +530,7 @@ def _buy_budget_fixed(cash):
     budget = _trade_budget_cap()
     opening = not (
         _has_position()
-        or (getattr(A, "is_backtest", False) and _bt_held_vol() >= 100)
+        or (getattr(A, "is_backtest", False) and _bt_held_vol() > 0)
     )
     frac = _chart_next_frac(opening)
     lot = float(budget or 0) * float(frac or 0)
@@ -1369,7 +1369,7 @@ def _fill_budget_snapshot(cash, opening=None):
     if opening is None:
         opening = not (
             _has_position()
-            or (getattr(A, "is_backtest", False) and _bt_held_vol() >= 100)
+            or (getattr(A, "is_backtest", False) and _bt_held_vol() > 0)
         )
     opening = bool(opening)
     if not _dynamic_budget_on():
