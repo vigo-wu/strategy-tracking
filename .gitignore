@@ -19,3 +19,4 @@ onr_strategy/data/
 # QMT kline dump CSV
 tools/csv/
 hongli_band/report/
+hongli_band/scripts/local_bt/.ui_form_cache.json

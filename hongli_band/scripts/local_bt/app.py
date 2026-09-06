@@ -145,6 +145,14 @@ from stock_select import (  # noqa: E402
     write_select_csv,
 )
 from trades_csv import trades_csv_path  # noqa: E402
+from ui_cache import (  # noqa: E402
+    CACHE_PATH,
+    clamp_choice,
+    hydrate_session,
+    load_form_cache,
+    merge_form_cache,
+    snapshot_form_state,
+)
 
 import streamlit as st  # noqa: E402
 
@@ -1240,7 +1248,7 @@ def _render_daily_position_section(
             st.session_state[dates_pending_key] = (d_min, d_max)
             st.session_state[stock_pending_key] = "（全部）"
             st.session_state[main_ver_key] = int(st.session_state.get(main_ver_key, 0)) + 1
-            st.rerun()
+            _rerun_persist()
 
     if isinstance(picked, (tuple, list)) and len(picked) == 2:
         start_ymd, end_ymd = _fmt_ymd(picked[0]), _fmt_ymd(picked[1])
@@ -1294,7 +1302,7 @@ def _render_daily_position_section(
             st.session_state[range_key] = bounds
             # 换 key 清掉框选残留，避免改 date_input 后又被旧 box 盖写
             st.session_state[main_ver_key] = int(st.session_state.get(main_ver_key, 0)) + 1
-            st.rerun()
+            _rerun_persist()
         except ValueError:
             pass
 
@@ -1313,7 +1321,7 @@ def _render_daily_position_section(
         if picked_stock and picked_stock != highlight:
             st.session_state[stock_key] = picked_stock
             st.session_state[stock_pending_key] = picked_stock
-            st.rerun()
+            _rerun_persist()
     with right:
         st.plotly_chart(_plot_slot_hist(hist), use_container_width=True)
 
@@ -2555,9 +2563,9 @@ def _render_select_filter_widgets(year_max: int) -> dict[str, Any]:
             kwargs.pop("value", None)
         widget = str(spec.get("widget") or "number_input")
         if widget == "slider":
-            raw = st.slider(label, key=wkey, **kwargs)
+            raw = st.slider(label, key=wkey, persist_state="session", **kwargs)
         else:
-            raw = st.number_input(label, key=wkey, **kwargs)
+            raw = st.number_input(label, key=wkey, persist_state="session", **kwargs)
         out[key] = cast_filter_value(spec, raw)
         if key == "top_n":
             out[key] = clamp_top_n(out[key])
@@ -2585,11 +2593,26 @@ def _render_select_sidebar() -> tuple[dict[str, Any], tuple[str, ...] | None, di
     avail = infer_score_years((scanned or {}).get("stocks") or {}) or tuple(SCORE_YEARS)
     start_key = str(cfg["year_start_key"])
     end_key = str(cfg["year_end_key"])
-    start = st.selectbox(str(cfg["year_start_label"]), list(avail), index=0, key=start_key)
-    end_opts = [y for y in avail if str(y) >= str(start)] or list(avail)
-    if st.session_state.get(end_key) not in end_opts:
+    avail_list = list(avail)
+    if start_key in st.session_state:
+        st.session_state[start_key] = clamp_choice(st.session_state[start_key], avail_list)
+    start = st.selectbox(
+        str(cfg["year_start_label"]),
+        avail_list,
+        key=start_key,
+        persist_state="session",
+    )
+    end_opts = [y for y in avail if str(y) >= str(start)] or avail_list
+    if end_key in st.session_state:
+        st.session_state[end_key] = clamp_choice(st.session_state[end_key], end_opts, end_opts[-1])
+    else:
         st.session_state[end_key] = end_opts[-1]
-    end = st.selectbox(str(cfg["year_end_label"]), end_opts, key=end_key)
+    end = st.selectbox(
+        str(cfg["year_end_label"]),
+        end_opts,
+        key=end_key,
+        persist_state="session",
+    )
     if str(end) < str(start):
         start, end = end, start
     select_years = tuple(y for y in avail if str(start) <= str(y) <= str(end))
@@ -2600,7 +2623,7 @@ def _render_select_sidebar() -> tuple[dict[str, Any], tuple[str, ...] | None, di
     filters = _render_select_filter_widgets(year_max_for_window(len(select_years)))
     if st.button(str(cfg["refresh_label"])):
         _cached_select_scan.clear()
-        st.rerun()
+        _rerun_persist()
     return filters, select_years, scanned
 
 
@@ -2626,6 +2649,65 @@ def _copy_editor_rows(rows: Any) -> list[dict[str, str]]:
         if isinstance(rec, dict):
             out.append(dict(rec))
     return out
+
+
+def _df_to_editor_rows(edited: Any) -> list[dict[str, str]]:
+    if edited is None:
+        return []
+    if isinstance(edited, pd.DataFrame):
+        return _copy_editor_rows(edited.to_dict(orient="records"))
+    return _copy_editor_rows(edited)
+
+
+def _ensure_analysis_widget_defaults(avail: tuple[str, ...], defaults: dict[str, Any]) -> None:
+    book = load_book_defaults()
+    avail_list = list(avail)
+    if "analysis_type_radio" not in st.session_state:
+        raw = str(defaults.get("analysis_type") or "Walk-forward")
+        st.session_state["analysis_type_radio"] = "固定标的" if raw == "固定标的" else "Walk-forward"
+    start_default = str(defaults.get("data_start") or (avail_list[0] if avail_list else ""))
+    end_default = str(defaults.get("data_end") or (avail_list[-1] if avail_list else ""))
+    if start_default and end_default and end_default < start_default:
+        start_default, end_default = end_default, start_default
+    if avail_list:
+        if "analysis_form_data_start" not in st.session_state:
+            st.session_state["analysis_form_data_start"] = clamp_choice(
+                start_default, avail_list, avail_list[0]
+            )
+        else:
+            st.session_state["analysis_form_data_start"] = clamp_choice(
+                st.session_state["analysis_form_data_start"], avail_list
+            )
+        if "analysis_form_data_end" not in st.session_state:
+            st.session_state["analysis_form_data_end"] = clamp_choice(
+                end_default, avail_list, avail_list[-1]
+            )
+        else:
+            st.session_state["analysis_form_data_end"] = clamp_choice(
+                st.session_state["analysis_form_data_end"], avail_list
+            )
+    if "analysis_form_rebalance" not in st.session_state:
+        st.session_state["analysis_form_rebalance"] = int(defaults.get("rebalance_years") or 1)
+    if "analysis_force_rerun" not in st.session_state:
+        st.session_state["analysis_force_rerun"] = bool(defaults.get("force_rerun"))
+    if "analysis_compound_backtest" not in st.session_state:
+        st.session_state["analysis_compound_backtest"] = bool(defaults.get("compound_backtest", True))
+    if "analysis_trade_budget" not in st.session_state:
+        st.session_state["analysis_trade_budget"] = float(
+            defaults.get("trade_budget") or book["trade_budget"]
+        )
+    if "analysis_book_lot_max" not in st.session_state:
+        st.session_state["analysis_book_lot_max"] = int(
+            defaults.get("book_lot_max") or book["book_lot_max"]
+        )
+    if "analysis_lot_open_frac" not in st.session_state:
+        st.session_state["analysis_lot_open_frac"] = float(
+            defaults.get("lot_open_frac") or book["lot_open_frac"]
+        )
+    if "analysis_lot_add_frac" not in st.session_state:
+        st.session_state["analysis_lot_add_frac"] = float(
+            defaults.get("lot_add_frac") or book["lot_add_frac"]
+        )
 
 
 def _clear_wf_editor_state() -> None:
@@ -2673,24 +2755,21 @@ def _dialog_import_book(select_year: str = "") -> None:
                 st.session_state["analysis_book_rows"] = book_stocks_to_editor_rows(book)
                 if "analysis_book_editor" in st.session_state:
                     del st.session_state["analysis_book_editor"]
-            st.rerun()
+            _rerun_persist()
         except Exception as e:
             st.error(str(e))
 
 
-def _collect_analysis_form(avail: tuple[str, ...], defaults: dict[str, Any]) -> dict[str, Any]:
+def _collect_analysis_form(avail: tuple[str, ...], defaults: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
     cfg = ANALYSIS_SIDEBAR
+    _ensure_analysis_widget_defaults(avail, defaults)
     analysis_type = st.radio(
         "分析类型",
         ["Walk-forward", "固定标的"],
         horizontal=True,
-        index=0 if str(defaults.get("analysis_type") or "Walk-forward") != "固定标的" else 1,
         key="analysis_type_radio",
+        persist_state="session",
     )
-    start_default = str(defaults.get("data_start") or (avail[0] if avail else ""))
-    end_default = str(defaults.get("data_end") or (avail[-1] if avail else ""))
-    if start_default and end_default and end_default < start_default:
-        start_default, end_default = end_default, start_default
 
     st.markdown("**%s**" % cfg["year_section"])
     c1, c2 = st.columns(2)
@@ -2698,23 +2777,35 @@ def _collect_analysis_form(avail: tuple[str, ...], defaults: dict[str, Any]) -> 
         start = st.selectbox(
             str(cfg["year_start_label"]),
             list(avail),
-            index=list(avail).index(start_default) if start_default in avail else 0,
             key="analysis_form_data_start",
+            persist_state="session",
         )
     with c2:
         end_opts = [y for y in avail if y >= start] or list(avail)
+        if "analysis_form_data_end" in st.session_state:
+            st.session_state["analysis_form_data_end"] = clamp_choice(
+                st.session_state["analysis_form_data_end"], end_opts, end_opts[-1]
+            )
+        elif end_opts:
+            st.session_state["analysis_form_data_end"] = end_opts[-1]
         end = st.selectbox(
             str(cfg["year_end_label"]),
             end_opts,
-            index=end_opts.index(end_default) if end_default in end_opts else len(end_opts) - 1,
             key="analysis_form_data_end",
+            persist_state="session",
         )
     if str(end) < str(start):
         start, end = end, start
 
     periods: list[dict[str, Any]] = []
     hold_years: tuple[str, ...] = ()
-    rebalance = int(defaults.get("rebalance_years") or 1)
+    rebalance = int(st.session_state.get("analysis_form_rebalance") or 1)
+    params: dict[str, Any] = dict(defaults)
+    params["analysis_type"] = analysis_type
+
+    st.subheader(str(cfg["title"]))
+    st.caption(str(cfg["scan_caption"]))
+
     if analysis_type == "固定标的":
         c_r, c_i = st.columns([4, 1], vertical_alignment="bottom")
         with c_r:
@@ -2724,7 +2815,7 @@ def _collect_analysis_form(avail: tuple[str, ...], defaults: dict[str, Any]) -> 
                 )
                 if "analysis_book_editor" in st.session_state:
                     del st.session_state["analysis_book_editor"]
-                st.rerun()
+                _rerun_persist()
         with c_i:
             if st.button(
                 str(cfg.get("import_period_label") or "导入"),
@@ -2736,15 +2827,35 @@ def _collect_analysis_form(avail: tuple[str, ...], defaults: dict[str, Any]) -> 
             st.session_state["analysis_book_rows"] = book_stocks_to_editor_rows(
                 defaults.get("book_stocks") or load_book_stocks_full()
             )
+        st.markdown("**固定标的（默认 config.BOOK_STOCKS，可改；不写回）**")
+        edited = st.data_editor(
+            pd.DataFrame(st.session_state.get("analysis_book_rows") or []),
+            num_rows="dynamic",
+            width="stretch",
+            column_config=_book_editor_column_config(),
+            key="analysis_book_editor",
+        )
+        st.session_state["analysis_book_rows"] = _df_to_editor_rows(edited)
+        params["book_stocks"] = editor_rows_to_book_stocks(edited)
+        params["force_rerun"] = st.checkbox(
+            "强制重跑回放",
+            key="analysis_force_rerun",
+            persist_state="session",
+        )
+        params["compound_backtest"] = st.checkbox(
+            "复利回测",
+            key="analysis_compound_backtest",
+            persist_state="session",
+        )
     else:
         rebalance = int(
             st.number_input(
                 "换仓周期（年）",
                 min_value=1,
                 max_value=10,
-                value=int(defaults.get("rebalance_years") or 1),
                 step=1,
                 key="analysis_form_rebalance",
+                persist_state="session",
             )
         )
         hold_years = hold_years_for_range(str(start), str(end))
@@ -2760,7 +2871,7 @@ def _collect_analysis_form(avail: tuple[str, ...], defaults: dict[str, Any]) -> 
         )
         if st.button(str(cfg["reload_wf_label"]), key="analysis_reload_wf"):
             _clear_wf_editor_state()
-            st.rerun()
+            _rerun_persist()
         rows_map = st.session_state.setdefault("analysis_wf_rows", {})
         if not rows_map and defaults.get("period_baskets"):
             for sy, basket in dict(defaults.get("period_baskets") or {}).items():
@@ -2780,97 +2891,82 @@ def _collect_analysis_form(avail: tuple[str, ...], defaults: dict[str, Any]) -> 
                 if st.button(
                     str(cfg.get("import_period_label") or "导入"),
                     key="analysis_wf_import_btn_%s" % sy,
-                    use_container_width=True,
+                    width="stretch",
                 ):
                     _dialog_import_book(sy)
-
-    with st.form(str(cfg["form_key"])):
-        st.subheader(str(cfg["title"]))
-        st.caption(str(cfg["scan_caption"]))
-        params: dict[str, Any] = dict(defaults)
-        params["analysis_type"] = analysis_type
-        params["rebalance_years"] = rebalance
-
-        if analysis_type == "固定标的":
-            st.markdown("**固定标的（默认 config.BOOK_STOCKS，可改；不写回）**")
+        st.markdown("**%s**" % cfg["walk_section"])
+        period_baskets: dict[str, dict[str, dict[str, str]]] = {}
+        if not periods:
+            st.warning("当前起止年没有可持有的换仓段。")
+        for p in periods:
+            sy = str(p["select_year"])
+            st.caption("段 p%s · %s" % (p["period_i"], sy))
             edited = st.data_editor(
-                pd.DataFrame(st.session_state.get("analysis_book_rows") or []),
+                pd.DataFrame(rows_map.get(sy) or []),
                 num_rows="dynamic",
-                use_container_width=True,
+                width="stretch",
                 column_config=_book_editor_column_config(),
-                key="analysis_book_editor",
+                key="analysis_wf_editor_%s" % sy,
             )
-            params["book_stocks"] = editor_rows_to_book_stocks(edited)
-            params["force_rerun"] = st.checkbox("强制重跑回放", value=bool(params.get("force_rerun")))
-            params["compound_backtest"] = st.checkbox(
-                "复利回测",
-                value=bool(params.get("compound_backtest", True)),
-            )
-        else:
-            st.markdown("**%s**" % cfg["walk_section"])
-            period_baskets: dict[str, dict[str, dict[str, str]]] = {}
-            rows_map = st.session_state.get("analysis_wf_rows") or {}
-            if not periods:
-                st.warning("当前起止年没有可持有的换仓段。")
-            for p in periods:
-                sy = str(p["select_year"])
-                st.caption("段 p%s · %s" % (p["period_i"], sy))
-                edited = st.data_editor(
-                    pd.DataFrame(rows_map.get(sy) or []),
-                    num_rows="dynamic",
-                    use_container_width=True,
-                    column_config=_book_editor_column_config(),
-                    key="analysis_wf_editor_%s" % sy,
-                )
-                period_baskets[sy] = editor_rows_to_book_stocks(edited)
-            params["period_baskets"] = period_baskets
-            params["force_rerun"] = st.checkbox("强制重跑回放", value=bool(params.get("force_rerun")))
-            params["compound_backtest"] = st.checkbox(
-                "复利回测（持有期跨年传递权益）",
-                value=bool(params.get("compound_backtest", True)),
-            )
+            rows_map[sy] = _df_to_editor_rows(edited)
+            period_baskets[sy] = editor_rows_to_book_stocks(edited)
+        params["period_baskets"] = period_baskets
+        params["force_rerun"] = st.checkbox(
+            "强制重跑回放",
+            key="analysis_force_rerun",
+            persist_state="session",
+        )
+        params["compound_backtest"] = st.checkbox(
+            "复利回测（持有期跨年传递权益）",
+            key="analysis_compound_backtest",
+            persist_state="session",
+        )
 
-        st.markdown("**%s**" % cfg["book_section"])
-        bc1, bc2 = st.columns(2)
-        book = load_book_defaults()
-        with bc1:
-            params["trade_budget"] = float(
-                st.number_input(
-                    "组合资金帽（元）",
-                    min_value=10000.0,
-                    value=float(params.get("trade_budget") or book["trade_budget"]),
-                    step=10000.0,
-                )
+    params["rebalance_years"] = rebalance
+    st.markdown("**%s**" % cfg["book_section"])
+    bc1, bc2 = st.columns(2)
+    with bc1:
+        params["trade_budget"] = float(
+            st.number_input(
+                "组合资金帽（元）",
+                min_value=10000.0,
+                step=10000.0,
+                key="analysis_trade_budget",
+                persist_state="session",
             )
-            params["book_lot_max"] = int(
-                st.number_input(
-                    "BOOK_LOT_MAX",
-                    min_value=1,
-                    max_value=9,
-                    value=int(params.get("book_lot_max") or book["book_lot_max"]),
-                    step=1,
-                )
+        )
+        params["book_lot_max"] = int(
+            st.number_input(
+                "BOOK_LOT_MAX",
+                min_value=1,
+                max_value=9,
+                step=1,
+                key="analysis_book_lot_max",
+                persist_state="session",
             )
-        with bc2:
-            params["lot_open_frac"] = float(
-                st.slider(
-                    "大仓档",
-                    min_value=0.1,
-                    max_value=0.9,
-                    value=float(params.get("lot_open_frac") or book["lot_open_frac"]),
-                    step=0.05,
-                )
+        )
+    with bc2:
+        params["lot_open_frac"] = float(
+            st.slider(
+                "大仓档",
+                min_value=0.1,
+                max_value=0.9,
+                step=0.05,
+                key="analysis_lot_open_frac",
+                persist_state="session",
             )
-            params["lot_add_frac"] = float(
-                st.slider(
-                    "加仓档",
-                    min_value=0.05,
-                    max_value=0.5,
-                    value=float(params.get("lot_add_frac") or book["lot_add_frac"]),
-                    step=0.05,
-                )
+        )
+        params["lot_add_frac"] = float(
+            st.slider(
+                "加仓档",
+                min_value=0.05,
+                max_value=0.5,
+                step=0.05,
+                key="analysis_lot_add_frac",
+                persist_state="session",
             )
-        submitted = st.form_submit_button(str(cfg["submit_label"]))
+        )
+    submitted = st.button(str(cfg["submit_label"]), type="primary", key="analysis_submit")
 
     params["data_start"] = str(start)
     params["data_end"] = str(end)
@@ -2879,9 +2975,6 @@ def _collect_analysis_form(avail: tuple[str, ...], defaults: dict[str, Any]) -> 
     )
     params["eval_years"] = params["data_years"]
     if submitted and analysis_type == "Walk-forward":
-        wf_rows = st.session_state.setdefault("analysis_wf_rows", {})
-        for sy, basket in (params.get("period_baskets") or {}).items():
-            wf_rows[str(sy)] = book_stocks_to_editor_rows(basket)
         st.info(
             str(cfg["year_caption"])
             % (
@@ -2932,8 +3025,7 @@ def _render_fixed_book_results(result: dict[str, Any], params: dict[str, Any]) -
     cfg = ANALYSIS_SIDEBAR
     if st.button(str(cfg["reset_label"]), key="analysis_reset_fixed"):
         st.session_state.pop(str(cfg["result_key"]), None)
-        st.session_state.pop(str(cfg["params_key"]), None)
-        st.rerun()
+        _rerun_persist()
     st.caption("参数：%s" % {k: v for k, v in params.items() if k != "book_stocks"})
     for line in result.get("notes") or []:
         st.markdown("- " + line)
@@ -2977,8 +3069,7 @@ def _render_analysis_results(result: dict[str, Any], params: dict[str, Any]) -> 
     cfg = ANALYSIS_SIDEBAR
     if st.button(str(cfg["reset_label"]), key="analysis_reset"):
         st.session_state.pop(str(cfg["result_key"]), None)
-        st.session_state.pop(str(cfg["params_key"]), None)
-        st.rerun()
+        _rerun_persist()
     st.caption("参数：%s" % params)
     for line in result.get("notes") or []:
         st.markdown("- " + line)
@@ -3063,7 +3154,9 @@ def _render_analysis_mode(scanned: dict | None) -> None:
     defaults.setdefault("rebalance_years", 1)
     defaults.setdefault("compound_backtest", True)
     defaults.setdefault("analysis_type", "Walk-forward")
-    defaults.update(load_book_defaults())
+    book = load_book_defaults()
+    for key, val in book.items():
+        defaults.setdefault(key, val)
     result = st.session_state.get(str(cfg["result_key"]))
     if result is None:
         submitted, params = _collect_analysis_form(avail, defaults)
@@ -3125,7 +3218,7 @@ def _render_analysis_mode(scanned: dict | None) -> None:
                 st.session_state["analysis_book_rows"] = book_stocks_to_editor_rows(
                     params.get("book_stocks") or {}
                 )
-                st.rerun()
+                _rerun_persist()
             except Exception:
                 st.error("分析失败")
                 st.code(traceback.format_exc())
@@ -3169,6 +3262,25 @@ def _clear_ui_mode() -> None:
     st.session_state[_UI_MODE_KEY] = None
 
 
+def _hydrate_form_cache() -> None:
+    try:
+        hydrate_session(st.session_state, load_form_cache(CACHE_PATH))
+    except Exception:
+        pass
+
+
+def _persist_form_cache() -> None:
+    try:
+        merge_form_cache(snapshot_form_state(st.session_state), CACHE_PATH)
+    except Exception:
+        pass
+
+
+def _rerun_persist() -> None:
+    _persist_form_cache()
+    st.rerun()
+
+
 def _render_mode_hub() -> None:
     st.caption("选择一项任务开始")
     cols = st.columns(4)
@@ -3198,6 +3310,7 @@ def _render_mode_bar(mode: str) -> None:
         st.markdown("%s **%s**" % (spec["icon"], spec["key"]))
 
 
+_hydrate_form_cache()
 st.session_state.setdefault(_UI_MODE_KEY, None)
 mode = st.session_state.get(_UI_MODE_KEY)
 if mode not in _UI_MODE_BY_KEY:
@@ -3211,13 +3324,16 @@ else:
 
 scope = "单标的"
 if mode == "跑本地回测":
+    scope_kw: dict[str, Any] = {}
+    if "bt_scope" not in st.session_state:
+        scope_kw["default"] = "单标的"
     pick = st.segmented_control(
         "范围",
         options=["单标的", "批量"],
-        default="单标的",
         required=True,
         key="bt_scope",
         persist_state="session",
+        **scope_kw,
     )
     scope = "批量（按标的汇总）" if pick == "批量" else "单标的"
 
@@ -3229,12 +3345,16 @@ with st.sidebar:
         st.caption("先选任务")
     elif mode != "选股方案" and mode != "数据分析":
         csv_root = st.text_input("行情根目录", value=str(DEFAULT_CSV_ROOT))
+        div_kw: dict[str, Any] = {}
+        if "bt_dividend_types" not in st.session_state:
+            div_kw["default"] = [DEFAULT_DIVIDEND_TYPE]
         divs = st.multiselect(
             "复权类型",
             options=list(DIVIDEND_TYPES),
-            default=[DEFAULT_DIVIDEND_TYPE],
             format_func=lambda k: "%s（%s）" % (DIVIDEND_LABELS.get(k, k), k),
             key="bt_dividend_types",
+            persist_state="session",
+            **div_kw,
         )
         if divs:
             st.caption(
@@ -3260,11 +3380,24 @@ with st.sidebar:
     if mode == "跑本地回测" and scope == "单标的":
         uploaded = st.file_uploader("或上传日线 CSV", type=["csv"])
     if mode == "跑本地回测":
-        quiet = not st.checkbox("详细日志（慢）", value=False, key="bt_verbose")
-        compound_bt = st.checkbox("复利回测", value=True, key="bt_compound")
+        if "bt_verbose" not in st.session_state:
+            st.session_state["bt_verbose"] = False
+        if "bt_compound" not in st.session_state:
+            st.session_state["bt_compound"] = True
+        quiet = not st.checkbox("详细日志（慢）", key="bt_verbose", persist_state="session")
+        compound_bt = st.checkbox("复利回测", key="bt_compound", persist_state="session")
         if scope == "批量（按标的汇总）":
+            if "bt_workers" not in st.session_state:
+                st.session_state["bt_workers"] = 0
             workers = int(
-                st.number_input("进程数（0=自动）", min_value=0, max_value=16, value=0, step=1, key="bt_workers")
+                st.number_input(
+                    "进程数（0=自动）",
+                    min_value=0,
+                    max_value=16,
+                    step=1,
+                    key="bt_workers",
+                    persist_state="session",
+                )
             )
     select_filters = dict(DEFAULT_FILTERS)
     select_years: tuple[str, ...] | None = None
@@ -3275,9 +3408,7 @@ with st.sidebar:
     elif mode == "数据分析":
         if st.button(str(ANALYSIS_SIDEBAR["refresh_label"]), key="analysis_refresh"):
             _cached_select_scan.clear()
-            st.session_state.pop(str(ANALYSIS_SIDEBAR["result_key"]), None)
-            st.session_state.pop(str(ANALYSIS_SIDEBAR["params_key"]), None)
-            st.rerun()
+            _rerun_persist()
         # Walk-forward 手工篮子不再全量 scan_reports
         analysis_scanned = None
 
@@ -3642,3 +3773,5 @@ elif mode == "仅分析已有明细":
                 range_end=ao.get("end") or "",
                 stock=ao.get("stock") or "",
             )
+
+_persist_form_cache()
