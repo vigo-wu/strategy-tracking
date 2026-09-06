@@ -20,8 +20,8 @@ SELECT_SIDEBAR: dict[str, Any] = {
     "year_start_label": "起始年",
     "year_end_label": "结束年",
     "year_start_key": "select_year_start",
-    "year_end_key": "select_year_end",
-    "year_caption": "建议均线/复权与硬过滤都在 %s–%s 内重算；改年不重新扫描。",
+    "year_end_key": "select_research_year_end",
+    "year_caption": "研究台打分窗 %s–%s；默认到预验收前一年。拉到验收年只供观察，不是结论。",
     # 仍给可能使用 max_from=year_max 的整数年控件（当前硬过滤已改为占比）
     "year_max_floor": 5,
     "filter_section": "硬过滤",
@@ -166,6 +166,181 @@ def clamp_top_n(n: Any, *, fallback: int | None = None) -> int:
     if v <= 0:
         v = fb
     return min(max(v, 1), hi)
+
+
+# 滚动选股年窗（与网格 year_* / check_* 共用 fill_year_windows；2022 划成预验收）
+SELECT_LOOKBACK = 3
+SELECT_PRECHECK_YEAR = 2022
+SELECT_LISTING_MIN_YEARS = 2
+SELECT_AMOUNT_DROP_BOTTOM = 0.20
+SELECT_MIN_N_BUY_PER_YEAR = 2
+SELECT_FILTER_LAB_MAX = 8
+SELECT_EPS_PNL = 1.0
+SELECT_CONTRIB_SHARE = 0.60
+SELECT_WF_SIDEBAR: dict[str, Any] = {
+    "research_caption": "下方全窗口打分是研究台，**不是**选股结论。滚动验收才给出 PASS / KEEP_CURRENT / FAIL。",
+    "gate_section": "滚动验收",
+    "gate_button": "滚动验收（命名格 base）",
+    "lab_button": "过滤实验室（训练窗预选 + 预验收确认）",
+    "gate_caption": "验收与实验室用冻结命名过滤格，不用侧栏硬过滤。侧栏只服务下方研究台。",
+    "universe_caption": "资格池来自已有 local_bt 报告（幸存者宇宙），不是全 A 股。无 ST 字段。",
+    "snippet_expander": "研究台 BOOK_STOCKS 草稿（非结论，勿写入 config）",
+}
+
+
+def scaled_min_n_buy(n_years: int, per_year: int = SELECT_MIN_N_BUY_PER_YEAR) -> int:
+    n = max(int(n_years or 0), 0)
+    p = max(int(per_year or 0), 0)
+    return int(n * p)
+
+
+def fill_select_windows(spec: dict[str, Any] | None = None) -> dict[str, int]:
+    from grid_spec import fill_year_windows
+
+    src = dict(spec or {})
+    out = fill_year_windows(src)
+    try:
+        lookback = int(src.get("lookback") or SELECT_LOOKBACK)
+    except (TypeError, ValueError):
+        lookback = SELECT_LOOKBACK
+    out["lookback"] = max(1, lookback)
+    try:
+        pre = int(src.get("precheck_year") or SELECT_PRECHECK_YEAR)
+    except (TypeError, ValueError):
+        pre = SELECT_PRECHECK_YEAR
+    out["precheck_year"] = pre
+    return out
+
+
+def first_hold_year(win: dict[str, int]) -> int:
+    return int(win["year_start"]) + int(win["lookback"])
+
+
+def hold_eval_years(win: dict[str, int]) -> tuple[str, ...]:
+    lo = first_hold_year(win)
+    hi = int(win["year_end"])
+    if hi < lo:
+        return ()
+    return tuple(str(y) for y in range(lo, hi + 1))
+
+
+def select_train_years(win: dict[str, int]) -> tuple[str, ...]:
+    """选股训练窗持有年：hold ∩ [year_start, precheck_year)。默认仅 2021。"""
+    pre = int(win["precheck_year"])
+    return tuple(y for y in hold_eval_years(win) if int(y) < pre)
+
+
+def select_precheck_years(win: dict[str, int]) -> tuple[str, ...]:
+    py = str(int(win["precheck_year"]))
+    return (py,) if py in hold_eval_years(win) else ()
+
+
+def select_check_years(win: dict[str, int]) -> tuple[str, ...]:
+    lo, hi = int(win["check_start"]), int(win["check_end"])
+    return tuple(y for y in hold_eval_years(win) if lo <= int(y) <= hi)
+
+
+def research_default_end_year(
+    avail: tuple[str, ...] | list[str],
+    win: dict[str, int] | None = None,
+) -> str:
+    """研究台默认结束年 = 预验收前一年，避免一打开就打到验收期。"""
+    w = win or fill_select_windows(None)
+    target = str(int(w["precheck_year"]) - 1)
+    years = [str(y) for y in avail if str(y).isdigit()]
+    if not years:
+        return target
+    if target in years:
+        return target
+    before = [y for y in years if int(y) < int(w["precheck_year"])]
+    return before[-1] if before else years[0]
+
+
+def score_years_before_hold(
+    hold_year: int | str,
+    win: dict[str, int],
+    available: tuple[str, ...] | None = None,
+) -> tuple[str, ...]:
+    """打分年 = [year_start, hold_year) ∩ available。空集不回落。"""
+    hy = int(hold_year)
+    ys, ye = int(win["year_start"]), hy - 1
+    if ye < ys:
+        return ()
+    years = tuple(str(y) for y in range(ys, ye + 1))
+    if available:
+        keep = {str(y) for y in available if str(y).isdigit()}
+        years = tuple(y for y in years if y in keep)
+    return years
+
+
+def resolve_named_filters(
+    overrides: dict[str, Any] | None,
+    n_score_years: int,
+) -> dict[str, Any]:
+    """命名格 overrides → score_universe 过滤。scale_min_n_buy 按窗口年数显式缩放。"""
+    flt = dict(DEFAULT_FILTERS)
+    ov = dict(overrides or {})
+    scale = bool(ov.pop("scale_min_n_buy", False))
+    per_year = int(ov.pop("min_n_buy_per_year_scale", SELECT_MIN_N_BUY_PER_YEAR) or SELECT_MIN_N_BUY_PER_YEAR)
+    flt.update(ov)
+    if scale:
+        flt["min_n_buy"] = scaled_min_n_buy(n_score_years, per_year)
+    return flt
+
+
+def named_filter_cells() -> list[dict[str, Any]]:
+    """≤8 组；base 显式缩放 min_n_buy，禁止静默改默认。"""
+    cells: list[dict[str, Any]] = [
+        {
+            "id": "base",
+            "label": "缩放轮次（每窗年×2）",
+            "kind": "base",
+            "overrides": {"scale_min_n_buy": True},
+        },
+        {
+            "id": "per_year2",
+            "label": "每年至少 2 轮",
+            "kind": "tighten",
+            "overrides": {"scale_min_n_buy": True, "min_n_buy_per_year": 2},
+        },
+        {
+            "id": "pos60",
+            "label": "盈利年占比 0.60",
+            "kind": "tighten",
+            "overrides": {"scale_min_n_buy": True, "min_pos_ratio": 0.60},
+        },
+        {
+            "id": "pos70",
+            "label": "盈利年占比 0.70",
+            "kind": "tighten",
+            "overrides": {"scale_min_n_buy": True, "min_pos_ratio": 0.70},
+        },
+        {
+            "id": "top5",
+            "label": "Top 5",
+            "kind": "tighten",
+            "overrides": {"scale_min_n_buy": True, "top_n": 5},
+        },
+        {
+            "id": "top7",
+            "label": "Top 7",
+            "kind": "loosen",
+            "overrides": {"scale_min_n_buy": True, "top_n": 7},
+        },
+        {
+            "id": "traded70",
+            "label": "成交年占比 0.70",
+            "kind": "tighten",
+            "overrides": {"scale_min_n_buy": True, "min_years_traded_ratio": 0.70},
+        },
+        {
+            "id": "vol20",
+            "label": "剔除高波动 20%",
+            "kind": "tighten",
+            "overrides": {"scale_min_n_buy": True, "vol_drop_top": 0.20},
+        },
+    ]
+    return cells[:SELECT_FILTER_LAB_MAX]
 
 
 ANALYSIS_SIDEBAR: dict[str, Any] = {

@@ -980,8 +980,14 @@ def score_universe(
     *,
     kpi_source: str = "single",
     weights: dict[str, float] | None = None,
+    qualify_ok: set[str] | None = None,
+    strict_score_years: bool = False,
 ) -> dict[str, Any]:
-    """硬过滤 + 百分位加权打分。score_years 内重跑建议均线/复权，不改扫描缓存。"""
+    """硬过滤 + 百分位加权打分。score_years 内重跑建议均线/复权，不改扫描缓存。
+
+    strict_score_years=True 时，空打分年不回落扫描全历史。
+    qualify_ok 非空时，不在集合内的标的记「资格不足」。
+    """
     flt = dict(DEFAULT_FILTERS)
     if filters:
         flt.update(filters)
@@ -1000,7 +1006,27 @@ def score_universe(
     if available:
         keep = set(available)
         requested = tuple(y for y in requested if y in keep)
-    score_years = requested if requested else (available or SCORE_YEARS)
+    if strict_score_years:
+        score_years = requested
+        if not score_years:
+            empty = pd.DataFrame()
+            return {
+                "df": empty,
+                "passed": empty,
+                "heatmap": pd.DataFrame(),
+                "details": {},
+                "coverage": _coverage_from_stocks({}, score_years=()),
+                "filters": flt,
+                "book": book,
+                "book_rank": pd.DataFrame(),
+                "recommend": pd.DataFrame(),
+                "snippet": "BOOK_STOCKS = {}",
+                "vol_cut": None,
+                "score_years": (),
+                "empty_score_years": True,
+            }
+    else:
+        score_years = requested if requested else (available or SCORE_YEARS)
     if kpi_src == "portfolio" and score_years:
         flt = _portfolio_score_filters(flt, score_years)
 
@@ -1048,6 +1074,8 @@ def score_universe(
         vol = style.get("vol_ann")
         touch = style.get("touch_ma20")
         reasons: list[str] = []
+        if qualify_ok is not None and str(stock).strip().upper() not in qualify_ok:
+            reasons.append("资格不足")
         year_n = agg.get("year_n") or {}
         n_buy_year_min = min(int(year_n.get(y) or 0) for y in score_years) if score_years else 0
         if int(agg["n_buy"] or 0) < min_n_buy:
@@ -1204,6 +1232,7 @@ def score_universe(
         "snippet": snippet,
         "vol_cut": vol_cut,
         "score_years": score_years,
+        "empty_score_years": False,
     }
 
 
@@ -1265,6 +1294,22 @@ def format_book_snippet(recommend: pd.DataFrame) -> str:
     if n == 0:
         return "BOOK_STOCKS = {}"
     return "\n".join(lines)
+
+
+def recommend_to_basket(recommend: pd.DataFrame | None) -> dict[str, dict[str, str]]:
+    """推荐表 → {code: {ma_type, dividend_type}}。"""
+    out: dict[str, dict[str, str]] = {}
+    if recommend is None or getattr(recommend, "empty", True):
+        return out
+    for _, r in recommend.iterrows():
+        stock = str(r.get("stock") or "").strip().upper()
+        if not stock:
+            continue
+        out[stock] = {
+            "ma_type": snippet_ma_type(r),
+            "dividend_type": snippet_div_type(r),
+        }
+    return out
 
 
 def coverage_notes(coverage: dict[str, Any], scanned: dict[str, Any] | None = None) -> list[str]:

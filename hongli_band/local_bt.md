@@ -117,7 +117,9 @@ hongli_band/回测记录/      ← 旧终端导出；「仅分析」会一并列
 
 ### 选股方案
 
-扫描 **`report/` 下已经存在的全部复权子目录**，不受本次侧栏勾选限制。侧栏先选 **起始年 / 结束年**，再调硬过滤（最少轮次、成交年占有数据年、盈利年占比、单笔盈利占比、波动分位、Top N）。改年只重打分，不重新扫描。
+**换不换跟踪池** 看页面上方的滚动验收（`PASS` / `KEEP_CURRENT` / `FAIL`），完整步骤见 [`select_wf.md`](./select_wf.md)。下方全窗口打分和 `BOOK_STOCKS` 草稿是研究台，不是结论。
+
+扫描 **`report/` 下已经存在的全部复权子目录**，不受本次侧栏勾选限制。侧栏先选 **起始年 / 结束年**，再调硬过滤（最少轮次、成交年占有数据年、盈利年占比、单笔盈利占比、波动分位、Top N）。改年只重打分，不重新扫描。验收按钮不用这套侧栏阈值。
 
 流程：
 
@@ -370,7 +372,7 @@ python -m unittest test_market_csv test_select_config test_select_analysis test_
 - **侧栏没勾的复权，选股就看不到。** 选股扫磁盘上已有的 `report/<type>/`，与本次勾选无关。没跑过的类型不会凭空出现。
 - **本地回测等于三图实盘。** 每次只回放一只标的、独立预算，没有共享 `BOOK_FILE` 的 50%/30%/剩余分档抢槽。
 - **改了 `hlband/*.py` 却去改终端 GBK。** 本地回测每次拼接片段；终端模型仍须 `python hongli_band/scripts/qmt/_deploy_qmt_gbk.py`。
-- **选股 snippet 会写入 config。** 只展示草稿，要改跟踪池须自己编辑 `BOOK_STOCKS` 再 deploy。
+- **选股 snippet 会写入 config。** 研究台草稿和滚动 `picks.json` 都不会自动改 config；要改跟踪池须自己编辑 `BOOK_STOCKS` 再 deploy。滚动结论以 [`select_wf.md`](./select_wf.md) 为准，不要把最后一年 Top N 写成静态池。
 - **QMT 图表「复权方式」决定本地 CSV。** 本地用的是 KlineDump 写出的子目录；图表复权只影响看图。
 - **扁平旧 `report/` 与分目录混用。** 出现类型子目录后，选股不再读根目录散落的明细。
 - **数据分析的起止年会空出前几年。** 持有年就是起止年本身，不再因打分回看跳过。
