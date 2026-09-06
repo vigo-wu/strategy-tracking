@@ -150,7 +150,7 @@ import streamlit as st  # noqa: E402
 
 
 st.set_page_config(page_title="HlBand 本地回测", layout="wide")
-st.title("HlBand Backtesting")
+st.title("HlBand 本地回测")
 
 DIVIDEND_COLORS = {
     "none": "#616161",
@@ -3134,17 +3134,100 @@ def _render_analysis_mode(scanned: dict | None) -> None:
     _render_analysis_results(result, params)
 
 
-# ---------- sidebar / controls ----------
-mode = st.radio("模式", ["跑本地回测", "仅分析已有明细", "选股方案", "数据分析"], horizontal=True)
+# ---------- mode hub / work bar ----------
+_UI_MODE_KEY = "ui_mode"
+_UI_MODES: tuple[dict[str, str], ...] = (
+    {
+        "key": "跑本地回测",
+        "icon": ":material/play_arrow:",
+        "caption": "用日线 CSV 现场拼接脚本回放",
+    },
+    {
+        "key": "仅分析已有明细",
+        "icon": ":material/table_chart:",
+        "caption": "已有成交表，不再开跑",
+    },
+    {
+        "key": "选股方案",
+        "icon": ":material/filter_list:",
+        "caption": "从已有分年报告打分，出 BOOK 草稿",
+    },
+    {
+        "key": "数据分析",
+        "icon": ":material/analytics:",
+        "caption": "组合 / walk-forward 持有回放",
+    },
+)
+_UI_MODE_BY_KEY = {m["key"]: m for m in _UI_MODES}
+
+
+def _set_ui_mode(next_mode: str | None) -> None:
+    st.session_state[_UI_MODE_KEY] = next_mode
+
+
+def _clear_ui_mode() -> None:
+    st.session_state[_UI_MODE_KEY] = None
+
+
+def _render_mode_hub() -> None:
+    st.caption("选择一项任务开始")
+    cols = st.columns(4)
+    for col, spec in zip(cols, _UI_MODES):
+        with col:
+            with st.container(border=True, height="stretch"):
+                st.markdown("%s **%s**" % (spec["icon"], spec["key"]))
+                st.caption(spec["caption"])
+                st.button(
+                    "进入",
+                    key="hub_enter_%s" % spec["key"],
+                    width="stretch",
+                    on_click=_set_ui_mode,
+                    args=(spec["key"],),
+                )
+
+
+def _render_mode_bar(mode: str) -> None:
+    spec = _UI_MODE_BY_KEY.get(mode) or {"icon": "", "key": mode}
+    with st.container(horizontal=True, vertical_alignment="center"):
+        st.button(
+            "返回",
+            icon=":material/arrow_back:",
+            key="ui_mode_back",
+            on_click=_clear_ui_mode,
+        )
+        st.markdown("%s **%s**" % (spec["icon"], spec["key"]))
+
+
+st.session_state.setdefault(_UI_MODE_KEY, None)
+mode = st.session_state.get(_UI_MODE_KEY)
+if mode not in _UI_MODE_BY_KEY:
+    mode = None
+    st.session_state[_UI_MODE_KEY] = None
+
+if mode is None:
+    _render_mode_hub()
+else:
+    _render_mode_bar(str(mode))
+
 scope = "单标的"
 if mode == "跑本地回测":
-    scope = st.radio("范围", ["单标的", "批量（按标的汇总）"], horizontal=True)
+    pick = st.segmented_control(
+        "范围",
+        options=["单标的", "批量"],
+        default="单标的",
+        required=True,
+        key="bt_scope",
+        persist_state="session",
+    )
+    scope = "批量（按标的汇总）" if pick == "批量" else "单标的"
 
 with st.sidebar:
     st.header("参数")
     csv_root = str(DEFAULT_CSV_ROOT)
     divs: list[str] = []
-    if mode != "选股方案" and mode != "数据分析":
+    if mode is None:
+        st.caption("先选任务")
+    elif mode != "选股方案" and mode != "数据分析":
         csv_root = st.text_input("行情根目录", value=str(DEFAULT_CSV_ROOT))
         divs = st.multiselect(
             "复权类型",
@@ -3409,7 +3492,7 @@ elif mode == "跑本地回测":
             tabs_key="single_div_tabs",
         )
 
-else:
+elif mode == "仅分析已有明细":
     details = list_detail_csvs(report_dirs or report_dir, include_hist=True)
     labels = [str(p.relative_to(REPO)) if str(p).startswith(str(REPO)) else p.name for p in details]
     if not labels:
