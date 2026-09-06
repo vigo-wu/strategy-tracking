@@ -1,10 +1,10 @@
 # coding: utf-8
-"""真实 local_bt 命名网格：冻结 winner、隔离目录、格间串行。
+"""真实 local_bt 命名网格：跟踪池 BOOK_STOCKS、隔离目录、格间串行。
 
 用法（仓库根目录）::
 
   python hongli_band/scripts/local_bt/grid_run.py --spec .cursor/skills/qmt-local-bt-grid/examples/stop_loss.json
-  python hongli_band/scripts/local_bt/grid_run.py --spec cells.json --book-only
+  python hongli_band/scripts/local_bt/grid_run.py --spec path/to/cells.json --include-sma-ema
 """
 from __future__ import annotations
 
@@ -14,16 +14,13 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any
-
-import pandas as pd
+from typing import Any, Callable
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
 THEME = REPO / "hongli_band"
 HLBAND_CONFIG = THEME / "scripts" / "qmt" / "hlband" / "config.py"
 GRID_ROOT = THEME / "report" / "grid"
-COMPARE_DEFAULT = THEME / "report" / "front_ratio" / "local_bt_ma_compare.csv"
 SKILL_SUMMARIZE = (
     REPO / ".cursor" / "skills" / "qmt-local-bt-grid" / "scripts" / "summarize.py"
 )
@@ -40,20 +37,30 @@ from analyze import (  # noqa: E402
     normalize_ma_type,
     resolve_typed_dir,
 )
+from grid_spec import (  # noqa: E402
+    GridSpecError,
+    apply_year_windows,
+    fill_year_windows,
+)
+from market_csv import compact_day, peek_daily_csv_meta  # noqa: E402
 from run import (  # noqa: E402
     _as_trail_tiers,
     _run_payloads,
     default_log_name,
 )
 
-MAX_CELLS = 8
-YEAR_START, YEAR_END = 2018, 2026
+WARN_CELL_SOFT = 8
 RE_STOP = re.compile(r"\bstop=\s*([0-9.eE+-]+)")
 RE_TFB = re.compile(r"\btime_force_bars=\s*(-?\d+)")
 RE_TFM = re.compile(r"\btime_force_min_ret=\s*([0-9.eE+-]+)")
 RE_ARM = re.compile(r"\btrail_arm=\s*([0-9.eE+-]+|None)")
 
 _CSV_INDEX: dict[tuple[str, str], Path] = {}
+_CSV_SPAN: dict[str, tuple[str, str] | None] = {}
+
+
+class GridError(Exception):
+    """网格 spec / 运行错误（CLI 转成 exit）。"""
 
 
 def _json_ready(obj: Any) -> Any:
@@ -80,32 +87,36 @@ def load_spec(path: str | Path) -> dict[str, Any]:
         try:
             import yaml  # type: ignore
         except ImportError as e:
-            raise SystemExit("YAML spec 需要 PyYAML，请改用 JSON") from e
+            raise GridError("YAML spec 需要 PyYAML，请改用 JSON") from e
         data = yaml.safe_load(text)
     else:
         data = json.loads(text)
     if not isinstance(data, dict):
-        raise SystemExit("spec 必须是对象")
+        raise GridError("spec 必须是对象")
     return data
 
 
 def validate_spec(spec: dict[str, Any]) -> list[dict[str, Any]]:
     cells = list(spec.get("cells") or [])
     if not cells:
-        raise SystemExit("spec.cells 为空")
-    if len(cells) > MAX_CELLS:
-        raise SystemExit("格子数 %s > %s（含 base）" % (len(cells), MAX_CELLS))
+        raise GridError("spec.cells 为空")
+    if len(cells) > WARN_CELL_SOFT:
+        print(
+            "WARN 格子数 %s > %s（含 base）；叉乘交互项多，确认后再跑"
+            % (len(cells), WARN_CELL_SOFT),
+            flush=True,
+        )
     ids: list[str] = []
     n_base = 0
     out: list[dict[str, Any]] = []
     for raw in cells:
         if not isinstance(raw, dict):
-            raise SystemExit("每个 cell 必须是对象")
+            raise GridError("每个 cell 必须是对象")
         cid = str(raw.get("id") or "").strip()
         if not cid:
-            raise SystemExit("cell 缺少 id")
+            raise GridError("cell 缺少 id")
         if cid in ids:
-            raise SystemExit("重复 cell id: %s" % cid)
+            raise GridError("重复 cell id: %s" % cid)
         ids.append(cid)
         kind = str(raw.get("kind") or ("base" if cid == "base" else "other")).strip().lower()
         if cid == "base":
@@ -113,7 +124,7 @@ def validate_spec(spec: dict[str, Any]) -> list[dict[str, Any]]:
             kind = "base"
         overrides = raw.get("overrides") or {}
         if not isinstance(overrides, dict):
-            raise SystemExit("%s.overrides 必须是对象" % cid)
+            raise GridError("%s.overrides 必须是对象" % cid)
         if cid == "base" and overrides:
             print("WARN base 格 overrides 非空，仍按覆盖跑", flush=True)
         out.append(
@@ -125,27 +136,38 @@ def validate_spec(spec: dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
     if n_base != 1:
-        raise SystemExit("必须恰好一个 id=base 的格子，当前 %s" % n_base)
+        raise GridError("必须恰好一个 id=base 的格子，当前 %s" % n_base)
+    try:
+        apply_year_windows(spec)
+    except GridSpecError as e:
+        raise GridError(str(e)) from e
     return out
 
 
 def _load_hlband_config():
     spec = importlib.util.spec_from_file_location("hlband_config_grid", HLBAND_CONFIG)
     if spec is None or spec.loader is None:
-        raise SystemExit("无法读取 %s" % HLBAND_CONFIG)
+        raise GridError("无法读取 %s" % HLBAND_CONFIG)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
 
 
-def load_exit_defaults() -> dict[str, Any]:
+def load_config_defaults() -> dict[str, Any]:
+    from grid_spec import param_catalog
+
     mod = _load_hlband_config()
-    return {
-        "STOP_LOSS": float(getattr(mod, "STOP_LOSS")),
-        "TIME_FORCE_BARS": int(getattr(mod, "TIME_FORCE_BARS")),
-        "TIME_FORCE_MIN_RET": float(getattr(mod, "TIME_FORCE_MIN_RET")),
-        "TRAIL_TIERS": getattr(mod, "TRAIL_TIERS"),
-    }
+    out: dict[str, Any] = {"TRAIL_TIERS": getattr(mod, "TRAIL_TIERS")}
+    for spec in param_catalog():
+        if spec.key == "TRAIL_TIERS":
+            continue
+        if hasattr(mod, spec.key):
+            out[spec.key] = getattr(mod, spec.key)
+    return out
+
+
+def load_exit_defaults() -> dict[str, Any]:
+    return load_config_defaults()
 
 
 def load_book_lock() -> list[tuple[str, str, str]]:
@@ -162,7 +184,7 @@ def load_book_lock() -> list[tuple[str, str, str]]:
     elif isinstance(raw, (list, tuple)):
         items = [(str(x), {}) for x in raw]
     else:
-        raise SystemExit("config.BOOK_STOCKS 为空或无法解析")
+        raise GridError("config.BOOK_STOCKS 为空或无法解析")
     out: list[tuple[str, str, str]] = []
     for k, v in items:
         stock = str(k or "").strip().upper()
@@ -178,7 +200,7 @@ def load_book_lock() -> list[tuple[str, str, str]]:
             ma, div = default_ma, default_div
         out.append((stock, ma, div))
     if not out:
-        raise SystemExit("config.BOOK_STOCKS 没有有效标的")
+        raise GridError("config.BOOK_STOCKS 没有有效标的")
     return out
 
 
@@ -248,24 +270,24 @@ def assert_fingerprint(
     text = log_path.read_text(encoding="utf-8", errors="replace")
     got = parse_fingerprint(text)
     if not got["has_stop"] or not _num_eq(got["stop"], expected["stop"]):
-        raise SystemExit(
+        raise GridError(
             "指纹 stop 不符 log=%s got=%s expected=%s" % (log_path, got["stop"], expected["stop"])
         )
     if not got["has_tfb"] or got["time_force_bars"] != expected["time_force_bars"]:
-        raise SystemExit(
+        raise GridError(
             "指纹 time_force_bars 不符 log=%s got=%s expected=%s"
             % (log_path, got["time_force_bars"], expected["time_force_bars"])
         )
     if got["time_force_min_ret"] is not None and not _num_eq(
         got["time_force_min_ret"], expected["time_force_min_ret"]
     ):
-        raise SystemExit(
+        raise GridError(
             "指纹 time_force_min_ret 不符 log=%s got=%s expected=%s"
             % (log_path, got["time_force_min_ret"], expected["time_force_min_ret"])
         )
     if need_trail:
         if not got["has_trail_arm"] or not _num_eq(got["trail_arm"], expected["trail_arm"]):
-            raise SystemExit(
+            raise GridError(
                 "指纹 trail_arm 不符 log=%s got=%s expected=%s"
                 % (log_path, got.get("trail_arm"), expected["trail_arm"])
             )
@@ -282,8 +304,34 @@ def csv_for(stock: str, div: str) -> Path | None:
         path = Path(str(meta.get("path") or ""))
         if code and path.is_file():
             _CSV_INDEX[(str(div), code)] = path
+            ms = compact_day(str(meta.get("start") or ""))
+            me = compact_day(str(meta.get("end") or ""))
+            if len(ms) == 8 and len(me) == 8:
+                _CSV_SPAN[str(path)] = (ms, me)
     hit = _CSV_INDEX.get(key)
     return hit if hit is not None and hit.is_file() else None
+
+
+def _csv_span(path: Path) -> tuple[str, str] | None:
+    key = str(path)
+    if key in _CSV_SPAN:
+        return _CSV_SPAN[key]
+    try:
+        meta = peek_daily_csv_meta(path)
+        ms = compact_day(str(meta.get("start") or ""))
+        me = compact_day(str(meta.get("end") or ""))
+        span = (ms, me) if len(ms) == 8 and len(me) == 8 else None
+    except Exception:
+        span = None
+    _CSV_SPAN[key] = span
+    return span
+
+
+def _year_overlaps_csv(csv_p: Path, start: str, end: str) -> bool:
+    span = _csv_span(csv_p)
+    if span is None:
+        return False
+    return max(str(start), span[0]) <= min(str(end), span[1])
 
 
 def _year_window(year: str) -> tuple[str, str]:
@@ -291,54 +339,20 @@ def _year_window(year: str) -> tuple[str, str]:
     return "%s0101" % y, "%s1231" % y
 
 
-def freeze_winner_jobs(compare_csv: Path, div: str) -> list[dict[str, Any]]:
-    if not compare_csv.is_file():
-        raise SystemExit(
-            "缺少冻结 winner 表 %s ；请先跑基线 local_bt 均线对照" % compare_csv
-        )
-    df = pd.read_csv(compare_csv)
-    jobs: list[dict[str, Any]] = []
-    for _, r in df.iterrows():
-        stock = str(r.get("stock") or "").strip().upper()
-        year = str(int(r["year"])) if pd.notna(r.get("year")) else ""
-        ma = str(r.get("winner") or "").strip().upper()
-        if not stock or not year or ma not in ("SMA", "EMA"):
-            continue
-        csv_col = "sma_csv" if ma == "SMA" else "ema_csv"
-        csv_p = Path(str(r.get(csv_col) or ""))
-        if not csv_p.is_file():
-            alt = csv_for(stock, div)
-            csv_p = alt if alt is not None else csv_p
-        if not csv_p.is_file():
-            print("skip winner 无 CSV", stock, year, ma, flush=True)
-            continue
-        start, end = _year_window(year)
-        jobs.append(
-            {
-                "sample": "winner",
-                "stock": stock,
-                "year": year,
-                "ma": ma,
-                "div": div,
-                "csv": csv_p,
-                "start": start,
-                "end": end,
-            }
-        )
-    if not jobs:
-        raise SystemExit("winner 冻结名单为空: %s" % compare_csv)
-    return jobs
-
-
-def book_jobs() -> list[dict[str, Any]]:
+def book_jobs(spec: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    win = fill_year_windows(spec)
+    y0, y1 = int(win["year_start"]), int(win["year_end"])
     out: list[dict[str, Any]] = []
     for stock, ma, div in load_book_lock():
         csv_p = csv_for(stock, div)
         if csv_p is None:
             print("skip book 无 CSV", stock, div, flush=True)
             continue
-        for year in range(YEAR_START, YEAR_END + 1):
+        for year in range(y0, y1 + 1):
             ys, ye = _year_window(str(year))
+            if not _year_overlaps_csv(csv_p, ys, ye):
+                print("skip book 无行情", stock, year, flush=True)
+                continue
             out.append(
                 {
                     "sample": "book",
@@ -354,10 +368,10 @@ def book_jobs() -> list[dict[str, Any]]:
     return out
 
 
-def ma_control_jobs(winner_jobs: list[dict[str, Any]], ma: str) -> list[dict[str, Any]]:
+def ma_control_jobs(src_jobs: list[dict[str, Any]], ma: str) -> list[dict[str, Any]]:
     kind = str(ma).upper()
     out: list[dict[str, Any]] = []
-    for j in winner_jobs:
+    for j in src_jobs:
         q = dict(j)
         q["sample"] = kind.lower()
         q["ma"] = kind
@@ -368,12 +382,12 @@ def ma_control_jobs(winner_jobs: list[dict[str, Any]], ma: str) -> list[dict[str
 def _assert_grid_dir(path: Path) -> None:
     parts = [str(x).lower() for x in path.parts]
     if "grid" not in parts:
-        raise SystemExit("禁止把网格 log 写到非 report/grid 目录: %s" % path)
+        raise GridError("禁止把网格 log 写到非 report/grid 目录: %s" % path)
     if "front_ratio" in parts and "grid" in parts:
         idx_g = parts.index("grid")
         # report/grid/.../front_ratio 作为 sample 下的复权子目录允许
         if idx_g > parts.index("front_ratio"):
-            raise SystemExit("禁止覆盖基线 report/front_ratio: %s" % path)
+            raise GridError("禁止覆盖基线 report/front_ratio: %s" % path)
 
 
 def job_payload(job: dict[str, Any], cell_dir: Path, overrides: dict[str, Any]) -> dict[str, Any]:
@@ -401,7 +415,7 @@ def job_payload(job: dict[str, Any], cell_dir: Path, overrides: dict[str, Any]) 
 def _load_summarize():
     spec = importlib.util.spec_from_file_location("qmt_local_bt_grid_summarize", SKILL_SUMMARIZE)
     if spec is None or spec.loader is None:
-        raise SystemExit("无法加载 %s" % SKILL_SUMMARIZE)
+        raise GridError("无法加载 %s" % SKILL_SUMMARIZE)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -413,6 +427,7 @@ def run_cell(
     cell_dir: Path,
     defaults: dict[str, Any],
     workers: int,
+    on_progress: Callable[[str, int, int, str], None] | None = None,
 ) -> None:
     cell_dir.mkdir(parents=True, exist_ok=True)
     meta = {
@@ -427,127 +442,202 @@ def run_cell(
         encoding="utf-8",
     )
     if not jobs:
-        raise SystemExit("格子 %s 无 job" % cell["id"])
+        raise GridError("格子 %s 无 job" % cell["id"])
     payloads = [job_payload(j, cell_dir, cell["overrides"]) for j in jobs]
     expected = expected_fingerprint(defaults, cell["overrides"])
     need_trail = "TRAIL_TIERS" in (cell.get("overrides") or {})
 
     def _progress(done: int, total: int, label: str) -> None:
-        print("[%s] %s/%s %s" % (cell["id"], done, total, label), flush=True)
+        if on_progress is not None:
+            on_progress(str(cell["id"]), done, total, label)
+        else:
+            print("[%s] %s/%s %s" % (cell["id"], done, total, label), flush=True)
 
-    probe = [payloads[0]]
-    probe_rows = _run_payloads(probe, Path(probe[0]["out_dir"]), _progress, 1)
-    log0 = Path(str(probe_rows[0].get("log") or ""))
-    if not probe_rows[0].get("ok") or not log0.is_file():
-        raise SystemExit(
-            "格子 %s 探针失败: %s" % (cell["id"], probe_rows[0].get("error") or log0)
-        )
-    assert_fingerprint(log0, expected, need_trail=need_trail)
-    rest = payloads[1:]
+    probe_idx = None
+    rest: list[dict[str, Any]] = []
+    for i, payload in enumerate(payloads):
+        probe_rows = _run_payloads([payload], Path(payload["out_dir"]), _progress, 1)
+        log0 = Path(str(probe_rows[0].get("log") or ""))
+        if probe_rows[0].get("ok") and log0.is_file():
+            assert_fingerprint(log0, expected, need_trail=need_trail)
+            probe_idx = i
+            rest = payloads[i + 1 :]
+            break
+        err = str(probe_rows[0].get("error") or "")
+        if "无行情交集" in err:
+            print(
+                "skip probe 无行情",
+                payload.get("stock"),
+                payload.get("year"),
+                flush=True,
+            )
+            continue
+        raise GridError("格子 %s 探针失败: %s" % (cell["id"], err or log0))
+    if probe_idx is None:
+        raise GridError("格子 %s 探针失败: 全部 job 无行情交集" % cell["id"])
     if rest:
         _run_payloads(rest, Path(rest[0]["out_dir"]), _progress, workers)
+
+
+def assemble_jobs(
+    spec: dict[str, Any],
+    *,
+    include_sma_ema: bool = False,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    book = book_jobs(spec)
+    jobs: list[dict[str, Any]] = list(book)
+    if include_sma_ema and book:
+        jobs.extend(ma_control_jobs(book, "SMA"))
+        jobs.extend(ma_control_jobs(book, "EMA"))
+    return book, jobs
+
+
+def run_sweep(
+    spec: dict[str, Any],
+    *,
+    include_sma_ema: bool = False,
+    workers: int = 0,
+    sweep_dir: str | Path | None = None,
+    progress: Callable[[str, int, int, str], None] | None = None,
+    dry_run: bool = False,
+    cell_id: str = "",
+    spec_path: str = "",
+) -> dict[str, Any]:
+    cells = validate_spec(spec)
+    if cell_id:
+        want = str(cell_id).strip()
+        cells = [c for c in cells if c["id"] == want]
+        if not cells:
+            raise GridError("没有格子 id=%s" % want)
+    sweep = str(spec.get("sweep") or Path(spec_path).stem or "grid")
+    dest = Path(sweep_dir) if sweep_dir else GRID_ROOT / sweep
+    _assert_grid_dir(dest)
+    book, jobs = assemble_jobs(spec, include_sma_ema=include_sma_ema)
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / "spec.json").write_text(
+        json.dumps(_json_ready(spec), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    win = fill_year_windows(spec)
+    freeze_meta = {
+        "compare_div": str(spec.get("compare_div") or "front_ratio"),
+        "n_book": len(book),
+        "n_jobs": len(jobs),
+        "include_sma_ema": bool(include_sma_ema),
+        "book": [
+            {"stock": j["stock"], "year": j["year"], "ma": j["ma"], "div": j["div"]}
+            for j in book
+        ],
+    }
+    freeze_meta.update(win)
+    (dest / "freeze.json").write_text(
+        json.dumps(freeze_meta, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    print(
+        "sweep=%s cells=%s jobs/cell=%s book=%s"
+        % (sweep, len(cells), len(jobs), len(book)),
+        flush=True,
+    )
+    info = {
+        "sweep": sweep,
+        "sweep_dir": str(dest),
+        "n_cells": len(cells),
+        "n_jobs": len(jobs),
+        "n_book": len(book),
+        "cells": cells,
+        "dry_run": bool(dry_run),
+    }
+    info.update(win)
+    if dry_run:
+        return info
+    defaults = load_exit_defaults()
+    cells = sorted(cells, key=lambda c: 0 if c["id"] == "base" else 1)
+    for cell in cells:
+        print("== cell", cell["id"], cell["kind"], cell["overrides"], flush=True)
+        run_cell(
+            cell,
+            jobs,
+            dest / cell["id"],
+            defaults,
+            int(workers or 0),
+            on_progress=progress,
+        )
+    mod = _load_summarize()
+    out = mod.summarize_sweep(dest)
+    rec = out.get("recommend") or {}
+    print("wrote", out.get("summary_path"))
+    print("recommend", rec.get("id"), rec.get("reason"))
+    print("默认不改 config.py、不 deploy；用户说按建议修改后再改片段")
+    info["summary"] = out
+    info["recommend"] = rec
+    return info
+
+
+def summarize_only(sweep_dir: str | Path) -> dict[str, Any]:
+    dest = Path(sweep_dir)
+    _assert_grid_dir(dest)
+    mod = _load_summarize()
+    out = mod.summarize_sweep(dest)
+    rec = out.get("recommend") or {}
+    print("wrote", out.get("summary_path"))
+    print("recommend", rec.get("id"), rec.get("reason"))
+    return out
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="真实 local_bt 命名网格")
     ap.add_argument("--spec", default="", help="命名格子 JSON/YAML")
-    ap.add_argument("--book-only", action="store_true", help="只跑跟踪池 4 只")
     ap.add_argument("--include-sma-ema", action="store_true", help="额外全 SMA / 全 EMA 对照")
     ap.add_argument("--workers", type=int, default=0, help="格内进程数；格子之间串行")
-    ap.add_argument("--compare-csv", default="", help="冻结 winner 的 local_bt_ma_compare.csv")
     ap.add_argument("--sweep-dir", default="", help="覆盖输出目录")
     ap.add_argument("--cell", default="", help="只跑指定格子 id")
     ap.add_argument("--summarize-only", action="store_true", help="不重跑，只 summarize")
     ap.add_argument("--dry-run", action="store_true", help="只打印 job 数")
+    ap.add_argument("--year-start", type=int, default=None)
+    ap.add_argument("--year-end", type=int, default=None)
+    ap.add_argument("--tune-start", type=int, default=None)
+    ap.add_argument("--tune-end", type=int, default=None)
+    ap.add_argument("--check-start", type=int, default=None)
+    ap.add_argument("--check-end", type=int, default=None)
     args = ap.parse_args()
-
-    if args.summarize_only:
-        if not args.sweep_dir and not args.spec:
-            raise SystemExit("--summarize-only 需要 --sweep-dir 或 --spec")
-        if args.sweep_dir:
-            sweep_dir = Path(args.sweep_dir)
-        else:
-            spec = load_spec(args.spec)
-            sweep = str(spec.get("sweep") or Path(args.spec).stem)
-            sweep_dir = GRID_ROOT / sweep
-        _assert_grid_dir(sweep_dir)
-        mod = _load_summarize()
-        out = mod.summarize_sweep(sweep_dir)
-        rec = out.get("recommend") or {}
-        print("wrote", out.get("summary_path"))
-        print("recommend", rec.get("id"), rec.get("reason"))
-        return
-
-    if not args.spec:
-        raise SystemExit("需要 --spec")
-    spec = load_spec(args.spec)
-    cells = validate_spec(spec)
-    if args.cell:
-        want = str(args.cell).strip()
-        cells = [c for c in cells if c["id"] == want]
-        if not cells:
-            raise SystemExit("没有格子 id=%s" % want)
-
-    sweep = str(spec.get("sweep") or Path(args.spec).stem)
-    compare_div = str(spec.get("compare_div") or "front_ratio")
-    sweep_dir = Path(args.sweep_dir) if args.sweep_dir else GRID_ROOT / sweep
-    _assert_grid_dir(sweep_dir)
-
-    compare_csv = Path(args.compare_csv) if args.compare_csv else COMPARE_DEFAULT
-    if spec.get("compare_csv"):
-        compare_csv = Path(str(spec["compare_csv"]))
-
-    winner = [] if args.book_only else freeze_winner_jobs(compare_csv, compare_div)
-    book = book_jobs()
-    jobs: list[dict[str, Any]] = []
-    jobs.extend(winner)
-    jobs.extend(book)
-    if args.include_sma_ema and winner:
-        jobs.extend(ma_control_jobs(winner, "SMA"))
-        jobs.extend(ma_control_jobs(winner, "EMA"))
-
-    sweep_dir.mkdir(parents=True, exist_ok=True)
-    (sweep_dir / "spec.json").write_text(
-        json.dumps(_json_ready(spec), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    freeze_meta = {
-        "compare_csv": str(compare_csv),
-        "compare_div": compare_div,
-        "n_winner": len(winner),
-        "n_book": len(book),
-        "n_jobs": len(jobs),
-        "book_only": bool(args.book_only),
-        "include_sma_ema": bool(args.include_sma_ema),
-        "winner": [
-            {"stock": j["stock"], "year": j["year"], "ma": j["ma"], "div": j["div"]}
-            for j in winner
-        ],
-    }
-    (sweep_dir / "freeze.json").write_text(
-        json.dumps(freeze_meta, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    print(
-        "sweep=%s cells=%s jobs/cell=%s winner=%s book=%s"
-        % (sweep, len(cells), len(jobs), len(winner), len(book)),
-        flush=True,
-    )
-    if args.dry_run:
-        return
-
-    defaults = load_exit_defaults()
-    cells = sorted(cells, key=lambda c: 0 if c["id"] == "base" else 1)
-    for cell in cells:
-        print("== cell", cell["id"], cell["kind"], cell["overrides"], flush=True)
-        run_cell(cell, jobs, sweep_dir / cell["id"], defaults, int(args.workers or 0))
-
-    mod = _load_summarize()
-    out = mod.summarize_sweep(sweep_dir)
-    rec = out.get("recommend") or {}
-    print("wrote", out.get("summary_path"))
-    print("recommend", rec.get("id"), rec.get("reason"))
-    print("默认不改 config.py、不 deploy；用户说按建议修改后再改片段")
+    try:
+        if args.summarize_only:
+            if not args.sweep_dir and not args.spec:
+                raise GridError("--summarize-only 需要 --sweep-dir 或 --spec")
+            if args.sweep_dir:
+                sweep_dir = Path(args.sweep_dir)
+            else:
+                spec = load_spec(args.spec)
+                sweep = str(spec.get("sweep") or Path(args.spec).stem)
+                sweep_dir = GRID_ROOT / sweep
+            summarize_only(sweep_dir)
+            return
+        if not args.spec:
+            raise GridError("需要 --spec")
+        spec = load_spec(args.spec)
+        cli_years = {
+            "year_start": args.year_start,
+            "year_end": args.year_end,
+            "tune_start": args.tune_start,
+            "tune_end": args.tune_end,
+            "check_start": args.check_start,
+            "check_end": args.check_end,
+        }
+        for key, val in cli_years.items():
+            if val is not None:
+                spec[key] = int(val)
+        run_sweep(
+            spec,
+            include_sma_ema=bool(args.include_sma_ema),
+            workers=int(args.workers or 0),
+            sweep_dir=args.sweep_dir or None,
+            dry_run=bool(args.dry_run),
+            cell_id=str(args.cell or ""),
+            spec_path=str(args.spec),
+        )
+    except GridError as e:
+        raise SystemExit(str(e)) from e
 
 
 if __name__ == "__main__":

@@ -9,7 +9,9 @@ from pathlib import Path
 from batch_year_perf import (
     batch_naive_year_perf,
     collect_batch_detail_trades,
+    list_grid_samples_with_details,
     parse_detail_trades,
+    rows_from_grid_sample_dir,
 )
 
 
@@ -150,6 +152,64 @@ class BatchNaiveYearPerfTests(unittest.TestCase):
             again = parse_detail_trades(p, cache=cache)
             self.assertEqual(len(again), 1)
             self.assertAlmostEqual(float(again[0]["pnl"]), 1000.0, places=2)
+
+
+class GridSampleRowsTests(unittest.TestCase):
+    def test_rows_from_grid_sample_years_and_separate_ma(self):
+        lines_2018 = [
+            "600000,浦发,股票,银行,多,2018-01-10 15:00:00,买入,10,10,0,0,0,100,0,1000,普通",
+            "600000,浦发,股票,银行,多,2018-01-15 15:00:00,卖出,11,11,1000,0,0,100,0,1100,普通",
+        ]
+        with tempfile.TemporaryDirectory() as td:
+            cell = Path(td)
+            book_dir = cell / "book" / "front_ratio"
+            sma_dir = cell / "sma" / "front_ratio"
+            ema_dir = cell / "ema" / "front_ratio"
+            book_dir.mkdir(parents=True)
+            sma_dir.mkdir(parents=True)
+            ema_dir.mkdir(parents=True)
+            p2018 = book_dir / "local_bt_600000_SH_2018_EMA_操作明细.csv"
+            p2019 = book_dir / "local_bt_600000_SH_2019_EMA_操作明细.csv"
+            _write_detail(p2018, lines_2018)
+            _write_detail(p2019, [])
+            (book_dir / "local_bt_600000_SH_2018_EMA.txt").write_text(
+                "TRADE_BUDGET budget= 12345.0\n", encoding="utf-8"
+            )
+            _write_detail(sma_dir / "local_bt_000001_SZ_2018_SMA_操作明细.csv", [])
+            _write_detail(ema_dir / "local_bt_000001_SZ_2018_EMA_操作明细.csv", [])
+
+            book_rows = rows_from_grid_sample_dir(cell, "book", fallback_budget=100000.0)
+            years = sorted(str(r["year"]) for r in book_rows)
+            self.assertEqual(years, ["2018", "2019"])
+            by_year = {str(r["year"]): r for r in book_rows}
+            self.assertEqual(by_year["2018"]["stock"], "600000.SH")
+            self.assertEqual(by_year["2018"]["ma_type"], "EMA")
+            self.assertEqual(by_year["2018"]["dividend_type"], "front_ratio")
+            self.assertAlmostEqual(float(by_year["2018"]["budget"]), 12345.0)
+            self.assertAlmostEqual(float(by_year["2019"]["budget"]), 100000.0)
+            self.assertEqual(list_grid_samples_with_details(cell), ["book", "sma", "ema"])
+
+            mixed = batch_naive_year_perf(
+                rows_from_grid_sample_dir(cell, "sma") + rows_from_grid_sample_dir(cell, "ema"),
+                split="year",
+            )
+            self.assertFalse(mixed["ok"])
+            self.assertIn("SMA", mixed["reason"])
+
+            sma_out = batch_naive_year_perf(
+                rows_from_grid_sample_dir(cell, "sma"), split="year"
+            )
+            ema_out = batch_naive_year_perf(
+                rows_from_grid_sample_dir(cell, "ema"), split="year"
+            )
+            self.assertTrue(sma_out["ok"])
+            self.assertTrue(ema_out["ok"])
+
+            book_out = batch_naive_year_perf(book_rows, split="year")
+            self.assertTrue(book_out["ok"])
+            self.assertIn("2018", [str(y) for y in book_out["table"]["year"].tolist()])
+            self.assertEqual(int(book_out["n_ok"]), 2)
+            self.assertEqual(int(book_out["n_buy"]), 1)
 
 
 if __name__ == "__main__":

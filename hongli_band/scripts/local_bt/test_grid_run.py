@@ -1,0 +1,153 @@
+# coding: utf-8
+"""grid_run：GridError、8 格以上通过、dry_run 组 job。"""
+from __future__ import annotations
+
+import json
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+HERE = Path(__file__).resolve().parent
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+
+from grid_run import (  # noqa: E402
+    GridError,
+    assemble_jobs,
+    book_jobs,
+    load_config_defaults,
+    run_sweep,
+    validate_spec,
+)
+from grid_spec import build_cells  # noqa: E402
+
+
+def _nine_cell_spec() -> dict:
+    defaults = {
+        "STOP_LOSS": 0.08,
+        "TIME_FORCE_BARS": 30,
+        "TIME_FORCE_MIN_RET": 0.03,
+        "TRAIL_TIERS": ((0.03, 0.06, 0.015, None), (0.06, 0.10, 0.03, 0.03), (0.10, None, 0.04, None)),
+    }
+    cells = build_cells({"STOP_LOSS": [0.05, 0.06, 0.07, 0.09, 0.10, 0.11, 0.12, 0.13]}, defaults)
+    return {"theme": "hongli_band", "sweep": "nine_cells", "compare_div": "front_ratio", "cells": cells}
+
+
+class GridRunApiTest(unittest.TestCase):
+    def test_validate_nine_cells_ok(self) -> None:
+        spec = _nine_cell_spec()
+        self.assertGreaterEqual(len(spec["cells"]), 9)
+        cells = validate_spec(spec)
+        self.assertEqual(len(cells), len(spec["cells"]))
+        self.assertEqual(sum(1 for c in cells if c["id"] == "base"), 1)
+
+    def test_missing_base_raises(self) -> None:
+        spec = {
+            "cells": [
+                {"id": "sl06", "kind": "tighten", "overrides": {"STOP_LOSS": 0.06}},
+            ]
+        }
+        with self.assertRaises(GridError) as ctx:
+            validate_spec(spec)
+        self.assertIn("base", str(ctx.exception))
+
+    def test_dry_run_job_counts(self) -> None:
+        spec = {
+            "theme": "hongli_band",
+            "sweep": "dry_unit",
+            "compare_div": "front_ratio",
+            "cells": [
+                {"id": "base", "label": "现行", "kind": "base", "overrides": {}},
+                {"id": "sl06", "label": "止损 6%", "kind": "tighten", "overrides": {"STOP_LOSS": 0.06}},
+            ],
+        }
+        book = [
+            {
+                "sample": "book",
+                "stock": "600350.SH",
+                "year": "2020",
+                "ma": "EMA",
+                "div": "front_ratio",
+                "csv": Path("x.csv"),
+                "start": "20200101",
+                "end": "20201231",
+            }
+        ]
+        with tempfile.TemporaryDirectory() as td:
+            sweep_dir = Path(td) / "report" / "grid" / "dry_unit"
+            with patch("grid_run.assemble_jobs", return_value=(book, book)):
+                info = run_sweep(spec, dry_run=True, sweep_dir=sweep_dir)
+            self.assertTrue(info["dry_run"])
+            self.assertEqual(info["n_cells"], 2)
+            self.assertEqual(info["n_jobs"], 1)
+            self.assertEqual(info["n_book"], 1)
+            self.assertNotIn("n_winner", info)
+            self.assertTrue((sweep_dir / "spec.json").is_file())
+            freeze = json.loads((sweep_dir / "freeze.json").read_text(encoding="utf-8"))
+            self.assertEqual(freeze["n_book"], 1)
+            self.assertNotIn("winner", freeze)
+            self.assertEqual(freeze["year_start"], 2018)
+            self.assertEqual(freeze["tune_end"], 2022)
+
+
+    def test_assemble_jobs_book_and_sma_ema(self) -> None:
+        spec = {"compare_div": "front_ratio", "cells": [{"id": "base", "overrides": {}}]}
+        fake_book = [
+            {
+                "sample": "book",
+                "stock": "A",
+                "year": "2020",
+                "ma": "EMA",
+                "div": "front_ratio",
+                "csv": Path("a.csv"),
+                "start": "20200101",
+                "end": "20201231",
+            }
+        ]
+        with patch("grid_run.book_jobs", return_value=fake_book):
+            book, jobs = assemble_jobs(spec)
+            self.assertEqual(len(jobs), 1)
+            self.assertEqual(book, fake_book)
+            _, many = assemble_jobs(spec, include_sma_ema=True)
+        self.assertEqual(len(many), 3)
+        self.assertEqual({j["sample"] for j in many}, {"book", "sma", "ema"})
+
+    def test_book_jobs_respects_spec_years(self) -> None:
+        csv_p = Path("fake.csv")
+        spec = {"year_start": 2022, "year_end": 2023}
+        with patch("grid_run.load_book_lock", return_value=[("600938.SH", "EMA", "front_ratio")]):
+            with patch("grid_run.csv_for", return_value=csv_p):
+                with patch("grid_run._csv_span", return_value=("20220421", "20260904")):
+                    jobs = book_jobs(spec)
+        years = {j["year"] for j in jobs}
+        self.assertEqual(years, {"2022", "2023"})
+        self.assertTrue(all(j["sample"] == "book" for j in jobs))
+
+    def test_book_jobs_skips_years_without_bars(self) -> None:
+        csv_p = Path("fake.csv")
+        with patch("grid_run.load_book_lock", return_value=[("600938.SH", "EMA", "front_ratio")]):
+            with patch("grid_run.csv_for", return_value=csv_p):
+                with patch("grid_run._csv_span", return_value=("20220421", "20260904")):
+                    jobs = book_jobs()
+        years = {j["year"] for j in jobs}
+        self.assertNotIn("2018", years)
+        self.assertNotIn("2021", years)
+        self.assertIn("2022", years)
+        self.assertTrue(all(j["stock"] == "600938.SH" for j in jobs))
+
+    def test_load_config_defaults_covers_catalog(self) -> None:
+        defaults = load_config_defaults()
+        self.assertIn("STOP_LOSS", defaults)
+        self.assertIn("TRAIL_TIERS", defaults)
+        self.assertIn("CHASE_MAX_PCT", defaults)
+        self.assertIn("W_BIAS_HARD", defaults)
+        self.assertIn("MA_TOUCH_TOL", defaults)
+        self.assertNotIn("STATE_FILE", defaults)
+        self.assertAlmostEqual(float(defaults["CHASE_MAX_PCT"]), 0.05)
+        self.assertAlmostEqual(float(defaults["STOP_LOSS"]), 0.08)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -46,13 +46,40 @@ def select_filter_keys() -> tuple[str, ...]:
     return tuple("select_flt_%s" % w["key"] for w in FILTER_WIDGETS)
 
 
+GRID_KEYS: tuple[str, ...] = (
+    "grid_sweep",
+    "grid_compare_div",
+    "grid_workers",
+    "grid_sma_ema",
+    "grid_year_start",
+    "grid_year_end",
+    "grid_tune_start",
+    "grid_tune_end",
+    "grid_check_start",
+    "grid_check_end",
+    "grid_param_sel",
+)
+
+
 def form_cache_keys() -> tuple[str, ...]:
-    return (UI_MODE_KEY,) + BT_KEYS + SELECT_YEAR_KEYS + select_filter_keys() + ANALYSIS_KEYS
+    return (
+        (UI_MODE_KEY,)
+        + BT_KEYS
+        + SELECT_YEAR_KEYS
+        + select_filter_keys()
+        + ANALYSIS_KEYS
+        + GRID_KEYS
+    )
 
 
 def is_editor_key(key: Any) -> bool:
     k = str(key or "")
-    return k == "analysis_book_editor" or k.startswith("analysis_wf_editor_")
+    return (
+        k == "analysis_book_editor"
+        or k == "grid_cells_editor"
+        or k == "grid_param_editor"
+        or k.startswith("analysis_wf_editor_")
+    )
 
 
 def json_ready(value: Any) -> Any:

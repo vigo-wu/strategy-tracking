@@ -12,19 +12,19 @@
     {
       "id": "sl06",
       "label": "止损 6%",
-      "kind": "sl06",
+      "kind": "tighten",
       "overrides": {"STOP_LOSS": 0.06}
     },
     {
       "id": "sl07",
       "label": "止损 7%",
-      "kind": "sl07",
+      "kind": "tighten",
       "overrides": {"STOP_LOSS": 0.07}
     },
     {
       "id": "sl9",
       "label": "止损 9%",
-      "kind": "sl9",
+      "kind": "loosen",
       "overrides": {
         "STOP_LOSS": 0.09
       }
@@ -32,7 +32,7 @@
     {
       "id": "sl10",
       "label": "止损 10%",
-      "kind": "sl10",
+      "kind": "loosen",
       "overrides": {"STOP_LOSS": 0.1}
     }
   ]

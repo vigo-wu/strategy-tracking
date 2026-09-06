@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,12 @@ import pandas as pd
 
 from equity_yearly import year_performance_table
 from market_csv import compact_day
+
+GRID_SAMPLE_NAMES = ("book", "sma", "ema")
+GRID_DETAIL_NAME_RE = re.compile(
+    r"^local_bt_(\d{6})_(SZ|SH)_(\d{4})_(SMA|EMA)_操作明细\.csv$",
+    re.IGNORECASE,
+)
 
 
 def _row_year(row: dict[str, Any]) -> str:
@@ -60,6 +67,16 @@ def parse_detail_trades(path: str | Path, cache: dict | None = None) -> list[dic
     return trades
 
 
+def _sum_trade_pnl(trades: list[dict[str, Any]]) -> float:
+    total = 0.0
+    for t in trades:
+        try:
+            total += float(t.get("pnl") or 0)
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
 def collect_batch_detail_trades(
     rows: list[dict[str, Any]],
     cache: dict | None = None,
@@ -77,14 +94,79 @@ def collect_batch_detail_trades(
             continue
         packed = dict(r)
         packed["trades"] = parse_detail_trades(p, cache=cache)
+        if "sum_pnl" not in r:
+            packed["sum_pnl"] = _sum_trade_pnl(packed["trades"])
         out.append(packed)
     return out
+
+
+def _iter_grid_sample_details(cell_dir: str | Path, sample: str) -> list[Path]:
+    root = Path(cell_dir) / str(sample)
+    if not root.is_dir():
+        return []
+    return sorted(
+        p for p in root.rglob("*_操作明细.csv") if GRID_DETAIL_NAME_RE.match(p.name)
+    )
+
+
+def list_grid_samples_with_details(cell_dir: str | Path) -> list[str]:
+    """该格目录下实际有操作明细的 sample 名，顺序 book / sma / ema。"""
+    root = Path(cell_dir)
+    return [name for name in GRID_SAMPLE_NAMES if _iter_grid_sample_details(root, name)]
+
+
+def _div_from_detail_path(path: Path) -> str:
+    from analyze import normalize_dividend_type  # noqa: WPS433
+
+    for part in reversed(path.parts[:-1]):
+        d = normalize_dividend_type(part)
+        if d:
+            return d
+    return str(path.parent.name or "")
+
+
+def rows_from_grid_sample_dir(
+    cell_dir: str | Path,
+    sample: str,
+    *,
+    fallback_budget: float = 100000.0,
+) -> list[dict[str, Any]]:
+    """扫一格下一个 sample：ok / year / detail / stock / ma_type / dividend_type / budget。"""
+    from analyze import parse_budget_from_log, sibling_log_path  # noqa: WPS433
+
+    try:
+        fb = float(fallback_budget)
+    except (TypeError, ValueError):
+        fb = 100000.0
+    if fb <= 0:
+        fb = 100000.0
+    rows: list[dict[str, Any]] = []
+    for path in _iter_grid_sample_details(cell_dir, sample):
+        m = GRID_DETAIL_NAME_RE.match(path.name)
+        if not m:
+            continue
+        code, ex, year, ma = m.group(1), m.group(2).upper(), m.group(3), m.group(4).upper()
+        log = sibling_log_path(path)
+        budget = parse_budget_from_log(log, default=fb) if log else fb
+        rows.append(
+            {
+                "ok": True,
+                "year": year,
+                "detail": str(path),
+                "stock": "%s.%s" % (code, ex),
+                "ma_type": ma,
+                "dividend_type": _div_from_detail_path(path),
+                "budget": float(budget),
+            }
+        )
+    return rows
 
 
 def _filter_perf_rows(
     rows: list[dict[str, Any]],
     *,
     ma_type: str = "",
+    allow_mixed_ma: bool = False,
 ) -> tuple[list[dict[str, Any]], str]:
     """复权必须唯一；出现 SMA+EMA 时必须指定 ma_type。失败 reason 非空。"""
     from analyze import normalize_ma_type, unique_dividend_types  # noqa: WPS433
@@ -99,7 +181,7 @@ def _filter_perf_rows(
         m = normalize_ma_type(r.get("ma_type"))
         if m and m not in found_ma:
             found_ma.append(m)
-    if len(found_ma) >= 2 and not want_ma:
+    if len(found_ma) >= 2 and not want_ma and not allow_mixed_ma:
         return [], "请先选 SMA 或 EMA"
     filtered = []
     for r in ok_rows:
@@ -120,16 +202,6 @@ def _concat_trades(packed: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for item in packed:
         trades.extend(list(item.get("trades") or []))
     return trades
-
-
-def _sum_trade_pnl(trades: list[dict[str, Any]]) -> float:
-    total = 0.0
-    for t in trades:
-        try:
-            total += float(t.get("pnl") or 0)
-        except (TypeError, ValueError):
-            continue
-    return total
 
 
 def _pos_task_ratio(rows: list[dict[str, Any]]) -> float | None:
@@ -155,6 +227,7 @@ def batch_naive_year_perf(
     ma_type: str = "",
     cache: dict | None = None,
     packed: list[dict[str, Any]] | None = None,
+    allow_mixed_ma: bool = False,
 ) -> dict[str, Any]:
     """单票合计分年绩效。
 
@@ -176,7 +249,9 @@ def batch_naive_year_perf(
         "pos_ratio": None,
         "split": str(split or "range"),
     }
-    filtered, reason = _filter_perf_rows(rows, ma_type=ma_type)
+    filtered, reason = _filter_perf_rows(
+        rows, ma_type=ma_type, allow_mixed_ma=allow_mixed_ma
+    )
     if reason:
         empty["reason"] = reason
         return empty

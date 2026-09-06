@@ -128,6 +128,7 @@ from batch_year_perf import batch_naive_year_perf  # noqa: E402
 from equity_yearly import (  # noqa: E402
     build_daily_equity,
     daily_equity_for_year,
+    year_perf_display_df,
     year_performance_table,
 )
 from stock_select import (  # noqa: E402
@@ -153,6 +154,7 @@ from ui_cache import (  # noqa: E402
     merge_form_cache,
     snapshot_form_state,
 )
+from grid_ui import GRID_MODE, render_grid_mode, render_grid_sidebar  # noqa: E402
 
 import streamlit as st  # noqa: E402
 
@@ -1327,31 +1329,7 @@ def _render_daily_position_section(
 
 
 def _year_perf_display_df(tbl: pd.DataFrame) -> pd.DataFrame:
-    if tbl is None or tbl.empty:
-        return pd.DataFrame(
-            columns=[
-                "年份",
-                "年化盈亏%",
-                "当年盈亏",
-                "最大回撤%",
-                "开仓次数",
-                "夏普",
-                "期初权益",
-                "期末权益",
-            ]
-        )
-    return pd.DataFrame(
-        {
-            "年份": tbl["year"].astype(str),
-            "年化盈亏%": tbl["year_ret_pct"],
-            "当年盈亏": tbl["year_pnl"],
-            "最大回撤%": tbl["max_dd_pct"],
-            "开仓次数": tbl["n_open"],
-            "夏普": tbl["sharpe"],
-            "期初权益": tbl["start_equity"],
-            "期末权益": tbl["end_equity"],
-        }
-    )
+    return year_perf_display_df(tbl)
 
 
 def _render_year_performance_section(
@@ -3250,6 +3228,11 @@ _UI_MODES: tuple[dict[str, str], ...] = (
         "icon": ":material/analytics:",
         "caption": "组合 / walk-forward 持有回放",
     },
+    {
+        "key": GRID_MODE,
+        "icon": ":material/grid_on:",
+        "caption": "命名格子或叉乘对照，按样本外选参",
+    },
 )
 _UI_MODE_BY_KEY = {m["key"]: m for m in _UI_MODES}
 
@@ -3283,19 +3266,24 @@ def _rerun_persist() -> None:
 
 def _render_mode_hub() -> None:
     st.caption("选择一项任务开始")
-    cols = st.columns(4)
-    for col, spec in zip(cols, _UI_MODES):
-        with col:
-            with st.container(border=True, height="stretch"):
-                st.markdown("%s **%s**" % (spec["icon"], spec["key"]))
-                st.caption(spec["caption"])
-                st.button(
-                    "进入",
-                    key="hub_enter_%s" % spec["key"],
-                    width="stretch",
-                    on_click=_set_ui_mode,
-                    args=(spec["key"],),
-                )
+    modes = list(_UI_MODES)
+    for chunk_start in (0, 3):
+        chunk = modes[chunk_start : chunk_start + 3]
+        if not chunk:
+            continue
+        cols = st.columns(len(chunk))
+        for col, spec in zip(cols, chunk):
+            with col:
+                with st.container(border=True, height="stretch"):
+                    st.markdown("%s **%s**" % (spec["icon"], spec["key"]))
+                    st.caption(spec["caption"])
+                    st.button(
+                        "进入",
+                        key="hub_enter_%s" % spec["key"],
+                        width="stretch",
+                        on_click=_set_ui_mode,
+                        args=(spec["key"],),
+                    )
 
 
 def _render_mode_bar(mode: str) -> None:
@@ -3343,6 +3331,8 @@ with st.sidebar:
     divs: list[str] = []
     if mode is None:
         st.caption("先选任务")
+    elif mode == GRID_MODE:
+        render_grid_sidebar()
     elif mode != "选股方案" and mode != "数据分析":
         csv_root = st.text_input("行情根目录", value=str(DEFAULT_CSV_ROOT))
         div_kw: dict[str, Any] = {}
@@ -3412,7 +3402,9 @@ with st.sidebar:
         # Walk-forward 手工篮子不再全量 scan_reports
         analysis_scanned = None
 
-if mode == "选股方案":
+if mode == GRID_MODE:
+    render_grid_mode()
+elif mode == "选股方案":
     _render_select(
         str(DEFAULT_CSV_ROOT),
         str(DEFAULT_REPORT_ROOT),

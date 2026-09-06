@@ -1,5 +1,5 @@
 # coding: utf-8
-"""解析 local_bt 网格各格 log → 合计 / IS / OOS / 对照 / 稳健推荐 JSON。
+"""解析 local_bt 网格各格 log → 合计 / 调参期 / 验收期 / 稳健推荐 JSON。
 
 用法（仓库根目录）::
 
@@ -22,15 +22,27 @@ LOCAL_BT = REPO / "hongli_band" / "scripts" / "local_bt"
 if str(LOCAL_BT) not in sys.path:
     sys.path.insert(0, str(LOCAL_BT))
 
-from stop_loss_mae import (  # noqa: E402
-    IS_YEARS,
-    OOS_YEARS,
+from local_bt_log import (  # noqa: E402
+    BUDGET,
     _max_dd,
     _year_of,
     parse_local_bt_log,
+    parse_trade_budget,
+)
+from equity_yearly import (  # noqa: E402
+    build_daily_equity,
+    sharpe_from_returns,
+    simple_returns,
+    year_equity_path,
+    year_performance_table,
+)
+from grid_spec import (  # noqa: E402
+    YEAR_WINDOW_KEYS,
+    fill_year_windows,
+    year_range_set,
 )
 
-SAMPLES = ("winner", "book", "sma", "ema")
+SAMPLES = ("book", "sma", "ema")
 RE_LOG = re.compile(
     r"^local_bt_(\d{6})_(SZ|SH)_(\d{4})_(SMA|EMA)\.txt$",
     re.I,
@@ -48,9 +60,104 @@ def _json_ready(obj: Any) -> Any:
     return obj
 
 
+def _job_year(t: dict[str, Any]) -> int | None:
+    raw = str(t.get("year") or "").strip()
+    if len(raw) >= 4 and raw[:4].isdigit():
+        return int(raw[:4])
+    return _year_of(
+        str(t.get("sell_exec_day") or t.get("buy_open_day") or "")
+    )
+
+
+def _empty_window() -> dict[str, Any]:
+    return {
+        "sharpe": None,
+        "n_open": 0,
+        "avg_ann_pct": None,
+        "avg_year_pnl": None,
+    }
+
+
+def _agg_window(year_rows: list[dict[str, Any]], years: set[int]) -> dict[str, Any]:
+    rows = [r for r in year_rows if int(r["year"]) in years]
+    if not rows:
+        return _empty_window()
+    n_open = sum(int(r.get("n_open") or 0) for r in rows)
+    anns = [
+        float(r["year_ret_pct"])
+        for r in rows
+        if r.get("year_ret_pct") is not None
+    ]
+    pnls = [
+        float(r["year_pnl"])
+        for r in rows
+        if r.get("year_pnl") is not None
+    ]
+    rets: list[float] = []
+    for r in rows:
+        rets.extend(float(x) for x in (r.get("returns") or []))
+    return {
+        "sharpe": sharpe_from_returns(rets) if rets else None,
+        "n_open": n_open,
+        "avg_ann_pct": round(sum(anns) / len(anns), 4) if anns else None,
+        "avg_year_pnl": round(sum(pnls) / len(pnls), 2) if pnls else None,
+    }
+
+
+def _job_year_rows(
+    trades: list[dict[str, Any]],
+    n_accounts_by_year: dict[int, int],
+    per_budget: float,
+) -> list[dict[str, Any]]:
+    """每年独立空仓；只保留任务年那一行（跨年卖出不另开邻年行）。"""
+    by_job: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for t in trades:
+        y = _job_year(t)
+        if y is not None:
+            by_job[y].append(t)
+    years = set(n_accounts_by_year) | set(by_job)
+    rows: list[dict[str, Any]] = []
+    bud_one = float(per_budget)
+    for y in sorted(years):
+        trades_y = by_job.get(y) or []
+        n_acc = int(n_accounts_by_year.get(y) or 0)
+        if n_acc <= 0:
+            n_acc = 1 if trades_y else 0
+        if n_acc <= 0:
+            continue
+        bud_y = float(n_acc) * bud_one
+        tbl = year_performance_table(trades_y, bud_y)
+        if tbl is None or tbl.empty:
+            continue
+        match = tbl.loc[tbl["year"].astype(str) == str(y)]
+        if match.empty:
+            continue
+        rec = match.iloc[0]
+        daily = build_daily_equity(trades_y, bud_y)
+        path = year_equity_path(daily, y, bud_y)
+        rets = simple_returns(path)
+        rows.append(
+            {
+                "year": int(y),
+                "n_open": int(rec["n_open"] or 0),
+                "year_ret_pct": None
+                if rec["year_ret_pct"] is None or rec["year_ret_pct"] != rec["year_ret_pct"]
+                else float(rec["year_ret_pct"]),
+                "year_pnl": float(rec["year_pnl"]),
+                "returns": [float(x) for x in rets.tolist()],
+            }
+        )
+    return rows
+
+
 def stats_from_trades(
     trades: list[dict[str, Any]],
     n_accounts_by_year: dict[int, int],
+    *,
+    tune_years: set[int] | None = None,
+    check_years: set[int] | None = None,
+    run_years: set[int] | None = None,
+    per_budget: float | None = None,
 ) -> dict[str, Any]:
     pnls = [float(t["pnl"]) for t in trades]
     n = len(pnls)
@@ -70,9 +177,21 @@ def stats_from_trades(
         if y is not None:
             by_year[y] += pnl
         day_pnls.append((day, pnl))
-    is_pnl = sum(by_year[y] for y in by_year if y in IS_YEARS)
-    oos_pnl = sum(by_year[y] for y in by_year if y in OOS_YEARS)
+    win = fill_year_windows(None)
+    tune = set(tune_years) if tune_years is not None else year_range_set(
+        win["tune_start"], win["tune_end"]
+    )
+    check = set(check_years) if check_years is not None else year_range_set(
+        win["check_start"], win["check_end"]
+    )
+    run = set(run_years) if run_years is not None else year_range_set(
+        win["year_start"], win["year_end"]
+    )
+    is_pnl = sum(by_year[y] for y in by_year if y in tune)
+    oos_pnl = sum(by_year[y] for y in by_year if y in check)
     n_acc = max(n_accounts_by_year.values()) if n_accounts_by_year else 0
+    budget = float(BUDGET if per_budget is None else per_budget)
+    year_rows = _job_year_rows(trades, n_accounts_by_year, budget)
     return {
         "n_trades": n,
         "sum_pnl": round(sum(pnls), 2),
@@ -88,6 +207,12 @@ def stats_from_trades(
         "n_time": int(by_sig.get("time_force", 0)),
         "by_year": {str(y): round(by_year[y], 2) for y in sorted(by_year)},
         "n_accounts_by_year": {str(y): int(n_accounts_by_year[y]) for y in sorted(n_accounts_by_year)},
+        "per_budget": budget,
+        "windows": {
+            "all": _agg_window(year_rows, run),
+            "tune": _agg_window(year_rows, tune),
+            "check": _agg_window(year_rows, check),
+        },
     }
 
 
@@ -108,12 +233,13 @@ def _delta_stats(cell: dict[str, Any], base: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def parse_logs(log_paths: list[Path]) -> tuple[list[dict[str, Any]], dict[int, int], int, int]:
+def parse_logs(log_paths: list[Path]) -> tuple[list[dict[str, Any]], dict[int, int], int, int, float]:
     trades: list[dict[str, Any]] = []
     n_accounts: dict[int, int] = defaultdict(int)
     n_ok = 0
     n_fail = 0
     seen_acc: set[tuple[int, str]] = set()
+    per_budget: float | None = None
     for path in log_paths:
         try:
             _banner, raw = parse_local_bt_log(path)
@@ -121,6 +247,9 @@ def parse_logs(log_paths: list[Path]) -> tuple[list[dict[str, Any]], dict[int, i
             n_fail += 1
             continue
         n_ok += 1
+        bud = parse_trade_budget(path, default=0.0)
+        if per_budget is None and bud > 0:
+            per_budget = bud
         m = RE_LOG.match(path.name)
         stock = ""
         year = ""
@@ -141,7 +270,7 @@ def parse_logs(log_paths: list[Path]) -> tuple[list[dict[str, Any]], dict[int, i
             row["year"] = year
             row["ma"] = ma
             trades.append(row)
-    return trades, dict(n_accounts), n_ok, n_fail
+    return trades, dict(n_accounts), n_ok, n_fail, float(per_budget or BUDGET)
 
 
 def _list_logs(sample_dir: Path) -> list[Path]:
@@ -157,13 +286,26 @@ def _load_cell_meta(cell_dir: Path) -> dict[str, Any]:
     return {"id": cell_dir.name, "label": cell_dir.name, "kind": "other", "overrides": {}}
 
 
-def summarize_cell(cell_dir: Path) -> dict[str, Any]:
+def summarize_cell(
+    cell_dir: Path,
+    *,
+    tune_years: set[int] | None = None,
+    check_years: set[int] | None = None,
+    run_years: set[int] | None = None,
+) -> dict[str, Any]:
     meta = _load_cell_meta(cell_dir)
     samples: dict[str, Any] = {}
     for name in SAMPLES:
         logs = _list_logs(cell_dir / name)
-        trades, n_acc, n_ok, n_fail = parse_logs(logs)
-        st = stats_from_trades(trades, n_acc)
+        trades, n_acc, n_ok, n_fail, per_budget = parse_logs(logs)
+        st = stats_from_trades(
+            trades,
+            n_acc,
+            tune_years=tune_years,
+            check_years=check_years,
+            run_years=run_years,
+            per_budget=per_budget,
+        )
         st["n_logs_ok"] = n_ok
         st["n_logs_fail"] = n_fail
         samples[name] = st
@@ -200,13 +342,6 @@ def pick_recommend(cells: list[dict[str, Any]]) -> dict[str, Any]:
     def sample(cell: dict[str, Any], name: str) -> dict[str, Any]:
         return (cell.get("samples") or {}).get(name) or {}
 
-    def primary(cell: dict[str, Any]) -> tuple[dict[str, Any], str]:
-        w = sample(cell, "winner")
-        if int(w.get("n_logs_ok") or 0) > 0:
-            return w, "winner"
-        return sample(cell, "book"), "book"
-
-    bw, primary_name = primary(base)
     bb = sample(base, "book")
     passers: list[tuple[dict[str, Any], float, int]] = []
     notes: list[dict[str, Any]] = []
@@ -214,31 +349,19 @@ def pick_recommend(cells: list[dict[str, Any]]) -> dict[str, Any]:
     for cell in cells:
         if cell["id"] == "base":
             continue
-        w, _ = primary(cell)
         b = sample(cell, "book")
-        d_oos = float(w.get("oos_pnl") or 0) - float(bw.get("oos_pnl") or 0)
-        d_is = float(w.get("is_pnl") or 0) - float(bw.get("is_pnl") or 0)
-        has_book = (
-            primary_name == "winner"
-            and int(b.get("n_logs_ok") or 0) > 0
-            and int(bb.get("n_logs_ok") or 0) > 0
-        )
-        d_book = None
-        if has_book:
-            d_book = float(b.get("oos_pnl") or 0) - float(bb.get("oos_pnl") or 0)
+        d_oos = float(b.get("oos_pnl") or 0) - float(bb.get("oos_pnl") or 0)
+        d_is = float(b.get("is_pnl") or 0) - float(bb.get("is_pnl") or 0)
         fail = ""
         if _sign(d_oos) * _sign(d_is) < 0:
-            fail = "IS 与 OOS 不同向"
+            fail = "调参期与验收期不同向"
         elif d_oos <= 0:
-            fail = "OOS 未优于 base"
-        elif has_book and d_book is not None and _sign(d_oos) * _sign(d_book) < 0:
-            fail = "OOS 与跟踪池 4 只不同向"
+            fail = "验收期未优于现行"
         row = {
             "id": cell["id"],
             "kind": cell.get("kind"),
             "d_oos": round(d_oos, 2),
             "d_is": round(d_is, 2),
-            "d_book_oos": None if d_book is None else round(d_book, 2),
             "fail": fail or None,
         }
         notes.append(row)
@@ -258,7 +381,7 @@ def pick_recommend(cells: list[dict[str, Any]]) -> dict[str, Any]:
             "id": "base",
             "label": base.get("label") or "base",
             "kind": "base",
-            "reason": "OOS 与跟踪池未同向改善，维持现行",
+            "reason": "验收期未优于现行或与调参期不同向，维持现行",
             "candidates": notes,
             "by_kind": by_kind,
         }
@@ -272,7 +395,7 @@ def pick_recommend(cells: list[dict[str, Any]]) -> dict[str, Any]:
         "id": picked["id"],
         "label": picked.get("label") or picked["id"],
         "kind": picked.get("kind"),
-        "reason": "OOS 为主且与 IS、跟踪池同向；接近则少改结构",
+        "reason": "以验收期为主且与调参期同向；接近则少改结构",
         "candidates": notes,
         "by_kind": by_kind,
     }
@@ -293,10 +416,28 @@ def attach_deltas(cells: list[dict[str, Any]]) -> None:
         cell["delta_vs_base"] = deltas
 
 
+def _load_sweep_windows(root: Path) -> dict[str, int]:
+    for name in ("spec.json", "freeze.json"):
+        path = root / name
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if isinstance(data, dict):
+            return fill_year_windows(data)
+    return fill_year_windows(None)
+
+
 def summarize_sweep(sweep_dir: str | Path) -> dict[str, Any]:
     root = Path(sweep_dir)
     if not root.is_dir():
         raise FileNotFoundError("sweep dir not found: %s" % root)
+    win = _load_sweep_windows(root)
+    tune = year_range_set(win["tune_start"], win["tune_end"])
+    check = year_range_set(win["check_start"], win["check_end"])
+    run = year_range_set(win["year_start"], win["year_end"])
     cells: list[dict[str, Any]] = []
     for child in sorted(root.iterdir()):
         if not child.is_dir():
@@ -305,7 +446,11 @@ def summarize_sweep(sweep_dir: str | Path) -> dict[str, Any]:
             (child / s).is_dir() for s in SAMPLES
         ):
             continue
-        cells.append(summarize_cell(child))
+        cells.append(
+            summarize_cell(
+                child, tune_years=tune, check_years=check, run_years=run
+            )
+        )
     attach_deltas(cells)
     rec = pick_recommend(cells)
     spec = {}
@@ -323,6 +468,8 @@ def summarize_sweep(sweep_dir: str | Path) -> dict[str, Any]:
         "recommend": rec,
         "note": "MAE 反事实不得写入推荐；默认不改 config / 不 deploy",
     }
+    for key in YEAR_WINDOW_KEYS:
+        out[key] = int(win[key])
     out_p = root / "summary.json"
     out_p.write_text(
         json.dumps(_json_ready(out), ensure_ascii=False, indent=2),

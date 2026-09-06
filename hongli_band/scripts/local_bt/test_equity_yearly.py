@@ -4,6 +4,7 @@ import unittest
 from equity_yearly import (
     build_daily_equity,
     daily_equity_for_year,
+    year_perf_display_df,
     year_performance_table,
 )
 
@@ -86,6 +87,19 @@ class EquityYearlyTests(unittest.TestCase):
         self.assertTrue(y24.iloc[0]["date"] is None or (y24["date"].isna().iloc[0]))
         self.assertEqual(float(y24.iloc[0]["equity"]), 101000.0)
         self.assertEqual(float(y24.iloc[-1]["equity"]), 101200.0)
+
+    def test_year_perf_display_df_columns(self):
+        tbl = year_performance_table([_t("20240102", "20240105", 1000.0)], 100000.0)
+        display = year_perf_display_df(tbl)
+        self.assertEqual(
+            list(display.columns),
+            ["年份", "年化盈亏%", "当年盈亏", "最大回撤%", "开仓次数", "夏普", "期初权益", "期末权益"],
+        )
+        self.assertEqual(str(display.iloc[0]["年份"]), "2024")
+        self.assertEqual(float(display.iloc[0]["当年盈亏"]), 1000.0)
+        empty = year_perf_display_df(None)
+        self.assertTrue(empty.empty)
+        self.assertEqual(len(empty.columns), 8)
 
 
 if __name__ == "__main__":

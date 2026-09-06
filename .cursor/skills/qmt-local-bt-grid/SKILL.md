@@ -19,7 +19,7 @@ MAE 为何不可信、本轮数字：需要时再读 [reference-lessons.md](refe
 
 - 用户要确认 STOP_LOSS / TRAIL_TIERS / TIME_FORCE_*（或同类出场阈值）哪个更好
 - 用户说网格、扫参、最优参数、对照重跑、样本外选参
-- 已有基线 `local_bt` 报告（含每年均线 winner 名单）
+- 已有主题 `scripts/local_bt/` 与 config `BOOK_STOCKS`
 
 ## 不要用错
 
@@ -36,7 +36,7 @@ MAE 为何不可信、本轮数字：需要时再读 [reference-lessons.md](refe
 2. **必须含现行 `base`**。收紧 / 放宽分开标，不要混成一个「更好」。
 3. 关联常量不顺手改：动 TRAIL 起步不改 `SCALE_ARM` / `TIME_FORCE_MIN_RET`，除非格子里显式写了。
 4. `TIME_FORCE_BARS<=0` 关闭整条 time_force；`MIN_RET=0` 只关掉让路，不是关闭 time_force。
-5. **冻结**基线 winner 名单（stock × year × MA），其它格子用同一组。禁止每格重算 winner。
+5. **主样本=跟踪池 `BOOK_STOCKS` × spec 回测年**（均线/复权锁 config）。不要用 `local_bt_ma_compare.csv` 冻结 winner。跟踪池样本小，过拟合风险更高。
 6. 每格写入主题 `report/grid/<sweep>/<cell>/`，**不得覆盖** `report/front_ratio/` 等基线 log。
 7. 格子之间**串行**；格内可用现有 ProcessPool。
 8. 开跑后校验 init 指纹：`stop=` / `time_force_bars=`（扫 TRAIL 时还要 `trail_arm=`）与该格一致，不一致则停。
@@ -44,22 +44,21 @@ MAE 为何不可信、本轮数字：需要时再读 [reference-lessons.md](refe
 
 ## 选参
 
-相对 `base`：合计、利润因子、分年回撤；**OOS 为主**（主样本 2018–2022 IS / 2023–2026 OOS）；
-IS 与 OOS 同向；跟踪池 4 只同向。接近则少改结构。不追样本内尖峰。
-OOS 与 4 只一正一负则维持现行。
+相对 `base`：合计、利润因子、分年回撤；**以验收期为主**（默认 2023–2026，年段写在 spec：`tune_*` / `check_*`）。
+调参期与验收期同向。接近则少改结构。不追调参期尖峰。不同向或验收期未优于现行则维持现行。
 
-Agent 输出：Canvas（各格 Δ / OOS / 4 只）+ **一句推荐**。不要把 MAE 数字写进推荐。
+Agent 输出：Canvas（各格 Δ / 验收期）+ **一句推荐**。不要把 MAE 数字写进推荐。
 
 ## 检查清单
 
 ```
 进度:
 - [ ] 1. 命名格子 JSON（含 base，≤8，收紧/放宽分开）
-- [ ] 2. 基线 winner CSV 存在；冻结名单，不重算
+- [ ] 2. 主样本=BOOK_STOCKS；spec 含回测年 / 调参期 / 验收期
 - [ ] 3. 运行时 overrides（禁止改 config 扫参）
 - [ ] 4. 隔离 report/grid/<sweep>/；格间串行
 - [ ] 5. 探针 log 指纹与格子一致
-- [ ] 6. summarize → summary.json；OOS + 4 只选参
+- [ ] 6. summarize → summary.json；验收期 + 调参期同向选参
 - [ ] 7. Canvas + 一句推荐；默认不改 config / 不 deploy
 ```
 
@@ -69,7 +68,6 @@ Agent 输出：Canvas（各格 Δ / OOS / 4 只）+ **一句推荐**。不要把
 
 ```bash
 python hongli_band/scripts/local_bt/grid_run.py --spec .cursor/skills/qmt-local-bt-grid/examples/stop_loss.json
-python hongli_band/scripts/local_bt/grid_run.py --spec path/to/cells.json --book-only
 python hongli_band/scripts/local_bt/grid_run.py --spec path/to/cells.json --include-sma-ema
 python .cursor/skills/qmt-local-bt-grid/scripts/summarize.py --sweep-dir hongli_band/report/grid/<sweep>
 ```
@@ -79,10 +77,10 @@ python .cursor/skills/qmt-local-bt-grid/scripts/summarize.py --sweep-dir hongli_
 | 参数 | 含义 |
 | :--- | :--- |
 | `--spec` | 命名格子 JSON/YAML（须含 `id=base`） |
-| `--book-only` | 只跑跟踪池 4 只（冒烟） |
-| `--include-sma-ema` | 额外全 SMA / 全 EMA 对照（不参与冻结 winner） |
+| `--include-sma-ema` | 额外全 SMA / 全 EMA 对照 |
 | `--workers` | 格内进程数；格子之间始终串行 |
 | `--summarize-only` | 不重跑，只解析已有格子 log |
+| `--year-start` 等 | 覆盖 spec 回测年 / 调参期 / 验收期 |
 
 ## 格子 JSON
 
@@ -91,6 +89,12 @@ python .cursor/skills/qmt-local-bt-grid/scripts/summarize.py --sweep-dir hongli_
   "theme": "hongli_band",
   "sweep": "stop_loss_confirm",
   "compare_div": "front_ratio",
+  "year_start": 2018,
+  "year_end": 2026,
+  "tune_start": 2018,
+  "tune_end": 2022,
+  "check_start": 2023,
+  "check_end": 2026,
   "cells": [
     {"id": "base", "label": "现行 8%", "kind": "base", "overrides": {}},
     {"id": "sl06", "label": "止损 6%", "kind": "tighten", "overrides": {"STOP_LOSS": 0.06}},

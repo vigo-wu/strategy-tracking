@@ -90,22 +90,58 @@ def _max_dd_pct(eq: pd.Series) -> float | None:
     return round(val * 100.0, 4)
 
 
+def simple_returns(eq: pd.Series) -> pd.Series:
+    """权益序列 → 简单日收益（丢掉首个 NaN / 非有限值）。"""
+    vals = pd.to_numeric(eq, errors="coerce").dropna()
+    if vals.empty:
+        return pd.Series(dtype=float)
+    prev = vals.shift(1)
+    rets = (vals - prev) / prev.replace(0, np.nan)
+    return rets.replace([np.inf, -np.inf], np.nan).dropna()
+
+
+def sharpe_from_returns(rets: pd.Series | list | np.ndarray) -> float | None:
+    """mean/std × √252。不足 2 个收益或标准差为 0 则 None。"""
+    s = pd.to_numeric(pd.Series(rets), errors="coerce").dropna()
+    if len(s) < 2:
+        return None
+    std = float(s.std(ddof=1))
+    if std <= 1e-12 or not np.isfinite(std):
+        return None
+    mean = float(s.mean())
+    if not np.isfinite(mean):
+        return None
+    return round(mean / std * math.sqrt(252.0), 4)
+
+
 def _sharpe_daily(eq: pd.Series) -> float | None:
     vals = pd.to_numeric(eq, errors="coerce").dropna()
     if len(vals) < 3:
         return None
-    prev = vals.shift(1)
-    rets = (vals - prev) / prev.replace(0, np.nan)
-    rets = rets.replace([np.inf, -np.inf], np.nan).dropna()
-    if len(rets) < 2:
-        return None
-    std = float(rets.std(ddof=1))
-    if std <= 1e-12 or not np.isfinite(std):
-        return None
-    mean = float(rets.mean())
-    if not np.isfinite(mean):
-        return None
-    return round(mean / std * math.sqrt(252.0), 4)
+    return sharpe_from_returns(simple_returns(vals))
+
+
+def year_equity_path(
+    daily: pd.DataFrame | None,
+    year: str | int,
+    budget: float = 100000.0,
+) -> pd.Series:
+    """含期初点的该年权益路径（与 year_performance_table 夏普同一条）。"""
+    bud = float(budget)
+    if daily is None or daily.empty:
+        return pd.Series([bud], dtype=float)
+    df = daily.copy()
+    df["date"] = pd.to_datetime(df["date"])
+    y_int = int(year)
+    year_slice = df.loc[df["date"].dt.year == y_int]
+    prior = df.loc[df["date"].dt.year < y_int]
+    start_eq = float(prior["equity"].iloc[-1]) if not prior.empty else bud
+    if year_slice.empty:
+        return pd.Series([start_eq], dtype=float)
+    return pd.concat(
+        [pd.Series([start_eq], dtype=float), year_slice["equity"].reset_index(drop=True)],
+        ignore_index=True,
+    )
 
 
 def _years_touched(trades: list[dict] | None) -> list[str]:
@@ -166,30 +202,11 @@ def year_performance_table(
 
     daily = daily.copy()
     daily["date"] = pd.to_datetime(daily["date"])
-    equity_before = bud  # 样本起点前
     rows = []
     for y in years:
-        y_int = int(y)
-        mask = daily["date"].dt.year == y_int
-        year_slice = daily.loc[mask]
-        # 期初：该年首日之前最后权益；无则用累积前史
-        prior = daily.loc[daily["date"].dt.year < y_int]
-        if not prior.empty:
-            start_eq = float(prior["equity"].iloc[-1])
-        else:
-            start_eq = float(equity_before)
-
-        if year_slice.empty:
-            end_eq = start_eq
-            path = pd.Series([start_eq])
-        else:
-            end_eq = float(year_slice["equity"].iloc[-1])
-            # 路径含期初点，便于回撤/夏普覆盖跨年首跳
-            path = pd.concat(
-                [pd.Series([start_eq]), year_slice["equity"].reset_index(drop=True)],
-                ignore_index=True,
-            )
-
+        path = year_equity_path(daily, y, bud)
+        start_eq = float(path.iloc[0])
+        end_eq = float(path.iloc[-1])
         year_pnl = end_eq - start_eq
         if abs(start_eq) < 1e-12:
             ret_pct = None
@@ -207,7 +224,6 @@ def year_performance_table(
                 "sharpe": _sharpe_daily(path),
             }
         )
-        equity_before = end_eq
     return pd.DataFrame(rows, columns=cols)
 
 
@@ -238,3 +254,33 @@ def daily_equity_for_year(
     if year_slice.empty:
         return head
     return pd.concat([head, year_slice[cols]], ignore_index=True)
+
+
+YEAR_PERF_DISPLAY_COLUMNS = (
+    "年份",
+    "年化盈亏%",
+    "当年盈亏",
+    "最大回撤%",
+    "开仓次数",
+    "夏普",
+    "期初权益",
+    "期末权益",
+)
+
+
+def year_perf_display_df(tbl: pd.DataFrame | None) -> pd.DataFrame:
+    """分年绩效表中文列，与数据分析/批量结果一致。"""
+    if tbl is None or getattr(tbl, "empty", True):
+        return pd.DataFrame(columns=list(YEAR_PERF_DISPLAY_COLUMNS))
+    return pd.DataFrame(
+        {
+            "年份": tbl["year"].astype(str),
+            "年化盈亏%": tbl["year_ret_pct"],
+            "当年盈亏": tbl["year_pnl"],
+            "最大回撤%": tbl["max_dd_pct"],
+            "开仓次数": tbl["n_open"],
+            "夏普": tbl["sharpe"],
+            "期初权益": tbl["start_equity"],
+            "期末权益": tbl["end_equity"],
+        }
+    )

@@ -30,7 +30,13 @@ class UiCacheTest(unittest.TestCase):
         self.assertIn("analysis_book_rows", keys)
         self.assertIn("select_flt_top_n", keys)
         self.assertNotIn("analysis_book_editor", keys)
+        self.assertIn("grid_sweep", keys)
+        self.assertIn("grid_param_sel", keys)
+        self.assertNotIn("grid_cells_editor", keys)
+        self.assertNotIn("grid_param_editor", keys)
         self.assertTrue(is_editor_key("analysis_book_editor"))
+        self.assertTrue(is_editor_key("grid_cells_editor"))
+        self.assertTrue(is_editor_key("grid_param_editor"))
         self.assertTrue(is_editor_key("analysis_wf_editor_2021"))
         self.assertFalse(is_editor_key("analysis_wf_rows"))
 

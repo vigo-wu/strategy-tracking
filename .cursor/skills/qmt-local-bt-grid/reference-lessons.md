@@ -2,7 +2,9 @@
 
 固定买入路径的反事实（`stop_loss_mae.py` / `trail_tiers_mae.py` / `time_force_mae.py`）**不能**当作选参结论。本文件记下 hongli_band 本轮对照，Agent 需要解释「为什么必须实跑」时再读。
 
-口径：主样本 = 冻结的每年均线 winner（约 40 只 × 年）；预算 10 万/账户/年；IS=2018–2022，OOS=2023–2026。
+口径（当时）：主样本 = 冻结的每年均线 winner（约 40 只 × 年）；预算 10 万/账户/年；IS=2018–2022，OOS=2023–2026。
+
+**现行网格不再跑 winner 样本**，主样本是跟踪池 `BOOK_STOCKS`；调参期/验收期年段写在 spec 里。
 
 ## 收紧 vs 放宽
 
@@ -33,9 +35,9 @@ MAE：关掉整条规则（`TIME_FORCE_BARS<=0`）约 **+3.4 万**。
 
 ## 均线 winner
 
-每格若按该格自己的盈亏重选 SMA/EMA，会把「选均线」混进「选阈值」。网格必须冻结基线 `local_bt_ma_compare.csv` 的 winner 名单，其它格子同一组 stock/year/MA。
+每格若按该格自己的盈亏重选 SMA/EMA，会把「选均线」混进「选阈值」。当时用冻结 `local_bt_ma_compare.csv` 避免这件事。
 
-全 SMA / 全 EMA 只做对照，不参与冻结名单，也不单独当选参器。
+**现行网格已去掉 winner 冻结**，改跑跟踪池锁定均线。全 SMA / 全 EMA 只做对照，不单独当选参器。
 
 ## Agent 禁令
 

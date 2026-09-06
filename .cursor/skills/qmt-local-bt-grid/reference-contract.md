@@ -14,8 +14,8 @@
 3. **init 指纹**（写进同一份 log，供 runner 校验）
    - 必有：`stop=`、`time_force_bars=`（若策略有这两项）。
    - 扫阶梯止盈：`trail_arm=` = `TRAIL_TIERS` 档 1 的 `peak_lo`。
-4. **主样本 job 列表**：冻结的 `(stock, year, ma_type, csv, dividend_type)`。来源应是基线均线对照表，而不是当场重选 winner。
-5. **对照 job 列表**：跟踪池锁 config `BOOK_STOCKS` 的均线/复权。可选全 SMA / 全 EMA。
+4. **主样本 job 列表**：config `BOOK_STOCKS` × spec 回测年（均线/复权锁在跟踪池配置里）。
+5. **可选对照**：全 SMA / 全 EMA（`include_sma_ema`），不单独当选参器。
 
 ## 覆盖值形态
 
@@ -46,7 +46,7 @@ JSON 可序列化。元组在 JSON 里用数组；`null` = Python `None`。
 
 复用主题已有的 log 解析（hongli_band：`parse_local_bt_log`，认 `BUY filled` 的 `lots=` / `@close=`，不要用终端 `generate_report.parse_trades`）。
 
-每格、每个样本（`winner` / `book` / `sma` / `ema`）输出：合计盈亏、胜率、利润因子、IS、OOS、分年、出场结构、相对 `base` 的 Δ。
+每格、每个样本（`book` / `sma` / `ema`）输出：合计盈亏、胜率、利润因子、调参期、验收期、分年、出场结构、相对 `base` 的 Δ。年份窗口读该 sweep 的 `spec.json`。
 
 写出 `<theme>/report/grid/<sweep>/summary.json`。选参规则见 SKILL.md，不要在 summarize 里改 `config.py`。
 
@@ -54,6 +54,6 @@ JSON 可序列化。元组在 JSON 里用数组；`null` = Python `None`。
 
 1. `run.py`：`overrides` 注入 + 任意 `out_dir`。
 2. `batch_job.py`：payload `overrides` 透传。
-3. 一份冻结名单 CSV 或等价表。
+3. 跟踪池 `BOOK_STOCKS`（主样本）。
 4. 在主题 `scripts/local_bt/grid_run.py`（或共享 runner 的 `--theme`）里提供 job 列表。
 5. init 日志带指纹字段。
