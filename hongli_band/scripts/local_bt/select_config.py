@@ -170,7 +170,7 @@ def clamp_top_n(n: Any, *, fallback: int | None = None) -> int:
 
 ANALYSIS_SIDEBAR: dict[str, Any] = {
     "title": "数据分析",
-    "scan_caption": "每换仓段手工指定篮子（默认拷贝 config.BOOK_STOCKS），只跑持有期组合回放。",
+    "scan_caption": "每换仓段手工指定篮子（默认拷贝 config.BOOK_STOCKS），只跑持有期组合回放。年份来自行情覆盖，不必先跑批量。",
     "year_section": "数据区间（持有年）",
     "year_start_label": "数据起始年",
     "year_end_label": "数据结束年",

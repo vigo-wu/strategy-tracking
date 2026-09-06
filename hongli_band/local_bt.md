@@ -172,10 +172,10 @@ python hongli_band/scripts/local_bt/select_analysis.py \
 
 表单里的 **数据起始年 / 数据结束年** 就是评估持有年（含端点），**不再**因打分回看空出前几年。
 
-规则（实现见 `select_analysis.hold_years_for_range`）：
+规则（实现见 `select_analysis.hold_years_for_range` / `analyze.list_csv_years`）：
 
-1. 界面年份列表来自 `list_score_years`（只扫文件名）；与起止年求交得到持有年
-2. 无扫描年时（CLI 未给 report 分年文件）用日历年 `data_start`–`data_end`
+1. 界面年份列表来自日线覆盖（`resolve_ohlc_csv_dir`：优先 `none/`，没有再回落逻辑复权目录），**不是**批量 `report/` 文件名
+2. 选中起止年后按日历年展开持有年（含端点）；无 CSV 时下拉兜底 2018–今年
 3. `rebalance_years` 把持有年切成换仓段；段首 `select_year` 共用一张篮子表
 
 **示例**（持有 2020–2026，换仓 1 年）：每年一段，每段各自填标的（默认都是当前 `BOOK_STOCKS`）。换仓 2 年则 2020–2021 一段、2022–2023 一段，以此类推。
@@ -191,7 +191,7 @@ python hongli_band/scripts/local_bt/select_analysis.py \
 
 持有期回放（组合）
   段内每个持有年 Hy：该段篮子 run_book_backtest(Hy)
-  → portfolio_pnl；无全量 scan 时 naive_pnl 为空
+  → portfolio_pnl；naive_pnl 列保留但恒为空
 ```
 
 不跑全池打分预计算，也不调用 `score_universe`。
@@ -204,7 +204,7 @@ python hongli_band/scripts/local_bt/select_analysis.py \
 **持有期回放**
 
 - 产物：`report/<type>/local_bt_book_hold_{YYYY}_p{段号}_k{hash8}_操作明细.csv`
-- `naive_pnl`：仅当传入了分年 scan KPI 时，才用单票明细 `sum_pnl` 之和作对照；界面默认不 scan，该列为空。
+- `naive_pnl`：列保留、界面/默认路径**不计算**（恒空）；组合结果看 `portfolio_pnl`
 - **日度仓位**（组合明细面板）：由成交轮次推导，持仓区间 `[买入日, 卖出日)`；槽位=当日重叠 lot 数；资金占用率=`Σ成本/当前权益`（当前权益=预算+已实现盈亏阶梯，非市值）。主图上下拆：上图成本堆叠+占用率，下图分色槽位柱，共用日期轴框选；副图为按票持仓天数条形与槽位占用直方。主图框选日期（或手改日期窗）同步重算副图/KPI；点条形或下拉可高亮该票堆叠。
 - **按年分析**（组合明细面板）：按自然年汇总期初/期末权益、当年盈亏、年化盈亏%（相对期初简单收益）、最大回撤%、开仓次数、夏普；权益为预算+已实现盈亏日度阶梯。表下用下拉选择年份，页内展示该年按日权益曲线。
 
@@ -212,7 +212,7 @@ python hongli_band/scripts/local_bt/select_analysis.py \
 
 | 分组 | 参数 | 含义 |
 | :--- | :--- | :--- |
-| 数据区间 | 数据起始/结束年 | 持有自然年（含端点）；默认扫描到的最早/最晚年 |
+| 数据区间 | 数据起始/结束年 | 持有自然年（含端点）；默认行情覆盖的最早/最晚年 |
 | Walk-forward | 换仓周期 `rebalance_years` | 几个持有年共用一篮子 |
 | | 各段标的表 | 默认拷贝 `BOOK_STOCKS`；「从 config 重载各段」恢复；每段「导入」弹窗可粘贴 config 字典（含 `# 名称` 注释） |
 | 固定标的 | 标的表 | 默认 `BOOK_STOCKS`；「从 config 重载」恢复；「导入」弹窗粘贴单篮子字典（按年 dict 请用 Walk-forward） |
@@ -236,7 +236,7 @@ python hongli_band/scripts/local_bt/select_analysis.py \
 | `picks` | 该段篮子（顿号分隔） |
 | `pick_details` | 篮子明细：`stock` / `ma_type` / `dividend_type`（界面「查看标的」弹窗；CSV 中为 JSON 字符串） |
 | `portfolio_pnl` | 该年篮子 **组合回放** 盈亏 |
-| `naive_pnl` | 该年篮子 **单票明细相加**（对照；无 scan 时为空） |
+| `naive_pnl` | 列保留、不计算（恒空）；组合看 `portfolio_pnl` |
 | `status` | `ok` / `无推荐` / `回放失败:…` |
 | `params_json` | 当次分析完整参数快照（含 `period_baskets`） |
 
@@ -271,7 +271,7 @@ python hongli_band/scripts/local_bt/select_analysis.py \
 
 | 参数 | 说明 |
 | :--- | :--- |
-| `--data-start` / `--data-end` | 持有自然年（含端点） |
+| `--data-start` / `--data-end` | 持有自然年（含端点）；省略则用行情覆盖首末年 |
 | `--eval-start` / `--eval-end` | 同上别名 |
 | `--rebalance-years` | 换仓周期，默认 1 |
 | `--picks-json` | 按年篮子或单篮子（含注释）；省略则全段 BOOK_STOCKS |
@@ -280,7 +280,7 @@ python hongli_band/scripts/local_bt/select_analysis.py \
 
 #### 前置依赖
 
-1. **`tools/csv/<type>/`**：组合回放现场读日线。
+1. **`tools/csv/<type>/`**：组合回放现场读日线。不必先跑分年批量回测。
 2. 修改过组合回放相关代码（`book_backtest.py`、`run.py` 的 OHLCV 路由、`hlband/universe.py` 等）后，应对相关年份勾选 **强制重跑回放**，避免命中修复前的缓存。
 
 #### 与「选股方案 / 批量回测」的区别
@@ -290,7 +290,7 @@ python hongli_band/scripts/local_bt/select_analysis.py \
 | 目的 | 静态窗口出 BOOK 草稿 | 滚动持有手工篮子 | 单票或多票独立 KPI |
 | 打分 KPI | 单票分年明细 | 无（手工选股） | 单票明细 |
 | 持有/盈亏 | 无 | 各段篮子组合回放 | 每票独立预算 |
-| 起止年 | 选定打分窗口 | **持有年**（含端点） | 用户指定 walk 区间 |
+| 起止年 | 选定打分窗口 | **持有年**（行情覆盖，不必先批量） | 用户指定 walk 区间 |
 | 产物 | `local_bt_stock_select.csv` | `local_bt_select_analysis.csv` | 各票分年明细 |
 
 
@@ -375,7 +375,7 @@ python -m unittest test_market_csv test_select_config test_select_analysis test_
 - **扁平旧 `report/` 与分目录混用。** 出现类型子目录后，选股不再读根目录散落的明细。
 - **数据分析的起止年会空出前几年。** 持有年就是起止年本身，不再因打分回看跳过。
 - **分析后不勾强制重跑却换了回放逻辑。** 空明细会自动重跑，但旧的有效缓存仍可能命中；改代码后务必强制重跑相关年份。
-- **把 `naive_pnl` 当组合成绩。** 它是单票明细相加对照（界面默认不计算）；组合结果看 `portfolio_pnl`。
+- **把 `naive_pnl` 当组合成绩。** 该列保留但恒空，勿当组合成绩；组合结果看 `portfolio_pnl`。
 
 ## 相关文档
 

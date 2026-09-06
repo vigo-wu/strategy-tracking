@@ -1,12 +1,12 @@
 # coding: utf-8
-"""数据分析加载加速：hold_metrics 开关 + list_score_years。"""
+"""数据分析加载加速：hold_metrics 开关 + list_score_years / list_csv_years。"""
 from __future__ import annotations
 
 import tempfile
 import unittest
 from pathlib import Path
 
-from analyze import analyze_detail
+from analyze import analyze_detail, list_csv_years, years_from_daily_metas
 from stock_select import list_score_years
 from test_terminal_rounds import HEADER, _write_detail
 
@@ -70,6 +70,46 @@ class ListScoreYearsTests(unittest.TestCase):
             )
             years = list_score_years(root)
             self.assertEqual(years, ("2019", "2020", "2021", "2022"))
+
+
+def _write_daily_csv(folder: Path, stock: str, start: str, end: str) -> None:
+    folder.mkdir(parents=True, exist_ok=True)
+    code = stock.replace(".", "_")
+    path = folder / ("%s_1d_%s_%s.csv" % (code, start, end))
+    path.write_text(
+        "stock,period,datetime,open,high,low,close,volume,amount\n"
+        "%s,1d,%s,3.5,4.0,3.4,3.59,100,100\n"
+        "%s,1d,%s,3.7,3.9,3.6,3.80,100,100\n" % (stock, start, stock, end),
+        encoding="utf-8",
+    )
+
+
+class ListCsvYearsTests(unittest.TestCase):
+    def test_years_from_daily_metas_empty(self):
+        self.assertEqual(years_from_daily_metas(None), ())
+        self.assertEqual(years_from_daily_metas([]), ())
+
+    def test_years_from_daily_metas_union(self):
+        metas = [
+            {"start": "20200102", "end": "20210601"},
+            {"start": "20190101", "end": "20201231"},
+        ]
+        self.assertEqual(years_from_daily_metas(metas), ("2019", "2020", "2021"))
+
+    def test_list_csv_years_from_none_dir(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _write_daily_csv(root / "none", "600350.SH", "20200102", "20221231")
+            years = list_csv_years(root)
+            self.assertEqual(years[0], "2020")
+            self.assertEqual(years[-1], "2022")
+
+    def test_list_csv_years_falls_back_to_front_ratio(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _write_daily_csv(root / "front_ratio", "600350.SH", "20180102", "20191231")
+            years = list_csv_years(root)
+            self.assertEqual(years, ("2018", "2019"))
 
 
 if __name__ == "__main__":

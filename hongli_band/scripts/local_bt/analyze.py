@@ -1187,6 +1187,27 @@ def union_date_range(metas: list[dict[str, Any]]) -> tuple[str, str]:
     return min(starts), max(ends)
 
 
+def years_from_daily_metas(metas: list[dict[str, Any]] | None) -> tuple[str, ...]:
+    """日线 meta 并集覆盖的自然年（含端点年）。"""
+    if not metas:
+        return ()
+    try:
+        start, end = union_date_range(list(metas))
+    except ValueError:
+        return ()
+    return tuple(y for y, _ys, _ye in iter_year_windows(start, end))
+
+
+def list_csv_years(
+    csv_root: str | Path | None = None,
+    dividend_type: Any = "",
+) -> tuple[str, ...]:
+    """行情覆盖年：与 resolve_ohlc_csv_dir 同一目录回落（优先 none，再逻辑复权目录）。"""
+    root = Path(csv_root) if csv_root else DEFAULT_CSV_ROOT
+    data_dir = resolve_ohlc_csv_dir(root, dividend_type or DEFAULT_DIVIDEND_TYPE)
+    return years_from_daily_metas(daily_csvs_by_stock(data_dir))
+
+
 def iter_year_windows(start: str, end: str) -> list[tuple[str, str, str]]:
     """闭区间 [start, end] 按自然年切开。返回 [(year, y_start, y_end), ...]。"""
     s = compact_day(start)

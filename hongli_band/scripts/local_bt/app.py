@@ -62,6 +62,7 @@ from analyze import (  # noqa: E402
     peek_daily_csv_meta,
     prepare_detail_raw_display,
     resolve_chart_ma_kind,
+    resolve_ohlc_csv_dir,
     resolve_typed_dir,
     stock_from_detail_path,
     stock_matches_filter,
@@ -70,6 +71,7 @@ from analyze import (  # noqa: E402
     unique_dividend_types,
     union_date_range,
     uses_pit_front,
+    years_from_daily_metas,
     ymd_to_date,
 )
 from display_df import (  # noqa: E402
@@ -136,7 +138,6 @@ from stock_select import (  # noqa: E402
     format_book_snippet,
     glob_fingerprint,
     infer_score_years,
-    list_score_years,
     ma_suggest_label,
     report_fingerprint,
     scan_reports,
@@ -179,6 +180,15 @@ def _cached_daily_metas(csv_dir: str, fingerprint: tuple) -> list[dict]:
 def _cached_select_scan(report_dir: str, csv_dir: str, fp_report: tuple, fp_csv: tuple) -> dict:
     _ = fp_report, fp_csv
     return scan_reports(report_dir, csv_dir)
+
+
+def _fallback_calendar_years() -> tuple[str, ...]:
+    return tuple(str(y) for y in range(2018, date.today().year + 1))
+
+
+def _analysis_csv_years() -> tuple[str, ...]:
+    csv_dir = str(resolve_ohlc_csv_dir(DEFAULT_CSV_ROOT, DEFAULT_DIVIDEND_TYPE))
+    return years_from_daily_metas(_cached_daily_metas(csv_dir, _daily_dir_fingerprint(csv_dir)))
 
 
 def _fmt_ymd(d: date) -> str:
@@ -1132,11 +1142,6 @@ def _glob_hold_detail(out_dir: Path, year: str, period_i: int) -> Path | None:
     return matches[0] if matches else None
 
 
-def _glob_score_detail(out_dir: Path, year: str) -> Path | None:
-    matches = sorted(out_dir.glob("local_bt_book_score_%s_u*_操作明细.csv" % (year)))
-    return matches[0] if matches else None
-
-
 def _resolve_hold_detail(row: dict[str, Any], out_dir: Path) -> Path | None:
     raw = str(row.get("hold_detail_path") or "").strip()
     if raw:
@@ -1569,7 +1574,6 @@ def _render_analysis_trade_records(result: dict[str, Any], params: dict[str, Any
     book = dict(params.get("book_params") or load_book_defaults())
     budget = float(book.get("trade_budget") or book.get("TRADE_BUDGET") or 100000.0)
     out_dir = Path(str(result.get("report_dir") or resolve_typed_dir(DEFAULT_REPORT_ROOT, DEFAULT_DIVIDEND_TYPE)))
-    score_paths = dict(result.get("score_detail_paths") or {})
     hold_opts: list[dict[str, Any]] = []
     for row in year_rows:
         if row.get("status") != "ok":
@@ -1578,56 +1582,29 @@ def _render_analysis_trade_records(result: dict[str, Any], params: dict[str, Any
         if path is None:
             continue
         hold_opts.append({**row, "_detail_path": path})
-    score_years = set(str(y) for y in score_paths.keys())
-    for p in out_dir.glob("local_bt_book_score_*_操作明细.csv"):
-        parts = p.stem.split("_")
-        if len(parts) >= 5 and str(parts[4]).isdigit():
-            score_years.add(str(parts[4]))
-    score_years_sorted = sorted(score_years)
-    if not hold_opts and not score_years_sorted:
+    if not hold_opts:
         return
     st.subheader("回放操作记录")
-    kinds = []
-    if hold_opts:
-        kinds.append("持有期回放")
-    if score_years_sorted:
-        kinds.append("打分预计算")
-    if not kinds:
-        st.info("暂无可用操作明细。")
-        return
-    kind = st.radio("回放类型", kinds, horizontal=True, key="analysis_trade_kind")
-    if kind == "持有期回放":
-        labels = []
-        for row in hold_opts:
-            hy = str(row.get("year") or "")
-            picks = str(row.get("picks") or "")
-            pnl = row.get("portfolio_pnl")
-            pnl_s = "-" if pnl is None else "%.0f" % float(pnl)
-            labels.append("%s · 盈亏 %s · %s" % (hy, pnl_s, picks or "（空）"))
-        idx = st.selectbox("评估年", range(len(hold_opts)), format_func=lambda i: labels[i], key="analysis_hold_year")
-        row = hold_opts[int(idx)]
-        cap = "持有 %s · 段 %s · 选股年 %s" % (
-            row.get("year"),
-            row.get("period_i"),
-            row.get("select_year"),
+    labels = []
+    for row in hold_opts:
+        hy = str(row.get("year") or "")
+        picks = str(row.get("picks") or "")
+        pnl = row.get("portfolio_pnl")
+        pnl_s = "-" if pnl is None else "%.0f" % float(pnl)
+        labels.append("%s · 盈亏 %s · %s" % (hy, pnl_s, picks or "（空）"))
+    idx = st.selectbox("评估年", range(len(hold_opts)), format_func=lambda i: labels[i], key="analysis_hold_year")
+    row = hold_opts[int(idx)]
+    cap = "持有 %s · 段 %s · 选股年 %s" % (
+        row.get("year"),
+        row.get("period_i"),
+        row.get("select_year"),
+    )
+    if row.get("wallet_start") is not None and row.get("wallet_end") is not None:
+        cap += " · 权益 %.0f→%.0f" % (
+            float(row.get("wallet_start") or 0),
+            float(row.get("wallet_end") or 0),
         )
-        if row.get("wallet_start") is not None and row.get("wallet_end") is not None:
-            cap += " · 权益 %.0f→%.0f" % (
-                float(row.get("wallet_start") or 0),
-                float(row.get("wallet_end") or 0),
-            )
-        _render_book_detail_panel(Path(row["_detail_path"]), budget, caption=cap)
-    else:
-        if not score_years_sorted:
-            st.info("无打分预计算明细。")
-            return
-        sy = st.selectbox("打分自然年", score_years_sorted, key="analysis_score_year")
-        sp = score_paths.get(str(sy))
-        detail = Path(sp) if sp else _glob_score_detail(out_dir, str(sy))
-        if detail is None or not detail.is_file():
-            st.warning("未找到 %s 年打分预计算明细。" % sy)
-            return
-        _render_book_detail_panel(detail, budget, caption="打分预计算 %s（全打分池）" % sy)
+    _render_book_detail_panel(Path(row["_detail_path"]), budget, caption=cap)
 
 
 def _render_ma_compare_panel(
@@ -2770,7 +2747,7 @@ def _collect_analysis_form(avail: tuple[str, ...], defaults: dict[str, Any]) -> 
                 key="analysis_form_rebalance",
             )
         )
-        hold_years = hold_years_for_range(str(start), str(end), tuple(str(y) for y in avail))
+        hold_years = hold_years_for_range(str(start), str(end))
         periods = iter_rebalance_periods(hold_years, rebalance)
         st.caption(
             str(cfg["year_caption"])
@@ -2898,7 +2875,7 @@ def _collect_analysis_form(avail: tuple[str, ...], defaults: dict[str, Any]) -> 
     params["data_start"] = str(start)
     params["data_end"] = str(end)
     params["data_years"] = hold_years if analysis_type != "固定标的" else hold_years_for_range(
-        str(start), str(end), tuple(str(y) for y in avail)
+        str(start), str(end)
     )
     params["eval_years"] = params["data_years"]
     if submitted and analysis_type == "Walk-forward":
@@ -3075,10 +3052,13 @@ def _render_analysis_results(result: dict[str, Any], params: dict[str, Any]) -> 
 def _render_analysis_mode(scanned: dict | None) -> None:
     del scanned
     cfg = ANALYSIS_SIDEBAR
-    avail = list_score_years(str(DEFAULT_REPORT_ROOT)) or tuple(SCORE_YEARS)
-    if not avail:
-        avail = tuple(str(y) for y in range(2018, 2027))
-        st.caption("未扫到分年报告文件名，年份列表使用 2018–2026 兜底（固定标的仍可读 CSV）。")
+    csv_years = _analysis_csv_years()
+    if csv_years:
+        avail = csv_years
+        st.caption("年份来自行情覆盖，不必先跑批量。")
+    else:
+        avail = _fallback_calendar_years()
+        st.caption("未扫到日线 CSV，年份列表使用 2018–%s 兜底。" % date.today().year)
     defaults = dict(st.session_state.get(str(cfg["params_key"])) or {})
     defaults.setdefault("rebalance_years", 1)
     defaults.setdefault("compound_backtest", True)
@@ -3125,7 +3105,6 @@ def _render_analysis_mode(scanned: dict | None) -> None:
                             pass
 
                     result = run_walk_forward(
-                        {"stocks": {}},
                         data_start=str(params.get("data_start") or ""),
                         data_end=str(params.get("data_end") or ""),
                         eval_years=tuple(params.get("eval_years") or ()),

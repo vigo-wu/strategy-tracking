@@ -4,12 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import pickle
-import subprocess
 import sys
-import tempfile
-import time
-import uuid
 from pathlib import Path
 from typing import Any, Callable
 
@@ -21,8 +16,12 @@ HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
-from analyze import DEFAULT_DIVIDEND_TYPE, DEFAULT_REPORT_ROOT, resolve_typed_dir  # noqa: E402
-from batch_job import run_score_year  # noqa: E402
+from analyze import (  # noqa: E402
+    DEFAULT_DIVIDEND_TYPE,
+    DEFAULT_REPORT_ROOT,
+    list_csv_years,
+    resolve_typed_dir,
+)
 from book_backtest import (  # noqa: E402
     analyze_book_detail,
     book_log_name,
@@ -32,23 +31,13 @@ from book_backtest import (  # noqa: E402
 )
 from compound_wallet import parse_wallet_from_log  # noqa: E402
 from select_config import (  # noqa: E402
-    DEFAULT_FILTERS,
-    clamp_top_n,
     coerce_book_stocks_dict,
     is_year_keyed_baskets,
     load_book_defaults,
     load_book_stocks_full,
     parse_book_stocks_text,
 )
-from stock_select import (  # noqa: E402
-    _apply_year_window,
-    infer_score_years,
-    list_score_years,
-    score_universe,
-)
 from trades_csv import trades_csv_path  # noqa: E402
-
-MA_TYPES = ("SMA", "EMA")
 
 
 def pick_details_from_basket(
@@ -72,57 +61,6 @@ def pick_details_from_basket(
             row["score"] = score_map[key]
         out.append(row)
     return out
-
-
-def picks_from_scored(
-    scored: dict[str, Any] | None,
-    top_k: int,
-) -> tuple[list[dict[str, Any]], str]:
-    """Walk-forward 选股：硬过滤通过者优先，不足 top_k 时按总分从其余补足。
-
-    返回 (picks, note)。note 非空表示发生了补足或仍不足。
-    """
-    k = clamp_top_n(top_k, fallback=3)
-    df = None
-    if scored:
-        rec = scored.get("recommend")
-        df = scored.get("df")
-        if df is None or (hasattr(df, "empty") and df.empty):
-            df = rec
-    if df is None or (hasattr(df, "empty") and df.empty):
-        return [], ""
-    picks: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    n_passed = 0
-    for _, r in df.iterrows():
-        if len(picks) >= k:
-            break
-        stock = str(r.get("stock") or "").strip().upper()
-        if not stock or stock in seen:
-            continue
-        ma = str(r.get("ma_type_suggest") or r.get("ma_type") or "").upper()
-        if ma not in MA_TYPES:
-            ma = "EMA"
-        div = str(r.get("div_type_suggest") or r.get("div_type") or DEFAULT_DIVIDEND_TYPE).lower()
-        if not div:
-            div = DEFAULT_DIVIDEND_TYPE
-        seen.add(stock)
-        if bool(r.get("passed")):
-            n_passed += 1
-        picks.append(
-            {
-                "stock": stock,
-                "score": r.get("score"),
-                "ma_type": ma,
-                "div_type": div,
-            }
-        )
-    note = ""
-    if len(picks) < k:
-        note = "硬过滤后可交易不足 %s 只，仅选出 %s 只" % (k, len(picks))
-    elif n_passed < k:
-        note = "硬过滤仅 %s 只过线，已按分数补足至 %s 只" % (n_passed, k)
-    return picks, note
 
 
 def iter_rebalance_periods(
@@ -159,7 +97,7 @@ def hold_years_for_range(
     data_end: str,
     available: tuple[str, ...] | None = None,
 ) -> tuple[str, ...]:
-    """评估/持有年：有扫描年则与区间求交；否则用日历年 data_start–data_end。"""
+    """评估/持有年：有 available 则与区间求交；否则用日历年 data_start–data_end。分析 UI 不传第三参。"""
     ds, de = str(data_start or "").strip(), str(data_end or "").strip()
     if ds and de and de < ds:
         ds, de = de, ds
@@ -238,98 +176,6 @@ def load_period_baskets_json(path: str | Path) -> dict[str, Any]:
     return periods
 
 
-def score_years_for_period(
-    select_year: str,
-    lookback_n: int,
-    year_pool: tuple[str, ...],
-) -> tuple[str, ...]:
-    """select_year 之前、且在 year_pool 内的最近 lookback_n 个自然年。"""
-    y0 = str(select_year)
-    n = max(1, int(lookback_n or 1))
-    prior = tuple(str(y) for y in year_pool if str(y).isdigit() and str(y) < y0)
-    if len(prior) < n:
-        return ()
-    return prior[-n:]
-
-
-def data_and_eval_years(
-    data_start: str,
-    data_end: str,
-    lookback_n: int,
-    available: tuple[str, ...],
-) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """起止年为数据/KPI 年；首评年 = 数据区间内已有 lookback_n 个 prior 的最早年。"""
-    ds, de = str(data_start or "").strip(), str(data_end or "").strip()
-    if ds and de and de < ds:
-        ds, de = de, ds
-    data_years = tuple(str(y) for y in available if str(y).isdigit() and ds <= str(y) <= de)
-    n = max(1, int(lookback_n or 1))
-    eval_years = tuple(
-        y
-        for y in data_years
-        if sum(1 for d in data_years if d < y) >= n
-    )
-    return data_years, eval_years
-
-
-def collect_score_years(
-    periods: list[dict[str, Any]],
-    lookback_n: int,
-    year_pool: tuple[str, ...],
-) -> tuple[str, ...]:
-    found: set[str] = set()
-    for p in periods:
-        sy = score_years_for_period(str(p["select_year"]), lookback_n, year_pool)
-        found.update(sy)
-    return tuple(sorted(found))
-
-
-def build_score_pool(
-    scanned: dict[str, Any],
-    *,
-    pool_mode: str = "scanned",
-    filters: dict[str, Any] | None = None,
-) -> dict[str, dict[str, str]]:
-    stocks: dict[str, Any] = dict(scanned.get("stocks") or {})
-    avail = infer_score_years(stocks)
-    if not avail:
-        return {}
-    resolved: dict[str, dict[str, str]] = {}
-    for stock, rec in stocks.items():
-        w = _apply_year_window(rec, avail)
-        ma = str(w.get("ma_type_suggest") or "").upper()
-        div = str(w.get("div_type_suggest") or DEFAULT_DIVIDEND_TYPE).lower()
-        if ma not in MA_TYPES:
-            continue
-        resolved[str(stock).upper()] = {"ma_type": ma, "dividend_type": div}
-
-    mode = str(pool_mode or "scanned").strip().lower()
-    if mode != "passed_prefilter" or not resolved:
-        return resolved
-
-    flt = dict(DEFAULT_FILTERS)
-    if filters:
-        flt.update(filters)
-    flt["min_n_buy"] = max(0, int(flt.get("min_n_buy") or 0) // 2)
-    flt["min_years_traded_ratio"] = max(
-        0.0, float(flt.get("min_years_traded_ratio") or 0.0) - 0.10
-    )
-    sub = {k: v for k, v in stocks.items() if k in resolved}
-    if not sub:
-        return resolved
-    scored = score_universe(
-        {**scanned, "stocks": sub},
-        filters=flt,
-        score_years=avail,
-        kpi_source="single",
-    )
-    passed = scored.get("passed")
-    if passed is None or passed.empty:
-        return resolved
-    keep = set(passed["stock"].astype(str).tolist())
-    return {k: v for k, v in resolved.items() if k in keep}
-
-
 def _book_overrides(book_params: dict[str, Any]) -> dict[str, Any]:
     bp = dict(book_params or load_book_defaults())
     return {
@@ -366,321 +212,7 @@ def _emit_wf_progress(
     )
 
 
-def _score_trades_path(payload: dict[str, Any]) -> Path:
-    out_dir = Path(payload["out_dir"])
-    log_name = book_log_name(kind="score", year=str(payload["year"]), tag=str(payload["tag"]))
-    return out_dir / log_name.replace(".txt", "_操作明细.csv")
-
-
-def _score_cache_likely(payload: dict[str, Any]) -> bool:
-    return _score_trades_path(payload).is_file() and not bool(payload.get("force_rerun"))
-
-
-def _run_score_year_job(payload: dict[str, Any]) -> dict[str, Any]:
-    """串行路径 / 单测入口；并行必须走 batch_job.run_score_year。"""
-    return run_score_year(payload)
-
-
-def _score_parallel_workers(requested: int, n_jobs: int, n_pool: int = 0) -> int:
-    """按用户填写的进程数并行；0/1=顺序。n_pool 仅兼容旧调用。"""
-    del n_pool
-    w = max(0, int(requested or 0))
-    if w <= 1 or int(n_jobs or 0) <= 1:
-        return 1
-    return max(1, min(w, int(n_jobs)))
-
-
-def _run_score_jobs_subprocess(
-    jobs: list[dict[str, Any]],
-    *,
-    n_workers: int,
-    n_pool: int,
-    get_done: Callable[[], int],
-    total: int,
-    on_progress: ProgressCb,
-    finish_row: Callable[[dict[str, Any]], None],
-) -> list[dict[str, Any]]:
-    """独立 python 子进程跑打分年，避开 Streamlit + ProcessPool 的 ScriptRunContext 卡死。"""
-    results: list[dict[str, Any]] = []
-    queue = list(jobs)
-    active: list[dict[str, Any]] = []
-    t0 = time.perf_counter()
-    work = Path(tempfile.mkdtemp(prefix="hlband_score_"))
-    script = str((HERE / "batch_job.py").resolve())
-
-    def _spawn(job: dict[str, Any]) -> dict[str, Any]:
-        tok = uuid.uuid4().hex
-        inp = work / ("in_%s.pkl" % tok)
-        outp = work / ("out_%s.pkl" % tok)
-        inp.write_bytes(pickle.dumps(job, protocol=pickle.HIGHEST_PROTOCOL))
-        creationflags = 0
-        if sys.platform == "win32":
-            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        proc = subprocess.Popen(
-            [sys.executable, script, "--score-year", str(inp), str(outp)],
-            cwd=str(HERE),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            creationflags=creationflags,
-        )
-        return {
-            "year": str(job["year"]),
-            "proc": proc,
-            "inp": inp,
-            "outp": outp,
-        }
-
-    def _collect(slot: dict[str, Any]) -> dict[str, Any]:
-        proc: subprocess.Popen = slot["proc"]
-        outp: Path = slot["outp"]
-        year = str(slot["year"])
-        stdout_b, stderr_b = proc.communicate()
-        try:
-            if outp.is_file():
-                row = pickle.loads(outp.read_bytes())
-                if isinstance(row, dict):
-                    return row
-        except Exception as e:
-            return {"year": year, "error": "读结果失败: %s" % e, "per_stock": {}}
-        err = (stderr_b or b"").decode("utf-8", errors="replace").strip()
-        out = (stdout_b or b"").decode("utf-8", errors="replace").strip()
-        tip = err or out or ("exit=%s" % proc.returncode)
-        return {"year": year, "error": tip[:500], "per_stock": {}}
-
-    _emit_wf_progress(
-        on_progress,
-        phase="score",
-        done=get_done(),
-        total=total,
-        year="",
-        action="run",
-        label="打分预计算 %s/%s · 子进程×%s · 池 %s 只 · 首年约数分钟"
-        % (get_done(), total, n_workers, n_pool),
-        extra={"pool_n": n_pool, "parallel": n_workers},
-    )
-    try:
-        while queue or active:
-            while queue and len(active) < n_workers:
-                job = queue.pop(0)
-                active.append(_spawn(job))
-                _emit_wf_progress(
-                    on_progress,
-                    phase="score",
-                    done=get_done(),
-                    total=total,
-                    year=str(job["year"]),
-                    action="run",
-                    label="打分预计算 %s/%s · 启动 %s · 在跑 %s · 池 %s 只"
-                    % (
-                        get_done(),
-                        total,
-                        job["year"],
-                        "、".join(str(s["year"]) for s in active),
-                        n_pool,
-                    ),
-                    extra={"pool_n": n_pool, "running": [str(s["year"]) for s in active]},
-                )
-            alive: list[dict[str, Any]] = []
-            finished_any = False
-            for slot in active:
-                rc = slot["proc"].poll()
-                if rc is None:
-                    alive.append(slot)
-                    continue
-                finished_any = True
-                row = _collect(slot)
-                try:
-                    slot["inp"].unlink(missing_ok=True)
-                    slot["outp"].unlink(missing_ok=True)
-                except Exception:
-                    pass
-                results.append(row)
-                finish_row(row)
-            active = alive
-            if not finished_any:
-                elapsed = int(time.perf_counter() - t0)
-                running = "、".join(str(s["year"]) for s in active) or "-"
-                _emit_wf_progress(
-                    on_progress,
-                    phase="score",
-                    done=get_done(),
-                    total=total,
-                    year="",
-                    action="run",
-                    label="打分预计算 %s/%s · 子进程×%s 仍在跑 %s · 已等待 %ss · 池 %s 只"
-                    % (get_done(), total, n_workers, running, elapsed, n_pool),
-                    extra={
-                        "pool_n": n_pool,
-                        "parallel": n_workers,
-                        "elapsed_s": elapsed,
-                        "running": [str(s["year"]) for s in active],
-                    },
-                )
-                time.sleep(2.0)
-    finally:
-        for slot in active:
-            try:
-                slot["proc"].kill()
-            except Exception:
-                pass
-        try:
-            for p in work.glob("*"):
-                p.unlink(missing_ok=True)
-            work.rmdir()
-        except Exception:
-            pass
-    return results
-
-
-def precompute_portfolio_kpis(
-    scanned: dict[str, Any],
-    score_years: tuple[str, ...],
-    pool: dict[str, dict[str, str]],
-    *,
-    csv_root: str | Path,
-    report_dir: str | Path,
-    book_params: dict[str, Any] | None = None,
-    force_rerun: bool = False,
-    workers: int = 0,
-    on_progress: ProgressCb = None,
-    progress_done: int = 0,
-    progress_total: int | None = None,
-) -> dict[str, dict[str, Any]]:
-    if not pool or not score_years:
-        return dict(scanned.get("portfolio_kpi") or {})
-    portfolio_kpi: dict[str, dict[str, Any]] = {}
-    for stock in pool:
-        portfolio_kpi[str(stock).upper()] = dict((scanned.get("portfolio_kpi") or {}).get(stock) or {})
-    tag = book_stocks_hash(pool)
-    overrides = _book_overrides(book_params)
-    budget = float(overrides["TRADE_BUDGET"])
-    out_dir = resolve_typed_dir(report_dir, DEFAULT_DIVIDEND_TYPE)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    jobs = [
-        {
-            "year": y,
-            "pool": pool,
-            "tag": tag,
-            "csv_root": str(csv_root),
-            "out_dir": str(out_dir),
-            "budget": budget,
-            "overrides": overrides,
-            "force_rerun": bool(force_rerun),
-        }
-        for y in score_years
-    ]
-    results: list[dict[str, Any]] = []
-    errors: list[str] = []
-    score_paths: dict[str, str] = dict(scanned.get("score_detail_paths") or {})
-    n_pool = len(pool)
-    n_workers = _score_parallel_workers(int(workers or 0), len(jobs), n_pool)
-    done = int(progress_done)
-    total = int(progress_total) if progress_total is not None else (done + len(jobs))
-
-    def _finish_score_row(row: dict[str, Any]) -> None:
-        nonlocal done
-        year = str(row.get("year") or "")
-        if row.get("error"):
-            action = "error"
-            tip = "失败: %s" % row.get("error")
-        elif row.get("cached"):
-            action = "cache"
-            tip = "缓存命中"
-        else:
-            action = "run"
-            tip = "回测完成"
-        done += 1
-        _emit_wf_progress(
-            on_progress,
-            phase="score",
-            done=done,
-            total=total,
-            year=year,
-            action=action,
-            label="打分预计算 %s/%s · %s · %s · 池 %s 只"
-            % (done, total, year or "-", tip, n_pool),
-            extra={"pool_n": n_pool, "cached": bool(row.get("cached")), "error": row.get("error")},
-        )
-
-    if n_workers <= 1:
-        for j in jobs:
-            year = str(j["year"])
-            likely = _score_cache_likely(j)
-            _emit_wf_progress(
-                on_progress,
-                phase="score",
-                done=done,
-                total=total,
-                year=year,
-                action="cache" if likely else "run",
-                label="打分预计算 %s/%s · %s · %s · 池 %s 只"
-                % (
-                    min(done + 1, total),
-                    total,
-                    year,
-                    "读缓存…" if likely else "正在组合回测…",
-                    n_pool,
-                ),
-                extra={"pool_n": n_pool, "cached": likely},
-            )
-            row = _run_score_year_job(j)
-            results.append(row)
-            _finish_score_row(row)
-    else:
-        results.extend(
-            _run_score_jobs_subprocess(
-                jobs,
-                n_workers=n_workers,
-                n_pool=n_pool,
-                get_done=lambda: done,
-                total=total,
-                on_progress=on_progress,
-                finish_row=_finish_score_row,
-            )
-        )
-    for row in results:
-        sy = str(row.get("year") or "")
-        sp = str(row.get("path") or "").strip()
-        if sy and sp:
-            score_paths[sy] = sp
-    scanned["score_detail_paths"] = score_paths
-    for row in results:
-        year = str(row.get("year") or "")
-        if row.get("error"):
-            errors.append("%s: %s" % (year, row.get("error")))
-            continue
-        per = row.get("per_stock") or {}
-        if not per:
-            errors.append("%s: 组合明细无成交归因" % year)
-        per = row.get("per_stock") or {}
-        for stock, kpi in per.items():
-            portfolio_kpi.setdefault(str(stock).upper(), {})[year] = dict(kpi)
-    scanned["portfolio_kpi"] = portfolio_kpi
-    scanned["_portfolio_kpi_errors"] = errors
-    return portfolio_kpi
-
-
-def _naive_year_pnl(
-    stocks: list[str],
-    year: str,
-    scanned: dict[str, Any],
-) -> float:
-    total = 0.0
-    raw = scanned.get("stocks") or {}
-    avail = infer_score_years(raw)
-    for stock in stocks:
-        rec = raw.get(stock)
-        if not rec:
-            continue
-        w = _apply_year_window(rec, avail)
-        k = (w.get("years") or {}).get(str(year))
-        if k:
-            total += float(k.get("sum_pnl") or 0.0)
-    return total
-
-
 def run_walk_forward(
-    scanned: dict[str, Any] | None = None,
     *,
     data_start: str = "",
     data_end: str = "",
@@ -694,33 +226,18 @@ def run_walk_forward(
     force_rerun: bool = False,
     compound_backtest: bool = True,
     on_progress: ProgressCb = None,
-    lookback_n: int = 2,
-    top_k: int = 3,
-    filters: dict[str, Any] | None = None,
-    weights: dict[str, float] | None = None,
-    score_mode: str = "portfolio",
-    score_pool: str = "scanned",
-    workers: int = 0,
 ) -> dict[str, Any]:
-    del lookback_n, top_k, filters, weights, score_mode, score_pool, workers
-    scanned = scanned if isinstance(scanned, dict) else {}
     fallback = normalize_book_stocks(
         fallback_book if fallback_book is not None else load_book_stocks_full()
     )
     baskets_in = (
         {str(k): v for k, v in period_baskets.items()} if period_baskets is not None else None
     )
-    available = infer_score_years(scanned.get("stocks") or {})
     ds = str(data_start or "").strip()
     de = str(data_end or "").strip()
-    if not ds and available:
-        ds = str(available[0])
-    if not de and available:
-        de = str(available[-1])
-    data_years = hold_years_for_range(ds, de, available)
+    data_years = hold_years_for_range(ds, de)
     eval_years_run = tuple(str(y) for y in eval_years) if eval_years else data_years
     notes: list[str] = []
-    has_scan_kpi = bool(scanned.get("stocks"))
     if data_years:
         notes.append(
             "评估持有 %s–%s · 换仓 %s 年 · 手工篮子"
@@ -728,8 +245,6 @@ def run_walk_forward(
         )
     elif ds or de:
         notes.append("数据年 %s–%s 推不出持有年" % (ds or "-", de or "-"))
-    if not has_scan_kpi:
-        notes.append("未扫描分年明细，不计算单票合计对照（naive_pnl）")
     if not eval_years_run:
         return {
             "summary": {
@@ -828,10 +343,7 @@ def run_walk_forward(
             is_rebalance = hy == select_year
             row_status = period_status
             port_pnl = None
-            if has_scan_kpi:
-                naive = _naive_year_pnl(list(basket.keys()), hy, scanned) if basket else None
-            else:
-                naive = None
+            naive = None
             if period_status != "ok" or not basket:
                 _hold_step(
                     hy=hy,
@@ -1004,7 +516,6 @@ def run_walk_forward(
         "year_rows": year_rows,
         "period_rows": period_rows,
         "equity_pts": equity_pts,
-        "score_detail_paths": dict(scanned.get("score_detail_paths") or {}),
         "report_dir": str(out_dir),
         "notes": notes,
         "params": _walk_forward_params(
@@ -1242,14 +753,14 @@ def main(argv: list[str] | None = None) -> int:
         "--eval-start",
         default="",
         dest="data_start",
-        help="持有起始自然年（含）",
+        help="持有起始自然年（含）；缺省取行情覆盖最早年",
     )
     ap.add_argument(
         "--data-end",
         "--eval-end",
         default="",
         dest="data_end",
-        help="持有结束自然年（含）",
+        help="持有结束自然年（含）；缺省取行情覆盖最晚年",
     )
     ap.add_argument("--rebalance-years", type=int, default=1)
     ap.add_argument(
@@ -1262,11 +773,17 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
     csv_dir = args.csv_dir or str(Path(args.report_dir).parent.parent / "tools" / "csv")
+    avail = list_csv_years(csv_dir)
+    data_start = str(args.data_start or (avail[0] if avail else ""))
+    data_end = str(args.data_end or (avail[-1] if avail else ""))
+    if not data_start or not data_end:
+        print("请指定 --data-start / --data-end（或准备好 tools/csv 日线）", file=sys.stderr)
+        return 1
     if args.mode == "fixed":
         result = run_fixed_book(
             load_book_stocks_full(),
-            data_start=str(args.data_start or ""),
-            data_end=str(args.data_end or ""),
+            data_start=data_start,
+            data_end=data_end,
             compound_backtest=not args.no_compound,
             force_rerun=args.force_rerun,
             csv_root=csv_dir,
@@ -1289,12 +806,6 @@ def main(argv: list[str] | None = None) -> int:
         print("wrote", out)
         return 0 if str(s.get("status") or "") == "ok" else 1
 
-    avail = list_score_years(args.report_dir)
-    data_start = str(args.data_start or (avail[0] if avail else ""))
-    data_end = str(args.data_end or (avail[-1] if avail else ""))
-    if not data_start or not data_end:
-        print("请指定 --data-start / --data-end", file=sys.stderr)
-        return 1
     fallback = load_book_stocks_full()
     period_baskets = None
     if args.picks_json:
@@ -1302,7 +813,6 @@ def main(argv: list[str] | None = None) -> int:
         if book_override is not None:
             fallback = book_override
     result = run_walk_forward(
-        {"stocks": {}},
         data_start=data_start,
         data_end=data_end,
         rebalance_years=args.rebalance_years,

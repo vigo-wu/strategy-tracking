@@ -7,19 +7,15 @@ from unittest.mock import patch
 from book_backtest import book_log_name, book_stocks_hash, normalize_book_stocks
 from compound_wallet import compound_enabled
 from select_analysis import (
-    collect_score_years,
-    data_and_eval_years,
     hold_years_for_range,
     iter_rebalance_periods,
     load_period_baskets_json,
     load_picks_file,
     period_baskets_from_book,
     pick_details_from_basket,
-    picks_from_scored,
     resolve_period_basket,
     run_fixed_book,
     run_walk_forward,
-    score_years_for_period,
     write_analysis_csv,
 )
 from select_config import (
@@ -36,26 +32,6 @@ class SelectAnalysisTests(unittest.TestCase):
         self.assertEqual(len(ps), 3)
         self.assertEqual(ps[0]["hold_years"], ("2020", "2021"))
         self.assertEqual(ps[2]["hold_years"], ("2024",))
-
-    def test_score_years_for_period(self):
-        data = ("2020", "2021", "2022", "2023", "2024")
-        self.assertEqual(score_years_for_period("2022", 2, data), ("2020", "2021"))
-        self.assertEqual(score_years_for_period("2021", 2, data), ())
-
-    def test_data_and_eval_years(self):
-        avail = ("2019", "2020", "2021", "2022", "2023", "2024", "2025", "2026")
-        data, ev = data_and_eval_years("2020", "2026", 2, avail)
-        self.assertEqual(data, ("2020", "2021", "2022", "2023", "2024", "2025", "2026"))
-        self.assertEqual(ev, ("2022", "2023", "2024", "2025", "2026"))
-        data2, ev2 = data_and_eval_years("2020", "2021", 2, avail)
-        self.assertEqual(ev2, ())
-
-    def test_collect_score_years(self):
-        ps = iter_rebalance_periods(("2022", "2023", "2024"), 1)
-        data = ("2020", "2021", "2022", "2023", "2024")
-        years = collect_score_years(ps, 2, data)
-        self.assertIn("2020", years)
-        self.assertIn("2023", years)
 
     def test_book_hash_stable(self):
         a = {"600350.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"}}
@@ -199,24 +175,6 @@ class SelectAnalysisTests(unittest.TestCase):
         self.assertEqual(pick_details_from_basket(None), [])
         self.assertEqual(pick_details_from_basket({}), [])
 
-    def test_picks_from_scored_fills_top_k(self):
-        import pandas as pd
-
-        df = pd.DataFrame(
-            [
-                {"stock": "A.SH", "passed": True, "score": 1.0, "ma_type_suggest": "EMA", "div_type_suggest": "front_ratio"},
-                {"stock": "B.SH", "passed": False, "score": 0.9, "ma_type_suggest": "SMA", "div_type_suggest": "front_ratio"},
-                {"stock": "C.SH", "passed": False, "score": 0.8, "ma_type_suggest": "EMA", "div_type_suggest": "front"},
-            ]
-        )
-        rec = df[df["passed"]].copy()
-        picks, note = picks_from_scored({"recommend": rec, "df": df}, 3)
-        self.assertEqual([p["stock"] for p in picks], ["A.SH", "B.SH", "C.SH"])
-        self.assertIn("补足", note)
-        short, note2 = picks_from_scored({"recommend": rec, "df": rec}, 3)
-        self.assertEqual(len(short), 1)
-        self.assertIn("不足", note2)
-
     def test_write_analysis_csv_serializes_pick_details(self):
         result = {
             "year_rows": [
@@ -248,20 +206,7 @@ class SelectAnalysisTests(unittest.TestCase):
             self.assertEqual(parsed[0]["ma_type"], "EMA")
 
     def test_walk_forward_on_progress(self):
-        kpi = {**empty_year_kpi(), "n_buy": 5, "sum_pnl": 1000.0, "win_rate": 60.0}
         basket = {"600350.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"}}
-        scanned = {
-            "stocks": {
-                "600350.SH": {
-                    "stock": "600350.SH",
-                    "years": {"2020": dict(kpi), "2021": dict(kpi), "2022": dict(kpi)},
-                    "by_ma": {},
-                    "by_div": {},
-                    "style": {},
-                }
-            },
-            "portfolio_kpi": {},
-        }
         events: list[dict] = []
 
         def on_progress(ev: dict) -> None:
@@ -286,14 +231,11 @@ class SelectAnalysisTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             report = Path(td) / "report"
             report.mkdir()
-            with patch("select_analysis._run_score_year_job") as score_job, patch(
-                "select_analysis.precompute_portfolio_kpis"
-            ) as precompute, patch("select_analysis.run_book_backtest", side_effect=_fake_run), patch(
+            with patch("select_analysis.run_book_backtest", side_effect=_fake_run), patch(
                 "select_analysis.analyze_book_detail",
                 return_value={"sum_pnl": 1000.0, "stats": {"n_buy": 1}},
             ):
                 result = run_walk_forward(
-                    scanned,
                     data_start="2020",
                     data_end="2022",
                     rebalance_years=1,
@@ -306,8 +248,6 @@ class SelectAnalysisTests(unittest.TestCase):
                     compound_backtest=True,
                     on_progress=on_progress,
                 )
-            score_job.assert_not_called()
-            precompute.assert_not_called()
         self.assertTrue(events)
         phases = {str(e.get("phase") or "") for e in events}
         self.assertEqual(phases, {"hold"})
@@ -394,7 +334,6 @@ class SelectAnalysisTests(unittest.TestCase):
                 return_value={"sum_pnl": 0.0, "stats": {"n_buy": 0}},
             ):
                 result = run_walk_forward(
-                    {"stocks": {}},
                     data_start="2020",
                     data_end="2021",
                     rebalance_years=1,
@@ -425,7 +364,6 @@ class SelectAnalysisTests(unittest.TestCase):
             report.mkdir()
             with patch("select_analysis.run_book_backtest", side_effect=_fake_run):
                 result = run_walk_forward(
-                    {"stocks": {}},
                     data_start="2020",
                     data_end="2020",
                     period_baskets={"2020": {}},
@@ -460,7 +398,6 @@ class SelectAnalysisTests(unittest.TestCase):
                 return_value={"sum_pnl": 0.0, "stats": {"n_buy": 0}},
             ):
                 result = run_walk_forward(
-                    {},
                     data_start="2024",
                     data_end="2025",
                     period_baskets=None,
@@ -473,7 +410,7 @@ class SelectAnalysisTests(unittest.TestCase):
                 )
         self.assertEqual(years_seen, ["2024", "2025"])
         self.assertEqual([r["year"] for r in result["year_rows"]], ["2024", "2025"])
-        self.assertTrue(any("naive_pnl" in (n or "") or "单票合计" in n for n in result["notes"]))
+        self.assertTrue(all(r.get("naive_pnl") is None for r in result["year_rows"]))
 
 
 if __name__ == "__main__":
