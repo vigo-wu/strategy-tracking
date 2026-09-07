@@ -42,6 +42,13 @@ from grid_spec import (  # noqa: E402
     apply_year_windows,
     fill_year_windows,
 )
+from asset_split import (  # noqa: E402
+    AssetSplitError,
+    draw_asset_split,
+    fill_asset_split,
+    stock_lock_rows,
+    validate_asset_split,
+)
 from market_csv import compact_day, peek_daily_csv_meta  # noqa: E402
 from run import (  # noqa: E402
     _as_trail_tiers,
@@ -50,6 +57,7 @@ from run import (  # noqa: E402
 )
 
 WARN_CELL_SOFT = 8
+WARN_JOBS_SOFT = 200
 RE_STOP = re.compile(r"\bstop=\s*([0-9.eE+-]+)")
 RE_TFB = re.compile(r"\btime_force_bars=\s*(-?\d+)")
 RE_TFM = re.compile(r"\btime_force_min_ret=\s*([0-9.eE+-]+)")
@@ -140,6 +148,13 @@ def validate_spec(spec: dict[str, Any]) -> list[dict[str, Any]]:
     try:
         apply_year_windows(spec)
     except GridSpecError as e:
+        raise GridError(str(e)) from e
+    try:
+        split = fill_asset_split(spec)
+        if split["mode"] != "off":
+            validate_asset_split(split)
+        spec["asset_split"] = split
+    except AssetSplitError as e:
         raise GridError(str(e)) from e
     return out
 
@@ -342,8 +357,15 @@ def _year_window(year: str) -> tuple[str, str]:
 def book_jobs(spec: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     win = fill_year_windows(spec)
     y0, y1 = int(win["year_start"]), int(win["year_end"])
+    split = fill_asset_split(spec)
+    if split["mode"] == "random_from_csv":
+        locks = stock_lock_rows(split)
+        if not locks:
+            raise GridError("asset_split 名单为空，请先抽取 tune/holdout")
+    else:
+        locks = load_book_lock()
     out: list[dict[str, Any]] = []
-    for stock, ma, div in load_book_lock():
+    for stock, ma, div in locks:
         csv_p = csv_for(stock, div)
         if csv_p is None:
             print("skip book 无 CSV", stock, div, flush=True)
@@ -502,6 +524,7 @@ def run_sweep(
     dry_run: bool = False,
     cell_id: str = "",
     spec_path: str = "",
+    reshuffle: bool = False,
 ) -> dict[str, Any]:
     cells = validate_spec(spec)
     if cell_id:
@@ -512,8 +535,28 @@ def run_sweep(
     sweep = str(spec.get("sweep") or Path(spec_path).stem or "grid")
     dest = Path(sweep_dir) if sweep_dir else GRID_ROOT / sweep
     _assert_grid_dir(dest)
-    book, jobs = assemble_jobs(spec, include_sma_ema=include_sma_ema)
     dest.mkdir(parents=True, exist_ok=True)
+
+    prev_freeze: dict[str, Any] | None = None
+    freeze_p = dest / "freeze.json"
+    if freeze_p.is_file() and not reshuffle:
+        try:
+            prev_freeze = json.loads(freeze_p.read_text(encoding="utf-8"))
+        except Exception:
+            prev_freeze = None
+    try:
+        split = draw_asset_split(spec, reshuffle=bool(reshuffle), freeze=prev_freeze)
+    except AssetSplitError as e:
+        raise GridError(str(e)) from e
+    spec["asset_split"] = split
+
+    book, jobs = assemble_jobs(spec, include_sma_ema=include_sma_ema)
+    if len(jobs) > WARN_JOBS_SOFT:
+        print(
+            "WARN jobs/cell=%s > %s（空间抽取或年窗偏大；SMA/EMA 对照再 ×3）"
+            % (len(jobs), WARN_JOBS_SOFT),
+            flush=True,
+        )
     (dest / "spec.json").write_text(
         json.dumps(_json_ready(spec), ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -528,6 +571,9 @@ def run_sweep(
             {"stock": j["stock"], "year": j["year"], "ma": j["ma"], "div": j["div"]}
             for j in book
         ],
+        "asset_split": _json_ready(split),
+        "tune_stocks": list(split.get("tune_stocks") or []),
+        "holdout_stocks": list(split.get("holdout_stocks") or []),
     }
     freeze_meta.update(win)
     (dest / "freeze.json").write_text(
@@ -535,8 +581,17 @@ def run_sweep(
         encoding="utf-8",
     )
     print(
-        "sweep=%s cells=%s jobs/cell=%s book=%s"
-        % (sweep, len(cells), len(jobs), len(book)),
+        "sweep=%s cells=%s jobs/cell=%s book=%s mode=%s tune=%s holdout=%s eligible=%s"
+        % (
+            sweep,
+            len(cells),
+            len(jobs),
+            len(book),
+            split.get("mode"),
+            len(split.get("tune_stocks") or []),
+            len(split.get("holdout_stocks") or []),
+            split.get("eligible_n"),
+        ),
         flush=True,
     )
     info = {
@@ -547,6 +602,7 @@ def run_sweep(
         "n_book": len(book),
         "cells": cells,
         "dry_run": bool(dry_run),
+        "asset_split": split,
     }
     info.update(win)
     if dry_run:
@@ -600,6 +656,19 @@ def main() -> None:
     ap.add_argument("--tune-end", type=int, default=None)
     ap.add_argument("--check-start", type=int, default=None)
     ap.add_argument("--check-end", type=int, default=None)
+    ap.add_argument(
+        "--asset-mode",
+        default="",
+        help="空间隔离: off | random_from_csv（覆盖 spec.asset_split.mode）",
+    )
+    ap.add_argument("--n-tune", type=int, default=None, help="调参抽取数")
+    ap.add_argument("--n-holdout", type=int, default=None, help="盲测抽取数")
+    ap.add_argument("--seed", type=int, default=None, help="抽取 seed")
+    ap.add_argument(
+        "--reshuffle",
+        action="store_true",
+        help="忽略 freeze/spec 旧名单，按 seed 重新抽取",
+    )
     args = ap.parse_args()
     try:
         if args.summarize_only:
@@ -627,6 +696,16 @@ def main() -> None:
         for key, val in cli_years.items():
             if val is not None:
                 spec[key] = int(val)
+        split = fill_asset_split(spec)
+        if args.asset_mode:
+            split["mode"] = str(args.asset_mode).strip().lower()
+        if args.n_tune is not None:
+            split["n_tune"] = int(args.n_tune)
+        if args.n_holdout is not None:
+            split["n_holdout"] = int(args.n_holdout)
+        if args.seed is not None:
+            split["seed"] = int(args.seed)
+        spec["asset_split"] = split
         run_sweep(
             spec,
             include_sma_ema=bool(args.include_sma_ema),
@@ -635,6 +714,7 @@ def main() -> None:
             dry_run=bool(args.dry_run),
             cell_id=str(args.cell or ""),
             spec_path=str(args.spec),
+            reshuffle=bool(args.reshuffle),
         )
     except GridError as e:
         raise SystemExit(str(e)) from e

@@ -36,16 +36,17 @@ MAE 为何不可信、本轮数字：需要时再读 [reference-lessons.md](refe
 2. **必须含现行 `base`**。收紧 / 放宽分开标，不要混成一个「更好」。
 3. 关联常量不顺手改：动 TRAIL 起步不改 `SCALE_ARM` / `TIME_FORCE_MIN_RET`，除非格子里显式写了。
 4. `TIME_FORCE_BARS<=0` 关闭整条 time_force；`MIN_RET=0` 只关掉让路，不是关闭 time_force。
-5. **主样本=跟踪池 `BOOK_STOCKS` × spec 回测年**（均线/复权锁 config）。不要用 `local_bt_ma_compare.csv` 冻结 winner。跟踪池样本小，过拟合风险更高。
-6. 每格写入主题 `report/grid/<sweep>/<cell>/`，**不得覆盖** `report/front_ratio/` 等基线 log。
-7. 格子之间**串行**；格内可用现有 ProcessPool。
-8. 开跑后校验 init 指纹：`stop=` / `time_force_bars=`（扫 TRAIL 时还要 `trail_arm=`）与该格一致，不一致则停。
-9. **默认不改 `config.py`、不 deploy**。用户说「按建议修改」再改片段并部署。
+5. **主样本**：默认=跟踪池 `BOOK_STOCKS` × spec 回测年（均线/复权锁 config）。`asset_split.mode=random_from_csv` 时=从 `tools/csv/none` 抽取的 **调参∪盲测** 名单（均线/复权锁 compare_div）。不要用 `local_bt_ma_compare.csv` 冻结 winner。
+6. **时空双重隔离**：时间用 `tune_*` / `check_*`；空间用 `tune_stocks` / `holdout_stocks`（盲测只否决、不参与格子比大小）。`mode=off` 时无空间门。
+7. 每格写入主题 `report/grid/<sweep>/<cell>/`，**不得覆盖** `report/front_ratio/` 等基线 log。
+8. 格子之间**串行**；格内可用现有 ProcessPool。
+9. 开跑后校验 init 指纹：`stop=` / `time_force_bars=`（扫 TRAIL 时还要 `trail_arm=`）与该格一致，不一致则停。
+10. **默认不改 `config.py`、不 deploy**。用户说「按建议修改」再改片段并部署。
 
 ## 选参
 
-相对 `base`：合计、利润因子、分年回撤；**以验收期为主**（默认 2023–2026，年段写在 spec：`tune_*` / `check_*`）。
-调参期与验收期同向。接近则少改结构。不追调参期尖峰。不同向或验收期未优于现行则维持现行。
+相对 `base`：合计、利润因子、分年回撤；**以调参标的验收期为主**（默认 2023–2026，年段写在 spec：`tune_*` / `check_*`）。
+调参期与验收期同向。开启空间隔离时另要求盲测角（holdout × 验收年）不劣于 base，且 holdout 须有覆盖（禁止 `0>=0` 假通过）。接近则少改结构。不追调参期尖峰。不同向或验收期未优于现行则维持现行。
 
 Agent 输出：Canvas（各格 Δ / 验收期）+ **一句推荐**。不要把 MAE 数字写进推荐。
 
@@ -54,12 +55,13 @@ Agent 输出：Canvas（各格 Δ / 验收期）+ **一句推荐**。不要把 M
 ```
 进度:
 - [ ] 1. 命名格子 JSON（含 base，≤8，收紧/放宽分开）
-- [ ] 2. 主样本=BOOK_STOCKS；spec 含回测年 / 调参期 / 验收期
-- [ ] 3. 运行时 overrides（禁止改 config 扫参）
-- [ ] 4. 隔离 report/grid/<sweep>/；格间串行
-- [ ] 5. 探针 log 指纹与格子一致
-- [ ] 6. summarize → summary.json；验收期 + 调参期同向选参
-- [ ] 7. Canvas + 一句推荐；默认不改 config / 不 deploy
+- [ ] 2. 主样本=BOOK_STOCKS 或 asset_split 抽取名单；spec 含回测年 / 调参期 / 验收期
+- [ ] 3. 若空间隔离：freeze 含 tune/holdout；盲测只否决
+- [ ] 4. 运行时 overrides（禁止改 config 扫参）
+- [ ] 5. 隔离 report/grid/<sweep>/；格间串行
+- [ ] 6. 探针 log 指纹与格子一致
+- [ ] 7. summarize → summary.json；验收期 + 调参期同向选参
+- [ ] 8. Canvas + 一句推荐；默认不改 config / 不 deploy
 ```
 
 ## 怎么跑（hongli_band 首个实现）
@@ -68,6 +70,7 @@ Agent 输出：Canvas（各格 Δ / 验收期）+ **一句推荐**。不要把 M
 
 ```bash
 python hongli_band/scripts/local_bt/grid_run.py --spec .cursor/skills/qmt-local-bt-grid/examples/stop_loss.json
+python hongli_band/scripts/local_bt/grid_run.py --spec .cursor/skills/qmt-local-bt-grid/examples/stop_loss_space.json --reshuffle
 python hongli_band/scripts/local_bt/grid_run.py --spec path/to/cells.json --include-sma-ema
 python .cursor/skills/qmt-local-bt-grid/scripts/summarize.py --sweep-dir hongli_band/report/grid/<sweep>
 ```
@@ -81,6 +84,9 @@ python .cursor/skills/qmt-local-bt-grid/scripts/summarize.py --sweep-dir hongli_
 | `--workers` | 格内进程数；格子之间始终串行 |
 | `--summarize-only` | 不重跑，只解析已有格子 log |
 | `--year-start` 等 | 覆盖 spec 回测年 / 调参期 / 验收期 |
+| `--asset-mode` | `off` / `random_from_csv` |
+| `--n-tune` / `--n-holdout` / `--seed` | 空间抽取数量与种子 |
+| `--reshuffle` | 忽略 freeze 旧名单重新抽取 |
 
 ## 格子 JSON
 
@@ -102,5 +108,7 @@ python .cursor/skills/qmt-local-bt-grid/scripts/summarize.py --sweep-dir hongli_
   ]
 }
 ```
+
+空间隔离示例见 `examples/stop_loss_space.json`（`asset_split.mode=random_from_csv`，宇宙默认 `tools/csv/none`）。
 
 `kind`：`base` / `tighten` / `loosen` / `off` / `other`。`overrides` 的键是拼接脚本里的全局名（如 `STOP_LOSS`、`TRAIL_TIERS`、`TIME_FORCE_BARS`）。

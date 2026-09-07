@@ -58,6 +58,13 @@ GRID_KEYS: tuple[str, ...] = (
     "grid_check_start",
     "grid_check_end",
     "grid_param_sel",
+    "grid_asset_split",
+    "grid_n_tune",
+    "grid_n_holdout",
+    "grid_asset_seed",
+    "grid_tune_stocks",
+    "grid_holdout_stocks",
+    "grid_eligible_n",
 )
 
 

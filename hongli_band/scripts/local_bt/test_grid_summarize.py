@@ -26,14 +26,16 @@ from equity_yearly import (  # noqa: E402
 )
 
 
-def _cell(cid, kind, is_pnl, oos_pnl, overrides=None):
+def _cell(cid, kind, is_pnl, oos_pnl, overrides=None, **book_extra):
+    book = {"is_pnl": is_pnl, "oos_pnl": oos_pnl, "n_logs_ok": 1}
+    book.update(book_extra)
     return {
         "id": cid,
         "label": cid,
         "kind": kind,
         "overrides": overrides if overrides is not None else ({"STOP_LOSS": 0.06} if cid != "base" else {}),
         "samples": {
-            "book": {"is_pnl": is_pnl, "oos_pnl": oos_pnl, "n_logs_ok": 1},
+            "book": book,
         },
     }
 
@@ -55,6 +57,85 @@ class GridSummarizeTest(unittest.TestCase):
         self.assertIn("调参期", by_id["bad_sign"]["fail"])
         self.assertIn("验收期", by_id["worse_oos"]["fail"])
         self.assertIsNone(by_id["good"]["fail"])
+
+    def test_pick_recommend_corner_collapse_keeps_base(self) -> None:
+        cells = [
+            _cell(
+                "base",
+                "base",
+                1000.0,
+                500.0,
+                overrides={},
+                corner_oos_pnl=200.0,
+                holdout_has_coverage=True,
+                holdout_n_logs=2,
+            ),
+            _cell(
+                "good_time",
+                "tighten",
+                1500.0,
+                900.0,
+                corner_oos_pnl=50.0,
+                holdout_has_coverage=True,
+                holdout_n_logs=2,
+            ),
+        ]
+        rec = pick_recommend(cells)
+        self.assertEqual(rec["id"], "base")
+        by_id = {n["id"]: n for n in rec["candidates"]}
+        self.assertIn("盲测", by_id["good_time"]["fail"])
+
+    def test_pick_recommend_holdout_no_coverage(self) -> None:
+        cells = [
+            _cell(
+                "base",
+                "base",
+                100.0,
+                50.0,
+                overrides={},
+                corner_oos_pnl=0.0,
+                holdout_has_coverage=False,
+                holdout_n_logs=0,
+            ),
+            _cell(
+                "sl06",
+                "tighten",
+                200.0,
+                80.0,
+                corner_oos_pnl=0.0,
+                holdout_has_coverage=False,
+                holdout_n_logs=0,
+            ),
+        ]
+        rec = pick_recommend(cells)
+        self.assertEqual(rec["id"], "base")
+        by_id = {n["id"]: n for n in rec["candidates"]}
+        self.assertIn("无覆盖", by_id["sl06"]["fail"])
+
+    def test_stats_tune_excludes_holdout_pnl(self) -> None:
+        trades = [
+            {"pnl": 100.0, "sell_exec_day": "20180615", "sell_signal": "trail_stop", "stock": "A.SH"},
+            {"pnl": 999.0, "sell_exec_day": "20180615", "sell_signal": "trail_stop", "stock": "B.SH"},
+            {"pnl": -20.0, "sell_exec_day": "20240615", "sell_signal": "time_force", "stock": "A.SH"},
+            {"pnl": -500.0, "sell_exec_day": "20240615", "sell_signal": "time_force", "stock": "B.SH"},
+        ]
+        st = stats_from_trades(
+            trades,
+            {2018: 2, 2024: 2},
+            tune_years={2018},
+            check_years={2024},
+            tune_stocks=["A.SH"],
+            holdout_stocks=["B.SH"],
+        )
+        self.assertEqual(st["sum_pnl"], 80.0)
+        self.assertEqual(st["is_pnl"], 100.0)
+        self.assertEqual(st["oos_pnl"], -20.0)
+        self.assertEqual(st["corner_oos_pnl"], -500.0)
+        self.assertTrue(st["holdout_has_coverage"])
+        self.assertIn("holdout_windows", st)
+        self.assertEqual(st["holdout_windows"]["tune"]["n_open"], 1)
+        self.assertEqual(st["holdout_windows"]["check"]["n_open"], 1)
+        self.assertIsNotNone(st["windows"]["tune"]["n_open"])
 
     def test_pick_recommend_ignores_winner_sample(self) -> None:
         cells = [

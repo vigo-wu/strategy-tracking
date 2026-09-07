@@ -26,6 +26,15 @@ from equity_yearly import (
     daily_equity_for_year,
     year_perf_display_df,
 )
+from asset_split import (
+    DEFAULT_N_HOLDOUT,
+    DEFAULT_N_TUNE,
+    DEFAULT_SEED,
+    DEFAULT_UNIVERSE_DIR,
+    AssetSplitError,
+    draw_asset_split,
+    fill_asset_split,
+)
 from grid_run import (
     GRID_ROOT,
     GridError,
@@ -108,6 +117,34 @@ def _ensure_state() -> None:
     ss.setdefault("grid_import_text", "")
     ss.setdefault("grid_param_group", "全部")
     ss.setdefault("grid_param_search", "")
+    ss.setdefault("grid_asset_split", False)
+    ss.setdefault("grid_n_tune", DEFAULT_N_TUNE)
+    ss.setdefault("grid_n_holdout", DEFAULT_N_HOLDOUT)
+    ss.setdefault("grid_asset_seed", DEFAULT_SEED)
+    ss.setdefault("grid_tune_stocks", [])
+    ss.setdefault("grid_holdout_stocks", [])
+    ss.setdefault("grid_eligible_n", 0)
+    ss.setdefault("grid_reshuffle", False)
+
+
+def _asset_split_from_state() -> dict[str, Any]:
+    if not st.session_state.get("grid_asset_split"):
+        return fill_asset_split({"asset_split": {"mode": "off"}})
+    return {
+        "mode": "random_from_csv",
+        "universe_dir": DEFAULT_UNIVERSE_DIR,
+        "n_tune": int(st.session_state.get("grid_n_tune") or DEFAULT_N_TUNE),
+        "n_holdout": int(st.session_state.get("grid_n_holdout") or DEFAULT_N_HOLDOUT),
+        "seed": int(st.session_state.get("grid_asset_seed") or DEFAULT_SEED),
+        "ma_type": "EMA",
+        "dividend_type": str(
+            st.session_state.get("grid_compare_div") or DEFAULT_DIVIDEND_TYPE
+        ),
+        "exclude": [],
+        "tune_stocks": list(st.session_state.get("grid_tune_stocks") or []),
+        "holdout_stocks": list(st.session_state.get("grid_holdout_stocks") or []),
+        "eligible_n": int(st.session_state.get("grid_eligible_n") or 0),
+    }
 
 
 def _axes() -> dict[str, list[Any]]:
@@ -128,6 +165,7 @@ def _current_spec(defaults: dict[str, Any]) -> dict[str, Any]:
         tune_end=int(st.session_state.get("grid_tune_end") or YEAR_WINDOW_DEFAULTS["tune_end"]),
         check_start=int(st.session_state.get("grid_check_start") or YEAR_WINDOW_DEFAULTS["check_start"]),
         check_end=int(st.session_state.get("grid_check_end") or YEAR_WINDOW_DEFAULTS["check_end"]),
+        asset_split=_asset_split_from_state(),
     )
 
 
@@ -164,7 +202,13 @@ def _persist_app() -> None:
 def render_grid_sidebar() -> None:
     _ensure_state()
     busy = bool(st.session_state.get("grid_busy"))
-    st.caption("主样本=跟踪池 BOOK_STOCKS（config 锁定均线/复权），不可勾选。")
+    if st.session_state.get("grid_asset_split"):
+        st.caption(
+            "主样本=csv/none 抽取名单（调参∪盲测）；均线/复权锁 compare_div。"
+            "开 SMA/EMA 对照 jobs 约 ×3。"
+        )
+    else:
+        st.caption("主样本=跟踪池 BOOK_STOCKS（config 锁定均线/复权），不可勾选。")
     st.text_input("sweep 名", key="grid_sweep", disabled=busy, persist_state="session")
     if not sweep_name_ok(str(st.session_state.get("grid_sweep") or "")):
         st.error("sweep 名不能为空或含路径字符")
@@ -197,6 +241,65 @@ def render_grid_sidebar() -> None:
         )
     except GridSpecError as e:
         st.error(str(e))
+
+    st.checkbox(
+        "空间隔离（csv/none 抽取）",
+        key="grid_asset_split",
+        disabled=busy,
+        persist_state="session",
+    )
+    if st.session_state.get("grid_asset_split"):
+        st.caption("宇宙：`%s` · 调参/盲测互不重叠；盲测只否决不选参" % DEFAULT_UNIVERSE_DIR)
+        a1, a2 = st.columns(2)
+        with a1:
+            st.number_input(
+                "调参抽取数",
+                min_value=1,
+                max_value=500,
+                step=1,
+                key="grid_n_tune",
+                disabled=busy,
+                persist_state="session",
+            )
+        with a2:
+            st.number_input(
+                "盲测抽取数",
+                min_value=1,
+                max_value=500,
+                step=1,
+                key="grid_n_holdout",
+                disabled=busy,
+                persist_state="session",
+            )
+        st.number_input(
+            "抽取 seed",
+            min_value=0,
+            max_value=2_147_483_647,
+            step=1,
+            key="grid_asset_seed",
+            disabled=busy,
+            persist_state="session",
+        )
+        b1, b2 = st.columns(2)
+        with b1:
+            if st.button("抽取", disabled=busy, key="grid_draw_split"):
+                _draw_split_clicked(reshuffle=True)
+        with b2:
+            if st.button("重新抽取", disabled=busy, key="grid_redraw_split"):
+                _draw_split_clicked(reshuffle=True)
+        n_t = len(st.session_state.get("grid_tune_stocks") or [])
+        n_h = len(st.session_state.get("grid_holdout_stocks") or [])
+        st.caption(
+            "合格池 %s · 已抽调参 %s / 盲测 %s"
+            % (st.session_state.get("grid_eligible_n") or "—", n_t, n_h)
+        )
+        if n_t:
+            with st.expander("调参标的", expanded=False):
+                st.code(", ".join(st.session_state.get("grid_tune_stocks") or []))
+        if n_h:
+            with st.expander("盲测标的", expanded=False):
+                st.code(", ".join(st.session_state.get("grid_holdout_stocks") or []))
+
     st.checkbox("额外全 SMA / EMA 对照", key="grid_sma_ema", disabled=busy, persist_state="session")
     st.number_input(
         "格内进程数（0=自动）",
@@ -227,6 +330,27 @@ def render_grid_sidebar() -> None:
             wrap=False,
             width="stretch",
         )
+
+
+def _draw_split_clicked(*, reshuffle: bool) -> None:
+    defaults = _defaults()
+    spec = _current_spec(defaults)
+    try:
+        apply_year_windows(spec)
+        split = draw_asset_split(spec, reshuffle=reshuffle)
+    except (AssetSplitError, GridSpecError) as e:
+        st.session_state["grid_flash"] = str(e)
+        return
+    # 勿回写 grid_n_tune / grid_n_holdout：已绑定 number_input，实例化后改会抛 StreamlitAPIException
+    st.session_state["grid_tune_stocks"] = list(split.get("tune_stocks") or [])
+    st.session_state["grid_holdout_stocks"] = list(split.get("holdout_stocks") or [])
+    st.session_state["grid_eligible_n"] = int(split.get("eligible_n") or 0)
+    st.session_state["grid_flash"] = "已抽取 调参%s / 盲测%s（合格池 %s）" % (
+        len(st.session_state["grid_tune_stocks"]),
+        len(st.session_state["grid_holdout_stocks"]),
+        st.session_state["grid_eligible_n"],
+    )
+    _persist_app()
 
 
 def _mark_start() -> None:
@@ -264,7 +388,8 @@ def render_grid_mode() -> None:
         st.info(str(flash))
 
     st.caption(
-        "主样本=跟踪池 BOOK_STOCKS × 回测年。选参看验收期，且须与调参期同向。"
+        "主样本默认=跟踪池 BOOK_STOCKS × 回测年；开启空间隔离后=csv/none 抽取名单。"
+        "选参看调参标的验收期，且须与调参期同向；盲测盈亏只否决。"
         "默认不改 config.py / 不 deploy。"
     )
     axes = _axes()
@@ -570,6 +695,19 @@ def _handle_actions(defaults: dict[str, Any]) -> None:
         return
     if action != "run":
         return
+    # 空间隔离：开跑前若无名单则先抽一次
+    if (spec.get("asset_split") or {}).get("mode") == "random_from_csv":
+        split = spec.get("asset_split") or {}
+        if not split.get("tune_stocks") or not split.get("holdout_stocks"):
+            try:
+                drawn = draw_asset_split(spec, reshuffle=True)
+            except AssetSplitError as e:
+                st.error(str(e))
+                return
+            spec["asset_split"] = drawn
+            st.session_state["grid_tune_stocks"] = list(drawn.get("tune_stocks") or [])
+            st.session_state["grid_holdout_stocks"] = list(drawn.get("holdout_stocks") or [])
+            st.session_state["grid_eligible_n"] = int(drawn.get("eligible_n") or 0)
     dest = _sweep_dir(spec)
     if dest.exists() and any(dest.iterdir()) and not st.session_state.get("grid_overwrite_ok"):
         _dialog_overwrite(dest)
@@ -614,7 +752,13 @@ def _run_now(spec: dict[str, Any], n_jobs: int, total: int) -> None:
             include_sma_ema=bool(st.session_state.get("grid_sma_ema")),
             workers=int(st.session_state.get("grid_workers") or 0),
             progress=on_progress,
+            reshuffle=False,
         )
+        split = info.get("asset_split") or {}
+        if split.get("tune_stocks"):
+            st.session_state["grid_tune_stocks"] = list(split.get("tune_stocks") or [])
+            st.session_state["grid_holdout_stocks"] = list(split.get("holdout_stocks") or [])
+            st.session_state["grid_eligible_n"] = int(split.get("eligible_n") or 0)
         st.session_state["grid_summary"] = info.get("summary")
         rec = (info.get("recommend") or {}) if isinstance(info.get("recommend"), dict) else {}
         status.success("完成 · 推荐 %s" % (rec.get("id") or ""))
@@ -628,7 +772,6 @@ def _run_now(spec: dict[str, Any], n_jobs: int, total: int) -> None:
         st.session_state["grid_overwrite_ok"] = False
         st.session_state["grid_run_ok"] = False
         _persist_app()
-
 
 def _grid_sweep_dir(summary: dict[str, Any]) -> Path:
     raw = str(summary.get("sweep_dir") or "").strip()
@@ -769,9 +912,83 @@ def _render_grid_year_perf(summary: dict[str, Any]) -> None:
     )
 
 
-def _window_metric(book: dict[str, Any], key: str, field: str) -> Any:
-    w = (book.get("windows") or {}).get(key) or {}
+def _window_metric(book: dict[str, Any], key: str, field: str, *, windows_key: str = "windows") -> Any:
+    w = (book.get(windows_key) or {}).get(key) or {}
     return w.get(field)
+
+
+def _detail_window_row(
+    cell: dict[str, Any],
+    book: dict[str, Any],
+    *,
+    windows_key: str = "windows",
+) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "id": cell.get("id"),
+        "label": cell.get("label"),
+    }
+    for prefix, wkey in (
+        ("全区间", "all"),
+        ("调参期", "tune"),
+        ("验收期", "check"),
+    ):
+        row["%s夏普" % prefix] = _window_metric(book, wkey, "sharpe", windows_key=windows_key)
+        row["%s开仓" % prefix] = _window_metric(book, wkey, "n_open", windows_key=windows_key)
+        row["%s平均年化%%" % prefix] = _window_metric(
+            book, wkey, "avg_ann_pct", windows_key=windows_key
+        )
+        row["%s平均盈亏" % prefix] = _window_metric(
+            book, wkey, "avg_year_pnl", windows_key=windows_key
+        )
+    return row
+
+
+def _render_detail_window_table(rows: list[dict[str, Any]], caption: str) -> None:
+    detail_df = pd.DataFrame(rows)
+    detail_cfg: dict[str, Any] = {}
+    for prefix in ("全区间", "调参期", "验收期"):
+        detail_cfg["%s夏普" % prefix] = st.column_config.NumberColumn(
+            "%s夏普" % prefix, format="%.4f"
+        )
+        detail_cfg["%s开仓" % prefix] = st.column_config.NumberColumn(
+            "%s开仓" % prefix, format="%d"
+        )
+        detail_cfg["%s平均年化%%" % prefix] = st.column_config.NumberColumn(
+            "%s平均年化%%" % prefix, format="%.2f"
+        )
+        detail_cfg["%s平均盈亏" % prefix] = st.column_config.NumberColumn(
+            "%s平均盈亏" % prefix, format="%.2f"
+        )
+    st.caption(caption)
+    st.dataframe(detail_df, width="stretch", hide_index=True, column_config=detail_cfg)
+
+
+def _round_pnl(val: Any) -> int | None:
+    if val is None:
+        return None
+    try:
+        return int(round(float(val)))
+    except (TypeError, ValueError):
+        return None
+
+
+def _style_delta_cell(val: Any) -> str:
+    """A 股习惯：正红负绿；|x|<1 中性。"""
+    try:
+        x = float(val)
+    except (TypeError, ValueError):
+        return ""
+    if abs(x) < 1.0:
+        return ""
+    if x > 0:
+        return "color: #e74c3c"
+    return "color: #27ae60"
+
+
+def _style_base_row(row: pd.Series) -> list[str]:
+    if str(row.get("id") or "") == "base":
+        return ["background-color: rgba(255,255,255,0.06)"] * len(row)
+    return [""] * len(row)
 
 
 def _render_results() -> None:
@@ -781,54 +998,86 @@ def _render_results() -> None:
     rec = summary.get("recommend") or {}
     st.subheader("选参结论")
     st.success("%s · %s" % (rec.get("label") or rec.get("id") or "—", rec.get("reason") or ""))
-    st.caption("禁止用 MAE 反事实当结论。默认不改 config / 不 deploy。选参宇宙是跟踪池，过拟合风险高于大样本。")
+    space = summary.get("asset_split") or {}
+    space_on = bool(space.get("holdout_stocks") or space.get("tune_stocks"))
+    if space_on:
+        st.caption(
+            "空间隔离：主列=调参标的；盲测盈亏只否决。禁止用 MAE 反事实当结论。"
+        )
+    else:
+        st.caption(
+            "禁止用 MAE 反事实当结论。默认不改 config / 不 deploy。选参宇宙是跟踪池，过拟合风险高于大样本。"
+        )
     win = fill_year_windows(summary)
-    tune_h = "调参期（%s–%s）" % (win["tune_start"], win["tune_end"])
-    check_h = "验收期（%s–%s）" % (win["check_start"], win["check_end"])
-    rows = []
+    main_rows: list[dict[str, Any]] = []
+    tune_detail_rows: list[dict[str, Any]] = []
+    hold_detail_rows: list[dict[str, Any]] = []
+    notes = rec.get("candidates") or []
     for cell in summary.get("cells") or []:
         b = (cell.get("samples") or {}).get("book") or {}
         db = (cell.get("delta_vs_base") or {}).get("book") or {}
-        notes = rec.get("candidates") or []
         fail = next((n.get("fail") for n in notes if n.get("id") == cell.get("id")), None)
-        row = {
-            "id": cell.get("id"),
+        cid = cell.get("id")
+        main: dict[str, Any] = {
+            "id": cid,
             "label": cell.get("label"),
-            "kind": cell.get("kind"),
-            "合计": b.get("sum_pnl"),
-            tune_h: b.get("is_pnl"),
-            check_h: b.get("oos_pnl"),
-            "验收期相对现行": db.get("oos_pnl"),
+            "合计": _round_pnl(b.get("sum_pnl")),
+            "调参期": _round_pnl(b.get("is_pnl")),
+            "验收期": _round_pnl(b.get("oos_pnl")),
+            "Δ验收": _round_pnl(db.get("oos_pnl")),
         }
-        for prefix, wkey in (
-            ("全区间", "all"),
-            ("调参期", "tune"),
-            ("验收期", "check"),
-        ):
-            row["%s夏普" % prefix] = _window_metric(b, wkey, "sharpe")
-            row["%s开仓" % prefix] = _window_metric(b, wkey, "n_open")
-            row["%s平均年化%%" % prefix] = _window_metric(b, wkey, "avg_ann_pct")
-            row["%s平均盈亏" % prefix] = _window_metric(b, wkey, "avg_year_pnl")
-        row["过门"] = "否" if fail else "是"
-        rows.append(row)
-    df = pd.DataFrame(rows)
-    num_cfg = {}
-    for prefix in ("全区间", "调参期", "验收期"):
-        num_cfg["%s夏普" % prefix] = st.column_config.NumberColumn("%s夏普" % prefix, format="%.4f")
-        num_cfg["%s开仓" % prefix] = st.column_config.NumberColumn("%s开仓" % prefix, format="%d")
-        num_cfg["%s平均年化%%" % prefix] = st.column_config.NumberColumn(
-            "%s平均年化%%" % prefix, format="%.2f"
-        )
-        num_cfg["%s平均盈亏" % prefix] = st.column_config.NumberColumn(
-            "%s平均盈亏" % prefix, format="%.2f"
-        )
-    for col in ("合计", tune_h, check_h, "验收期相对现行"):
-        num_cfg[col] = st.column_config.NumberColumn(col, format="%.2f")
-    st.dataframe(df, width="stretch", hide_index=True, column_config=num_cfg)
+        if "corner_oos_pnl" in b:
+            main["盲测盈亏"] = _round_pnl(b.get("corner_oos_pnl"))
+            main["Δ盲测"] = _round_pnl(db.get("corner_oos_pnl"))
+        main["是否通过"] = "否" if fail else "是"
+        main_rows.append(main)
+        tune_detail_rows.append(_detail_window_row(cell, b, windows_key="windows"))
+        if isinstance(b.get("holdout_windows"), dict):
+            hold_detail_rows.append(
+                _detail_window_row(cell, b, windows_key="holdout_windows")
+            )
+
+    df = pd.DataFrame(main_rows)
     st.caption(
-        "合计 / 调参期 / 验收期是卖出年已实现盈亏之和。"
-        "夏普 / 开仓 / 平均年化% / 平均盈亏与下方分年绩效同口径（每年独立空仓）；"
-        "平均盈亏是窗内各年当年盈亏的算术平均，不等于合计除以年数。"
-        "窗内夏普是各年日收益拼接后算一次，不是各年夏普平均。"
+        "调参期 %s–%s · 验收期 %s–%s%s · 单位：元"
+        % (
+            win["tune_start"],
+            win["tune_end"],
+            win["check_start"],
+            win["check_end"],
+            " · 主列=调参标的" if space_on else "",
+        )
+    )
+    delta_cols = [c for c in ("Δ验收", "Δ盲测") if c in df.columns]
+    styled = df.style.apply(_style_base_row, axis=1)
+    if delta_cols:
+        # pandas 2.1+ 用 map；旧版 applymap
+        if hasattr(styled, "map"):
+            styled = styled.map(_style_delta_cell, subset=delta_cols)
+        else:
+            styled = styled.applymap(_style_delta_cell, subset=delta_cols)
+    fmt: dict[str, str] = {}
+    for col in ("合计", "调参期", "验收期", "Δ验收", "盲测盈亏", "Δ盲测"):
+        if col in df.columns:
+            fmt[col] = "{:.0f}"
+    if fmt:
+        styled = styled.format(fmt, na_rep="—")
+    st.dataframe(styled, width="stretch", hide_index=True)
+
+    with st.expander("窗内夏普 / 开仓 / 年化", expanded=False):
+        _render_detail_window_table(
+            tune_detail_rows,
+            "调参标的" if space_on or hold_detail_rows else "跟踪池 / 主样本",
+        )
+        if hold_detail_rows:
+            _render_detail_window_table(hold_detail_rows, "盲测标的（未参与调参）")
+        st.caption(
+            "夏普 / 开仓 / 平均年化% / 平均盈亏与下方分年绩效同口径（每年独立空仓）；"
+            "平均盈亏是窗内各年当年盈亏的算术平均，不等于合计除以年数。"
+            "窗内夏普是各年日收益拼接后算一次，不是各年夏普平均。"
+            "旧 summary 无 holdout_windows 时需「只汇总」重算。"
+        )
+    st.caption(
+        "合计 / 调参期 / 验收期是卖出年已实现盈亏之和（空间隔离时仅调参标的）。"
     )
     _render_grid_year_perf(summary)

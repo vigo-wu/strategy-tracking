@@ -137,6 +137,90 @@ class GridRunApiTest(unittest.TestCase):
         self.assertIn("2022", years)
         self.assertTrue(all(j["stock"] == "600938.SH" for j in jobs))
 
+    def test_dry_run_random_from_csv_freeze_lists(self) -> None:
+        spec = {
+            "theme": "hongli_band",
+            "sweep": "space_unit",
+            "compare_div": "front_ratio",
+            "year_start": 2020,
+            "year_end": 2021,
+            "tune_start": 2020,
+            "tune_end": 2020,
+            "check_start": 2021,
+            "check_end": 2021,
+            "asset_split": {
+                "mode": "random_from_csv",
+                "n_tune": 2,
+                "n_holdout": 1,
+                "seed": 3,
+                "ma_type": "EMA",
+                "dividend_type": "front_ratio",
+            },
+            "cells": [
+                {"id": "base", "label": "现行", "kind": "base", "overrides": {}},
+            ],
+        }
+        pool = ["AAA111.SH", "BBB222.SZ", "CCC333.SH", "DDD444.SZ"]
+        book = [
+            {
+                "sample": "book",
+                "stock": "AAA111.SH",
+                "year": "2020",
+                "ma": "EMA",
+                "div": "front_ratio",
+                "csv": Path("x.csv"),
+                "start": "20200101",
+                "end": "20201231",
+            }
+        ]
+        with tempfile.TemporaryDirectory() as td:
+            sweep_dir = Path(td) / "report" / "grid" / "space_unit"
+            with patch("grid_run.draw_asset_split") as draw:
+                drawn = {
+                    "mode": "random_from_csv",
+                    "n_tune": 2,
+                    "n_holdout": 1,
+                    "seed": 3,
+                    "tune_stocks": ["AAA111.SH", "BBB222.SZ"],
+                    "holdout_stocks": ["CCC333.SH"],
+                    "eligible_n": 4,
+                    "universe_dir": "tools/csv/none",
+                    "ma_type": "EMA",
+                    "dividend_type": "front_ratio",
+                    "exclude": [],
+                }
+                draw.return_value = drawn
+                with patch("grid_run.assemble_jobs", return_value=(book, book)):
+                    info = run_sweep(spec, dry_run=True, sweep_dir=sweep_dir, reshuffle=True)
+            freeze = json.loads((sweep_dir / "freeze.json").read_text(encoding="utf-8"))
+            self.assertEqual(freeze["tune_stocks"], ["AAA111.SH", "BBB222.SZ"])
+            self.assertEqual(freeze["holdout_stocks"], ["CCC333.SH"])
+            self.assertEqual(info["asset_split"]["mode"], "random_from_csv")
+            spec_saved = json.loads((sweep_dir / "spec.json").read_text(encoding="utf-8"))
+            self.assertEqual(spec_saved["asset_split"]["tune_stocks"], freeze["tune_stocks"])
+
+    def test_book_jobs_uses_asset_split_locks(self) -> None:
+        csv_p = Path("fake.csv")
+        spec = {
+            "year_start": 2022,
+            "year_end": 2022,
+            "asset_split": {
+                "mode": "random_from_csv",
+                "tune_stocks": ["600001.SH"],
+                "holdout_stocks": ["600002.SH"],
+                "ma_type": "EMA",
+                "dividend_type": "front_ratio",
+                "n_tune": 1,
+                "n_holdout": 1,
+                "seed": 1,
+            },
+        }
+        with patch("grid_run.csv_for", return_value=csv_p):
+            with patch("grid_run._csv_span", return_value=("20220101", "20221231")):
+                jobs = book_jobs(spec)
+        stocks = {j["stock"] for j in jobs}
+        self.assertEqual(stocks, {"600001.SH", "600002.SH"})
+
     def test_load_config_defaults_covers_catalog(self) -> None:
         defaults = load_config_defaults()
         self.assertIn("STOP_LOSS", defaults)

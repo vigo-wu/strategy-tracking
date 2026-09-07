@@ -1,0 +1,41 @@
+{
+  "theme": "hongli_band",
+  "sweep": "stop_loss_space",
+  "compare_div": "front_ratio",
+  "year_start": 2018,
+  "year_end": 2026,
+  "tune_start": 2018,
+  "tune_end": 2022,
+  "check_start": 2023,
+  "check_end": 2026,
+  "asset_split": {
+    "mode": "random_from_csv",
+    "universe_dir": "tools/csv/none",
+    "n_tune": 20,
+    "n_holdout": 20,
+    "seed": 42,
+    "ma_type": "EMA",
+    "dividend_type": "front_ratio",
+    "exclude": []
+  },
+  "cells": [
+    {
+      "id": "base",
+      "label": "现行 8%",
+      "kind": "base",
+      "overrides": {}
+    },
+    {
+      "id": "sl06",
+      "label": "止损 6%",
+      "kind": "tighten",
+      "overrides": {"STOP_LOSS": 0.06}
+    },
+    {
+      "id": "sl10",
+      "label": "止损 10%",
+      "kind": "loosen",
+      "overrides": {"STOP_LOSS": 0.10}
+    }
+  ]
+}

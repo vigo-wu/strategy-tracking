@@ -150,6 +150,51 @@ def _job_year_rows(
     return rows
 
 
+def _stock_of(t: dict[str, Any]) -> str:
+    return str(t.get("stock") or "").strip().upper()
+
+
+def _norm_stock_set(raw: Any) -> set[str] | None:
+    if raw is None:
+        return None
+    if isinstance(raw, (set, frozenset)):
+        out = {str(x).strip().upper() for x in raw if str(x).strip()}
+        return out or None
+    if isinstance(raw, str):
+        parts = [p.strip().upper() for p in raw.replace(",", " ").split() if p.strip()]
+        return set(parts) or None
+    out = {str(x).strip().upper() for x in raw if str(x).strip()}
+    return out or None
+
+
+def _accounts_from_trades(trades: list[dict[str, Any]]) -> dict[int, int]:
+    n_accounts: dict[int, int] = defaultdict(int)
+    seen: set[tuple[int, str]] = set()
+    for t in trades:
+        stock = _stock_of(t)
+        y = _job_year(t)
+        if y is None:
+            y = _year_of(str(t.get("sell_exec_day") or t.get("buy_open_day") or ""))
+        if y is None:
+            continue
+        key = (int(y), stock or "?")
+        if key in seen:
+            continue
+        seen.add(key)
+        n_accounts[int(y)] += 1
+    return dict(n_accounts)
+
+
+def _pnl_in_years(trades: list[dict[str, Any]], years: set[int]) -> float:
+    total = 0.0
+    for t in trades:
+        day = str(t.get("sell_exec_day") or t.get("year") or "")
+        y = _year_of(day)
+        if y is not None and y in years:
+            total += float(t["pnl"])
+    return round(total, 2)
+
+
 def stats_from_trades(
     trades: list[dict[str, Any]],
     n_accounts_by_year: dict[int, int],
@@ -158,8 +203,24 @@ def stats_from_trades(
     check_years: set[int] | None = None,
     run_years: set[int] | None = None,
     per_budget: float | None = None,
+    tune_stocks: Any = None,
+    holdout_stocks: Any = None,
 ) -> dict[str, Any]:
-    pnls = [float(t["pnl"]) for t in trades]
+    tune_set = _norm_stock_set(tune_stocks)
+    holdout_set = _norm_stock_set(holdout_stocks)
+    if tune_set is not None:
+        primary = [t for t in trades if _stock_of(t) in tune_set]
+        holdout_trades = (
+            [t for t in trades if _stock_of(t) in holdout_set] if holdout_set else []
+        )
+        n_accounts_by_year = _accounts_from_trades(primary)
+    else:
+        primary = trades
+        holdout_trades = (
+            [t for t in trades if _stock_of(t) in holdout_set] if holdout_set else []
+        )
+
+    pnls = [float(t["pnl"]) for t in primary]
     n = len(pnls)
     gp = sum(p for p in pnls if p > 0)
     gl = abs(sum(p for p in pnls if p < 0))
@@ -168,7 +229,7 @@ def stats_from_trades(
     by_year: dict[int, float] = defaultdict(float)
     by_sig: dict[str, int] = defaultdict(int)
     day_pnls: list[tuple[str, float]] = []
-    for t in trades:
+    for t in primary:
         sig = str(t.get("sell_signal") or "-")
         by_sig[sig] += 1
         day = str(t.get("sell_exec_day") or t.get("year") or "")
@@ -191,8 +252,10 @@ def stats_from_trades(
     oos_pnl = sum(by_year[y] for y in by_year if y in check)
     n_acc = max(n_accounts_by_year.values()) if n_accounts_by_year else 0
     budget = float(BUDGET if per_budget is None else per_budget)
-    year_rows = _job_year_rows(trades, n_accounts_by_year, budget)
-    return {
+    year_rows = _job_year_rows(primary, n_accounts_by_year, budget)
+    corner = _pnl_in_years(holdout_trades, check)
+    asset_oos = _pnl_in_years(holdout_trades, tune)
+    out: dict[str, Any] = {
         "n_trades": n,
         "sum_pnl": round(sum(pnls), 2),
         "win_rate": round(100.0 * wins / n, 2) if n else None,
@@ -206,7 +269,9 @@ def stats_from_trades(
         "n_weekly": int(by_sig.get("weekly_bear", 0)),
         "n_time": int(by_sig.get("time_force", 0)),
         "by_year": {str(y): round(by_year[y], 2) for y in sorted(by_year)},
-        "n_accounts_by_year": {str(y): int(n_accounts_by_year[y]) for y in sorted(n_accounts_by_year)},
+        "n_accounts_by_year": {
+            str(y): int(n_accounts_by_year[y]) for y in sorted(n_accounts_by_year)
+        },
         "per_budget": budget,
         "windows": {
             "all": _agg_window(year_rows, run),
@@ -214,6 +279,19 @@ def stats_from_trades(
             "check": _agg_window(year_rows, check),
         },
     }
+    if holdout_set is not None:
+        out["corner_oos_pnl"] = corner
+        out["asset_oos_pnl"] = asset_oos
+        out["holdout_n_trades"] = len(holdout_trades)
+        out["holdout_has_coverage"] = bool(holdout_trades)
+        hold_acc = _accounts_from_trades(holdout_trades)
+        hold_year_rows = _job_year_rows(holdout_trades, hold_acc, budget)
+        out["holdout_windows"] = {
+            "all": _agg_window(hold_year_rows, run),
+            "tune": _agg_window(hold_year_rows, tune),
+            "check": _agg_window(hold_year_rows, check),
+        }
+    return out
 
 
 def _empty_stats() -> dict[str, Any]:
@@ -221,7 +299,16 @@ def _empty_stats() -> dict[str, Any]:
 
 
 def _delta_stats(cell: dict[str, Any], base: dict[str, Any]) -> dict[str, Any]:
-    keys = ("sum_pnl", "is_pnl", "oos_pnl", "profit_factor", "win_rate", "max_dd")
+    keys = (
+        "sum_pnl",
+        "is_pnl",
+        "oos_pnl",
+        "corner_oos_pnl",
+        "asset_oos_pnl",
+        "profit_factor",
+        "win_rate",
+        "max_dd",
+    )
     out: dict[str, Any] = {}
     for k in keys:
         a = cell.get(k)
@@ -229,8 +316,84 @@ def _delta_stats(cell: dict[str, Any], base: dict[str, Any]) -> dict[str, Any]:
         if a is None or b is None:
             out[k] = None
         else:
-            out[k] = round(float(a) - float(b), 4 if k in ("profit_factor", "win_rate", "max_dd") else 2)
+            out[k] = round(
+                float(a) - float(b),
+                4 if k in ("profit_factor", "win_rate", "max_dd") else 2,
+            )
     return out
+
+
+def _load_asset_lists(root: Path) -> tuple[list[str] | None, list[str] | None]:
+    for name in ("freeze.json", "spec.json"):
+        path = root / name
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(data, dict):
+            continue
+        block = data.get("asset_split") if isinstance(data.get("asset_split"), dict) else data
+        mode = str(block.get("mode") or data.get("mode") or "off").strip().lower()
+        if mode == "off":
+            return None, None
+        tune = [str(x).strip().upper() for x in (block.get("tune_stocks") or []) if str(x).strip()]
+        holdout = [
+            str(x).strip().upper() for x in (block.get("holdout_stocks") or []) if str(x).strip()
+        ]
+        if tune or holdout:
+            return (tune or None), (holdout or None)
+    return None, None
+
+
+def summarize_cell(
+    cell_dir: Path,
+    *,
+    tune_years: set[int] | None = None,
+    check_years: set[int] | None = None,
+    run_years: set[int] | None = None,
+    tune_stocks: Any = None,
+    holdout_stocks: Any = None,
+) -> dict[str, Any]:
+    meta = _load_cell_meta(cell_dir)
+    samples: dict[str, Any] = {}
+    for name in SAMPLES:
+        logs = _list_logs(cell_dir / name)
+        trades, n_acc, n_ok, n_fail, per_budget = parse_logs(logs)
+        st = stats_from_trades(
+            trades,
+            n_acc,
+            tune_years=tune_years,
+            check_years=check_years,
+            run_years=run_years,
+            per_budget=per_budget,
+            tune_stocks=tune_stocks,
+            holdout_stocks=holdout_stocks,
+        )
+        st["n_logs_ok"] = n_ok
+        st["n_logs_fail"] = n_fail
+        if holdout_stocks:
+            hold_set = _norm_stock_set(holdout_stocks) or set()
+            hold_logs = 0
+            for path in logs:
+                m = RE_LOG.match(path.name)
+                if not m:
+                    continue
+                stock = "%s.%s" % (m.group(1), m.group(2).upper())
+                if stock in hold_set:
+                    hold_logs += 1
+            st["holdout_n_logs"] = hold_logs
+            if hold_logs <= 0:
+                st["holdout_has_coverage"] = False
+        samples[name] = st
+    return {
+        "id": str(meta.get("id") or cell_dir.name),
+        "label": str(meta.get("label") or cell_dir.name),
+        "kind": str(meta.get("kind") or "other"),
+        "overrides": meta.get("overrides") or {},
+        "samples": samples,
+    }
 
 
 def parse_logs(log_paths: list[Path]) -> tuple[list[dict[str, Any]], dict[int, int], int, int, float]:
@@ -286,38 +449,6 @@ def _load_cell_meta(cell_dir: Path) -> dict[str, Any]:
     return {"id": cell_dir.name, "label": cell_dir.name, "kind": "other", "overrides": {}}
 
 
-def summarize_cell(
-    cell_dir: Path,
-    *,
-    tune_years: set[int] | None = None,
-    check_years: set[int] | None = None,
-    run_years: set[int] | None = None,
-) -> dict[str, Any]:
-    meta = _load_cell_meta(cell_dir)
-    samples: dict[str, Any] = {}
-    for name in SAMPLES:
-        logs = _list_logs(cell_dir / name)
-        trades, n_acc, n_ok, n_fail, per_budget = parse_logs(logs)
-        st = stats_from_trades(
-            trades,
-            n_acc,
-            tune_years=tune_years,
-            check_years=check_years,
-            run_years=run_years,
-            per_budget=per_budget,
-        )
-        st["n_logs_ok"] = n_ok
-        st["n_logs_fail"] = n_fail
-        samples[name] = st
-    return {
-        "id": str(meta.get("id") or cell_dir.name),
-        "label": str(meta.get("label") or cell_dir.name),
-        "kind": str(meta.get("kind") or "other"),
-        "overrides": meta.get("overrides") or {},
-        "samples": samples,
-    }
-
-
 def _sign(val: float | None, eps: float = EPS_PNL) -> int:
     if val is None:
         return 0
@@ -343,6 +474,8 @@ def pick_recommend(cells: list[dict[str, Any]]) -> dict[str, Any]:
         return (cell.get("samples") or {}).get(name) or {}
 
     bb = sample(base, "book")
+    space_on = "holdout_has_coverage" in bb or "holdout_n_logs" in bb
+
     passers: list[tuple[dict[str, Any], float, int]] = []
     notes: list[dict[str, Any]] = []
 
@@ -353,15 +486,35 @@ def pick_recommend(cells: list[dict[str, Any]]) -> dict[str, Any]:
         d_oos = float(b.get("oos_pnl") or 0) - float(bb.get("oos_pnl") or 0)
         d_is = float(b.get("is_pnl") or 0) - float(bb.get("is_pnl") or 0)
         fail = ""
-        if _sign(d_oos) * _sign(d_is) < 0:
-            fail = "调参期与验收期不同向"
-        elif d_oos <= 0:
-            fail = "验收期未优于现行"
+        if space_on:
+            cell_cov = bool(b.get("holdout_has_coverage"))
+            base_cov = bool(bb.get("holdout_has_coverage"))
+            if not cell_cov and not base_cov:
+                fail = "盲测标的无覆盖"
+            elif not cell_cov:
+                fail = "盲测标的无覆盖"
+            else:
+                d_corner = float(b.get("corner_oos_pnl") or 0) - float(
+                    bb.get("corner_oos_pnl") or 0
+                )
+                if d_corner < 0:
+                    fail = "盲测标的验收塌方"
+        if not fail:
+            if _sign(d_oos) * _sign(d_is) < 0:
+                fail = "调参期与验收期不同向"
+            elif d_oos <= 0:
+                fail = "验收期未优于现行"
         row = {
             "id": cell["id"],
             "kind": cell.get("kind"),
             "d_oos": round(d_oos, 2),
             "d_is": round(d_is, 2),
+            "d_corner": None
+            if not space_on
+            else round(
+                float(b.get("corner_oos_pnl") or 0) - float(bb.get("corner_oos_pnl") or 0),
+                2,
+            ),
             "fail": fail or None,
         }
         notes.append(row)
@@ -377,11 +530,16 @@ def pick_recommend(cells: list[dict[str, Any]]) -> dict[str, Any]:
         by_kind[kind] = best
 
     if not passers:
+        reason = "验收期未优于现行或与调参期不同向，维持现行"
+        if space_on and any(
+            n.get("fail") and "盲测" in str(n.get("fail")) for n in notes
+        ):
+            reason = "盲测未通过或验收期未优于现行，维持现行"
         return {
             "id": "base",
             "label": base.get("label") or "base",
             "kind": "base",
-            "reason": "验收期未优于现行或与调参期不同向，维持现行",
+            "reason": reason,
             "candidates": notes,
             "by_kind": by_kind,
         }
@@ -391,11 +549,14 @@ def pick_recommend(cells: list[dict[str, Any]]) -> dict[str, Any]:
     close = [p for p in passers if p[1] >= best_oos - pad]
     close.sort(key=lambda p: (p[2], -p[1]))
     picked = close[0][0]
+    reason = "以验收期为主且与调参期同向；接近则少改结构"
+    if space_on:
+        reason = "调参标的验收期同向且盲测未塌；接近则少改结构"
     return {
         "id": picked["id"],
         "label": picked.get("label") or picked["id"],
         "kind": picked.get("kind"),
-        "reason": "以验收期为主且与调参期同向；接近则少改结构",
+        "reason": reason,
         "candidates": notes,
         "by_kind": by_kind,
     }
@@ -438,6 +599,7 @@ def summarize_sweep(sweep_dir: str | Path) -> dict[str, Any]:
     tune = year_range_set(win["tune_start"], win["tune_end"])
     check = year_range_set(win["check_start"], win["check_end"])
     run = year_range_set(win["year_start"], win["year_end"])
+    tune_stocks, holdout_stocks = _load_asset_lists(root)
     cells: list[dict[str, Any]] = []
     for child in sorted(root.iterdir()):
         if not child.is_dir():
@@ -448,7 +610,12 @@ def summarize_sweep(sweep_dir: str | Path) -> dict[str, Any]:
             continue
         cells.append(
             summarize_cell(
-                child, tune_years=tune, check_years=check, run_years=run
+                child,
+                tune_years=tune,
+                check_years=check,
+                run_years=run,
+                tune_stocks=tune_stocks,
+                holdout_stocks=holdout_stocks,
             )
         )
     attach_deltas(cells)
@@ -468,6 +635,11 @@ def summarize_sweep(sweep_dir: str | Path) -> dict[str, Any]:
         "recommend": rec,
         "note": "MAE 反事实不得写入推荐；默认不改 config / 不 deploy",
     }
+    if tune_stocks or holdout_stocks:
+        out["asset_split"] = {
+            "tune_stocks": list(tune_stocks or []),
+            "holdout_stocks": list(holdout_stocks or []),
+        }
     for key in YEAR_WINDOW_KEYS:
         out[key] = int(win[key])
     out_p = root / "summary.json"
