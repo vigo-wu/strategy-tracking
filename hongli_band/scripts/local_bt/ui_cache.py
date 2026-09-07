@@ -82,6 +82,45 @@ GRID_KEYS: tuple[str, ...] = (
     "grid_gate_pf_min",
 )
 
+ROBUST_KEYS: tuple[str, ...] = (
+    "robust_run_id",
+    "robust_year_start",
+    "robust_year_end",
+    "robust_tune_start",
+    "robust_tune_end",
+    "robust_check_start",
+    "robust_check_end",
+    "robust_deploy_start",
+    "robust_deploy_end",
+    "robust_n_baskets",
+    "robust_basket_size",
+    "robust_seed",
+    "robust_workers",
+    "robust_universe",
+    "robust_ma_type",
+    "robust_compare_div",
+    "robust_compound",
+    "robust_param_source",
+    "robust_h_calmar_en",
+    "robust_h_calmar_min",
+    "robust_h_dd_en",
+    "robust_h_dd_pct",
+    "robust_h_sharpe_en",
+    "robust_h_sharpe_min",
+    "robust_h_pf_en",
+    "robust_h_pf_min",
+    "robust_s_wr_en",
+    "robust_s_wr_veto",
+    "robust_s_wr_min",
+    "robust_s_nt_en",
+    "robust_s_nt_veto",
+    "robust_s_nt_min",
+    "robust_s_nt_psy",
+    "robust_a_pass",
+    "robust_a_calmar",
+    "robust_a_tail_pct",
+)
+
 
 def form_cache_keys() -> tuple[str, ...]:
     return (
@@ -91,6 +130,7 @@ def form_cache_keys() -> tuple[str, ...]:
         + select_filter_keys()
         + ANALYSIS_KEYS
         + GRID_KEYS
+        + ROBUST_KEYS
     )
 
 

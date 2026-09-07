@@ -1286,6 +1286,24 @@ def _render_results() -> None:
     rec = summary.get("recommend") or {}
     st.subheader("选参结论")
     st.success("%s · %s" % (rec.get("label") or rec.get("id") or "—", rec.get("reason") or ""))
+    try:
+        from robust_ui import ROBUST_MODE
+        from ui_cache import UI_MODE_KEY
+
+        sweep_dir = _grid_sweep_dir(summary)
+        sum_path = sweep_dir / "summary.json"
+        if sum_path.is_file() and st.button("送入实盘评估", key="grid_to_robust"):
+            try:
+                rel = str(sum_path.resolve().relative_to(Path(__file__).resolve().parents[3])).replace(
+                    "\\", "/"
+                )
+            except ValueError:
+                rel = str(sum_path)
+            st.session_state["robust_param_source"] = rel
+            st.session_state[UI_MODE_KEY] = ROBUST_MODE
+            st.rerun()
+    except Exception:
+        pass
     space = summary.get("asset_split") or {}
     space_on = bool(space.get("holdout_stocks") or space.get("tune_stocks"))
     if space_on:

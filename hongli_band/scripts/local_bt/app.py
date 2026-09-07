@@ -170,6 +170,7 @@ from ui_cache import (  # noqa: E402
     snapshot_form_state,
 )
 from grid_ui import GRID_MODE, render_grid_mode, render_grid_sidebar  # noqa: E402
+from robust_ui import ROBUST_MODE, render_robust_mode, render_robust_sidebar  # noqa: E402
 
 import streamlit as st  # noqa: E402
 
@@ -3389,6 +3390,11 @@ _UI_MODES: tuple[dict[str, str], ...] = (
         "icon": ":material/grid_on:",
         "caption": "命名格子或叉乘对照，按样本外选参",
     },
+    {
+        "key": ROBUST_MODE,
+        "icon": ":material/verified:",
+        "caption": "随机抽组合回放，看能不能上实盘",
+    },
 )
 _UI_MODE_BY_KEY = {m["key"]: m for m in _UI_MODES}
 
@@ -3489,6 +3495,8 @@ with st.sidebar:
         st.caption("先选任务")
     elif mode == GRID_MODE:
         render_grid_sidebar()
+    elif mode == ROBUST_MODE:
+        render_robust_sidebar()
     elif mode != "选股方案" and mode != "数据分析":
         csv_root = st.text_input("行情根目录", value=str(DEFAULT_CSV_ROOT))
         div_kw: dict[str, Any] = {}
@@ -3560,6 +3568,8 @@ with st.sidebar:
 
 if mode == GRID_MODE:
     render_grid_mode()
+elif mode == ROBUST_MODE:
+    render_robust_mode()
 elif mode == "选股方案":
     _render_select(
         str(DEFAULT_CSV_ROOT),

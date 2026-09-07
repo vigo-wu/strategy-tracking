@@ -17,6 +17,7 @@ alwaysApply: true
 | 因子正交化/中性化、剥离行业市值风格、残差因子 | `.cursor/skills/skill-factor-orthogonalize/SKILL.md` |
 | 批量把 OHLCV alpha 做成 QuantSkills 因子 Skill 并验证 | `.cursor/skills/skill-quant-factor-skill-factory/SKILL.md` |
 | 网格回测、最优参数、实跑扫参、STOP_LOSS/TRAIL/TIME_FORCE 确认 | `.cursor/skills/qmt-local-bt-grid/SKILL.md` |
+| 实盘评估、随机组合回放、能否上实盘、稳健门（参数锁定后） | `.cursor/skills/qmt-local-bt-robust/SKILL.md` |
 
 ## 叠加（不是二选一）
 
@@ -30,3 +31,4 @@ alwaysApply: true
 - 「回测报告」= 解析 QMT log 画图；「过拟合检验」= 对收益序列做 DSR/PBO，不是同一条路
 - `qmt-backtest-report` 只读日志画图，不改策略、不 deploy
 - 「网格 / 最优参数 / 实跑扫参」= 真实 local_bt 重跑（`qmt-local-bt-grid`），不是 MAE 反事实，也不是 DSR/PBO
+- 「实盘评估 / 随机组合 / 能否上实盘」= 参数锁定后的组合稳健门（`qmt-local-bt-robust`），不是网格选参，也不是选股 WF

@@ -1,0 +1,43 @@
+{
+  "theme": "hongli_band",
+  "run_id": "post_sl_robust",
+  "overrides_from": "",
+  "overrides": {},
+  "year_start": 2018,
+  "year_end": 2026,
+  "tune_start": 2018,
+  "tune_end": 2021,
+  "check_start": 2022,
+  "check_end": 2023,
+  "deploy_start": 2024,
+  "deploy_end": 2026,
+  "compare_div": "front_ratio",
+  "ma_type": "EMA",
+  "universe_dir": "tools/csv/none",
+  "n_baskets": 40,
+  "basket_size": 10,
+  "seed": 42,
+  "compound_backtest": true,
+  "gate": {
+    "hard": {
+      "calmar": { "enabled": true, "min": 1.2 },
+      "max_dd": { "enabled": true, "floor": -0.12 },
+      "oos_sharpe": { "enabled": true, "min": 0.7 },
+      "profit_factor": { "enabled": true, "min": 1.4 }
+    },
+    "soft": {
+      "win_rate": { "enabled": true, "veto": false, "min": 42.0 },
+      "n_trades": {
+        "enabled": true,
+        "veto": false,
+        "min": 1,
+        "per_stock_year_min": 0.5
+      }
+    },
+    "aggregate": {
+      "pass_rate_min": 0.7,
+      "median_calmar_min": 1.2,
+      "tail_max_dd_floor": -0.15
+    }
+  }
+}
