@@ -181,7 +181,6 @@ class GridSummarizeTest(unittest.TestCase):
     def test_pick_disabled_skips_missing(self) -> None:
         gate = _gate_off_absolute(relative_to_base=False, calmar_same_sign=False)
         cells = [
-            _cell("base", "base", check=_win(calmar=None, sharpe=None, max_dd=None), overrides={}),
             _cell(
                 "sl06",
                 "tighten",
@@ -199,20 +198,21 @@ class GridSummarizeTest(unittest.TestCase):
             _cell(
                 "mid",
                 "other",
-                check=_win(calmar=1.7, sharpe=1.0),
-                tune=_win(calmar=1.8),
+                check=_win(calmar=3.0, sharpe=1.0),
+                tune=_win(calmar=2.8),
             ),
         ]
         ok = pick_recommend(cells)
         self.assertEqual(ok["id"], "mid")
         strict = default_gate()
         strict["calmar"]["enabled"] = True
-        strict["calmar"]["min"] = 2.0
+        strict["calmar"]["min"] = 4.0
         rec = pick_recommend(cells, gate=strict)
-        self.assertEqual(rec["id"], "base")
-        self.assertIn("卡玛", rec["candidates"][0]["fail"])
+        self.assertIsNone(rec["id"])
+        by_id = {n["id"]: n for n in rec["candidates"]}
+        self.assertIn("卡玛", by_id["mid"]["fail"])
 
-    def test_pick_relative_off_allows_worse_than_base(self) -> None:
+    def test_pick_relative_on_rejects_worse(self) -> None:
         cells = [
             _cell(
                 "base",
@@ -224,17 +224,20 @@ class GridSummarizeTest(unittest.TestCase):
             _cell(
                 "weaker",
                 "tighten",
-                check=_win(calmar=2.0, sharpe=1.0, win_rate=50, profit_factor=2.0, max_dd=-0.05),
-                tune=_win(calmar=2.5),
+                check=_win(calmar=5.0, sharpe=1.0, win_rate=50, profit_factor=2.0, max_dd=-0.05),
+                tune=_win(calmar=4.5),
             ),
         ]
-        with_rel = pick_recommend(cells)
+        rel = default_gate()
+        rel["relative_to_base"] = True
+        rel["calmar_same_sign"] = False
+        with_rel = pick_recommend(cells, gate=rel)
         self.assertEqual(with_rel["id"], "base")
-        gate = default_gate()
-        gate["relative_to_base"] = False
-        gate["calmar_same_sign"] = False
-        no_rel = pick_recommend(cells, gate=gate)
-        self.assertEqual(no_rel["id"], "weaker")
+        no_rel = default_gate()
+        no_rel["relative_to_base"] = False
+        no_rel["calmar_same_sign"] = False
+        picked = pick_recommend(cells, gate=no_rel)
+        self.assertEqual(picked["id"], "weaker")
 
     def test_pick_holdout_no_coverage(self) -> None:
         gate = _gate_off_absolute(relative_to_base=False, calmar_same_sign=False)
@@ -258,8 +261,9 @@ class GridSummarizeTest(unittest.TestCase):
             ),
         ]
         rec = pick_recommend(cells, gate=gate)
-        self.assertEqual(rec["id"], "base")
-        self.assertIn("无覆盖", rec["candidates"][0]["fail"])
+        self.assertIsNone(rec["id"])
+        by_id = {n["id"]: n for n in rec["candidates"]}
+        self.assertIn("无覆盖", by_id["sl06"]["fail"])
 
     def test_pick_holdout_veto_absolute(self) -> None:
         base_h = _win(calmar=2.0, sharpe=1.0)
@@ -277,12 +281,36 @@ class GridSummarizeTest(unittest.TestCase):
                 "tighten",
                 check=_win(calmar=2.5, sharpe=1.2),
                 tune=_win(calmar=2.2),
-                holdout_check=_win(calmar=0.5, sharpe=0.2),  # 盲测卡玛不过
+                holdout_check=_win(calmar=0.5, sharpe=0.2),  # 盲测夏普不过
             ),
         ]
         rec = pick_recommend(cells)
         self.assertEqual(rec["id"], "base")
-        self.assertIn("盲测", rec["candidates"][0]["fail"])
+        by_id = {n["id"]: n for n in rec["candidates"]}
+        self.assertIn("盲测", by_id["good_time"]["fail"])
+
+    def test_pick_no_base_still_recommends(self) -> None:
+        gate = _gate_off_absolute()
+        cells = [
+            _cell("sl06", "tighten", check=_win(calmar=1.5), oos_pnl=10.0),
+            _cell("sl10", "loosen", check=_win(calmar=2.2), oos_pnl=20.0),
+        ]
+        rec = pick_recommend(cells, gate=gate)
+        self.assertEqual(rec["id"], "sl10")
+        by_id = {n["id"]: n for n in rec["candidates"]}
+        self.assertIsNone(by_id["sl06"]["fail"])
+        self.assertIsNone(by_id["sl10"]["fail"])
+
+    def test_pick_none_pass(self) -> None:
+        gate = default_gate()
+        gate["calmar"]["enabled"] = True
+        gate["calmar"]["min"] = 9.0
+        cells = [
+            _cell("sl06", "tighten", check=_win(calmar=1.0)),
+        ]
+        rec = pick_recommend(cells, gate=gate)
+        self.assertIsNone(rec["id"])
+        self.assertIn("过门", rec["reason"])
 
     def test_pick_rank_by_calmar_delta(self) -> None:
         gate = _gate_off_absolute(relative_to_base=False, calmar_same_sign=False)

@@ -32,8 +32,8 @@ MAE 为何不可信、本轮数字：需要时再读 [reference-lessons.md](refe
 
 ## 硬规则
 
-1. **只扫有经济含义的命名变体**，默认 ≤8 格（含 `base`）。禁止 12 维笛卡尔积。
-2. **必须含现行 `base`**。收紧 / 放宽分开标，不要混成一个「更好」。
+1. **只扫有经济含义的命名变体**，默认 ≤8 格。禁止 12 维笛卡尔积。
+2. 格子 = **扫描取值笛卡尔积**，不自动插入现行档。扫描值全等于 config 的格打 `is_current` / `★现行`。不强制 `id=base`。
 3. 关联常量不顺手改：动 TRAIL 起步不改 `SCALE_ARM` / `TIME_FORCE_MIN_RET`，除非格子里显式写了。
 4. `TIME_FORCE_BARS<=0` 关闭整条 time_force；`MIN_RET=0` 只关掉让路，不是关闭 time_force。
 5. **主样本**：默认=跟踪池 `BOOK_STOCKS` × spec 回测年（均线/复权锁 config）。`asset_split.mode=random_from_csv` 时=从 `tools/csv/none` 抽取的 **调参∪盲测** 名单（均线/复权锁 compare_div）。不要用 `local_bt_ma_compare.csv` 冻结 winner。
@@ -45,25 +45,25 @@ MAE 为何不可信、本轮数字：需要时再读 [reference-lessons.md](refe
 
 ## 选参
 
-过门 = **侧栏/spec `gate` 已启用的绝对合格线** ∧（可选）**相对 base 不劣** ∧（可选）**调参/验收卡玛同向**。
-默认关闭：卡玛绝对线、笔数、卡玛同向；默认开启：回撤、夏普、胜率、盈亏比、相对 base。
+过门 = **侧栏/spec `gate` 已启用的绝对合格线** ∧（可选）相对现行格不劣 ∧（可选）调参/验收卡玛同向。无 `is_current` / `id=base` 格时相对门与同向跳过。
+默认关闭：卡玛绝对线、笔数、卡玛同向、相对现行。默认开启：回撤、夏普、胜率、盈亏比。
 指标一律用窗内 `windows.check.*`（空间隔离时盲测用 `holdout_windows.check.*` 复用同一 gate 否决）；禁止用样本级整段 `max_dd`/`win_rate`。
-通过者按验收期**卡玛 Δ**排序（接近则少改 overrides）；盈亏仅展示。侧栏可逐项启用/改阈值；「只汇总」传入当前侧栏 gate 重算推荐（不回写 widget 键）。
+通过者按验收期**卡玛**排序（接近则少改与 config 的差异键）；盈亏仅展示。全不过则无推荐（不要写「最优」或「维持现行」）。侧栏可逐项启用/改阈值；「只汇总」传入当前侧栏 gate 重算推荐（不回写 widget 键）。
 
-Agent 输出：Canvas（各格 Δ / 验收期）+ **一句推荐**。不要把 MAE 数字写进推荐。
+Agent 输出：过门推荐一句。不要把 MAE 数字写进推荐。
 
 ## 检查清单
 
 ```
 进度:
-- [ ] 1. 命名格子 JSON（含 base，≤8，收紧/放宽分开）
+- [ ] 1. 扫描叉乘格子 JSON（≤8；等于 config 则 ★现行）
 - [ ] 2. 主样本=BOOK_STOCKS 或 asset_split 抽取名单；spec 含回测年 / 调参期 / 验收期
 - [ ] 3. 若空间隔离：freeze 含 tune/holdout；盲测只否决
 - [ ] 4. 运行时 overrides（禁止改 config 扫参）
 - [ ] 5. 隔离 report/grid/<sweep>/；格间串行
 - [ ] 6. 探针 log 指纹与格子一致
-- [ ] 7. summarize → summary.json；侧栏/spec gate 过门 + 验收期卡玛Δ选参
-- [ ] 8. Canvas + 一句推荐；默认不改 config / 不 deploy
+- [ ] 7. summarize → summary.json；绝对过门 + 验收期卡玛推荐
+- [ ] 8. 一句过门推荐；默认不改 config / 不 deploy
 ```
 
 ## 怎么跑（hongli_band 首个实现）
@@ -81,7 +81,7 @@ python .cursor/skills/qmt-local-bt-grid/scripts/summarize.py --sweep-dir hongli_
 
 | 参数 | 含义 |
 | :--- | :--- |
-| `--spec` | 命名格子 JSON/YAML（须含 `id=base`） |
+| `--spec` | 命名格子 JSON/YAML |
 | `--include-sma-ema` | 额外全 SMA / 全 EMA 对照 |
 | `--workers` | 格内进程数；格子之间始终串行 |
 | `--summarize-only` | 不重跑，只解析已有格子 log |
@@ -115,4 +115,4 @@ python .cursor/skills/qmt-local-bt-grid/scripts/summarize.py --sweep-dir hongli_
 
 空间隔离示例见 `examples/stop_loss_space.json`（`asset_split.mode=random_from_csv`，宇宙默认 `tools/csv/none`）。
 
-`kind`：`base` / `tighten` / `loosen` / `off` / `other`。`overrides` 的键是拼接脚本里的全局名（如 `STOP_LOSS`、`TRAIL_TIERS`、`TIME_FORCE_BARS`）。
+`kind`：`base` / `tighten` / `loosen` / `off` / `other`（`id=base` 仅兼容旧 spec）。扫描生成的格子用 token id；等于 config 时 `is_current=true`。`overrides` 的键是拼接脚本里的全局名（如 `STOP_LOSS`、`TRAIL_TIERS`、`TIME_FORCE_BARS`）。

@@ -553,8 +553,7 @@ def parse_scan_values(family: str, text: str) -> list[Any]:
 
 def unique_levels(family: str, extras: Iterable[Any], defaults: Mapping[str, Any]) -> list[Any]:
     spec = require_param(family)
-    cur = current_value(family, defaults)
-    out: list[Any] = [cur]
+    out: list[Any] = []
     for raw in extras or ():
         val = coerce_level(family, raw)
         if spec.dtype == "percent" and abs(float(val)) > 1.0 + EPS:
@@ -564,16 +563,19 @@ def unique_levels(family: str, extras: Iterable[Any], defaults: Mapping[str, Any
         if family == "TRAIL":
             patch_trail_arm(defaults.get("TRAIL_TIERS"), float(val))
         out.append(val)
+    if not out:
+        raise GridSpecError("%s 已选用但扫描取值为空" % spec.label)
     return out
 
 
 def product_count(axes: Mapping[str, Iterable[Any]], defaults: Mapping[str, Any]) -> int:
+    fams = [f for f in FAMILY_ORDER if f in axes]
+    if not fams:
+        return 0
     n = 1
-    for fam in FAMILY_ORDER:
-        if fam not in axes:
-            continue
+    for fam in fams:
         n *= len(unique_levels(fam, axes[fam], defaults))
-    return n if n > 0 else 1
+    return n
 
 
 def _pct_token(value: float) -> str:
@@ -649,7 +651,7 @@ def infer_kind_from_overrides(
     ov = dict(overrides or {})
     keys = [k for k in ov if k in KNOWN_OVERRIDE_KEYS]
     if not keys:
-        return "base"
+        return "other"
     if len(keys) >= 2:
         return "other"
     key = keys[0]
@@ -756,15 +758,35 @@ def base_label(defaults: Mapping[str, Any], families: Iterable[str]) -> str:
     return "现行"
 
 
+CURRENT_MARK = "★现行"
+
+
+def combo_matches_current(combo: Mapping[str, Any], defaults: Mapping[str, Any]) -> bool:
+    if not combo:
+        return False
+    return all(num_eq(combo[fam], current_value(fam, defaults)) for fam in combo)
+
+
+def combo_n_diffs(combo: Mapping[str, Any], defaults: Mapping[str, Any]) -> int:
+    return sum(
+        0 if num_eq(combo[fam], current_value(fam, defaults)) else 1 for fam in combo
+    )
+
+
+def cell_is_current(cell: Mapping[str, Any] | None) -> bool:
+    if not cell:
+        return False
+    if cell.get("is_current"):
+        return True
+    return str(cell.get("id") or "") == "base"
+
+
 def overrides_for_combo(
     combo: Mapping[str, Any],
     defaults: Mapping[str, Any],
 ) -> dict[str, Any]:
     ov: dict[str, Any] = {}
     for fam, val in combo.items():
-        cur = current_value(fam, defaults)
-        if num_eq(val, cur):
-            continue
         spec = require_param(fam)
         if fam == "TRAIL":
             ov["TRAIL_TIERS"] = patch_trail_arm(defaults.get("TRAIL_TIERS"), float(val))
@@ -782,12 +804,8 @@ def combo_id(combo: Mapping[str, Any], defaults: Mapping[str, Any], used: set[st
     for fam in FAMILY_ORDER:
         if fam not in combo:
             continue
-        if num_eq(combo[fam], current_value(fam, defaults)):
-            continue
         parts.append(family_token(fam, combo[fam]))
-    if not parts:
-        return _unique_id("base", used)
-    return _unique_id("_".join(parts), used)
+    return _unique_id("_".join(parts) or "cell", used)
 
 
 def combo_label(combo: Mapping[str, Any], defaults: Mapping[str, Any]) -> str:
@@ -795,16 +813,14 @@ def combo_label(combo: Mapping[str, Any], defaults: Mapping[str, Any]) -> str:
     for fam in FAMILY_ORDER:
         if fam not in combo:
             continue
-        if num_eq(combo[fam], current_value(fam, defaults)):
-            continue
         bits.append(family_value_label(fam, combo[fam]))
-    return " · ".join(bits) if bits else "现行"
+    return " · ".join(bits)
 
 
 def overrides_summary(overrides: Mapping[str, Any] | None, defaults: Mapping[str, Any] | None = None) -> str:
     ov = dict(overrides or {})
     if not ov:
-        return "（现行）"
+        return "（无覆盖）"
     bits: list[str] = []
     if "STOP_LOSS" in ov:
         bits.append("STOP_LOSS=%s" % ov["STOP_LOSS"])
@@ -818,7 +834,7 @@ def overrides_summary(overrides: Mapping[str, Any] | None, defaults: Mapping[str
     extra = [k for k in ov if k not in ("STOP_LOSS", "TRAIL_TIERS", "TIME_FORCE_BARS", "TIME_FORCE_MIN_RET")]
     for k in extra:
         bits.append("%s=%s" % (k, ov[k]))
-    return " · ".join(bits) if bits else "（现行）"
+    return " · ".join(bits) if bits else "（无覆盖）"
 
 
 def build_cells(
@@ -832,14 +848,7 @@ def build_cells(
     if unknown:
         raise GridSpecError("未知参数轴 %s" % ", ".join(sorted(unknown)))
     if not fams:
-        used: set[str] = set()
-        cell = {
-            "id": "base",
-            "label": base_label(defaults, ()),
-            "kind": "base",
-            "overrides": {},
-        }
-        return [_apply_keep(cell, keep)]
+        return []
     levels = [unique_levels(fam, axes[fam], defaults) for fam in fams]
     used_ids: set[str] = set()
     cells: list[dict[str, Any]] = []
@@ -847,31 +856,23 @@ def build_cells(
         combo = {fam: prod[i] for i, fam in enumerate(fams)}
         ov = overrides_for_combo(combo, defaults)
         cid = combo_id(combo, defaults, used_ids)
-        if not ov:
-            cid = "base"
-            used_ids.add("base")
-            cell = {
-                "id": "base",
-                "label": base_label(defaults, fams),
-                "kind": "base",
-                "overrides": {},
-            }
-        else:
-            n_keys = len(ov)
-            kind = (
-                infer_kind_from_overrides(ov, defaults) if n_keys == 1 else "other"
-            )
-            cell = {
-                "id": cid,
-                "label": combo_label(combo, defaults),
-                "kind": kind,
-                "overrides": json_ready(ov),
-            }
+        is_cur = combo_matches_current(combo, defaults)
+        kind = infer_kind_from_overrides(ov, defaults)
+        if kind not in KIND_ENUM or kind == "base":
+            kind = "other"
+        label = combo_label(combo, defaults)
+        if is_cur:
+            label = "%s · %s" % (CURRENT_MARK, label) if label else CURRENT_MARK
+        cell = {
+            "id": cid,
+            "label": label,
+            "kind": kind,
+            "overrides": json_ready(ov),
+            "is_current": is_cur,
+            "n_diffs": combo_n_diffs(combo, defaults),
+        }
         cells.append(_apply_keep(cell, keep))
-    cells.sort(key=lambda c: 0 if c["id"] == "base" else 1)
-    n_base = sum(1 for c in cells if c["id"] == "base")
-    if n_base != 1:
-        raise GridSpecError("必须恰好一个 base 格，当前 %s" % n_base)
+    cells.sort(key=lambda c: 0 if cell_is_current(c) else 1)
     return cells
 
 
@@ -888,7 +889,7 @@ def _apply_keep(
     kind = str(prev.get("kind") or "").strip().lower()
     if label:
         cell["label"] = label
-    if cell["id"] != "base" and kind in KIND_ENUM and kind != "base":
+    if kind in KIND_ENUM and kind != "base":
         cell["kind"] = kind
     return cell
 
@@ -1019,16 +1020,25 @@ def correct_cell_kinds(
     out: list[dict[str, Any]] = []
     for raw in cells or ():
         raw_kind = str(raw.get("kind") or "").strip().lower()
-        cell = {
-            "id": str(raw.get("id") or "").strip(),
+        cid = str(raw.get("id") or "").strip()
+        cell: dict[str, Any] = {
+            "id": cid,
             "label": str(raw.get("label") or raw.get("id") or ""),
             "kind": raw_kind,
             "overrides": json_ready(raw.get("overrides") or {}),
+            "is_current": bool(raw.get("is_current")) or cid == "base",
         }
-        if cell["id"] == "base":
+        if raw.get("n_diffs") is not None:
+            try:
+                cell["n_diffs"] = int(raw.get("n_diffs"))
+            except (TypeError, ValueError):
+                pass
+        if cid == "base":
             cell["kind"] = "base"
-        elif raw_kind not in KIND_ENUM:
-            cell["kind"] = infer_kind_from_overrides(cell["overrides"], defaults)
+            cell["is_current"] = True
+        elif raw_kind not in KIND_ENUM or raw_kind == "base":
+            inferred = infer_kind_from_overrides(cell["overrides"], defaults)
+            cell["kind"] = inferred if inferred in KIND_ENUM and inferred != "base" else "other"
         out.append(cell)
     return out
 

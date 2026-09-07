@@ -55,18 +55,24 @@ class GridSpecTest(unittest.TestCase):
     def test_stop_loss_default_chips(self) -> None:
         cells = build_cells({"STOP_LOSS": [0.06, 0.10]}, DEFAULTS)
         ids = [c["id"] for c in cells]
-        self.assertEqual(ids, ["base", "sl06", "sl10"])
+        self.assertEqual(ids, ["sl06", "sl10"])
         by = {c["id"]: c for c in cells}
-        self.assertEqual(by["base"]["kind"], "base")
-        self.assertEqual(by["base"]["overrides"], {})
+        self.assertFalse(by["sl06"]["is_current"])
         self.assertEqual(by["sl06"]["kind"], "tighten")
         self.assertEqual(by["sl06"]["overrides"]["STOP_LOSS"], 0.06)
         self.assertEqual(by["sl10"]["kind"], "loosen")
         self.assertEqual(by["sl10"]["overrides"]["STOP_LOSS"], 0.10)
 
-    def test_current_value_not_a_variant(self) -> None:
+    def test_scan_includes_current_marks(self) -> None:
         cells = build_cells({"STOP_LOSS": [0.06, 0.08, 0.10]}, DEFAULTS)
-        self.assertEqual([c["id"] for c in cells], ["base", "sl06", "sl10"])
+        ids = [c["id"] for c in cells]
+        self.assertEqual(set(ids), {"sl06", "sl08", "sl10"})
+        by = {c["id"]: c for c in cells}
+        self.assertTrue(by["sl08"]["is_current"])
+        self.assertEqual(by["sl08"]["n_diffs"], 0)
+        self.assertAlmostEqual(by["sl08"]["overrides"]["STOP_LOSS"], 0.08)
+        self.assertIn("★现行", by["sl08"]["label"])
+        self.assertFalse(by["sl06"]["is_current"])
 
     def test_cartesian_stop_and_trail(self) -> None:
         cells = build_cells(
@@ -74,28 +80,30 @@ class GridSpecTest(unittest.TestCase):
             DEFAULTS,
         )
         ids = [c["id"] for c in cells]
-        self.assertEqual(
-            set(ids),
-            {"base", "sl06", "sl10", "arm04", "sl06_arm04", "sl10_arm04"},
-        )
-        self.assertEqual(len(cells), 6)
+        self.assertEqual(set(ids), {"sl06_arm04", "sl10_arm04"})
+        self.assertEqual(len(cells), 2)
         by = {c["id"]: c for c in cells}
-        self.assertEqual(by["arm04"]["kind"], "loosen")
-        self.assertEqual(by["sl06"]["kind"], "tighten")
         self.assertEqual(by["sl06_arm04"]["kind"], "other")
         self.assertEqual(by["sl10_arm04"]["kind"], "other")
         self.assertEqual(set(by["sl06_arm04"]["overrides"]), {"STOP_LOSS", "TRAIL_TIERS"})
-        arm = by["arm04"]["overrides"]["TRAIL_TIERS"][0][0]
+        arm = by["sl06_arm04"]["overrides"]["TRAIL_TIERS"][0][0]
         self.assertAlmostEqual(arm, 0.04)
-        self.assertAlmostEqual(by["arm04"]["overrides"]["TRAIL_TIERS"][0][1], 0.06)
-        self.assertEqual(len(by["arm04"]["overrides"]["TRAIL_TIERS"]), 3)
+        self.assertAlmostEqual(by["sl06_arm04"]["overrides"]["TRAIL_TIERS"][0][1], 0.06)
 
     def test_product_count(self) -> None:
-        self.assertEqual(product_count({"STOP_LOSS": [0.06, 0.10]}, DEFAULTS), 3)
+        self.assertEqual(product_count({"STOP_LOSS": [0.06, 0.10]}, DEFAULTS), 2)
         self.assertEqual(
             product_count({"STOP_LOSS": [0.06, 0.10], "TRAIL": [0.04]}, DEFAULTS),
-            6,
+            2,
         )
+        self.assertEqual(product_count({}, DEFAULTS), 0)
+
+    def test_empty_scan_raises(self) -> None:
+        with self.assertRaises(GridSpecError) as ctx:
+            unique_levels("STOP_LOSS", [], DEFAULTS)
+        self.assertIn("扫描取值", str(ctx.exception))
+        with self.assertRaises(GridSpecError):
+            build_cells({"STOP_LOSS": []}, DEFAULTS)
 
     def test_min_ret_zero_is_other_not_off(self) -> None:
         cells = build_cells({"TIME_FORCE_MIN_RET": [0.0]}, DEFAULTS)
@@ -127,8 +135,10 @@ class GridSpecTest(unittest.TestCase):
 
     def test_keep_label_on_rebuild(self) -> None:
         first = build_cells({"STOP_LOSS": [0.06, 0.10]}, DEFAULTS)
-        first[1]["label"] = "手改止损6"
-        first[1]["kind"] = "other"
+        for c in first:
+            if c["id"] == "sl06":
+                c["label"] = "手改止损6"
+                c["kind"] = "other"
         keep = keep_from_cells(first)
         second = build_cells({"STOP_LOSS": [0.06, 0.10]}, DEFAULTS, keep=keep)
         by = {c["id"]: c for c in second}
@@ -171,7 +181,7 @@ class GridSpecTest(unittest.TestCase):
         self.assertFalse(generator_locked(known))
 
     def test_overrides_summary(self) -> None:
-        self.assertEqual(overrides_summary({}), "（现行）")
+        self.assertEqual(overrides_summary({}), "（无覆盖）")
         self.assertIn("STOP_LOSS=0.06", overrides_summary({"STOP_LOSS": 0.06}))
 
     def test_catalog_includes_entry_not_infra(self) -> None:
@@ -207,11 +217,10 @@ class GridSpecTest(unittest.TestCase):
         )
         ids = [c["id"] for c in cells]
         self.assertIn("sl06_ch03", ids)
-        self.assertEqual(len(cells), 6)
+        self.assertEqual(len(cells), 2)
         by = {c["id"]: c for c in cells}
         self.assertEqual(by["sl06_ch03"]["kind"], "other")
-        self.assertEqual(by["ch03"]["kind"], "other")
-        self.assertAlmostEqual(by["ch03"]["overrides"]["CHASE_MAX_PCT"], 0.03)
+        self.assertAlmostEqual(by["sl06_ch03"]["overrides"]["CHASE_MAX_PCT"], 0.03)
         self.assertEqual(set(by["sl06_ch03"]["overrides"]), {"STOP_LOSS", "CHASE_MAX_PCT"})
 
     def test_default_selection_none(self) -> None:
@@ -221,7 +230,15 @@ class GridSpecTest(unittest.TestCase):
         axes = axes_from_selection(sel)
         self.assertEqual(axes, {})
         cells = build_cells(axes, DEFAULTS)
-        self.assertEqual([c["id"] for c in cells], ["base"])
+        self.assertEqual(cells, [])
+
+    def test_axes_from_cells_keeps_current_level(self) -> None:
+        cells = build_cells({"STOP_LOSS": [0.06, 0.08, 0.10]}, DEFAULTS)
+        axes = axes_from_cells(cells, DEFAULTS)
+        self.assertIn("STOP_LOSS", axes)
+        vals = axes["STOP_LOSS"]
+        self.assertTrue(any(abs(float(v) - 0.08) < 1e-9 for v in vals))
+        self.assertTrue(any(abs(float(v) - 0.06) < 1e-9 for v in vals))
 
     def test_merge_param_selection_fills_new_catalog_keys(self) -> None:
         stale = {"STOP_LOSS": {"selected": True, "scan": "6,10"}}

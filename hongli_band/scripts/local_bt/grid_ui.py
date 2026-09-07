@@ -61,6 +61,7 @@ from grid_spec import (
     axes_from_selection,
     auto_sweep_name,
     build_cells,
+    cell_is_current,
     correct_cell_kinds,
     default_param_selection,
     fill_year_windows,
@@ -152,7 +153,7 @@ def _gate_from_state() -> dict[str, Any]:
     """从侧栏读 gate；勿在 widget 实例化后回写同名 session 键。"""
     ss = st.session_state
     raw = {
-        "relative_to_base": bool(ss.get("grid_gate_relative", True)),
+        "relative_to_base": bool(ss.get("grid_gate_relative", False)),
         "calmar_same_sign": bool(ss.get("grid_gate_calmar_same_sign", False)),
         "calmar": {
             "enabled": bool(ss.get("grid_gate_calmar_en", False)),
@@ -210,7 +211,10 @@ def _axes() -> dict[str, list[Any]]:
 def _current_spec(defaults: dict[str, Any]) -> dict[str, Any]:
     cells = list(st.session_state.get("grid_cells") or [])
     if not cells:
-        cells = build_cells(_axes(), defaults)
+        try:
+            cells = build_cells(_axes(), defaults)
+        except GridSpecError:
+            cells = []
     return make_spec(
         cells,
         sweep=str(st.session_state.get("grid_sweep") or "grid"),
@@ -373,6 +377,8 @@ def render_grid_sidebar() -> None:
             disabled=busy,
             persist_state="session",
         )
+        if not any(cell_is_current(c) for c in (st.session_state.get("grid_cells") or [])):
+            st.caption("当前预览无 ★现行 格：相对门 / 卡玛同向不生效。")
 
         def _gate_row(
             label: str,
@@ -677,14 +683,14 @@ def _render_param_table(defaults: dict[str, Any], busy: bool) -> None:
 
     axes = _axes()
     try:
-        n = product_count(axes, defaults) if axes else 1
+        n = product_count(axes, defaults)
     except GridSpecError as e:
         st.error(str(e))
         n = 0
     names = " × ".join(
         "%s %s" % (p.label, p.id) for p in catalog if p.id in axes
     ) or "（未选用）"
-    st.caption("未勾选不进积；勾选轴始终含现行一档。N = Π(各轴水平数) = **%s** 格 · 轴：%s" % (n, names))
+    st.caption("未勾选不进积；N = Π(各轴扫描个数) = **%s** 格 · 轴：%s" % (n, names))
     if n > WARN_CELL_SOFT:
         st.warning("格子数 %s > %s：技能建议少量命名格，叉乘多为交互项。" % (n, WARN_CELL_SOFT))
 
@@ -720,7 +726,7 @@ def _render_action_bar(defaults: dict[str, Any], busy: bool) -> None:
         except GridSpecError as e:
             st.error(str(e))
     if not (st.session_state.get("grid_cells") or []):
-        st.caption("尚未生成预览时，开跑会按当前参数表即时积格（至少含 base）。")
+        st.caption("尚未生成预览时，开跑会按当前参数表即时积格。")
 
 
 def _render_preview(defaults: dict[str, Any], busy: bool) -> None:
@@ -732,12 +738,14 @@ def _render_preview(defaults: dict[str, Any], busy: bool) -> None:
     if st.session_state.get("grid_preview_n") != n:
         st.session_state.pop("grid_cells_editor", None)
     st.session_state["grid_preview_n"] = n
-    st.markdown("**格子预览** · %s / 无硬上限 · 已含 base" % n)
+    st.markdown("**格子预览** · %s / 无硬上限" % n)
     rows = []
     for c in cells:
+        mark = "★现行" if cell_is_current(c) else ""
         rows.append(
             {
                 "删除": False,
+                "现行": mark,
                 "id": c["id"],
                 "label": c["label"],
                 "kind": c["kind"],
@@ -760,9 +768,11 @@ def _render_preview(defaults: dict[str, Any], busy: bool) -> None:
         num_rows="fixed",
         width="stretch",
         hide_index=True,
-        disabled=["id", "覆盖"] if not busy else df.columns.tolist(),
+        disabled=["现行", "id", "覆盖"] if not busy else df.columns.tolist(),
+        column_order=["删除", "现行", "id", "label", "kind", "覆盖"],
         column_config={
             "删除": st.column_config.CheckboxColumn("删除", default=False),
+            "现行": st.column_config.TextColumn("现行"),
             "kind": st.column_config.SelectboxColumn("kind", options=list(KIND_ENUM)),
         },
         key="grid_cells_editor",
@@ -776,18 +786,16 @@ def _render_preview(defaults: dict[str, Any], busy: bool) -> None:
         src = dict(by_id.get(cid) or {})
         if not src:
             continue
-        if cid != "base" and rec.get("删除"):
+        if rec.get("删除"):
             continue
         src["label"] = str(rec.get("label") or cid)
         kind = str(rec.get("kind") or src.get("kind") or "other")
         if cid == "base":
             kind = "base"
-        elif kind not in KIND_ENUM:
-            kind = src.get("kind") or "other"
+        elif kind not in KIND_ENUM or kind == "base":
+            kind = src.get("kind") if src.get("kind") in KIND_ENUM and src.get("kind") != "base" else "other"
         src["kind"] = kind
         out.append(src)
-    if not any(c["id"] == "base" for c in out) and "base" in by_id:
-        out.insert(0, by_id["base"])
     st.session_state["grid_cells"] = out
 
 
@@ -1219,8 +1227,8 @@ def _style_delta_cell(val: Any) -> str:
     return "color: #27ae60"
 
 
-def _style_base_row(row: pd.Series) -> list[str]:
-    if str(row.get("id") or "") == "base":
+def _style_current_row(row: pd.Series) -> list[str]:
+    if str(row.get("现行") or "").strip():
         return ["background-color: rgba(255,255,255,0.06)"] * len(row)
     return [""] * len(row)
 
@@ -1285,8 +1293,6 @@ def _render_fail_detail(notes_by_id: dict[str, Any], cells: list[dict[str, Any]]
     rows: list[dict[str, Any]] = []
     for cell in cells:
         cid = cell.get("id")
-        if cid == "base":
-            continue
         note = notes_by_id.get(cid) or {}
         fails = note.get("fails")
         if not fails and note.get("fail"):
@@ -1324,18 +1330,26 @@ def _render_results() -> None:
     if not isinstance(summary, dict) or not summary.get("cells"):
         return
     rec = summary.get("recommend") or {}
+    rec_id = str(rec.get("id") or "").strip()
     st.subheader("选参结论")
     sweep_label = str(summary.get("sweep") or "").strip()
     if sweep_label:
         st.caption("sweep `%s`" % sweep_label)
-    st.success("%s · %s" % (rec.get("label") or rec.get("id") or "—", rec.get("reason") or ""))
+    rec_reason = str(rec.get("reason") or "")
+    if rec_id:
+        st.success("过门推荐 **%s** · %s" % (rec.get("label") or rec_id, rec_reason))
+    else:
+        st.warning(rec_reason or "无格子过门")
     try:
         from robust_ui import ROBUST_MODE
         from ui_cache import UI_MODE_KEY
 
         sweep_dir = _grid_sweep_dir(summary)
         sum_path = sweep_dir / "summary.json"
-        if sum_path.is_file() and st.button("送入实盘评估", key="grid_to_robust"):
+        can_robust = bool(rec_id) and sum_path.is_file()
+        if not rec_id:
+            st.caption("无过门推荐，不能送入实盘评估。")
+        if can_robust and st.button("送入实盘评估", key="grid_to_robust"):
             try:
                 rel = str(sum_path.resolve().relative_to(Path(__file__).resolve().parents[3])).replace(
                     "\\", "/"
@@ -1351,11 +1365,11 @@ def _render_results() -> None:
     space_on = bool(space.get("holdout_stocks") or space.get("tune_stocks"))
     if space_on:
         st.caption(
-            "空间隔离：主列盈亏=调参标的（展示）；过门=侧栏合格线；盲测复用同一 gate 否决。"
+            "空间隔离：主列盈亏=调参标的（展示）；过门=侧栏绝对合格线；盲测复用同一 gate 否决。"
         )
     else:
         st.caption(
-            "过门=侧栏五大硬指标（可禁用单项）；排序看验收期卡玛Δ。默认不改 config / 不 deploy。"
+            "过门=侧栏已启用的绝对合格线；排序看验收期卡玛。默认不改 config / 不 deploy。"
         )
     win = fill_year_windows(summary)
     main_rows: list[dict[str, Any]] = []
@@ -1366,7 +1380,6 @@ def _render_results() -> None:
     cells = list(summary.get("cells") or [])
     for cell in cells:
         b = (cell.get("samples") or {}).get("book") or {}
-        db = (cell.get("delta_vs_base") or {}).get("book") or {}
         note = notes_by_id.get(cell.get("id")) or {}
         fails = note.get("fails")
         if not (isinstance(fails, list) and fails) and note.get("fail"):
@@ -1374,22 +1387,22 @@ def _render_results() -> None:
         groups = _group_gate_fails(fails)
         compact = _fail_summary_compact(groups)
         cid = cell.get("id")
-        d_calmar = note.get("d_calmar")
-        if d_calmar is None and cid == "base":
-            d_calmar = 0.0
+        chk_calmar = note.get("calmar")
+        if chk_calmar is None:
+            w_chk = (b.get("windows") or {}).get("check") or {}
+            chk_calmar = w_chk.get("calmar")
         main: dict[str, Any] = {
+            "现行": "★现行" if cell_is_current(cell) else "",
             "id": cid,
             "label": cell.get("label"),
             "合计": _round_pnl(b.get("sum_pnl")),
             "调参期": _round_pnl(b.get("is_pnl")),
             "验收期": _round_pnl(b.get("oos_pnl")),
-            "Δ验收": _round_pnl(db.get("oos_pnl")),
-            "Δ卡玛": None if d_calmar is None else round(float(d_calmar), 3),
+            "验收卡玛": None if chk_calmar is None else round(float(chk_calmar), 3),
         }
         if "corner_oos_pnl" in b:
             main["盲测盈亏"] = _round_pnl(b.get("corner_oos_pnl"))
-            main["Δ盲测"] = _round_pnl(db.get("corner_oos_pnl"))
-        main["是否通过"] = "—" if cid == "base" else ("否" if compact else "是")
+        main["是否通过"] = "否" if compact else "是"
         main_rows.append(main)
         tune_detail_rows.append(_detail_window_row(cell, b, windows_key="windows"))
         if isinstance(b.get("holdout_windows"), dict):
@@ -1415,7 +1428,7 @@ def _render_results() -> None:
             % "、".join(extra_ids)
         )
     st.caption(
-        "调参期 %s–%s · 验收期 %s–%s%s · 单位：元（过门看侧栏；Δ卡玛=验收期卡玛相对 base）"
+        "调参期 %s–%s · 验收期 %s–%s%s · 单位：元（过门看侧栏；排序看验收卡玛）"
         % (
             win["tune_start"],
             win["tune_end"],
@@ -1424,19 +1437,13 @@ def _render_results() -> None:
             " · 主列=调参标的" if space_on else "",
         )
     )
-    delta_cols = [c for c in ("Δ验收", "Δ盲测", "Δ卡玛") if c in df.columns]
-    styled = df.style.apply(_style_base_row, axis=1)
-    if delta_cols:
-        if hasattr(styled, "map"):
-            styled = styled.map(_style_delta_cell, subset=delta_cols)
-        else:
-            styled = styled.applymap(_style_delta_cell, subset=delta_cols)
+    styled = df.style.apply(_style_current_row, axis=1)
     fmt: dict[str, str] = {}
-    for col in ("合计", "调参期", "验收期", "Δ验收", "盲测盈亏", "Δ盲测"):
+    for col in ("合计", "调参期", "验收期", "盲测盈亏"):
         if col in df.columns:
             fmt[col] = "{:.0f}"
-    if "Δ卡玛" in df.columns:
-        fmt["Δ卡玛"] = "{:.3f}"
+    if "验收卡玛" in df.columns:
+        fmt["验收卡玛"] = "{:.3f}"
     if fmt:
         styled = styled.format(fmt, na_rep="—")
     st.dataframe(styled, width="stretch", hide_index=True)

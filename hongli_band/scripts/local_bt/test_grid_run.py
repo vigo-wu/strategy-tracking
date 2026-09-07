@@ -14,7 +14,6 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 from grid_run import (  # noqa: E402
-    GridError,
     assemble_jobs,
     book_jobs,
     load_config_defaults,
@@ -39,20 +38,20 @@ def _nine_cell_spec() -> dict:
 class GridRunApiTest(unittest.TestCase):
     def test_validate_nine_cells_ok(self) -> None:
         spec = _nine_cell_spec()
-        self.assertGreaterEqual(len(spec["cells"]), 9)
+        self.assertGreaterEqual(len(spec["cells"]), 8)
         cells = validate_spec(spec)
         self.assertEqual(len(cells), len(spec["cells"]))
-        self.assertEqual(sum(1 for c in cells if c["id"] == "base"), 1)
+        self.assertEqual(len(cells), 8)
 
-    def test_missing_base_raises(self) -> None:
+    def test_missing_base_ok(self) -> None:
         spec = {
             "cells": [
                 {"id": "sl06", "kind": "tighten", "overrides": {"STOP_LOSS": 0.06}},
             ]
         }
-        with self.assertRaises(GridError) as ctx:
-            validate_spec(spec)
-        self.assertIn("base", str(ctx.exception))
+        cells = validate_spec(spec)
+        self.assertEqual(cells[0]["id"], "sl06")
+        self.assertFalse(cells[0]["is_current"])
 
     def test_dry_run_job_counts(self) -> None:
         spec = {

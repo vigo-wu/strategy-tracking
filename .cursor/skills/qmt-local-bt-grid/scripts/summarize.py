@@ -13,7 +13,7 @@ import re
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[3]
@@ -478,13 +478,17 @@ def summarize_cell(
             if hold_logs <= 0:
                 st["holdout_has_coverage"] = False
         samples[name] = st
-    return {
+    rec = {
         "id": str(meta.get("id") or cell_dir.name),
         "label": str(meta.get("label") or cell_dir.name),
         "kind": str(meta.get("kind") or "other"),
         "overrides": meta.get("overrides") or {},
+        "is_current": bool(meta.get("is_current")) or str(meta.get("id") or cell_dir.name) == "base",
         "samples": samples,
     }
+    if meta.get("n_diffs") is not None:
+        rec["n_diffs"] = meta.get("n_diffs")
+    return rec
 
 
 def parse_logs(log_paths: list[Path]) -> tuple[list[dict[str, Any]], dict[int, int], int, int, float]:
@@ -553,6 +557,43 @@ def _n_override_keys(overrides: Any) -> int:
     if not isinstance(overrides, dict):
         return 0
     return len(overrides)
+
+
+def _cell_is_current(cell: Mapping[str, Any] | None) -> bool:
+    if not cell:
+        return False
+    if cell.get("is_current"):
+        return True
+    return str(cell.get("id") or "") == "base"
+
+
+def _baseline_cell(cells: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for cell in cells:
+        if cell.get("is_current"):
+            return cell
+    for cell in cells:
+        if str(cell.get("id") or "") == "base":
+            return cell
+    return None
+
+
+def _cell_n_diffs(cell: Mapping[str, Any]) -> int:
+    if _cell_is_current(cell):
+        return 0
+    if cell.get("n_diffs") is not None:
+        try:
+            return int(cell.get("n_diffs"))
+        except (TypeError, ValueError):
+            pass
+    return _n_override_keys(cell.get("overrides"))
+
+
+def _space_on_cells(cells: list[dict[str, Any]]) -> bool:
+    for cell in cells:
+        book = (cell.get("samples") or {}).get("book") or {}
+        if "holdout_has_coverage" in book or "holdout_n_logs" in book:
+            return True
+    return False
 
 
 def _win_block(sample: dict[str, Any], period: str, *, windows_key: str = "windows") -> dict[str, Any]:
@@ -692,22 +733,24 @@ def _calmar_delta(w: dict[str, Any], bw: dict[str, Any]) -> float | None:
 
 def _eval_cell_gate(
     book: dict[str, Any],
-    base_book: dict[str, Any],
+    base_book: dict[str, Any] | None,
     gate: dict[str, Any],
     *,
     space_on: bool,
 ) -> list[str]:
-    """返回全部失败文案；空列表表示通过。"""
+    """返回全部失败文案；空列表表示通过。无对照格时跳过相对门 / 卡玛同向。"""
     g = fill_gate(gate)
     w_chk = _win_block(book, "check")
-    bw_chk = _win_block(base_book, "check")
+    bw_chk = _win_block(base_book or {}, "check")
     w_tune = _win_block(book, "tune")
-    bw_tune = _win_block(base_book, "tune")
+    bw_tune = _win_block(base_book or {}, "tune")
+    has_baseline = base_book is not None
 
     fails = _gate_absolute_fails(w_chk, g, prefix="验收期")
-    fails.extend(_gate_relative_fails(w_chk, bw_chk, g, prefix=""))
+    if has_baseline:
+        fails.extend(_gate_relative_fails(w_chk, bw_chk, g, prefix=""))
 
-    if g["calmar_same_sign"]:
+    if has_baseline and g["calmar_same_sign"]:
         d_chk = _calmar_delta(w_chk, bw_chk)
         d_tune = _calmar_delta(w_tune, bw_tune)
         if d_chk is None or d_tune is None:
@@ -721,9 +764,10 @@ def _eval_cell_gate(
             fails.append("盲测标的无覆盖")
         else:
             hw = _win_block(book, "check", windows_key="holdout_windows")
-            hbw = _win_block(base_book, "check", windows_key="holdout_windows")
             fails.extend(_gate_absolute_fails(hw, g, prefix="盲测"))
-            fails.extend(_gate_relative_fails(hw, hbw, g, prefix="盲测"))
+            if has_baseline:
+                hbw = _win_block(base_book or {}, "check", windows_key="holdout_windows")
+                fails.extend(_gate_relative_fails(hw, hbw, g, prefix="盲测"))
 
     return fails
 
@@ -733,40 +777,48 @@ def pick_recommend(
     gate: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     g = validate_gate(gate)
-    by_id = {c["id"]: c for c in cells}
-    base = by_id.get("base")
-    if base is None:
-        return {"id": None, "reason": "缺少 base 格，无法选参", "gate": gate_for_json(g)}
+    base = _baseline_cell(cells)
+    has_baseline = base is not None
 
     def sample(cell: dict[str, Any], name: str) -> dict[str, Any]:
         return (cell.get("samples") or {}).get(name) or {}
 
-    bb = sample(base, "book")
-    space_on = "holdout_has_coverage" in bb or "holdout_n_logs" in bb
+    bb = sample(base, "book") if base is not None else {}
+    space_on = _space_on_cells(cells)
     rank_warn = False
 
     passers: list[tuple[dict[str, Any], float, int]] = []
     notes: list[dict[str, Any]] = []
 
     for cell in cells:
-        if cell["id"] == "base":
-            continue
         b = sample(cell, "book")
         w_chk = _win_block(b, "check")
-        bw_chk = _win_block(bb, "check")
-        d_calmar = _calmar_delta(w_chk, bw_chk)
-        d_oos = float(b.get("oos_pnl") or 0) - float(bb.get("oos_pnl") or 0)
-        d_is = float(b.get("is_pnl") or 0) - float(bb.get("is_pnl") or 0)
-        fails = _eval_cell_gate(b, bb, g, space_on=space_on)
+        bw_chk = _win_block(bb, "check") if has_baseline else {}
+        calmar = _num(w_chk.get("calmar"))
+        oos = float(b.get("oos_pnl") or 0)
+        d_calmar = _calmar_delta(w_chk, bw_chk) if has_baseline else None
+        d_oos = round(oos - float(bb.get("oos_pnl") or 0), 2) if has_baseline else None
+        d_is = (
+            round(float(b.get("is_pnl") or 0) - float(bb.get("is_pnl") or 0), 2)
+            if has_baseline
+            else None
+        )
+        fails = _eval_cell_gate(
+            b,
+            bb if has_baseline else None,
+            g,
+            space_on=space_on,
+        )
         fail_text = "；".join(fails) if fails else None
         row = {
             "id": cell["id"],
             "kind": cell.get("kind"),
+            "calmar": calmar,
             "d_calmar": d_calmar,
-            "d_oos": round(d_oos, 2),
-            "d_is": round(d_is, 2),
+            "d_oos": d_oos,
+            "d_is": d_is,
             "d_corner": None
-            if not space_on
+            if not (space_on and has_baseline)
             else round(
                 float(b.get("corner_oos_pnl") or 0) - float(bb.get("corner_oos_pnl") or 0),
                 2,
@@ -776,12 +828,16 @@ def pick_recommend(
         }
         notes.append(row)
         if not fails:
-            score = d_calmar if d_calmar is not None else d_oos
-            if d_calmar is None:
+            if calmar is None:
                 rank_warn = True
-            passers.append((cell, float(score), _n_override_keys(cell.get("overrides"))))
+                score = oos
+            else:
+                score = float(calmar)
+            passers.append((cell, float(score), _cell_n_diffs(cell)))
 
     def _kind_score(n: dict[str, Any]) -> float:
+        if n.get("calmar") is not None:
+            return float(n["calmar"])
         if n.get("d_calmar") is not None:
             return float(n["d_calmar"])
         return float(n.get("d_oos") or 0)
@@ -795,13 +851,13 @@ def pick_recommend(
         by_kind[kind] = best
 
     if not passers:
-        reason = "未过门，维持现行"
+        reason = "无格子过门"
         if space_on and any(n.get("fail") and "盲测" in str(n.get("fail")) for n in notes):
-            reason = "盲测未通过或未过门，维持现行"
+            reason = "盲测未通过或未过门"
         return {
-            "id": "base",
-            "label": base.get("label") or "base",
-            "kind": "base",
+            "id": None,
+            "label": None,
+            "kind": None,
             "reason": reason,
             "candidates": notes,
             "by_kind": by_kind,
@@ -813,11 +869,11 @@ def pick_recommend(
     close = [p for p in passers if p[1] >= best_score - pad]
     close.sort(key=lambda p: (p[2], -p[1]))
     picked = close[0][0]
-    reason = "过门后按验收期卡玛Δ排序；接近则少改结构"
+    reason = "过门后按验收期卡玛排序；接近则少改结构"
     if rank_warn:
-        reason = "WARN 缺卡玛回落验收盈亏Δ；过门后接近则少改结构"
+        reason = "WARN 缺卡玛回落验收盈亏；过门后接近则少改结构"
     if space_on and not rank_warn:
-        reason = "过门且盲测未否决；按验收期卡玛Δ，接近则少改结构"
+        reason = "过门且盲测未否决；按验收期卡玛排序，接近则少改结构"
     return {
         "id": picked["id"],
         "label": picked.get("label") or picked["id"],
@@ -830,8 +886,7 @@ def pick_recommend(
 
 
 def attach_deltas(cells: list[dict[str, Any]]) -> None:
-    by_id = {c["id"]: c for c in cells}
-    base = by_id.get("base")
+    base = _baseline_cell(cells)
     if base is None:
         return
     for cell in cells:

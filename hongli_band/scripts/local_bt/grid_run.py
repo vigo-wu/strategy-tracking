@@ -113,12 +113,11 @@ def validate_spec(spec: dict[str, Any]) -> list[dict[str, Any]]:
         raise GridError("spec.cells 为空")
     if len(cells) > WARN_CELL_SOFT:
         print(
-            "WARN 格子数 %s > %s（含 base）；叉乘交互项多，确认后再跑"
+            "WARN 格子数 %s > %s；叉乘交互项多，确认后再跑"
             % (len(cells), WARN_CELL_SOFT),
             flush=True,
         )
     ids: list[str] = []
-    n_base = 0
     out: list[dict[str, Any]] = []
     for raw in cells:
         if not isinstance(raw, dict):
@@ -131,23 +130,23 @@ def validate_spec(spec: dict[str, Any]) -> list[dict[str, Any]]:
         ids.append(cid)
         kind = str(raw.get("kind") or ("base" if cid == "base" else "other")).strip().lower()
         if cid == "base":
-            n_base += 1
             kind = "base"
         overrides = raw.get("overrides") or {}
         if not isinstance(overrides, dict):
             raise GridError("%s.overrides 必须是对象" % cid)
-        if cid == "base" and overrides:
-            print("WARN base 格 overrides 非空，仍按覆盖跑", flush=True)
-        out.append(
-            {
-                "id": cid,
-                "label": str(raw.get("label") or cid),
-                "kind": kind,
-                "overrides": pickle_safe(overrides),
-            }
-        )
-    if n_base != 1:
-        raise GridError("必须恰好一个 id=base 的格子，当前 %s" % n_base)
+        rec = {
+            "id": cid,
+            "label": str(raw.get("label") or cid),
+            "kind": kind,
+            "overrides": pickle_safe(overrides),
+            "is_current": bool(raw.get("is_current")) or cid == "base",
+        }
+        if raw.get("n_diffs") is not None:
+            try:
+                rec["n_diffs"] = int(raw.get("n_diffs"))
+            except (TypeError, ValueError):
+                pass
+        out.append(rec)
     try:
         apply_year_windows(spec)
     except GridSpecError as e:
@@ -485,8 +484,11 @@ def run_cell(
         "label": cell["label"],
         "kind": cell["kind"],
         "overrides": cell["overrides"],
+        "is_current": bool(cell.get("is_current")) or str(cell.get("id") or "") == "base",
         "n_jobs": len(jobs),
     }
+    if cell.get("n_diffs") is not None:
+        meta["n_diffs"] = cell.get("n_diffs")
     (cell_dir / "cell_meta.json").write_text(
         json.dumps(_json_ready(meta), ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -644,7 +646,10 @@ def run_sweep(
     if not cell_id:
         prune_stale_cell_dirs(dest, [c["id"] for c in cells])
     defaults = load_exit_defaults()
-    cells = sorted(cells, key=lambda c: 0 if c["id"] == "base" else 1)
+    cells = sorted(
+        cells,
+        key=lambda c: 0 if (c.get("is_current") or c["id"] == "base") else 1,
+    )
     for cell in cells:
         print("== cell", cell["id"], cell["kind"], cell["overrides"], flush=True)
         run_cell(

@@ -1,5 +1,5 @@
 # coding: utf-8
-"""网格过门配置：绝对合格线 + 相对 base；侧栏/spec 可配、逐项启用。"""
+"""网格过门配置：绝对合格线 + 可选相对现行格；侧栏/spec 可配、逐项启用。"""
 from __future__ import annotations
 
 from copy import deepcopy
@@ -19,7 +19,7 @@ _RULE_KEYS = (
 
 def default_gate() -> dict[str, Any]:
     return {
-        "relative_to_base": True,
+        "relative_to_base": False,
         "calmar_same_sign": False,
         "calmar": {"enabled": False, "min": 1.5},
         "max_dd": {"enabled": True, "floor": -0.10},
