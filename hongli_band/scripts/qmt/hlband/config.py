@@ -73,15 +73,22 @@ W_BIAS_LOW = 0.02
 W_MA30_SLOPE_WEEKS = 2
 
 # ---- 日线买卖 ----
-# 日线均线（算法见标的 ma_type / MA_TYPE）：MA20→回踩/站上/无量阴跌；MA60→回踩支撑 + 时间成本线
+# 日线均线（算法见标的 ma_type / MA_TYPE）：中线→回踩/无量阴跌；慢线→回踩支撑 + 时间成本地板
+#   <=0 关闭该条（与 TIME_FORCE_BARS 相同约定）
+#   关中线：回踩只看慢线（若开着）；vol_dry_skip 关掉
+#   关慢线：回踩只看中线；time_force 破慢线地板关掉（BARS 仍独立，网格只改慢线不自动改 BARS）
+#   两条都关：无 pullback_vol 新开；加仓仍可走 plat_break / w_macd_golden
 D_MA_MID = 20
 D_MA_SLOW = 60
 
 # 买点 pullback_vol：缩量回踩强支撑
-#   价格贴近 MA20 或 MA60（|价-均线|/均线 <= 容差）且当日量 < N 日均量 * 比例
+#   价格贴近 MA20 或 MA60（|价-均线|/均线 <= 容差）且连续 N 日量 < 当日均量 * 比例
+#   贴均线只看当天；缩量按 VOL_PULLBACK_CONFIRM_DAYS 连续确认
 MA_TOUCH_TOL = 0.025          # 0.025 = 距均线 ±2.5% 内算「回踩到位」
 VOL_PULLBACK_N = 10           # 缩量比较的均量窗口（日，始终 SMA）
 VOL_PULLBACK_RATIO = 0.9      # 量 < 均量*0.9 视为缩量
+# 缩量连续确认日：<=0 或 1=当天缩量即可；2=今昨都缩量才算 pullback_vol
+VOL_PULLBACK_CONFIRM_DAYS = 2
 
 # 全局禁开 vol_dry_skip（无量阴跌不言底）：
 #   收盘跌破 MA20 且量 < N 日均量 * 比例 → 当天任何买点失效
@@ -227,7 +234,7 @@ LOG_DIR = r"D:\HlBandV7\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBandV7"
-STRATEGY_VER = "v1.64"
+STRATEGY_VER = "v1.66"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）

@@ -5,6 +5,7 @@ from __future__ import annotations
 import itertools
 import json
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -25,6 +26,7 @@ ENTRY_KEYS = (
     "MA_TOUCH_TOL",
     "VOL_PULLBACK_RATIO",
     "VOL_PULLBACK_N",
+    "VOL_PULLBACK_CONFIRM_DAYS",
     "VOL_DRY_RATIO",
     "VOL_DRY_N",
     "CHASE_MAX_PCT",
@@ -114,6 +116,7 @@ PARAM_LABELS = {
     "MA_TOUCH_TOL": "回踩容差",
     "VOL_PULLBACK_RATIO": "缩量回踩比例",
     "VOL_PULLBACK_N": "缩量窗口",
+    "VOL_PULLBACK_CONFIRM_DAYS": "缩量确认日",
     "VOL_DRY_RATIO": "无量阴跌比例",
     "VOL_DRY_N": "无量窗口",
     "CHASE_MAX_PCT": "追高禁开",
@@ -159,6 +162,7 @@ ABBREV_FIXED = {
     "MA_TOUCH_TOL": "mt",
     "VOL_PULLBACK_RATIO": "vpr",
     "VOL_PULLBACK_N": "vpn",
+    "VOL_PULLBACK_CONFIRM_DAYS": "vpc",
     "VOL_DRY_RATIO": "vdr",
     "VOL_DRY_N": "vdn",
     "W_MA30_SLOPE_WEEKS": "ws",
@@ -720,6 +724,16 @@ def family_value_label(family: str, value: Any) -> str:
         if abs(float(value)) <= EPS:
             return "关闭让路（仍到期强平）"
         return "让路 %s" % _format_pct(float(value))
+    if family in ("D_MA_MID", "D_MA_SLOW"):
+        try:
+            iv = int(value)
+        except (TypeError, ValueError):
+            iv = 0
+        spec = get_param(family)
+        label = spec.label if spec else family
+        if iv <= 0:
+            return "%s关闭" % label
+        return "%s %s" % (label, iv)
     spec = get_param(family)
     label = spec.label if spec else family
     if spec and spec.dtype == "percent":
@@ -929,6 +943,23 @@ def axes_from_cells(
             seen[fam].append(level)
             extras[fam].append(level)
     return {f: extras[f] for f in FAMILY_ORDER if extras[f]}
+
+
+def merge_param_selection(
+    selection: Mapping[str, Mapping[str, Any]] | None,
+) -> dict[str, dict[str, Any]]:
+    """目录新增键补进草稿；未知键丢掉。勾选与扫描文本保留。"""
+    out = default_param_selection()
+    cur = dict(selection or {})
+    for fam in out:
+        old = cur.get(fam)
+        if not isinstance(old, Mapping):
+            continue
+        out[fam] = {
+            "selected": bool(old.get("selected")),
+            "scan": str(old.get("scan") or ""),
+        }
+    return out
 
 
 def apply_axes_to_selection(
@@ -1143,3 +1174,28 @@ def sweep_name_ok(name: str) -> bool:
     if any(ch in s for ch in ("/", "\\", ":", "*", "?", "\"", "<", ">", "|")):
         return False
     return True
+
+
+def sweep_stem_from_axes(axes: Mapping[str, Any] | None) -> str:
+    fams = [f for f in FAMILY_ORDER if f in dict(axes or {})]
+    if not fams:
+        return "grid"
+    parts: list[str] = []
+    for fam in fams:
+        spec = get_param(fam)
+        parts.append(spec.abbrev if spec else str(fam).lower()[:4])
+    stem = "_".join(parts) or "grid"
+    return stem if sweep_name_ok(stem) else "grid"
+
+
+def auto_sweep_name(
+    axes: Mapping[str, Any] | None,
+    *,
+    when: datetime | None = None,
+    existing: Iterable[str] | None = None,
+) -> str:
+    """开跑用：轴缩写 + 时戳；与 existing 冲突时加 _2。"""
+    stem = sweep_stem_from_axes(axes)
+    stamp = (when or datetime.now()).strftime("%Y%m%d_%H%M%S")
+    used = {str(x).strip() for x in (existing or ()) if str(x).strip()}
+    return _unique_id("%s_%s" % (stem, stamp), used)

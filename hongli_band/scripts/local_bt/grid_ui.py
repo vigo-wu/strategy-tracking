@@ -59,6 +59,7 @@ from grid_spec import (
     apply_year_windows,
     axes_from_cells,
     axes_from_selection,
+    auto_sweep_name,
     build_cells,
     correct_cell_kinds,
     default_param_selection,
@@ -68,11 +69,13 @@ from grid_spec import (
     generator_locked,
     keep_from_cells,
     make_spec,
+    merge_param_selection,
     overrides_summary,
     param_catalog,
     product_count,
     spec_json,
     sweep_name_ok,
+    sweep_stem_from_axes,
 )
 
 GRID_CONFIG_DIR = THEME / "gridConfig"
@@ -102,7 +105,7 @@ def _migrate_old_sel(ss: Any) -> dict[str, dict[str, Any]]:
 
 def _ensure_state() -> None:
     ss = st.session_state
-    ss.setdefault("grid_sweep", "stop_loss")
+    ss.setdefault("grid_sweep", "")
     ss.setdefault("grid_compare_div", DEFAULT_DIVIDEND_TYPE)
     ss.setdefault("grid_workers", 0)
     ss.setdefault("grid_sma_ema", False)
@@ -110,6 +113,7 @@ def _ensure_state() -> None:
         ss.setdefault("grid_%s" % key, int(default))
     if "grid_param_sel" not in ss:
         ss["grid_param_sel"] = _migrate_old_sel(ss)
+    ss["grid_param_sel"] = merge_param_selection(ss.get("grid_param_sel"))
     ss.setdefault("grid_cells", [])
     ss.setdefault("grid_summary", None)
     ss.setdefault("grid_busy", False)
@@ -262,9 +266,11 @@ def render_grid_sidebar() -> None:
         )
     else:
         st.caption("主样本=跟踪池 BOOK_STOCKS（config 锁定均线/复权），不可勾选。")
-    st.text_input("sweep 名", key="grid_sweep", disabled=busy, persist_state="session")
-    if not sweep_name_ok(str(st.session_state.get("grid_sweep") or "")):
-        st.error("sweep 名不能为空或含路径字符")
+    last = str(st.session_state.get("grid_sweep") or "").strip()
+    st.caption(
+        "sweep 每次开跑自动生成"
+        + (" · 当前 `%s`" % last if last else " · 尚未开跑")
+    )
     y1, y2 = st.columns(2)
     with y1:
         st.number_input("回测年起", min_value=1990, max_value=2100, step=1, key="grid_year_start", disabled=busy, persist_state="session")
@@ -520,8 +526,22 @@ def _draw_split_clicked(*, reshuffle: bool) -> None:
     _persist_app()
 
 
+def _existing_sweep_names() -> set[str]:
+    if not GRID_ROOT.is_dir():
+        return set()
+    return {p.name for p in GRID_ROOT.iterdir()}
+
+
+def _mint_sweep_name() -> str:
+    return auto_sweep_name(_axes(), existing=_existing_sweep_names())
+
+
 def _mark_start() -> None:
-    st.session_state["grid_action"] = "run"
+    ss = st.session_state
+    ss["grid_action"] = "run"
+    ss.pop("grid_pending_sweep", None)
+    ss["grid_run_ok"] = False
+    ss["grid_overwrite_ok"] = False
 
 
 def _mark_summarize() -> None:
@@ -536,10 +556,11 @@ def _save_spec_clicked() -> None:
     except GridSpecError as e:
         st.session_state["grid_flash"] = str(e)
         return
-    name = str(spec.get("sweep") or "")
+    name = sweep_stem_from_axes(_axes())
     if not sweep_name_ok(name):
         st.session_state["grid_flash"] = "sweep 名非法"
         return
+    spec["sweep"] = name
     GRID_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     path = GRID_CONFIG_DIR / ("%s.json" % name)
     path.write_text(spec_json(spec), encoding="utf-8")
@@ -588,7 +609,8 @@ def _render_param_table(defaults: dict[str, Any], busy: bool) -> None:
             st.text_input("搜索参数", key="grid_param_search", disabled=busy) or ""
         ).strip()
     group = str(group or "全部")
-    filt = "%s|%s" % (group, search.lower())
+    cat_fp = tuple(p.id for p in catalog)
+    filt = "%s|%s|%s" % (group, search.lower(), ",".join(cat_fp))
     if st.session_state.get("grid_param_filt") != filt:
         st.session_state.pop("grid_param_editor", None)
         st.session_state["grid_param_filt"] = filt
@@ -639,8 +661,10 @@ def _render_param_table(defaults: dict[str, Any], busy: bool) -> None:
             changed = False
             for rec in edited.to_dict("records"):
                 pid = str(rec.get("键") or "") or label_map.get(str(rec.get("参数") or ""), "")
-                if pid not in sel:
+                if not pid:
                     continue
+                if pid not in sel:
+                    sel[pid] = {"selected": False, "scan": ""}
                 new_rec = {
                     "selected": bool(rec.get("选用")),
                     "scan": str(rec.get("扫描取值") or ""),
@@ -726,7 +750,7 @@ def _render_preview(defaults: dict[str, Any], busy: bool) -> None:
         st.download_button(
             "下载 spec JSON",
             data=spec_json(_current_spec(defaults)),
-            file_name="%s.json" % (st.session_state.get("grid_sweep") or "grid"),
+            file_name="%s.json" % (sweep_stem_from_axes(_axes()) or "grid"),
             mime="application/json",
             key="grid_dl_spec",
         )
@@ -810,7 +834,9 @@ def _import_spec_text(text: str, defaults: dict[str, Any]) -> None:
     st.session_state.pop("grid_cells_editor", None)
     st.session_state.pop("grid_param_editor", None)
     if spec.get("sweep"):
-        st.session_state["grid_sweep"] = str(spec["sweep"])
+        name = str(spec["sweep"])
+        if (GRID_ROOT / name / "summary.json").is_file():
+            st.session_state["grid_sweep"] = name
     if spec.get("compare_div"):
         st.session_state["grid_compare_div"] = str(spec["compare_div"])
     win = fill_year_windows(spec)
@@ -832,8 +858,8 @@ def _dialog_overwrite(path: Path) -> None:
 
 
 @st.dialog("确认开跑")
-def _dialog_confirm_run(n_cells: int, n_jobs: int, total: int) -> None:
-    st.write("格子 **%s** · 每格 job **%s** · 总任务约 **%s**" % (n_cells, n_jobs, total))
+def _dialog_confirm_run(n_cells: int, n_jobs: int, total: int, sweep: str) -> None:
+    st.write("sweep **%s** · 格子 **%s** · 每格 job **%s** · 总任务约 **%s**" % (sweep, n_cells, n_jobs, total))
     st.caption("格间串行，可能很久。默认不改 config。")
     if st.button("确认开跑", type="primary"):
         st.session_state["grid_run_ok"] = True
@@ -845,12 +871,25 @@ def _handle_actions(defaults: dict[str, Any]) -> None:
     action = st.session_state.pop("grid_action", None)
     if not action:
         return
+    if action == "run" and not st.session_state.get("grid_pending_sweep"):
+        name = _mint_sweep_name()
+        st.session_state["grid_pending_sweep"] = name
+        st.session_state["grid_sweep"] = name
     spec = _current_spec(defaults)
     if action == "summarize":
+        name = str(st.session_state.get("grid_sweep") or "").strip()
+        if not sweep_name_ok(name):
+            st.error("还没有 sweep：请先开跑或从高级里加载历史")
+            return
         dest = _sweep_dir(spec)
         try:
-            # 侧栏 gate 优先；勿回写 widget 键
-            out = summarize_only(dest, gate=_gate_from_state())
+            # 侧栏 gate 优先；勿回写 widget 键。按当前预览 id 过滤，避免同 sweep 残留格进主表。
+            want = [
+                str(c.get("id") or "")
+                for c in (spec.get("cells") or [])
+                if str(c.get("id") or "").strip()
+            ]
+            out = summarize_only(dest, gate=_gate_from_state(), cell_ids=want or None)
             st.session_state["grid_summary"] = out
             st.success("已汇总")
         except Exception as e:
@@ -893,7 +932,7 @@ def _handle_actions(defaults: dict[str, Any]) -> None:
     total = n_cells * n_jobs
     need_confirm = n_cells > WARN_CELL_SOFT or total > JOB_CONFIRM_THRESHOLD
     if need_confirm and not st.session_state.get("grid_run_ok"):
-        _dialog_confirm_run(n_cells, n_jobs, total)
+        _dialog_confirm_run(n_cells, n_jobs, total, str(spec.get("sweep") or ""))
         return
     _run_now(spec, n_jobs, total)
 
@@ -929,7 +968,7 @@ def _run_now(spec: dict[str, Any], n_jobs: int, total: int) -> None:
             st.session_state["grid_eligible_n"] = int(split.get("eligible_n") or 0)
         st.session_state["grid_summary"] = info.get("summary")
         rec = (info.get("recommend") or {}) if isinstance(info.get("recommend"), dict) else {}
-        status.success("完成 · 推荐 %s" % (rec.get("id") or ""))
+        status.success("完成 · sweep **%s** · 推荐 %s" % (spec.get("sweep") or "", rec.get("id") or ""))
         bar.progress(1.0)
     except GridError as e:
         st.error(str(e))
@@ -939,6 +978,7 @@ def _run_now(spec: dict[str, Any], n_jobs: int, total: int) -> None:
         st.session_state["grid_busy"] = False
         st.session_state["grid_overwrite_ok"] = False
         st.session_state["grid_run_ok"] = False
+        st.session_state.pop("grid_pending_sweep", None)
         _persist_app()
 
 def _grid_sweep_dir(summary: dict[str, Any]) -> Path:
@@ -1285,6 +1325,9 @@ def _render_results() -> None:
         return
     rec = summary.get("recommend") or {}
     st.subheader("选参结论")
+    sweep_label = str(summary.get("sweep") or "").strip()
+    if sweep_label:
+        st.caption("sweep `%s`" % sweep_label)
     st.success("%s · %s" % (rec.get("label") or rec.get("id") or "—", rec.get("reason") or ""))
     try:
         from robust_ui import ROBUST_MODE
@@ -1355,6 +1398,22 @@ def _render_results() -> None:
             )
 
     df = pd.DataFrame(main_rows)
+    preview_ids = {
+        str(c.get("id") or "")
+        for c in (st.session_state.get("grid_cells") or [])
+        if str(c.get("id") or "").strip()
+    }
+    extra_ids = [
+        str(c.get("id") or "")
+        for c in cells
+        if str(c.get("id") or "").strip() and str(c.get("id") or "") not in preview_ids
+    ]
+    if preview_ids and extra_ids:
+        st.warning(
+            "主表含不在当前预览中的格子：%s。主表读的是该次 sweep 已跑结果，不是上方预览。"
+            "请加载对应历史，或重新开跑（会生成新 sweep 目录）。"
+            % "、".join(extra_ids)
+        )
     st.caption(
         "调参期 %s–%s · 验收期 %s–%s%s · 单位：元（过门看侧栏；Δ卡玛=验收期卡玛相对 base）"
         % (

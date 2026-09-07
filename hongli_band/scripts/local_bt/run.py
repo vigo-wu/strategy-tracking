@@ -438,9 +438,17 @@ def _patch_fast_ohlcv(ns: dict) -> None:
 
     def _get_ohlcv_1d(C, stock):
         plat_n = int(ns.get("SCALE_PLAT_LOOKBACK") or 20)
+        mid_n = int(ns.get("D_MA_MID") or 0)
+        slow_n = int(ns.get("D_MA_SLOW") or 0)
+        try:
+            confirm_n = int(ns.get("VOL_PULLBACK_CONFIRM_DAYS") or 1)
+        except (TypeError, ValueError):
+            confirm_n = 1
+        vol_pb_need = int(ns.get("VOL_PULLBACK_N") or 0) + max(0, confirm_n - 1)
         need = max(
-            int(ns.get("D_MA_SLOW") or 0),
-            int(ns.get("VOL_PULLBACK_N") or 0),
+            mid_n if mid_n > 0 else 0,
+            slow_n if slow_n > 0 else 0,
+            vol_pb_need,
             int(ns.get("VOL_DRY_N") or 0),
             plat_n + 2,
         ) + 10

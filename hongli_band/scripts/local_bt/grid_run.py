@@ -12,9 +12,10 @@ import argparse
 import importlib.util
 import json
 import re
+import shutil
 import sys
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
@@ -414,6 +415,31 @@ def _assert_grid_dir(path: Path) -> None:
             raise GridError("禁止覆盖基线 report/front_ratio: %s" % path)
 
 
+_CELL_SAMPLE_DIRS = ("book", "sma", "ema")
+
+
+def is_cell_dir(path: Path) -> bool:
+    if not path.is_dir():
+        return False
+    if (path / "cell_meta.json").is_file():
+        return True
+    return any((path / name).is_dir() for name in _CELL_SAMPLE_DIRS)
+
+
+def prune_stale_cell_dirs(dest: Path, keep_ids: Iterable[str]) -> list[str]:
+    """全量重跑时删掉不在当前 spec 里的旧格子目录，避免 summarize 扫进残留 id。"""
+    keep = {str(x).strip() for x in keep_ids if str(x).strip()}
+    removed: list[str] = []
+    if not dest.is_dir():
+        return removed
+    for child in dest.iterdir():
+        if not is_cell_dir(child) or child.name in keep:
+            continue
+        shutil.rmtree(child)
+        removed.append(child.name)
+    return removed
+
+
 def job_payload(job: dict[str, Any], cell_dir: Path, overrides: dict[str, Any]) -> dict[str, Any]:
     dest = cell_dir / str(job["sample"]) / str(job["div"])
     dest.mkdir(parents=True, exist_ok=True)
@@ -615,6 +641,8 @@ def run_sweep(
     info.update(win)
     if dry_run:
         return info
+    if not cell_id:
+        prune_stale_cell_dirs(dest, [c["id"] for c in cells])
     defaults = load_exit_defaults()
     cells = sorted(cells, key=lambda c: 0 if c["id"] == "base" else 1)
     for cell in cells:
@@ -641,11 +669,12 @@ def run_sweep(
 def summarize_only(
     sweep_dir: str | Path,
     gate: dict[str, Any] | None = None,
+    cell_ids: Iterable[str] | None = None,
 ) -> dict[str, Any]:
     dest = Path(sweep_dir)
     _assert_grid_dir(dest)
     mod = _load_summarize()
-    out = mod.summarize_sweep(dest, gate=gate)
+    out = mod.summarize_sweep(dest, gate=gate, cell_ids=cell_ids)
     rec = out.get("recommend") or {}
     print("wrote", out.get("summary_path"))
     print("recommend", rec.get("id"), rec.get("reason"))

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 import unittest
+from datetime import datetime
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -14,22 +15,26 @@ if str(HERE) not in sys.path:
 
 from grid_spec import (  # noqa: E402
     GridSpecError,
+    auto_sweep_name,
     axes_from_cells,
     axes_from_selection,
     build_cells,
     catalog_ids,
     correct_cell_kinds,
     default_param_selection,
+    family_value_label,
     fill_year_windows,
     generator_locked,
     infer_kind,
     keep_from_cells,
     make_spec,
+    merge_param_selection,
     overrides_summary,
     parse_scan_token,
     parse_scan_values,
     patch_trail_arm,
     product_count,
+    sweep_stem_from_axes,
     unique_levels,
     validate_year_windows,
 )
@@ -104,6 +109,16 @@ class GridSpecTest(unittest.TestCase):
         self.assertEqual(by["tfb0"]["kind"], "off")
         self.assertEqual(by["tfb0"]["overrides"]["TIME_FORCE_BARS"], 0)
 
+    def test_dma_mid_zero_label(self) -> None:
+        self.assertEqual(family_value_label("D_MA_MID", 0), "日线中均线关闭")
+        self.assertEqual(family_value_label("D_MA_SLOW", 0), "日线慢均线关闭")
+        defs = dict(DEFAULTS)
+        defs["D_MA_MID"] = 20
+        cells = build_cells({"D_MA_MID": [0]}, defs)
+        by = {c["id"]: c for c in cells}
+        self.assertEqual(by["dmm0"]["kind"], "other")
+        self.assertEqual(by["dmm0"]["label"], "日线中均线关闭")
+
     def test_trail_arm_rejects_at_peak_hi(self) -> None:
         with self.assertRaises(GridSpecError):
             patch_trail_arm(DEFAULTS["TRAIL_TIERS"], 0.06)
@@ -164,6 +179,7 @@ class GridSpecTest(unittest.TestCase):
         self.assertIn("CHASE_MAX_PCT", ids)
         self.assertIn("W_BIAS_HARD", ids)
         self.assertIn("MA_TOUCH_TOL", ids)
+        self.assertIn("VOL_PULLBACK_CONFIRM_DAYS", ids)
         self.assertIn("STOP_LOSS", ids)
         self.assertIn("TRAIL", ids)
         self.assertNotIn("STATE_FILE", ids)
@@ -176,6 +192,7 @@ class GridSpecTest(unittest.TestCase):
         self.assertAlmostEqual(parse_scan_token("STOP_LOSS", "6%"), 0.06)
         self.assertAlmostEqual(parse_scan_token("STOP_LOSS", "6％"), 0.06)
         self.assertEqual(parse_scan_token("VOL_PULLBACK_N", "8"), 8)
+        self.assertEqual(parse_scan_token("VOL_PULLBACK_CONFIRM_DAYS", "3"), 3)
         self.assertEqual(parse_scan_values("STOP_LOSS", "6, 10"), [0.06, 0.10])
         self.assertEqual(parse_scan_values("STOP_LOSS", "6% 10%"), [0.06, 0.10])
         self.assertEqual(parse_scan_values("STOP_LOSS", "6%,10%"), [0.06, 0.10])
@@ -205,6 +222,15 @@ class GridSpecTest(unittest.TestCase):
         self.assertEqual(axes, {})
         cells = build_cells(axes, DEFAULTS)
         self.assertEqual([c["id"] for c in cells], ["base"])
+
+    def test_merge_param_selection_fills_new_catalog_keys(self) -> None:
+        stale = {"STOP_LOSS": {"selected": True, "scan": "6,10"}}
+        merged = merge_param_selection(stale)
+        self.assertIn("VOL_PULLBACK_CONFIRM_DAYS", merged)
+        self.assertFalse(merged["VOL_PULLBACK_CONFIRM_DAYS"]["selected"])
+        self.assertTrue(merged["STOP_LOSS"]["selected"])
+        self.assertEqual(merged["STOP_LOSS"]["scan"], "6,10")
+        self.assertNotIn("NOT_A_CONFIG", merged)
 
     def test_trail_scan_six_still_rejected(self) -> None:
         with self.assertRaises(GridSpecError):
@@ -239,6 +265,21 @@ class GridSpecTest(unittest.TestCase):
             }
         )
         self.assertEqual(ok["tune_end"], 2021)
+
+    def test_auto_sweep_name_from_axes(self) -> None:
+        axes = {
+            "VOL_PULLBACK_N": [15],
+            "VOL_PULLBACK_CONFIRM_DAYS": [1, 3],
+        }
+        self.assertEqual(sweep_stem_from_axes(axes), "vpn_vpc")
+        when = datetime(2026, 9, 7, 20, 34, 12)
+        self.assertEqual(
+            auto_sweep_name(axes, when=when),
+            "vpn_vpc_20260907_203412",
+        )
+        self.assertEqual(sweep_stem_from_axes({}), "grid")
+        taken = auto_sweep_name({}, when=when, existing=["grid_20260907_203412"])
+        self.assertEqual(taken, "grid_20260907_203412_2")
 
 
 if __name__ == "__main__":

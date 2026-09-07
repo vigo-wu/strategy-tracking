@@ -13,7 +13,7 @@ import re
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[3]
@@ -844,6 +844,42 @@ def attach_deltas(cells: list[dict[str, Any]]) -> None:
         cell["delta_vs_base"] = deltas
 
 
+def _load_spec_json(root: Path) -> dict[str, Any]:
+    spec_p = root / "spec.json"
+    if not spec_p.is_file():
+        return {}
+    try:
+        data = json.loads(spec_p.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def spec_cell_ids(spec: Any) -> set[str] | None:
+    """spec.cells 有 id 则返回白名单；缺字段则不过滤（兼容旧 sweep）。"""
+    if not isinstance(spec, dict):
+        return None
+    raw = spec.get("cells")
+    if not isinstance(raw, list) or not raw:
+        return None
+    ids = {
+        str(c.get("id") or "").strip()
+        for c in raw
+        if isinstance(c, dict) and str(c.get("id") or "").strip()
+    }
+    return ids or None
+
+
+def _wanted_cell_ids(
+    spec: dict[str, Any],
+    cell_ids: Iterable[str] | None,
+) -> set[str] | None:
+    if cell_ids is not None:
+        want = {str(x).strip() for x in cell_ids if str(x).strip()}
+        return want or None
+    return spec_cell_ids(spec)
+
+
 def _load_sweep_windows(root: Path) -> dict[str, int]:
     for name in ("spec.json", "freeze.json"):
         path = root / name
@@ -861,6 +897,7 @@ def _load_sweep_windows(root: Path) -> dict[str, int]:
 def summarize_sweep(
     sweep_dir: str | Path,
     gate: dict[str, Any] | None = None,
+    cell_ids: Iterable[str] | None = None,
 ) -> dict[str, Any]:
     root = Path(sweep_dir)
     if not root.is_dir():
@@ -871,9 +908,13 @@ def summarize_sweep(
     run = year_range_set(win["year_start"], win["year_end"])
     tune_stocks, holdout_stocks = _load_asset_lists(root)
     gate_used = load_gate_from_sweep(root, override=gate)
+    spec = _load_spec_json(root)
+    want = _wanted_cell_ids(spec, cell_ids)
     cells: list[dict[str, Any]] = []
     for child in sorted(root.iterdir()):
         if not child.is_dir():
+            continue
+        if want is not None and child.name not in want:
             continue
         if not (child / "cell_meta.json").is_file() and not any(
             (child / s).is_dir() for s in SAMPLES
@@ -891,13 +932,6 @@ def summarize_sweep(
         )
     attach_deltas(cells)
     rec = pick_recommend(cells, gate=gate_used)
-    spec = {}
-    spec_p = root / "spec.json"
-    if spec_p.is_file():
-        try:
-            spec = json.loads(spec_p.read_text(encoding="utf-8"))
-        except Exception:
-            spec = {}
     out = {
         "sweep": str(spec.get("sweep") or root.name),
         "sweep_dir": str(root),

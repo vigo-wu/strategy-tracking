@@ -18,6 +18,7 @@ from grid_run import (  # noqa: E402
     assemble_jobs,
     book_jobs,
     load_config_defaults,
+    prune_stale_cell_dirs,
     run_sweep,
     validate_spec,
 )
@@ -221,6 +222,53 @@ class GridRunApiTest(unittest.TestCase):
         stocks = {j["stock"] for j in jobs}
         self.assertEqual(stocks, {"600001.SH", "600002.SH"})
 
+    def test_prune_stale_cell_dirs_keeps_current_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "report" / "grid" / "sweep"
+            dest.mkdir(parents=True)
+            (dest / "spec.json").write_text("{}", encoding="utf-8")
+            for cid in ("base", "vpn15", "vpn13"):
+                cell = dest / cid
+                cell.mkdir()
+                (cell / "cell_meta.json").write_text("{}", encoding="utf-8")
+            removed = prune_stale_cell_dirs(dest, ["base", "vpn15"])
+            self.assertEqual(set(removed), {"vpn13"})
+            self.assertTrue((dest / "base").is_dir())
+            self.assertTrue((dest / "vpn15").is_dir())
+            self.assertFalse((dest / "vpn13").exists())
+            self.assertTrue((dest / "spec.json").is_file())
+
+    def test_dry_run_does_not_prune_stale_cells(self) -> None:
+        spec = {
+            "theme": "hongli_band",
+            "sweep": "dry_prune",
+            "compare_div": "front_ratio",
+            "cells": [
+                {"id": "base", "label": "现行", "kind": "base", "overrides": {}},
+            ],
+        }
+        book = [
+            {
+                "sample": "book",
+                "stock": "600350.SH",
+                "year": "2020",
+                "ma": "EMA",
+                "div": "front_ratio",
+                "csv": Path("x.csv"),
+                "start": "20200101",
+                "end": "20201231",
+            }
+        ]
+        with tempfile.TemporaryDirectory() as td:
+            sweep_dir = Path(td) / "report" / "grid" / "dry_prune"
+            sweep_dir.mkdir(parents=True)
+            leftover = sweep_dir / "vpn13"
+            leftover.mkdir()
+            (leftover / "cell_meta.json").write_text("{}", encoding="utf-8")
+            with patch("grid_run.assemble_jobs", return_value=(book, book)):
+                run_sweep(spec, dry_run=True, sweep_dir=sweep_dir)
+            self.assertTrue(leftover.is_dir())
+
     def test_load_config_defaults_covers_catalog(self) -> None:
         defaults = load_config_defaults()
         self.assertIn("STOP_LOSS", defaults)
@@ -228,6 +276,8 @@ class GridRunApiTest(unittest.TestCase):
         self.assertIn("CHASE_MAX_PCT", defaults)
         self.assertIn("W_BIAS_HARD", defaults)
         self.assertIn("MA_TOUCH_TOL", defaults)
+        self.assertIn("VOL_PULLBACK_CONFIRM_DAYS", defaults)
+        self.assertEqual(int(defaults["VOL_PULLBACK_CONFIRM_DAYS"]), 2)
         self.assertNotIn("STATE_FILE", defaults)
         self.assertAlmostEqual(float(defaults["CHASE_MAX_PCT"]), 0.05)
         self.assertAlmostEqual(float(defaults["STOP_LOSS"]), 0.08)

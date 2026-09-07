@@ -115,6 +115,16 @@ def _w_bear_confirm_need():
     return max(1, n)
 
 
+def _vol_pullback_confirm_need():
+    """最少 1：当天缩量即可；勿用 `x or 2`（0 会被当成缺省翻成 2）。"""
+    raw = globals().get("VOL_PULLBACK_CONFIRM_DAYS", 2)
+    try:
+        n = int(2 if raw is None else raw)
+    except Exception:
+        n = 2
+    return max(1, n)
+
+
 def _update_w_bear_streak(weekly_bear, sig_day, track):
     """
     连续 N 个信号日仍周线空头才确认清仓。
@@ -184,21 +194,30 @@ def _update_w_bear_streak(weekly_bear, sig_day, track):
 
 
 def _eval_daily_buy(closes, volumes):
-    """买点：缩量回踩 MA20/MA60。"""
+    """买点：缩量回踩中/慢均线。D_MA_*<=0 关闭该条。"""
     reasons = []
-    ma20 = _price_ma(closes, D_MA_MID)
-    ma60 = _price_ma(closes, D_MA_SLOW)
+    try:
+        mid_n = int(D_MA_MID or 0)
+    except (TypeError, ValueError):
+        mid_n = 0
+    try:
+        slow_n = int(D_MA_SLOW or 0)
+    except (TypeError, ValueError):
+        slow_n = 0
+    ma20 = _price_ma(closes, mid_n) if mid_n > 0 else None
+    ma60 = _price_ma(closes, slow_n) if slow_n > 0 else None
     vol10 = _sma(volumes, VOL_PULLBACK_N)
     vol20 = _sma(volumes, VOL_DRY_N)
-    if ma20 is None or ma60 is None or vol10 is None or vol20 is None:
+    if vol10 is None or vol20 is None:
         return False, reasons, {}
     i = len(closes) - 1
-    if i < 2:
+    vol_need = _vol_pullback_confirm_need()
+    if i < max(2, vol_need):
         return False, reasons, {}
     price = float(closes[i])
     vol = float(volumes[i])
-    m20 = _last_valid(ma20, i)
-    m60 = _last_valid(ma60, i)
+    m20 = _last_valid(ma20, i) if ma20 is not None else None
+    m60 = _last_valid(ma60, i) if ma60 is not None else None
     v10 = _last_valid(vol10, i)
     v20 = _last_valid(vol20, i)
     detail = {
@@ -206,15 +225,19 @@ def _eval_daily_buy(closes, volumes):
         "ma60": m60,
         "vol10": v10,
         "vol20": v20,
+        "vol_need": vol_need,
+        "vol_streak": 0,
     }
 
     prev = float(closes[i - 1]) if closes[i - 1] else 0.0
     if prev > 0 and (price - prev) / prev >= float(CHASE_MAX_PCT):
         return False, ["chase_skip"], detail
 
-    # 无量阴跌不言底：跌破 MA20 且量 < 20 日均量 * VOL_DRY_RATIO → 全局禁开
+    # 无量阴跌不言底：跌破中均线且量 < 均量 * VOL_DRY_RATIO → 全局禁开
+    # 中线关闭则本过滤关闭
     dry_below = (
-        m20 is not None
+        mid_n > 0
+        and m20 is not None
         and price < m20
         and v20 is not None
         and v20 > 0
@@ -223,10 +246,23 @@ def _eval_daily_buy(closes, volumes):
     if dry_below:
         return False, ["vol_dry_skip"], detail
 
-    # 缩量回踩 MA20/MA60 + 量 < 10 日均量 * 0.9
-    near = _near_ma(price, m20) or _near_ma(price, m60)
-    shrink = v10 is not None and v10 > 0 and vol < v10 * float(VOL_PULLBACK_RATIO)
-    if near and shrink:
+    # 缩量回踩中/慢均线（已关闭的条不参与）+ 连续 N 日量 < 当日均量 * VOL_PULLBACK_RATIO
+    near = False
+    if mid_n > 0:
+        near = near or _near_ma(price, m20)
+    if slow_n > 0:
+        near = near or _near_ma(price, m60)
+    ratio = float(VOL_PULLBACK_RATIO)
+    vol_streak = 0
+    for k in range(vol_need):
+        j = i - k
+        vma = _last_valid(vol10, j)
+        vj = float(volumes[j])
+        if vma is None or vma <= 0 or vj >= vma * ratio:
+            break
+        vol_streak += 1
+    detail["vol_streak"] = vol_streak
+    if near and vol_streak >= vol_need:
         reasons.append("pullback_vol")
 
     return bool(reasons), reasons, detail
@@ -364,9 +400,10 @@ def _time_force_mark_skip(lot, peak_ret, hold_bars, m60):
 
 
 def _time_force_hit(price, closes, hold_bars, lot=None):
-    """智能时间成本：持仓 > TIME_FORCE_BARS 后，破日线 MA60 强制平仓。
+    """智能时间成本：持仓 > TIME_FORCE_BARS 后，破日线慢均线强制平仓。
     BARS<=0 关闭整条规则（MIN_RET=0 只关掉让路，不是关闭）。
-    仍站上 MA60 时：峰值已达 TIME_FORCE_MIN_RET（阶梯止盈起步档）则不按日历强平；
+    D_MA_SLOW<=0 时慢线地板不存在，同样不触发（BARS 仍独立）。
+    仍站上慢线时：峰值已达 TIME_FORCE_MIN_RET（阶梯止盈起步档）则不按日历强平；
     从未武装的死钱仓豁免 GRACE 日后强平。"""
     try:
         bars_lim = int(TIME_FORCE_BARS)
@@ -374,9 +411,15 @@ def _time_force_hit(price, closes, hold_bars, lot=None):
         bars_lim = 0
     if bars_lim <= 0:
         return False
+    try:
+        slow_n = int(D_MA_SLOW or 0)
+    except (TypeError, ValueError):
+        slow_n = 0
+    if slow_n <= 0:
+        return False
     if hold_bars is None or int(hold_bars) <= bars_lim:
         return False
-    ma60_arr = _price_ma(closes, D_MA_SLOW)
+    ma60_arr = _price_ma(closes, slow_n)
     if ma60_arr is None:
         return False
     i = len(closes) - 1

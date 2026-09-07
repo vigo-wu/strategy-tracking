@@ -408,6 +408,57 @@ class GridSummarizeTest(unittest.TestCase):
             self.assertFalse(out["gate"]["calmar"]["enabled"])
             self.assertEqual(out["recommend"]["id"], "base")
 
+    def _write_cell(self, root: Path, cid: str) -> None:
+        cell = root / cid
+        cell.mkdir()
+        (cell / "cell_meta.json").write_text(
+            json.dumps({"id": cid, "label": cid, "kind": "other" if cid != "base" else "base", "overrides": {}}),
+            encoding="utf-8",
+        )
+        (cell / "book").mkdir()
+
+    def test_summarize_sweep_skips_cells_not_in_spec(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "spec.json").write_text(
+                json.dumps(
+                    {
+                        "sweep": "tmp",
+                        "cells": [
+                            {"id": "base", "kind": "base", "overrides": {}},
+                            {"id": "vpn15", "kind": "other", "overrides": {"VOL_PULLBACK_N": 15}},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            self._write_cell(root, "base")
+            self._write_cell(root, "vpn15")
+            self._write_cell(root, "vpn13")
+            out = summarize_sweep(root)
+            self.assertEqual([c["id"] for c in out["cells"]], ["base", "vpn15"])
+
+    def test_summarize_sweep_cell_ids_override_spec(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "spec.json").write_text(
+                json.dumps(
+                    {
+                        "sweep": "tmp",
+                        "cells": [
+                            {"id": "base", "kind": "base", "overrides": {}},
+                            {"id": "vpn15", "kind": "other", "overrides": {}},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            self._write_cell(root, "base")
+            self._write_cell(root, "vpn15")
+            self._write_cell(root, "vpn15_vpc1")
+            out = summarize_sweep(root, cell_ids=["base", "vpn15_vpc1"])
+            self.assertEqual([c["id"] for c in out["cells"]], ["base", "vpn15_vpc1"])
+
     def test_stats_from_trades_uses_year_sets(self) -> None:
         trades = [
             {"pnl": 100.0, "sell_exec_day": "20180615", "sell_signal": "trail_stop"},

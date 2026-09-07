@@ -1376,7 +1376,8 @@ def load_chart_ma_config(
                     ("w_life", "W_MA_LIFE", 34),
                 ):
                     try:
-                        out[key] = int(getattr(mod, attr, default) or default)
+                        raw_n = getattr(mod, attr, default)
+                        out[key] = int(raw_n) if raw_n is not None else int(default)
                     except (TypeError, ValueError):
                         out[key] = default
                 book: dict[str, str] = {}
@@ -1409,8 +1410,10 @@ def chart_ma_periods(period: str = "1d") -> list[int]:
     cfg = load_chart_ma_config()
     p = str(period or "1d").strip().lower()
     if p in ("1w", "week", "weekly", "w"):
-        return [int(cfg["w_fast"]), int(cfg["w_mid"]), int(cfg["w_life"])]
-    return [int(cfg["d_mid"]), int(cfg["d_slow"])]
+        nums = [int(cfg["w_fast"]), int(cfg["w_mid"]), int(cfg["w_life"])]
+    else:
+        nums = [int(cfg["d_mid"]), int(cfg["d_slow"])]
+    return [n for n in nums if n > 0]
 
 
 def ma_kind_from_detail_path(path: str | Path) -> str:

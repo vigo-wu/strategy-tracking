@@ -556,9 +556,23 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
 
 def _ohlcv_need_1d():
     plat_n = int(globals().get("SCALE_PLAT_LOOKBACK") or 20)
+    try:
+        mid_n = int(D_MA_MID or 0)
+    except (TypeError, ValueError):
+        mid_n = 0
+    try:
+        slow_n = int(D_MA_SLOW or 0)
+    except (TypeError, ValueError):
+        slow_n = 0
+    try:
+        confirm_n = int(globals().get("VOL_PULLBACK_CONFIRM_DAYS") or 1)
+    except (TypeError, ValueError):
+        confirm_n = 1
+    vol_pb_need = int(VOL_PULLBACK_N) + max(0, confirm_n - 1)
     return max(
-        int(D_MA_SLOW),
-        int(VOL_PULLBACK_N),
+        mid_n if mid_n > 0 else 0,
+        slow_n if slow_n > 0 else 0,
+        vol_pb_need,
         int(VOL_DRY_N),
         plat_n + 2,
     ) + 10
