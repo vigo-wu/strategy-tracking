@@ -2,6 +2,7 @@
 """参数网格任务页：可视化加格、开跑、看 summary。"""
 from __future__ import annotations
 
+import html
 import json
 from pathlib import Path
 from typing import Any
@@ -45,7 +46,7 @@ from grid_run import (
     summarize_only,
     validate_spec,
 )
-from grid_gate import default_gate, validate_gate  # noqa: E402  # path via grid_run
+from grid_gate import EPS_GATE, default_gate, validate_gate  # noqa: E402  # path via grid_run
 from grid_spec import (
     YEAR_WINDOW_DEFAULTS,
     YEAR_WINDOW_KEYS,
@@ -594,8 +595,11 @@ def render_grid_mode() -> None:
     _render_action_bar(defaults, busy)
     _render_preview(defaults, busy)
     _render_advanced(defaults, busy)
+    close_dialog_first = bool(st.session_state.get("grid_yield_for_dialog"))
     _handle_actions(defaults)
     _render_results()
+    if close_dialog_first:
+        _rerun_app()
 
 
 def _render_param_table(defaults: dict[str, Any], busy: bool) -> None:
@@ -737,15 +741,18 @@ def _render_preview(defaults: dict[str, Any], busy: bool) -> None:
     n = len(cells)
     if st.session_state.get("grid_preview_n") != n:
         st.session_state.pop("grid_cells_editor", None)
+        st.session_state.pop("grid_cells_editor_v2", None)
     st.session_state["grid_preview_n"] = n
-    st.markdown("**格子预览** · %s / 无硬上限" % n)
+    current_ids = {str(c.get("id") or "") for c in cells if cell_is_current(c)}
+    st.markdown(
+        "**格子预览** · %s / 无硬上限%s"
+        % (n, " · 浅蓝底=现行参数" if current_ids else "")
+    )
     rows = []
     for c in cells:
-        mark = "★现行" if cell_is_current(c) else ""
         rows.append(
             {
                 "删除": False,
-                "现行": mark,
                 "id": c["id"],
                 "label": c["label"],
                 "kind": c["kind"],
@@ -753,8 +760,10 @@ def _render_preview(defaults: dict[str, Any], busy: bool) -> None:
             }
         )
     df = pd.DataFrame(rows)
+    show = df.drop(columns=["删除"])
+    styled = show.style.apply(_style_current_ids(current_ids), axis=1)
+    st.dataframe(styled, width="stretch", hide_index=True)
     if n > EDITOR_CELL_MAX:
-        st.dataframe(df.drop(columns=["删除"]), width="stretch", hide_index=True)
         st.download_button(
             "下载 spec JSON",
             data=spec_json(_current_spec(defaults)),
@@ -763,40 +772,44 @@ def _render_preview(defaults: dict[str, Any], busy: bool) -> None:
             key="grid_dl_spec",
         )
         return
-    edited = st.data_editor(
-        df,
-        num_rows="fixed",
-        width="stretch",
-        hide_index=True,
-        disabled=["现行", "id", "覆盖"] if not busy else df.columns.tolist(),
-        column_order=["删除", "现行", "id", "label", "kind", "覆盖"],
-        column_config={
-            "删除": st.column_config.CheckboxColumn("删除", default=False),
-            "现行": st.column_config.TextColumn("现行"),
-            "kind": st.column_config.SelectboxColumn("kind", options=list(KIND_ENUM)),
-        },
-        key="grid_cells_editor",
-    )
-    if busy:
-        return
-    by_id = {c["id"]: c for c in cells}
-    out: list[dict[str, Any]] = []
-    for rec in edited.to_dict("records"):
-        cid = str(rec.get("id") or "")
-        src = dict(by_id.get(cid) or {})
-        if not src:
-            continue
-        if rec.get("删除"):
-            continue
-        src["label"] = str(rec.get("label") or cid)
-        kind = str(rec.get("kind") or src.get("kind") or "other")
-        if cid == "base":
-            kind = "base"
-        elif kind not in KIND_ENUM or kind == "base":
-            kind = src.get("kind") if src.get("kind") in KIND_ENUM and src.get("kind") != "base" else "other"
-        src["kind"] = kind
-        out.append(src)
-    st.session_state["grid_cells"] = out
+    with st.expander("编辑格子", expanded=False):
+        edited = st.data_editor(
+            df,
+            num_rows="fixed",
+            width="stretch",
+            hide_index=True,
+            disabled=["id", "覆盖"] if not busy else df.columns.tolist(),
+            column_order=["删除", "id", "label", "kind", "覆盖"],
+            column_config={
+                "删除": st.column_config.CheckboxColumn("删除", default=False),
+                "kind": st.column_config.SelectboxColumn("kind", options=list(KIND_ENUM)),
+            },
+            key="grid_cells_editor_v2",
+        )
+        if busy:
+            return
+        by_id = {c["id"]: c for c in cells}
+        out: list[dict[str, Any]] = []
+        for rec in edited.to_dict("records"):
+            cid = str(rec.get("id") or "")
+            src = dict(by_id.get(cid) or {})
+            if not src:
+                continue
+            if rec.get("删除"):
+                continue
+            src["label"] = str(rec.get("label") or cid)
+            kind = str(rec.get("kind") or src.get("kind") or "other")
+            if cid == "base":
+                kind = "base"
+            elif kind not in KIND_ENUM or kind == "base":
+                kind = (
+                    src.get("kind")
+                    if src.get("kind") in KIND_ENUM and src.get("kind") != "base"
+                    else "other"
+                )
+            src["kind"] = kind
+            out.append(src)
+        st.session_state["grid_cells"] = out
 
 
 def _render_advanced(defaults: dict[str, Any], busy: bool) -> None:
@@ -856,13 +869,21 @@ def _import_spec_text(text: str, defaults: dict[str, Any]) -> None:
     st.rerun()
 
 
+def _rerun_app() -> None:
+    try:
+        st.rerun(scope="app")
+    except TypeError:
+        st.rerun()
+
+
 @st.dialog("覆盖已有 sweep 目录")
 def _dialog_overwrite(path: Path) -> None:
     st.write("目录已存在：`%s`" % path)
     if st.button("确认覆盖", type="primary"):
         st.session_state["grid_overwrite_ok"] = True
         st.session_state["grid_action"] = "run"
-        st.rerun()
+        st.session_state["grid_yield_for_dialog"] = True
+        _rerun_app()
 
 
 @st.dialog("确认开跑")
@@ -872,10 +893,14 @@ def _dialog_confirm_run(n_cells: int, n_jobs: int, total: int, sweep: str) -> No
     if st.button("确认开跑", type="primary"):
         st.session_state["grid_run_ok"] = True
         st.session_state["grid_action"] = "run"
-        st.rerun()
+        st.session_state["grid_yield_for_dialog"] = True
+        _rerun_app()
 
 
 def _handle_actions(defaults: dict[str, Any]) -> None:
+    # 确认弹窗关掉后先完整画一帧，再开跑；否则长任务会把 overlay 卡住。
+    if st.session_state.pop("grid_yield_for_dialog", None):
+        return
     action = st.session_state.pop("grid_action", None)
     if not action:
         return
@@ -1133,75 +1158,254 @@ def _window_metric(book: dict[str, Any], key: str, field: str, *, windows_key: s
     return w.get(field)
 
 
-def _detail_window_row(
+_DETAIL_PERIODS = (
+    ("全区间", "all"),
+    ("调参期", "tune"),
+    ("验收期", "check"),
+)
+_DETAIL_METRIC_COLS = (
+    "夏普",
+    "开仓",
+    "笔数",
+    "卡玛",
+    "回撤%",
+    "胜率%",
+    "盈亏比",
+    "平均年化%",
+    "平均盈亏",
+)
+_DETAIL_GROUP_SIZE = len(_DETAIL_PERIODS)
+
+
+def _detail_window_rows(
     cell: dict[str, Any],
     book: dict[str, Any],
     *,
     windows_key: str = "windows",
-) -> dict[str, Any]:
-    row: dict[str, Any] = {
-        "id": cell.get("id"),
-        "label": cell.get("label"),
-    }
-    for prefix, wkey in (
-        ("全区间", "all"),
-        ("调参期", "tune"),
-        ("验收期", "check"),
-    ):
-        row["%s夏普" % prefix] = _window_metric(book, wkey, "sharpe", windows_key=windows_key)
-        row["%s开仓" % prefix] = _window_metric(book, wkey, "n_open", windows_key=windows_key)
-        row["%s笔数" % prefix] = _window_metric(book, wkey, "n_trades", windows_key=windows_key)
-        row["%s卡玛" % prefix] = _window_metric(book, wkey, "calmar", windows_key=windows_key)
+) -> list[dict[str, Any]]:
+    """每格固定 3 行（全区间 / 调参期 / 验收期），缺窗也出空指标行。"""
+    cid = cell.get("id")
+    label = cell.get("label")
+    rows: list[dict[str, Any]] = []
+    for period, wkey in _DETAIL_PERIODS:
         mdd = _window_metric(book, wkey, "max_dd", windows_key=windows_key)
-        row["%s回撤%%" % prefix] = (
-            None if mdd is None else round(abs(float(mdd)) * 100.0, 2)
+        rows.append(
+            {
+                "id": cid,
+                "label": label,
+                "区间": period,
+                "夏普": _window_metric(book, wkey, "sharpe", windows_key=windows_key),
+                "开仓": _window_metric(book, wkey, "n_open", windows_key=windows_key),
+                "笔数": _window_metric(book, wkey, "n_trades", windows_key=windows_key),
+                "卡玛": _window_metric(book, wkey, "calmar", windows_key=windows_key),
+                "回撤%": None if mdd is None else round(abs(float(mdd)) * 100.0, 2),
+                "胜率%": _window_metric(book, wkey, "win_rate", windows_key=windows_key),
+                "盈亏比": _window_metric(
+                    book, wkey, "profit_factor", windows_key=windows_key
+                ),
+                "平均年化%": _window_metric(
+                    book, wkey, "avg_ann_pct", windows_key=windows_key
+                ),
+                "平均盈亏": _window_metric(
+                    book, wkey, "avg_year_pnl", windows_key=windows_key
+                ),
+            }
         )
-        row["%s胜率%%" % prefix] = _window_metric(book, wkey, "win_rate", windows_key=windows_key)
-        row["%s盈亏比" % prefix] = _window_metric(
-            book, wkey, "profit_factor", windows_key=windows_key
+    return rows
+
+
+_DETAIL_TONE_COLS = ("夏普", "卡玛", "胜率%", "盈亏比", "平均年化%", "平均盈亏")
+_DETAIL_PASS_COLOR = "#e74c3c"
+_DETAIL_TONE_GATE_KEYS = {
+    "夏普": "oos_sharpe",
+    "卡玛": "calmar",
+    "胜率%": "win_rate",
+    "盈亏比": "profit_factor",
+}
+_DETAIL_LABEL_WIDTH = "10em"
+
+
+def _fmt_detail_metric(col: str, val: Any) -> str:
+    if val is None:
+        return "—"
+    try:
+        x = float(val)
+    except (TypeError, ValueError):
+        return html.escape(str(val))
+    if col in ("开仓", "笔数"):
+        return "%d" % int(round(x))
+    if col == "夏普":
+        return "%.4f" % x
+    if col == "卡玛":
+        return "%.3f" % x
+    if col == "胜率%":
+        return "%.1f" % x
+    return "%.2f" % x
+
+
+def _detail_metric_line(col: str, gate: dict[str, Any] | None) -> float | None:
+    """着色比较线；非着色列返回 None。对应门关闭（或无门）时比 0。"""
+    if col not in _DETAIL_TONE_COLS:
+        return None
+    key = _DETAIL_TONE_GATE_KEYS.get(col)
+    if not key:
+        return 0.0
+    g = gate or {}
+    rule = g.get(key) if isinstance(g.get(key), dict) else {}
+    if not rule.get("enabled"):
+        return 0.0
+    try:
+        return float(rule.get("min") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _detail_metric_tone(
+    col: str, val: Any, gate: dict[str, Any] | None
+) -> str | None:
+    """过线返回 pass；未过线与缺值返回 None（保持默认字色）。"""
+    line = _detail_metric_line(col, gate)
+    if line is None or val is None:
+        return None
+    try:
+        x = float(val)
+    except (TypeError, ValueError):
+        return None
+    if x + EPS_GATE >= line:
+        return "pass"
+    return None
+
+
+def _detail_table_palette() -> dict[str, str]:
+    dark = True
+    try:
+        theme = getattr(getattr(st, "context", None), "theme", None)
+        dark = str(getattr(theme, "type", "dark") or "dark").lower() != "light"
+    except Exception:
+        dark = True
+    if dark:
+        return {
+            "color": "var(--text-color, #e6edf3)",
+            "header_bg": "var(--secondary-background-color, #262730)",
+            "border": "rgba(230,237,243,0.18)",
+            "zebra": "rgba(255,255,255,0.04)",
+        }
+    return {
+        "color": "var(--text-color, #1f2328)",
+        "header_bg": "var(--secondary-background-color, #f0f2f6)",
+        "border": "rgba(31,35,40,0.18)",
+        "zebra": "rgba(0,0,0,0.04)",
+    }
+
+
+def _html_cell(
+    text: str,
+    style: str,
+    *,
+    tag: str = "td",
+    rowspan: int | None = None,
+) -> str:
+    rs = ' rowspan="%d"' % rowspan if rowspan and rowspan > 1 else ""
+    return "<%s%s style=\"%s\">%s</%s>" % (tag, rs, style, text, tag)
+
+
+def _detail_window_table_html(
+    rows: list[dict[str, Any]],
+    gate: dict[str, Any] | None = None,
+) -> str:
+    pal = _detail_table_palette()
+    cell_base = (
+        "border:none;border-bottom:1px solid %s;padding:0.35rem 0.6rem;"
+        "vertical-align:middle;color:%s;"
+        % (pal["border"], pal["color"])
+    )
+    headers = ["id", "label", ""] + list(_DETAIL_METRIC_COLS)
+    th_align = ["left", "left", "center"] + ["right"] * len(_DETAIL_METRIC_COLS)
+    wrap = "overflow-x:auto;width:100%;"
+    table = (
+        "width:100%%;border-collapse:collapse;font-size:0.9rem;color:%s;"
+        % pal["color"]
+    )
+    parts: list[str] = ['<div style="%s">' % wrap, '<table style="%s">' % table]
+    parts.append("<thead><tr>")
+    for h, align in zip(headers, th_align):
+        th_style = (
+            "%sbackground:%s;text-align:%s;font-weight:600;white-space:nowrap;"
+            % (cell_base, pal["header_bg"], align)
         )
-        row["%s平均年化%%" % prefix] = _window_metric(
-            book, wkey, "avg_ann_pct", windows_key=windows_key
-        )
-        row["%s平均盈亏" % prefix] = _window_metric(
-            book, wkey, "avg_year_pnl", windows_key=windows_key
-        )
-    return row
+        if h == "label":
+            th_style += "width:%s;max-width:%s;" % (
+                _DETAIL_LABEL_WIDTH,
+                _DETAIL_LABEL_WIDTH,
+            )
+        parts.append(_html_cell(html.escape(h), th_style, tag="th"))
+    parts.append("</tr></thead><tbody>")
+    n = len(rows)
+    i = 0
+    group_i = 0
+    while i < n:
+        chunk = rows[i : i + _DETAIL_GROUP_SIZE]
+        span = len(chunk)
+        zebra = pal["zebra"] if group_i % 2 == 1 else ""
+        bg = "background:%s;" % zebra if zebra else ""
+        for j, row in enumerate(chunk):
+            parts.append("<tr>")
+            if j == 0:
+                id_style = "%s%stext-align:left;white-space:nowrap;" % (
+                    cell_base,
+                    bg,
+                )
+                label_style = (
+                    "%s%stext-align:left;width:%s;max-width:%s;"
+                    "white-space:normal;overflow-wrap:anywhere;"
+                    % (cell_base, bg, _DETAIL_LABEL_WIDTH, _DETAIL_LABEL_WIDTH)
+                )
+                parts.append(
+                    _html_cell(
+                        html.escape(str(row.get("id") or "")),
+                        id_style,
+                        rowspan=span,
+                    )
+                )
+                parts.append(
+                    _html_cell(
+                        html.escape(str(row.get("label") or "")),
+                        label_style,
+                        rowspan=span,
+                    )
+                )
+            period_style = "%s%stext-align:center;white-space:nowrap;" % (
+                cell_base,
+                bg,
+            )
+            parts.append(
+                _html_cell(html.escape(str(row.get("区间") or "")), period_style)
+            )
+            for col in _DETAIL_METRIC_COLS:
+                extra = ""
+                if _detail_metric_tone(col, row.get(col), gate) == "pass":
+                    extra = "color:%s;" % _DETAIL_PASS_COLOR
+                metric_style = (
+                    "%s%stext-align:right;font-variant-numeric:tabular-nums;%s"
+                    % (cell_base, bg, extra)
+                )
+                parts.append(
+                    _html_cell(_fmt_detail_metric(col, row.get(col)), metric_style)
+                )
+            parts.append("</tr>")
+        i += _DETAIL_GROUP_SIZE
+        group_i += 1
+    parts.append("</tbody></table></div>")
+    return "".join(parts)
 
 
 def _render_detail_window_table(rows: list[dict[str, Any]], caption: str) -> None:
-    detail_df = pd.DataFrame(rows)
-    detail_cfg: dict[str, Any] = {}
-    for prefix in ("全区间", "调参期", "验收期"):
-        detail_cfg["%s夏普" % prefix] = st.column_config.NumberColumn(
-            "%s夏普" % prefix, format="%.4f"
-        )
-        detail_cfg["%s开仓" % prefix] = st.column_config.NumberColumn(
-            "%s开仓" % prefix, format="%d"
-        )
-        detail_cfg["%s笔数" % prefix] = st.column_config.NumberColumn(
-            "%s笔数" % prefix, format="%d"
-        )
-        detail_cfg["%s卡玛" % prefix] = st.column_config.NumberColumn(
-            "%s卡玛" % prefix, format="%.3f"
-        )
-        detail_cfg["%s回撤%%" % prefix] = st.column_config.NumberColumn(
-            "%s回撤%%" % prefix, format="%.2f"
-        )
-        detail_cfg["%s胜率%%" % prefix] = st.column_config.NumberColumn(
-            "%s胜率%%" % prefix, format="%.1f"
-        )
-        detail_cfg["%s盈亏比" % prefix] = st.column_config.NumberColumn(
-            "%s盈亏比" % prefix, format="%.2f"
-        )
-        detail_cfg["%s平均年化%%" % prefix] = st.column_config.NumberColumn(
-            "%s平均年化%%" % prefix, format="%.2f"
-        )
-        detail_cfg["%s平均盈亏" % prefix] = st.column_config.NumberColumn(
-            "%s平均盈亏" % prefix, format="%.2f"
-        )
     st.caption(caption)
-    st.dataframe(detail_df, width="stretch", hide_index=True, column_config=detail_cfg)
+    body = _detail_window_table_html(rows, gate=_gate_from_state())
+    try:
+        st.html(body, width="stretch")
+    except TypeError:
+        st.html(body)
 
 
 def _round_pnl(val: Any) -> int | None:
@@ -1227,10 +1431,13 @@ def _style_delta_cell(val: Any) -> str:
     return "color: #27ae60"
 
 
-def _style_current_row(row: pd.Series) -> list[str]:
-    if str(row.get("现行") or "").strip():
-        return ["background-color: rgba(255,255,255,0.06)"] * len(row)
-    return [""] * len(row)
+def _style_current_ids(ids: set[str]):
+    def _style(row: pd.Series) -> list[str]:
+        if str(row.get("id") or "") in ids:
+            return ["background-color: rgba(21,101,192,0.22)"] * len(row)
+        return [""] * len(row)
+
+    return _style
 
 
 def _fail_metric_token(msg: str) -> str:
@@ -1373,6 +1580,7 @@ def _render_results() -> None:
         )
     win = fill_year_windows(summary)
     main_rows: list[dict[str, Any]] = []
+    current_ids: set[str] = set()
     tune_detail_rows: list[dict[str, Any]] = []
     hold_detail_rows: list[dict[str, Any]] = []
     notes = rec.get("candidates") or []
@@ -1392,7 +1600,6 @@ def _render_results() -> None:
             w_chk = (b.get("windows") or {}).get("check") or {}
             chk_calmar = w_chk.get("calmar")
         main: dict[str, Any] = {
-            "现行": "★现行" if cell_is_current(cell) else "",
             "id": cid,
             "label": cell.get("label"),
             "合计": _round_pnl(b.get("sum_pnl")),
@@ -1400,14 +1607,16 @@ def _render_results() -> None:
             "验收期": _round_pnl(b.get("oos_pnl")),
             "验收卡玛": None if chk_calmar is None else round(float(chk_calmar), 3),
         }
+        if cell_is_current(cell) and cid:
+            current_ids.add(str(cid))
         if "corner_oos_pnl" in b:
             main["盲测盈亏"] = _round_pnl(b.get("corner_oos_pnl"))
         main["是否通过"] = "否" if compact else "是"
         main_rows.append(main)
-        tune_detail_rows.append(_detail_window_row(cell, b, windows_key="windows"))
+        tune_detail_rows.extend(_detail_window_rows(cell, b, windows_key="windows"))
         if isinstance(b.get("holdout_windows"), dict):
-            hold_detail_rows.append(
-                _detail_window_row(cell, b, windows_key="holdout_windows")
+            hold_detail_rows.extend(
+                _detail_window_rows(cell, b, windows_key="holdout_windows")
             )
 
     df = pd.DataFrame(main_rows)
@@ -1428,16 +1637,17 @@ def _render_results() -> None:
             % "、".join(extra_ids)
         )
     st.caption(
-        "调参期 %s–%s · 验收期 %s–%s%s · 单位：元（过门看侧栏；排序看验收卡玛）"
+        "调参期 %s–%s · 验收期 %s–%s%s · 单位：元（过门看侧栏；排序看验收卡玛）%s"
         % (
             win["tune_start"],
             win["tune_end"],
             win["check_start"],
             win["check_end"],
             " · 主列=调参标的" if space_on else "",
+            " · 浅蓝底=现行参数" if current_ids else "",
         )
     )
-    styled = df.style.apply(_style_current_row, axis=1)
+    styled = df.style.apply(_style_current_ids(current_ids), axis=1)
     fmt: dict[str, str] = {}
     for col in ("合计", "调参期", "验收期", "盲测盈亏"):
         if col in df.columns:
