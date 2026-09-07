@@ -1105,6 +1105,7 @@ def make_spec(
     check_start: int | None = None,
     check_end: int | None = None,
     asset_split: Mapping[str, Any] | None = None,
+    gate: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     spec: dict[str, Any] = {
         "theme": theme,
@@ -1126,6 +1127,8 @@ def make_spec(
     spec.update(fill_year_windows(spec))
     if asset_split is not None:
         spec["asset_split"] = dict(asset_split)
+    if gate is not None:
+        spec["gate"] = dict(gate)
     return spec
 
 

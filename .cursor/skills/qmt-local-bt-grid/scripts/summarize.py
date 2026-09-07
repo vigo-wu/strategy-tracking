@@ -19,6 +19,8 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[3]
 LOCAL_BT = REPO / "hongli_band" / "scripts" / "local_bt"
 
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
 if str(LOCAL_BT) not in sys.path:
     sys.path.insert(0, str(LOCAL_BT))
 
@@ -40,6 +42,13 @@ from grid_spec import (  # noqa: E402
     YEAR_WINDOW_KEYS,
     fill_year_windows,
     year_range_set,
+)
+from grid_gate import (  # noqa: E402
+    EPS_GATE,
+    fill_gate,
+    gate_for_json,
+    load_gate_from_sweep,
+    validate_gate,
 )
 
 SAMPLES = ("book", "sma", "ema")
@@ -75,7 +84,25 @@ def _empty_window() -> dict[str, Any]:
         "n_open": 0,
         "avg_ann_pct": None,
         "avg_year_pnl": None,
+        "n_trades": 0,
+        "win_rate": None,
+        "profit_factor": None,
+        "max_dd": None,
+        "calmar": None,
     }
+
+
+def _calmar(avg_ann_pct: Any, max_dd: Any) -> float | None:
+    if avg_ann_pct is None or max_dd is None:
+        return None
+    try:
+        ann = float(avg_ann_pct) / 100.0
+        dd = float(max_dd)
+    except (TypeError, ValueError):
+        return None
+    if dd >= -1e-12:
+        return None
+    return round(ann / abs(dd), 6)
 
 
 def _agg_window(year_rows: list[dict[str, Any]], years: set[int]) -> dict[str, Any]:
@@ -96,12 +123,76 @@ def _agg_window(year_rows: list[dict[str, Any]], years: set[int]) -> dict[str, A
     rets: list[float] = []
     for r in rows:
         rets.extend(float(x) for x in (r.get("returns") or []))
+    out = _empty_window()
+    out.update(
+        {
+            "sharpe": sharpe_from_returns(rets) if rets else None,
+            "n_open": n_open,
+            "avg_ann_pct": round(sum(anns) / len(anns), 4) if anns else None,
+            "avg_year_pnl": round(sum(pnls) / len(pnls), 2) if pnls else None,
+        }
+    )
+    return out
+
+
+def _trades_for_years(trades: list[dict[str, Any]], years: set[int]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for t in trades:
+        y = _job_year(t)
+        if y is not None and y in years:
+            out.append(t)
+    return out
+
+
+def _trade_kpi(
+    trades: list[dict[str, Any]],
+    n_accounts_by_year: dict[int, int],
+) -> dict[str, Any]:
+    if not trades:
+        return {
+            "n_trades": 0,
+            "win_rate": None,
+            "profit_factor": None,
+            "max_dd": None,
+        }
+    pnls = [float(t["pnl"]) for t in trades]
+    n = len(pnls)
+    gp = sum(p for p in pnls if p > 0)
+    gl = abs(sum(p for p in pnls if p < 0))
+    pf = (gp / gl) if gl > 1e-12 else (99.0 if gp > 0 else None)
+    wins = sum(1 for p in pnls if p > 0)
+    day_pnls: list[tuple[str, float]] = []
+    years_present: set[int] = set()
+    for t in trades:
+        day = str(t.get("sell_exec_day") or t.get("year") or "")
+        day_pnls.append((day, float(t["pnl"])))
+        y = _job_year(t)
+        if y is not None:
+            years_present.add(int(y))
+    n_acc = 0
+    for y in years_present:
+        n_acc = max(n_acc, int(n_accounts_by_year.get(y) or 0))
+    if n_acc <= 0:
+        n_acc = len({(_job_year(t), _stock_of(t)) for t in trades}) or 1
     return {
-        "sharpe": sharpe_from_returns(rets) if rets else None,
-        "n_open": n_open,
-        "avg_ann_pct": round(sum(anns) / len(anns), 4) if anns else None,
-        "avg_year_pnl": round(sum(pnls) / len(pnls), 2) if pnls else None,
+        "n_trades": n,
+        "win_rate": round(100.0 * wins / n, 2) if n else None,
+        "profit_factor": None if pf is None else round(float(pf), 3),
+        "max_dd": _max_dd(day_pnls, n_acc),
     }
+
+
+def _build_window(
+    year_rows: list[dict[str, Any]],
+    years: set[int],
+    trades: list[dict[str, Any]],
+    n_accounts_by_year: dict[int, int],
+) -> dict[str, Any]:
+    out = _agg_window(year_rows, years)
+    kpi = _trade_kpi(_trades_for_years(trades, years), n_accounts_by_year)
+    out.update(kpi)
+    out["calmar"] = _calmar(out.get("avg_ann_pct"), out.get("max_dd"))
+    return out
 
 
 def _job_year_rows(
@@ -274,9 +365,9 @@ def stats_from_trades(
         },
         "per_budget": budget,
         "windows": {
-            "all": _agg_window(year_rows, run),
-            "tune": _agg_window(year_rows, tune),
-            "check": _agg_window(year_rows, check),
+            "all": _build_window(year_rows, run, primary, n_accounts_by_year),
+            "tune": _build_window(year_rows, tune, primary, n_accounts_by_year),
+            "check": _build_window(year_rows, check, primary, n_accounts_by_year),
         },
     }
     if holdout_set is not None:
@@ -287,9 +378,9 @@ def stats_from_trades(
         hold_acc = _accounts_from_trades(holdout_trades)
         hold_year_rows = _job_year_rows(holdout_trades, hold_acc, budget)
         out["holdout_windows"] = {
-            "all": _agg_window(hold_year_rows, run),
-            "tune": _agg_window(hold_year_rows, tune),
-            "check": _agg_window(hold_year_rows, check),
+            "all": _build_window(hold_year_rows, run, holdout_trades, hold_acc),
+            "tune": _build_window(hold_year_rows, tune, holdout_trades, hold_acc),
+            "check": _build_window(hold_year_rows, check, holdout_trades, hold_acc),
         }
     return out
 
@@ -464,17 +555,195 @@ def _n_override_keys(overrides: Any) -> int:
     return len(overrides)
 
 
-def pick_recommend(cells: list[dict[str, Any]]) -> dict[str, Any]:
+def _win_block(sample: dict[str, Any], period: str, *, windows_key: str = "windows") -> dict[str, Any]:
+    block = (sample.get(windows_key) or {}).get(period)
+    return block if isinstance(block, dict) else {}
+
+
+def _num(val: Any) -> float | None:
+    if val is None:
+        return None
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
+
+def _gate_absolute_fails(
+    w: dict[str, Any],
+    gate: dict[str, Any],
+    *,
+    prefix: str = "",
+) -> list[str]:
+    g = fill_gate(gate)
+    fails: list[str] = []
+    tag = prefix or "验收期"
+
+    def miss(name: str) -> str:
+        return "%s缺%s" % (tag, name)
+
+    if g["calmar"]["enabled"]:
+        v = _num(w.get("calmar"))
+        if v is None:
+            fails.append(miss("卡玛"))
+        elif v < float(g["calmar"]["min"]) - EPS_GATE:
+            fails.append("%s卡玛未达线" % tag)
+    if g["max_dd"]["enabled"]:
+        v = _num(w.get("max_dd"))
+        if v is None:
+            fails.append(miss("回撤"))
+        elif v < float(g["max_dd"]["floor"]) - EPS_GATE:
+            fails.append("%s回撤超限" % tag)
+    if g["oos_sharpe"]["enabled"]:
+        v = _num(w.get("sharpe"))
+        if v is None:
+            fails.append(miss("夏普"))
+        elif v < float(g["oos_sharpe"]["min"]) - EPS_GATE:
+            fails.append("%s夏普未达线" % tag)
+    if g["n_trades"]["enabled"]:
+        v = _num(w.get("n_trades"))
+        if v is None:
+            fails.append(miss("笔数"))
+        elif v < float(g["n_trades"]["min"]) - EPS_GATE:
+            fails.append("%s笔数不足" % tag)
+    if g["win_rate"]["enabled"]:
+        v = _num(w.get("win_rate"))
+        if v is None:
+            fails.append(miss("胜率"))
+        elif v < float(g["win_rate"]["min"]) - EPS_GATE:
+            fails.append("%s胜率未达线" % tag)
+    if g["profit_factor"]["enabled"]:
+        v = _num(w.get("profit_factor"))
+        if v is None:
+            fails.append(miss("盈亏比"))
+        elif abs(v - 99.0) < 1e-9:
+            pass  # 无亏损视为通过绝对线
+        elif v < float(g["profit_factor"]["min"]) - EPS_GATE:
+            fails.append("%s盈亏比未达线" % tag)
+    return fails
+
+
+def _gate_relative_fails(
+    w: dict[str, Any],
+    bw: dict[str, Any],
+    gate: dict[str, Any],
+    *,
+    prefix: str = "",
+) -> list[str]:
+    g = fill_gate(gate)
+    if not g["relative_to_base"]:
+        return []
+    fails: list[str] = []
+    tag = prefix or "相对base"
+
+    def worse(name: str) -> str:
+        return "%s%s劣于base" % (tag, name)
+
+    def need(name: str) -> str:
+        return "%s缺%s无法比base" % (tag, name)
+
+    pairs = (
+        ("calmar", "卡玛", True),
+        ("max_dd", "回撤", True),  # 更高（更浅）更好
+        ("sharpe", "夏普", True),
+        ("win_rate", "胜率", True),
+        ("profit_factor", "盈亏比", True),
+    )
+    rule_key = {
+        "calmar": "calmar",
+        "max_dd": "max_dd",
+        "sharpe": "oos_sharpe",
+        "win_rate": "win_rate",
+        "profit_factor": "profit_factor",
+    }
+    for field, label, higher_better in pairs:
+        rk = rule_key[field]
+        if not g[rk]["enabled"]:
+            continue
+        a = _num(w.get(field))
+        b = _num(bw.get(field))
+        if a is None or b is None:
+            fails.append(need(label))
+            continue
+        if higher_better and a + EPS_GATE < b:
+            fails.append(worse(label))
+        elif not higher_better and a - EPS_GATE > b:
+            fails.append(worse(label))
+
+    if g["n_trades"]["enabled"]:
+        a = _num(w.get("n_trades"))
+        b = _num(bw.get("n_trades"))
+        if a is None or b is None:
+            fails.append(need("笔数"))
+        else:
+            need_n = float(g["n_trades"]["vs_base_ratio"]) * float(b)
+            if a + EPS_GATE < need_n:
+                fails.append("%s笔数相对base不足" % tag)
+    return fails
+
+
+def _calmar_delta(w: dict[str, Any], bw: dict[str, Any]) -> float | None:
+    a = _num(w.get("calmar"))
+    b = _num(bw.get("calmar"))
+    if a is None or b is None:
+        return None
+    return round(a - b, 6)
+
+
+def _eval_cell_gate(
+    book: dict[str, Any],
+    base_book: dict[str, Any],
+    gate: dict[str, Any],
+    *,
+    space_on: bool,
+) -> list[str]:
+    """返回全部失败文案；空列表表示通过。"""
+    g = fill_gate(gate)
+    w_chk = _win_block(book, "check")
+    bw_chk = _win_block(base_book, "check")
+    w_tune = _win_block(book, "tune")
+    bw_tune = _win_block(base_book, "tune")
+
+    fails = _gate_absolute_fails(w_chk, g, prefix="验收期")
+    fails.extend(_gate_relative_fails(w_chk, bw_chk, g, prefix=""))
+
+    if g["calmar_same_sign"]:
+        d_chk = _calmar_delta(w_chk, bw_chk)
+        d_tune = _calmar_delta(w_tune, bw_tune)
+        if d_chk is None or d_tune is None:
+            fails.append("缺卡玛无法同向")
+        elif _sign(d_chk, EPS_GATE) * _sign(d_tune, EPS_GATE) < 0:
+            fails.append("调参期与验收期卡玛不同向")
+
+    if space_on:
+        cell_cov = bool(book.get("holdout_has_coverage"))
+        if not cell_cov:
+            fails.append("盲测标的无覆盖")
+        else:
+            hw = _win_block(book, "check", windows_key="holdout_windows")
+            hbw = _win_block(base_book, "check", windows_key="holdout_windows")
+            fails.extend(_gate_absolute_fails(hw, g, prefix="盲测"))
+            fails.extend(_gate_relative_fails(hw, hbw, g, prefix="盲测"))
+
+    return fails
+
+
+def pick_recommend(
+    cells: list[dict[str, Any]],
+    gate: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    g = validate_gate(gate)
     by_id = {c["id"]: c for c in cells}
     base = by_id.get("base")
     if base is None:
-        return {"id": None, "reason": "缺少 base 格，无法选参"}
+        return {"id": None, "reason": "缺少 base 格，无法选参", "gate": gate_for_json(g)}
 
     def sample(cell: dict[str, Any], name: str) -> dict[str, Any]:
         return (cell.get("samples") or {}).get(name) or {}
 
     bb = sample(base, "book")
     space_on = "holdout_has_coverage" in bb or "holdout_n_logs" in bb
+    rank_warn = False
 
     passers: list[tuple[dict[str, Any], float, int]] = []
     notes: list[dict[str, Any]] = []
@@ -483,30 +752,17 @@ def pick_recommend(cells: list[dict[str, Any]]) -> dict[str, Any]:
         if cell["id"] == "base":
             continue
         b = sample(cell, "book")
+        w_chk = _win_block(b, "check")
+        bw_chk = _win_block(bb, "check")
+        d_calmar = _calmar_delta(w_chk, bw_chk)
         d_oos = float(b.get("oos_pnl") or 0) - float(bb.get("oos_pnl") or 0)
         d_is = float(b.get("is_pnl") or 0) - float(bb.get("is_pnl") or 0)
-        fail = ""
-        if space_on:
-            cell_cov = bool(b.get("holdout_has_coverage"))
-            base_cov = bool(bb.get("holdout_has_coverage"))
-            if not cell_cov and not base_cov:
-                fail = "盲测标的无覆盖"
-            elif not cell_cov:
-                fail = "盲测标的无覆盖"
-            else:
-                d_corner = float(b.get("corner_oos_pnl") or 0) - float(
-                    bb.get("corner_oos_pnl") or 0
-                )
-                if d_corner < 0:
-                    fail = "盲测标的验收塌方"
-        if not fail:
-            if _sign(d_oos) * _sign(d_is) < 0:
-                fail = "调参期与验收期不同向"
-            elif d_oos <= 0:
-                fail = "验收期未优于现行"
+        fails = _eval_cell_gate(b, bb, g, space_on=space_on)
+        fail_text = "；".join(fails) if fails else None
         row = {
             "id": cell["id"],
             "kind": cell.get("kind"),
+            "d_calmar": d_calmar,
             "d_oos": round(d_oos, 2),
             "d_is": round(d_is, 2),
             "d_corner": None
@@ -515,26 +771,33 @@ def pick_recommend(cells: list[dict[str, Any]]) -> dict[str, Any]:
                 float(b.get("corner_oos_pnl") or 0) - float(bb.get("corner_oos_pnl") or 0),
                 2,
             ),
-            "fail": fail or None,
+            "fail": fail_text,
+            "fails": fails or None,
         }
         notes.append(row)
-        if not fail:
-            passers.append((cell, d_oos, _n_override_keys(cell.get("overrides"))))
+        if not fails:
+            score = d_calmar if d_calmar is not None else d_oos
+            if d_calmar is None:
+                rank_warn = True
+            passers.append((cell, float(score), _n_override_keys(cell.get("overrides"))))
+
+    def _kind_score(n: dict[str, Any]) -> float:
+        if n.get("d_calmar") is not None:
+            return float(n["d_calmar"])
+        return float(n.get("d_oos") or 0)
 
     by_kind: dict[str, Any] = {}
     for kind in ("tighten", "loosen", "off", "other"):
         opts = [n for n in notes if n.get("kind") == kind]
         if not opts:
             continue
-        best = max(opts, key=lambda x: x["d_oos"])
+        best = max(opts, key=_kind_score)
         by_kind[kind] = best
 
     if not passers:
-        reason = "验收期未优于现行或与调参期不同向，维持现行"
-        if space_on and any(
-            n.get("fail") and "盲测" in str(n.get("fail")) for n in notes
-        ):
-            reason = "盲测未通过或验收期未优于现行，维持现行"
+        reason = "未过门，维持现行"
+        if space_on and any(n.get("fail") and "盲测" in str(n.get("fail")) for n in notes):
+            reason = "盲测未通过或未过门，维持现行"
         return {
             "id": "base",
             "label": base.get("label") or "base",
@@ -542,16 +805,19 @@ def pick_recommend(cells: list[dict[str, Any]]) -> dict[str, Any]:
             "reason": reason,
             "candidates": notes,
             "by_kind": by_kind,
+            "gate": gate_for_json(g),
         }
 
-    best_oos = max(p[1] for p in passers)
-    pad = max(500.0, 0.2 * abs(best_oos))
-    close = [p for p in passers if p[1] >= best_oos - pad]
+    best_score = max(p[1] for p in passers)
+    pad = max(0.05, 0.2 * abs(best_score))
+    close = [p for p in passers if p[1] >= best_score - pad]
     close.sort(key=lambda p: (p[2], -p[1]))
     picked = close[0][0]
-    reason = "以验收期为主且与调参期同向；接近则少改结构"
-    if space_on:
-        reason = "调参标的验收期同向且盲测未塌；接近则少改结构"
+    reason = "过门后按验收期卡玛Δ排序；接近则少改结构"
+    if rank_warn:
+        reason = "WARN 缺卡玛回落验收盈亏Δ；过门后接近则少改结构"
+    if space_on and not rank_warn:
+        reason = "过门且盲测未否决；按验收期卡玛Δ，接近则少改结构"
     return {
         "id": picked["id"],
         "label": picked.get("label") or picked["id"],
@@ -559,6 +825,7 @@ def pick_recommend(cells: list[dict[str, Any]]) -> dict[str, Any]:
         "reason": reason,
         "candidates": notes,
         "by_kind": by_kind,
+        "gate": gate_for_json(g),
     }
 
 
@@ -591,7 +858,10 @@ def _load_sweep_windows(root: Path) -> dict[str, int]:
     return fill_year_windows(None)
 
 
-def summarize_sweep(sweep_dir: str | Path) -> dict[str, Any]:
+def summarize_sweep(
+    sweep_dir: str | Path,
+    gate: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     root = Path(sweep_dir)
     if not root.is_dir():
         raise FileNotFoundError("sweep dir not found: %s" % root)
@@ -600,6 +870,7 @@ def summarize_sweep(sweep_dir: str | Path) -> dict[str, Any]:
     check = year_range_set(win["check_start"], win["check_end"])
     run = year_range_set(win["year_start"], win["year_end"])
     tune_stocks, holdout_stocks = _load_asset_lists(root)
+    gate_used = load_gate_from_sweep(root, override=gate)
     cells: list[dict[str, Any]] = []
     for child in sorted(root.iterdir()):
         if not child.is_dir():
@@ -619,7 +890,7 @@ def summarize_sweep(sweep_dir: str | Path) -> dict[str, Any]:
             )
         )
     attach_deltas(cells)
-    rec = pick_recommend(cells)
+    rec = pick_recommend(cells, gate=gate_used)
     spec = {}
     spec_p = root / "spec.json"
     if spec_p.is_file():
@@ -633,6 +904,7 @@ def summarize_sweep(sweep_dir: str | Path) -> dict[str, Any]:
         "n_cells": len(cells),
         "cells": cells,
         "recommend": rec,
+        "gate": gate_for_json(gate_used),
         "note": "MAE 反事实不得写入推荐；默认不改 config / 不 deploy",
     }
     if tune_stocks or holdout_stocks:
@@ -654,8 +926,21 @@ def summarize_sweep(sweep_dir: str | Path) -> dict[str, Any]:
 def main() -> None:
     ap = argparse.ArgumentParser(description="local_bt 网格 summarize")
     ap.add_argument("--sweep-dir", required=True, help="report/grid/<sweep> 目录")
+    ap.add_argument(
+        "--gate-json",
+        default="",
+        help="覆盖过门配置 JSON 文件或内联 JSON 对象",
+    )
     args = ap.parse_args()
-    out = summarize_sweep(args.sweep_dir)
+    gate_override = None
+    raw_gate = str(args.gate_json or "").strip()
+    if raw_gate:
+        p = Path(raw_gate)
+        if p.is_file():
+            gate_override = json.loads(p.read_text(encoding="utf-8"))
+        else:
+            gate_override = json.loads(raw_gate)
+    out = summarize_sweep(args.sweep_dir, gate=gate_override)
     rec = out.get("recommend") or {}
     print("wrote", out.get("summary_path"))
     print("recommend", rec.get("id"), rec.get("reason"))

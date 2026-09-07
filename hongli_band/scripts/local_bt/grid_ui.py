@@ -45,6 +45,7 @@ from grid_run import (
     summarize_only,
     validate_spec,
 )
+from grid_gate import default_gate, validate_gate  # noqa: E402  # path via grid_run
 from grid_spec import (
     YEAR_WINDOW_DEFAULTS,
     YEAR_WINDOW_KEYS,
@@ -125,6 +126,57 @@ def _ensure_state() -> None:
     ss.setdefault("grid_holdout_stocks", [])
     ss.setdefault("grid_eligible_n", 0)
     ss.setdefault("grid_reshuffle", False)
+    dg = default_gate()
+    ss.setdefault("grid_gate_relative", bool(dg["relative_to_base"]))
+    ss.setdefault("grid_gate_calmar_same_sign", bool(dg["calmar_same_sign"]))
+    ss.setdefault("grid_gate_calmar_en", bool(dg["calmar"]["enabled"]))
+    ss.setdefault("grid_gate_calmar_min", float(dg["calmar"]["min"]))
+    ss.setdefault("grid_gate_max_dd_en", bool(dg["max_dd"]["enabled"]))
+    ss.setdefault("grid_gate_max_dd_pct", abs(float(dg["max_dd"]["floor"])) * 100.0)
+    ss.setdefault("grid_gate_oos_sharpe_en", bool(dg["oos_sharpe"]["enabled"]))
+    ss.setdefault("grid_gate_oos_sharpe_min", float(dg["oos_sharpe"]["min"]))
+    ss.setdefault("grid_gate_n_trades_en", bool(dg["n_trades"]["enabled"]))
+    ss.setdefault("grid_gate_n_trades_min", int(dg["n_trades"]["min"]))
+    ss.setdefault("grid_gate_n_trades_vs_base", float(dg["n_trades"]["vs_base_ratio"]))
+    ss.setdefault("grid_gate_win_rate_en", bool(dg["win_rate"]["enabled"]))
+    ss.setdefault("grid_gate_win_rate_min", float(dg["win_rate"]["min"]))
+    ss.setdefault("grid_gate_pf_en", bool(dg["profit_factor"]["enabled"]))
+    ss.setdefault("grid_gate_pf_min", float(dg["profit_factor"]["min"]))
+
+
+def _gate_from_state() -> dict[str, Any]:
+    """从侧栏读 gate；勿在 widget 实例化后回写同名 session 键。"""
+    ss = st.session_state
+    raw = {
+        "relative_to_base": bool(ss.get("grid_gate_relative", True)),
+        "calmar_same_sign": bool(ss.get("grid_gate_calmar_same_sign", False)),
+        "calmar": {
+            "enabled": bool(ss.get("grid_gate_calmar_en", False)),
+            "min": float(ss.get("grid_gate_calmar_min") or 1.5),
+        },
+        "max_dd": {
+            "enabled": bool(ss.get("grid_gate_max_dd_en", True)),
+            "floor": -abs(float(ss.get("grid_gate_max_dd_pct") or 10.0)) / 100.0,
+        },
+        "oos_sharpe": {
+            "enabled": bool(ss.get("grid_gate_oos_sharpe_en", True)),
+            "min": float(ss.get("grid_gate_oos_sharpe_min") or 0.8),
+        },
+        "n_trades": {
+            "enabled": bool(ss.get("grid_gate_n_trades_en", False)),
+            "min": int(ss.get("grid_gate_n_trades_min") or 1),
+            "vs_base_ratio": float(ss.get("grid_gate_n_trades_vs_base") or 0.5),
+        },
+        "win_rate": {
+            "enabled": bool(ss.get("grid_gate_win_rate_en", True)),
+            "min": float(ss.get("grid_gate_win_rate_min") or 45.0),
+        },
+        "profit_factor": {
+            "enabled": bool(ss.get("grid_gate_pf_en", True)),
+            "min": float(ss.get("grid_gate_pf_min") or 1.5),
+        },
+    }
+    return validate_gate(raw)
 
 
 def _asset_split_from_state() -> dict[str, Any]:
@@ -166,6 +218,7 @@ def _current_spec(defaults: dict[str, Any]) -> dict[str, Any]:
         check_start=int(st.session_state.get("grid_check_start") or YEAR_WINDOW_DEFAULTS["check_start"]),
         check_end=int(st.session_state.get("grid_check_end") or YEAR_WINDOW_DEFAULTS["check_end"]),
         asset_split=_asset_split_from_state(),
+        gate=_gate_from_state(),
     )
 
 
@@ -299,6 +352,120 @@ def render_grid_sidebar() -> None:
         if n_h:
             with st.expander("盲测标的", expanded=False):
                 st.code(", ".join(st.session_state.get("grid_holdout_stocks") or []))
+
+    with st.expander("过门合格线", expanded=False):
+        st.caption("只汇总会用当前侧栏重算推荐；勿在开跑后改 widget 回写同名键。")
+        st.checkbox(
+            "相对 base 不劣",
+            key="grid_gate_relative",
+            disabled=busy,
+            persist_state="session",
+        )
+        st.checkbox(
+            "卡玛同向（调参/验收）",
+            key="grid_gate_calmar_same_sign",
+            disabled=busy,
+            persist_state="session",
+        )
+
+        def _gate_row(
+            label: str,
+            en_key: str,
+            val_key: str,
+            *,
+            min_v: float,
+            max_v: float,
+            step: float,
+            fmt: str = "%.2f",
+            is_int: bool = False,
+        ) -> None:
+            c_en, c_val = st.columns([1, 2])
+            with c_en:
+                st.checkbox(label, key=en_key, disabled=busy, persist_state="session")
+            en = bool(st.session_state.get(en_key))
+            with c_val:
+                if is_int:
+                    st.number_input(
+                        "阈值",
+                        min_value=int(min_v),
+                        max_value=int(max_v),
+                        step=int(step),
+                        key=val_key,
+                        disabled=busy or not en,
+                        persist_state="session",
+                        label_visibility="collapsed",
+                    )
+                else:
+                    st.number_input(
+                        "阈值",
+                        min_value=float(min_v),
+                        max_value=float(max_v),
+                        step=float(step),
+                        format=fmt,
+                        key=val_key,
+                        disabled=busy or not en,
+                        persist_state="session",
+                        label_visibility="collapsed",
+                    )
+
+        _gate_row("卡玛 ≥", "grid_gate_calmar_en", "grid_gate_calmar_min", min_v=0.0, max_v=50.0, step=0.1)
+        _gate_row(
+            "回撤% ≤",
+            "grid_gate_max_dd_en",
+            "grid_gate_max_dd_pct",
+            min_v=0.0,
+            max_v=100.0,
+            step=0.5,
+            fmt="%.1f",
+        )
+        _gate_row(
+            "夏普 ≥",
+            "grid_gate_oos_sharpe_en",
+            "grid_gate_oos_sharpe_min",
+            min_v=-5.0,
+            max_v=10.0,
+            step=0.1,
+        )
+        _gate_row(
+            "笔数 ≥",
+            "grid_gate_n_trades_en",
+            "grid_gate_n_trades_min",
+            min_v=0,
+            max_v=10000,
+            step=1,
+            is_int=True,
+        )
+        st.number_input(
+            "笔数相对 base 比例",
+            min_value=0.0,
+            max_value=2.0,
+            step=0.05,
+            format="%.2f",
+            key="grid_gate_n_trades_vs_base",
+            disabled=busy or not bool(st.session_state.get("grid_gate_n_trades_en")),
+            persist_state="session",
+        )
+        _gate_row(
+            "胜率% ≥",
+            "grid_gate_win_rate_en",
+            "grid_gate_win_rate_min",
+            min_v=0.0,
+            max_v=100.0,
+            step=1.0,
+            fmt="%.1f",
+        )
+        _gate_row(
+            "盈亏比 ≥",
+            "grid_gate_pf_en",
+            "grid_gate_pf_min",
+            min_v=0.0,
+            max_v=99.0,
+            step=0.1,
+        )
+        try:
+            _gate_from_state()
+        except ValueError as e:
+            st.error(str(e))
 
     st.checkbox("额外全 SMA / EMA 对照", key="grid_sma_ema", disabled=busy, persist_state="session")
     st.number_input(
@@ -682,7 +849,8 @@ def _handle_actions(defaults: dict[str, Any]) -> None:
     if action == "summarize":
         dest = _sweep_dir(spec)
         try:
-            out = summarize_only(dest)
+            # 侧栏 gate 优先；勿回写 widget 键
+            out = summarize_only(dest, gate=_gate_from_state())
             st.session_state["grid_summary"] = out
             st.success("已汇总")
         except Exception as e:
@@ -934,6 +1102,16 @@ def _detail_window_row(
     ):
         row["%s夏普" % prefix] = _window_metric(book, wkey, "sharpe", windows_key=windows_key)
         row["%s开仓" % prefix] = _window_metric(book, wkey, "n_open", windows_key=windows_key)
+        row["%s笔数" % prefix] = _window_metric(book, wkey, "n_trades", windows_key=windows_key)
+        row["%s卡玛" % prefix] = _window_metric(book, wkey, "calmar", windows_key=windows_key)
+        mdd = _window_metric(book, wkey, "max_dd", windows_key=windows_key)
+        row["%s回撤%%" % prefix] = (
+            None if mdd is None else round(abs(float(mdd)) * 100.0, 2)
+        )
+        row["%s胜率%%" % prefix] = _window_metric(book, wkey, "win_rate", windows_key=windows_key)
+        row["%s盈亏比" % prefix] = _window_metric(
+            book, wkey, "profit_factor", windows_key=windows_key
+        )
         row["%s平均年化%%" % prefix] = _window_metric(
             book, wkey, "avg_ann_pct", windows_key=windows_key
         )
@@ -952,6 +1130,21 @@ def _render_detail_window_table(rows: list[dict[str, Any]], caption: str) -> Non
         )
         detail_cfg["%s开仓" % prefix] = st.column_config.NumberColumn(
             "%s开仓" % prefix, format="%d"
+        )
+        detail_cfg["%s笔数" % prefix] = st.column_config.NumberColumn(
+            "%s笔数" % prefix, format="%d"
+        )
+        detail_cfg["%s卡玛" % prefix] = st.column_config.NumberColumn(
+            "%s卡玛" % prefix, format="%.3f"
+        )
+        detail_cfg["%s回撤%%" % prefix] = st.column_config.NumberColumn(
+            "%s回撤%%" % prefix, format="%.2f"
+        )
+        detail_cfg["%s胜率%%" % prefix] = st.column_config.NumberColumn(
+            "%s胜率%%" % prefix, format="%.1f"
+        )
+        detail_cfg["%s盈亏比" % prefix] = st.column_config.NumberColumn(
+            "%s盈亏比" % prefix, format="%.2f"
         )
         detail_cfg["%s平均年化%%" % prefix] = st.column_config.NumberColumn(
             "%s平均年化%%" % prefix, format="%.2f"
@@ -973,12 +1166,13 @@ def _round_pnl(val: Any) -> int | None:
 
 
 def _style_delta_cell(val: Any) -> str:
-    """A 股习惯：正红负绿；|x|<1 中性。"""
+    """A 股习惯：正红负绿。元级 |x|<1 中性；小数（卡玛Δ）|x|<1e-4 中性。"""
     try:
         x = float(val)
     except (TypeError, ValueError):
         return ""
-    if abs(x) < 1.0:
+    thr = 1.0 if abs(x) >= 1.0 else 1e-4
+    if abs(x) < thr:
         return ""
     if x > 0:
         return "color: #e74c3c"
@@ -989,6 +1183,100 @@ def _style_base_row(row: pd.Series) -> list[str]:
     if str(row.get("id") or "") == "base":
         return ["background-color: rgba(255,255,255,0.06)"] * len(row)
     return [""] * len(row)
+
+
+def _fail_metric_token(msg: str) -> str:
+    s = str(msg or "")
+    for name in ("卡玛", "回撤", "夏普", "笔数", "胜率", "盈亏比", "覆盖"):
+        if name in s:
+            return name
+    if "同向" in s:
+        return "同向"
+    return s[:8] if s else ""
+
+
+def _group_gate_fails(fails: Any) -> dict[str, list[str]]:
+    """把 fails 拆成 验收 / 相对 / 同向 / 盲测，指标名去重保序。"""
+    out: dict[str, list[str]] = {
+        "验收": [],
+        "相对": [],
+        "同向": [],
+        "盲测": [],
+    }
+    if isinstance(fails, str) and fails.strip():
+        items = [x.strip() for x in fails.replace("；", ";").split(";") if x.strip()]
+    elif isinstance(fails, list):
+        items = [str(x) for x in fails if x]
+    else:
+        return out
+    seen: dict[str, set[str]] = {k: set() for k in out}
+
+    def add(bucket: str, token: str) -> None:
+        if not token or token in seen[bucket]:
+            return
+        seen[bucket].add(token)
+        out[bucket].append(token)
+
+    for raw in items:
+        s = str(raw)
+        tok = _fail_metric_token(s)
+        if "同向" in s:
+            add("同向", "异号" if "不同向" in s else tok)
+        elif s.startswith("盲测") or "盲测标的" in s:
+            add("盲测", tok)
+        elif "相对base" in s or "劣于base" in s or "无法比base" in s:
+            add("相对", tok)
+        else:
+            add("验收", tok)
+    return out
+
+
+def _fail_summary_compact(groups: dict[str, list[str]]) -> str:
+    parts: list[str] = []
+    for key, label in (("验收", "验"), ("相对", "相"), ("同向", "向"), ("盲测", "盲")):
+        toks = groups.get(key) or []
+        if not toks:
+            continue
+        parts.append("%s:%s" % (label, ",".join(toks)))
+    return " · ".join(parts)
+
+
+def _render_fail_detail(notes_by_id: dict[str, Any], cells: list[dict[str, Any]]) -> None:
+    rows: list[dict[str, Any]] = []
+    for cell in cells:
+        cid = cell.get("id")
+        if cid == "base":
+            continue
+        note = notes_by_id.get(cid) or {}
+        fails = note.get("fails")
+        if not fails and note.get("fail"):
+            fails = note.get("fail")
+        groups = _group_gate_fails(fails)
+        if not any(groups.values()):
+            continue
+        rows.append(
+            {
+                "id": cid,
+                "label": cell.get("label"),
+                "验收绝对": " ".join(groups["验收"]) or "—",
+                "相对base": " ".join(groups["相对"]) or "—",
+                "同向": " ".join(groups["同向"]) or "—",
+                "盲测": " ".join(groups["盲测"]) or "—",
+                "全部": "；".join(str(x) for x in (fails if isinstance(fails, list) else [fails])),
+            }
+        )
+    if not rows:
+        return
+    with st.expander("未过明细（按门分类）", expanded=True):
+        st.caption("按验收绝对 / 相对 base / 同向 / 盲测拆开；全部原文不丢。主表只保留是否通过。")
+        st.dataframe(
+            pd.DataFrame(rows),
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "全部": st.column_config.TextColumn("全部原文", width="large"),
+            },
+        )
 
 
 def _render_results() -> None:
@@ -1002,22 +1290,32 @@ def _render_results() -> None:
     space_on = bool(space.get("holdout_stocks") or space.get("tune_stocks"))
     if space_on:
         st.caption(
-            "空间隔离：主列=调参标的；盲测盈亏只否决。禁止用 MAE 反事实当结论。"
+            "空间隔离：主列盈亏=调参标的（展示）；过门=侧栏合格线；盲测复用同一 gate 否决。"
         )
     else:
         st.caption(
-            "禁止用 MAE 反事实当结论。默认不改 config / 不 deploy。选参宇宙是跟踪池，过拟合风险高于大样本。"
+            "过门=侧栏五大硬指标（可禁用单项）；排序看验收期卡玛Δ。默认不改 config / 不 deploy。"
         )
     win = fill_year_windows(summary)
     main_rows: list[dict[str, Any]] = []
     tune_detail_rows: list[dict[str, Any]] = []
     hold_detail_rows: list[dict[str, Any]] = []
     notes = rec.get("candidates") or []
-    for cell in summary.get("cells") or []:
+    notes_by_id = {n.get("id"): n for n in notes if isinstance(n, dict)}
+    cells = list(summary.get("cells") or [])
+    for cell in cells:
         b = (cell.get("samples") or {}).get("book") or {}
         db = (cell.get("delta_vs_base") or {}).get("book") or {}
-        fail = next((n.get("fail") for n in notes if n.get("id") == cell.get("id")), None)
+        note = notes_by_id.get(cell.get("id")) or {}
+        fails = note.get("fails")
+        if not (isinstance(fails, list) and fails) and note.get("fail"):
+            fails = note.get("fail")
+        groups = _group_gate_fails(fails)
+        compact = _fail_summary_compact(groups)
         cid = cell.get("id")
+        d_calmar = note.get("d_calmar")
+        if d_calmar is None and cid == "base":
+            d_calmar = 0.0
         main: dict[str, Any] = {
             "id": cid,
             "label": cell.get("label"),
@@ -1025,11 +1323,12 @@ def _render_results() -> None:
             "调参期": _round_pnl(b.get("is_pnl")),
             "验收期": _round_pnl(b.get("oos_pnl")),
             "Δ验收": _round_pnl(db.get("oos_pnl")),
+            "Δ卡玛": None if d_calmar is None else round(float(d_calmar), 3),
         }
         if "corner_oos_pnl" in b:
             main["盲测盈亏"] = _round_pnl(b.get("corner_oos_pnl"))
             main["Δ盲测"] = _round_pnl(db.get("corner_oos_pnl"))
-        main["是否通过"] = "否" if fail else "是"
+        main["是否通过"] = "—" if cid == "base" else ("否" if compact else "是")
         main_rows.append(main)
         tune_detail_rows.append(_detail_window_row(cell, b, windows_key="windows"))
         if isinstance(b.get("holdout_windows"), dict):
@@ -1039,7 +1338,7 @@ def _render_results() -> None:
 
     df = pd.DataFrame(main_rows)
     st.caption(
-        "调参期 %s–%s · 验收期 %s–%s%s · 单位：元"
+        "调参期 %s–%s · 验收期 %s–%s%s · 单位：元（过门看侧栏；Δ卡玛=验收期卡玛相对 base）"
         % (
             win["tune_start"],
             win["tune_end"],
@@ -1048,10 +1347,9 @@ def _render_results() -> None:
             " · 主列=调参标的" if space_on else "",
         )
     )
-    delta_cols = [c for c in ("Δ验收", "Δ盲测") if c in df.columns]
+    delta_cols = [c for c in ("Δ验收", "Δ盲测", "Δ卡玛") if c in df.columns]
     styled = df.style.apply(_style_base_row, axis=1)
     if delta_cols:
-        # pandas 2.1+ 用 map；旧版 applymap
         if hasattr(styled, "map"):
             styled = styled.map(_style_delta_cell, subset=delta_cols)
         else:
@@ -1060,9 +1358,12 @@ def _render_results() -> None:
     for col in ("合计", "调参期", "验收期", "Δ验收", "盲测盈亏", "Δ盲测"):
         if col in df.columns:
             fmt[col] = "{:.0f}"
+    if "Δ卡玛" in df.columns:
+        fmt["Δ卡玛"] = "{:.3f}"
     if fmt:
         styled = styled.format(fmt, na_rep="—")
     st.dataframe(styled, width="stretch", hide_index=True)
+    _render_fail_detail(notes_by_id, cells)
 
     with st.expander("窗内夏普 / 开仓 / 年化", expanded=False):
         _render_detail_window_table(
@@ -1072,10 +1373,8 @@ def _render_results() -> None:
         if hold_detail_rows:
             _render_detail_window_table(hold_detail_rows, "盲测标的（未参与调参）")
         st.caption(
-            "夏普 / 开仓 / 平均年化% / 平均盈亏与下方分年绩效同口径（每年独立空仓）；"
-            "平均盈亏是窗内各年当年盈亏的算术平均，不等于合计除以年数。"
-            "窗内夏普是各年日收益拼接后算一次，不是各年夏普平均。"
-            "旧 summary 无 holdout_windows 时需「只汇总」重算。"
+            "过门用验收期窗内：卡玛、回撤%、夏普、笔数、胜率、盈亏比（非样本级整段）。"
+            "旧 summary 缺字段时「只汇总」会重解析 log。"
         )
     st.caption(
         "合计 / 调参期 / 验收期是卖出年已实现盈亏之和（空间隔离时仅调参标的）。"

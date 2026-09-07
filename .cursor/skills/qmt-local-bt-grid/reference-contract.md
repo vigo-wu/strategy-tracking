@@ -16,7 +16,8 @@
    - 扫阶梯止盈：`trail_arm=` = `TRAIL_TIERS` 档 1 的 `peak_lo`。
 4. **主样本 job 列表**：默认 config `BOOK_STOCKS` × spec 回测年（均线/复权锁在跟踪池配置里）。`asset_split.mode=random_from_csv` 时改为从 `tools/csv/none` 抽取的 `tune_stocks ∪ holdout_stocks`（名单写入 `freeze.json` / `spec.json`；建 job 仍用现有 `csv_for`）。
 5. **可选对照**：全 SMA / 全 EMA（`include_sma_ema`），不单独当选参器。
-6. **空间隔离（可选）**：`asset_split` 见 skill 示例 `stop_loss_space.json`。选参主 KPI 仅 tune 股；holdout × 验收年为否决硬门（无覆盖不得过门）。
+6. **空间隔离（可选）**：`asset_split` 见 skill 示例 `stop_loss_space.json`。选参主 KPI 仅 tune 股；holdout × 验收年复用 `gate` 否决（无覆盖不得过门）。
+7. **过门 `gate`**：绝对合格线（可逐项禁用）+ 可选相对 base + 可选卡玛同向；指标用 `windows.check.*`；排序用验收期卡玛 Δ。写入 spec/freeze/summary；只汇总可 `--gate-json` / 侧栏覆盖。
 
 ## 覆盖值形态
 

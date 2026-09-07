@@ -45,8 +45,10 @@ MAE 为何不可信、本轮数字：需要时再读 [reference-lessons.md](refe
 
 ## 选参
 
-相对 `base`：合计、利润因子、分年回撤；**以调参标的验收期为主**（默认 2023–2026，年段写在 spec：`tune_*` / `check_*`）。
-调参期与验收期同向。开启空间隔离时另要求盲测角（holdout × 验收年）不劣于 base，且 holdout 须有覆盖（禁止 `0>=0` 假通过）。接近则少改结构。不追调参期尖峰。不同向或验收期未优于现行则维持现行。
+过门 = **侧栏/spec `gate` 已启用的绝对合格线** ∧（可选）**相对 base 不劣** ∧（可选）**调参/验收卡玛同向**。
+默认关闭：卡玛绝对线、笔数、卡玛同向；默认开启：回撤、夏普、胜率、盈亏比、相对 base。
+指标一律用窗内 `windows.check.*`（空间隔离时盲测用 `holdout_windows.check.*` 复用同一 gate 否决）；禁止用样本级整段 `max_dd`/`win_rate`。
+通过者按验收期**卡玛 Δ**排序（接近则少改 overrides）；盈亏仅展示。侧栏可逐项启用/改阈值；「只汇总」传入当前侧栏 gate 重算推荐（不回写 widget 键）。
 
 Agent 输出：Canvas（各格 Δ / 验收期）+ **一句推荐**。不要把 MAE 数字写进推荐。
 
@@ -60,7 +62,7 @@ Agent 输出：Canvas（各格 Δ / 验收期）+ **一句推荐**。不要把 M
 - [ ] 4. 运行时 overrides（禁止改 config 扫参）
 - [ ] 5. 隔离 report/grid/<sweep>/；格间串行
 - [ ] 6. 探针 log 指纹与格子一致
-- [ ] 7. summarize → summary.json；验收期 + 调参期同向选参
+- [ ] 7. summarize → summary.json；侧栏/spec gate 过门 + 验收期卡玛Δ选参
 - [ ] 8. Canvas + 一句推荐；默认不改 config / 不 deploy
 ```
 
@@ -87,6 +89,8 @@ python .cursor/skills/qmt-local-bt-grid/scripts/summarize.py --sweep-dir hongli_
 | `--asset-mode` | `off` / `random_from_csv` |
 | `--n-tune` / `--n-holdout` / `--seed` | 空间抽取数量与种子 |
 | `--reshuffle` | 忽略 freeze 旧名单重新抽取 |
+| `--gate-json` | 过门配置 JSON 文件或内联对象（覆盖 spec.gate；只汇总同样生效） |
+| `--dry-run` | 只打印 job 数 |
 
 ## 格子 JSON
 

@@ -21,12 +21,13 @@ REPO = HERE.parents[2]
 THEME = REPO / "hongli_band"
 HLBAND_CONFIG = THEME / "scripts" / "qmt" / "hlband" / "config.py"
 GRID_ROOT = THEME / "report" / "grid"
-SKILL_SUMMARIZE = (
-    REPO / ".cursor" / "skills" / "qmt-local-bt-grid" / "scripts" / "summarize.py"
-)
+SKILL_SCRIPTS = REPO / ".cursor" / "skills" / "qmt-local-bt-grid" / "scripts"
+SKILL_SUMMARIZE = SKILL_SCRIPTS / "summarize.py"
 
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
+if str(SKILL_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SKILL_SCRIPTS))
 
 from analyze import (  # noqa: E402
     DEFAULT_CSV_ROOT,
@@ -42,6 +43,7 @@ from grid_spec import (  # noqa: E402
     apply_year_windows,
     fill_year_windows,
 )
+from grid_gate import fill_gate, gate_for_json, validate_gate  # noqa: E402
 from asset_split import (  # noqa: E402
     AssetSplitError,
     draw_asset_split,
@@ -549,6 +551,11 @@ def run_sweep(
     except AssetSplitError as e:
         raise GridError(str(e)) from e
     spec["asset_split"] = split
+    try:
+        gate = validate_gate(spec.get("gate"))
+    except ValueError as e:
+        raise GridError(str(e)) from e
+    spec["gate"] = gate_for_json(gate)
 
     book, jobs = assemble_jobs(spec, include_sma_ema=include_sma_ema)
     if len(jobs) > WARN_JOBS_SOFT:
@@ -574,6 +581,7 @@ def run_sweep(
         "asset_split": _json_ready(split),
         "tune_stocks": list(split.get("tune_stocks") or []),
         "holdout_stocks": list(split.get("holdout_stocks") or []),
+        "gate": gate_for_json(gate),
     }
     freeze_meta.update(win)
     (dest / "freeze.json").write_text(
@@ -620,7 +628,7 @@ def run_sweep(
             on_progress=progress,
         )
     mod = _load_summarize()
-    out = mod.summarize_sweep(dest)
+    out = mod.summarize_sweep(dest, gate=spec.get("gate"))
     rec = out.get("recommend") or {}
     print("wrote", out.get("summary_path"))
     print("recommend", rec.get("id"), rec.get("reason"))
@@ -630,11 +638,14 @@ def run_sweep(
     return info
 
 
-def summarize_only(sweep_dir: str | Path) -> dict[str, Any]:
+def summarize_only(
+    sweep_dir: str | Path,
+    gate: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     dest = Path(sweep_dir)
     _assert_grid_dir(dest)
     mod = _load_summarize()
-    out = mod.summarize_sweep(dest)
+    out = mod.summarize_sweep(dest, gate=gate)
     rec = out.get("recommend") or {}
     print("wrote", out.get("summary_path"))
     print("recommend", rec.get("id"), rec.get("reason"))
@@ -669,8 +680,22 @@ def main() -> None:
         action="store_true",
         help="忽略 freeze/spec 旧名单，按 seed 重新抽取",
     )
+    ap.add_argument(
+        "--gate-json",
+        default="",
+        help="过门配置 JSON 文件或内联对象（覆盖 spec.gate）",
+    )
     args = ap.parse_args()
     try:
+        gate_override = None
+        raw_gate = str(args.gate_json or "").strip()
+        if raw_gate:
+            gp = Path(raw_gate)
+            if gp.is_file():
+                gate_override = json.loads(gp.read_text(encoding="utf-8"))
+            else:
+                gate_override = json.loads(raw_gate)
+            gate_override = validate_gate(gate_override)
         if args.summarize_only:
             if not args.sweep_dir and not args.spec:
                 raise GridError("--summarize-only 需要 --sweep-dir 或 --spec")
@@ -680,7 +705,7 @@ def main() -> None:
                 spec = load_spec(args.spec)
                 sweep = str(spec.get("sweep") or Path(args.spec).stem)
                 sweep_dir = GRID_ROOT / sweep
-            summarize_only(sweep_dir)
+            summarize_only(sweep_dir, gate=gate_override)
             return
         if not args.spec:
             raise GridError("需要 --spec")
@@ -696,6 +721,12 @@ def main() -> None:
         for key, val in cli_years.items():
             if val is not None:
                 spec[key] = int(val)
+        if gate_override is not None:
+            spec["gate"] = gate_for_json(gate_override)
+        elif spec.get("gate") is not None:
+            spec["gate"] = gate_for_json(validate_gate(spec.get("gate")))
+        else:
+            spec["gate"] = gate_for_json(fill_gate(None))
         split = fill_asset_split(spec)
         if args.asset_mode:
             split["mode"] = str(args.asset_mode).strip().lower()

@@ -65,6 +65,21 @@ GRID_KEYS: tuple[str, ...] = (
     "grid_tune_stocks",
     "grid_holdout_stocks",
     "grid_eligible_n",
+    "grid_gate_relative",
+    "grid_gate_calmar_same_sign",
+    "grid_gate_calmar_en",
+    "grid_gate_calmar_min",
+    "grid_gate_max_dd_en",
+    "grid_gate_max_dd_pct",
+    "grid_gate_oos_sharpe_en",
+    "grid_gate_oos_sharpe_min",
+    "grid_gate_n_trades_en",
+    "grid_gate_n_trades_min",
+    "grid_gate_n_trades_vs_base",
+    "grid_gate_win_rate_en",
+    "grid_gate_win_rate_min",
+    "grid_gate_pf_en",
+    "grid_gate_pf_min",
 )
 
 
