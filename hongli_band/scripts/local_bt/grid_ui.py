@@ -954,6 +954,31 @@ def _run_now(spec: dict[str, Any]) -> None:
     cell_done: dict[str, int] = {}
 
     def on_progress(cid: str, done: int, tot: int, label: str, **extra: Any) -> None:
+        n_walks = extra.get("n_walks")
+        phase = str(extra.get("phase") or "")
+        if n_walks:
+            if phase == "probe":
+                pdone = int(extra.get("probe_done") or done or 0)
+                ptot = max(int(extra.get("probe_total") or tot or 1), 1)
+                text = "探针 %s/%s" % (pdone, ptot)
+                try:
+                    bar.progress(0.0, text=text)
+                except TypeError:
+                    bar.progress(0.0)
+                status.info("%s · %s" % (text, label))
+                return
+            completed = float(extra.get("completed") or 0)
+            inflight = float(extra.get("inflight_frac") or 0)
+            nw = max(int(n_walks), 1)
+            n_running = int(extra.get("n_running") or 0)
+            frac = min(1.0, max(0.0, (completed + inflight) / float(nw)))
+            text = "%.1f/%s walk · %s 路" % (completed + inflight, nw, n_running)
+            try:
+                bar.progress(frac, text=text)
+            except TypeError:
+                bar.progress(frac)
+            status.info("%s · %s" % (text, label))
+            return
         cell_done[str(cid)] = int(done or 0)
         n_jobs = max(int(tot or 1), 1)
         inner = 0.0

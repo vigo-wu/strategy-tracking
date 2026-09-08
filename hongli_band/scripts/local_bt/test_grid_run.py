@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from queue import Empty
 from typing import Any
 from unittest.mock import patch
 
@@ -16,6 +17,9 @@ if str(HERE) not in sys.path:
 
 from grid_run import (  # noqa: E402
     GridError,
+    WalkProgress,
+    _drain_walk_queue,
+    _run_walks_in_pool,
     assemble_jobs,
     book_jobs,
     book_stock_entries,
@@ -568,6 +572,68 @@ class GridInitProbeTest(unittest.TestCase):
             walk.assert_not_called()
 
 
+class _ListQ:
+    def __init__(self, items):
+        self._items = list(items)
+
+    def get_nowait(self):
+        if not self._items:
+            raise Empty
+        return self._items.pop(0)
+
+
+class WalkProgressTest(unittest.TestCase):
+    def test_frac_completed_plus_two_inflight(self) -> None:
+        st = WalkProgress(8)
+        st.finish("a")
+        st.finish("b")
+        st.finish("c")
+        st.bar("x", 50, 100)
+        st.bar("y", 1, 2)
+        self.assertAlmostEqual(st.frac(), 0.5)
+        self.assertEqual(st.completed, 3)
+        self.assertEqual(st.n_running, 2)
+
+    def test_finish_pops_inflight_before_increment(self) -> None:
+        st = WalkProgress(2)
+        st.bar("j", 100, 100)
+        self.assertAlmostEqual(st.frac(), 0.5)
+        st.finish("j")
+        self.assertEqual(st.completed, 1)
+        self.assertNotIn("j", st.inflight)
+        self.assertAlmostEqual(st.frac(), 0.5)
+        st.finish("j")
+        self.assertEqual(st.completed, 1)
+
+    def test_late_bar_after_pop_ignored(self) -> None:
+        st = WalkProgress(2)
+        st.finish("j")
+        before = st.frac()
+        st.bar("j", 100, 100)
+        st.start("j")
+        self.assertAlmostEqual(st.frac(), before)
+        self.assertNotIn("j", st.inflight)
+
+    def test_drain_bar_then_finish_leaves_inflight(self) -> None:
+        st = WalkProgress(8)
+        jk = "c1|book|tune"
+        q = _ListQ([("bar", "c1", jk, 50, 100, "回放 tune")])
+        cid, got_jk, lab = _drain_walk_queue(q, st)
+        self.assertEqual(cid, "c1")
+        self.assertEqual(got_jk, jk)
+        self.assertIn("tune", lab)
+        extra = st.extras(phase="walk", job_key=jk)
+        self.assertAlmostEqual(extra["inflight_frac"], 0.5)
+        self.assertEqual(extra["n_running"], 1)
+        self.assertEqual(extra["n_walks"], 8)
+        st.finish(jk)
+        self.assertEqual(st.completed, 1)
+        self.assertNotIn(jk, st.inflight)
+        extra2 = st.extras(phase="walk", job_key=jk)
+        self.assertEqual(extra2["inflight_frac"], 0.0)
+        self.assertEqual(extra2["completed"], 1)
+
+
 _POOL_DEFAULTS = {
     "STOP_LOSS": 0.08,
     "TIME_FORCE_BARS": 30,
@@ -743,6 +809,40 @@ class GridWalkPoolTest(unittest.TestCase):
             self.assertIn("cell_id", payload)
             self.assertTrue(payload.get("out_dir"))
         self.assertTrue(fake_sum.called)
+
+    def test_pool_drain_bar_then_future_complete(self) -> None:
+        payloads = [
+            {"cell_id": "c1", "sample": "book", "basket_id": "tune", "out_dir": "x"},
+            {"cell_id": "c1", "sample": "book", "basket_id": "holdout", "out_dir": "y"},
+        ]
+        state = WalkProgress(2)
+        jk_hold = "c1|book|holdout"
+        events: list[dict[str, Any]] = []
+
+        def on_progress(_cid: str, _done: int, _tot: int, _label: str, **extra: Any) -> None:
+            events.append(dict(extra))
+
+        def fake_drain(_q, st: WalkProgress):
+            st.bar(jk_hold, 40, 80)
+            return ("c1", jk_hold, "回放 holdout · 2019 40/80")
+
+        _FakePool.last = None
+        with patch("grid_run.ProcessPoolExecutor", _FakePool):
+            with patch("grid_run.wait", _fake_wait):
+                with patch("grid_run._drain_walk_queue", fake_drain):
+                    got = _run_walks_in_pool(
+                        payloads, 2, 2, state, on_progress=on_progress
+                    )
+        self.assertEqual(got, {"c1"})
+        self.assertTrue(
+            any(abs(float(e.get("inflight_frac") or 0) - 0.5) < 1e-9 for e in events)
+        )
+        self.assertTrue(all(e.get("n_walks") == 2 for e in events))
+        self.assertEqual(state.completed, 2)
+        self.assertNotIn(jk_hold, state.inflight)
+        last = events[-1]
+        self.assertEqual(last.get("completed"), 2)
+        self.assertEqual(float(last.get("inflight_frac") or 0), 0.0)
 
     def test_walk_ok_false_cancels_and_skips_summarize(self) -> None:
         spec = _n_cell_spec(4, "fail_unit")

@@ -105,8 +105,123 @@ def _emit_progress(
 ) -> None:
     if on_progress is not None:
         on_progress(str(cid), int(done), int(tot), str(label), **extra)
+        return
+    n_walks = extra.get("n_walks")
+    if n_walks:
+        completed = extra.get("completed", done)
+        inflight = extra.get("inflight_frac") or 0.0
+        n_running = extra.get("n_running") or 0
+        jk = extra.get("job_key") or cid
+        phase = extra.get("phase") or "walk"
+        if phase == "probe":
+            print(
+                "[%s] 探针 %s/%s %s"
+                % (cid, extra.get("probe_done", done), extra.get("probe_total", tot), label),
+                flush=True,
+            )
+            return
+        print(
+            "[%s] %.1f/%s walk · %s 路 %s"
+            % (jk, float(completed) + float(inflight), n_walks, n_running, label),
+            flush=True,
+        )
+        return
+    print("[%s] %s/%s %s" % (cid, done, tot, label), flush=True)
+
+
+def walk_job_key(payload: dict[str, Any] | None, *, cid: str = "", sample: str = "", basket: str = "") -> str:
+    p = payload or {}
+    return "%s|%s|%s" % (
+        str(p.get("cell_id") or cid or ""),
+        str(p.get("sample") or sample or "book"),
+        str(p.get("basket_id") or p.get("basket") or basket or "book"),
+    )
+
+
+class WalkProgress:
+    """全局 walk 进度：completed + sum(inflight bar 分数)。"""
+
+    def __init__(self, n_walks: int):
+        self.n_walks = max(int(n_walks or 0), 0)
+        self.completed = 0
+        self.inflight: dict[str, float] = {}
+        self._finished: set[str] = set()
+        self.probe_done = 0
+        self.probe_total = 0
+
+    @property
+    def inflight_frac(self) -> float:
+        return float(sum(self.inflight.values()))
+
+    @property
+    def n_running(self) -> int:
+        return len(self.inflight)
+
+    def frac(self) -> float:
+        denom = max(self.n_walks, 1)
+        return min(1.0, (float(self.completed) + self.inflight_frac) / float(denom))
+
+    def start(self, job_key: str) -> None:
+        jk = str(job_key or "")
+        if not jk or jk in self._finished:
+            return
+        self.inflight.setdefault(jk, 0.0)
+
+    def bar(self, job_key: str, done: int, total: int) -> None:
+        jk = str(job_key or "")
+        if not jk or jk in self._finished:
+            return
+        tot = float(total or 0)
+        if tot <= 0:
+            self.inflight.setdefault(jk, 0.0)
+            return
+        self.inflight[jk] = min(1.0, float(done or 0) / tot)
+
+    def finish(self, job_key: str) -> None:
+        jk = str(job_key or "")
+        self.inflight.pop(jk, None)
+        if jk:
+            if jk in self._finished:
+                return
+            self._finished.add(jk)
+        self.completed += 1
+
+    def drop(self, job_key: str) -> None:
+        jk = str(job_key or "")
+        self.inflight.pop(jk, None)
+        if jk:
+            self._finished.add(jk)
+
+    def extras(self, *, phase: str = "walk", job_key: str = "") -> dict[str, Any]:
+        out: dict[str, Any] = {
+            "completed": int(self.completed),
+            "n_walks": int(self.n_walks),
+            "inflight_frac": float(self.inflight_frac),
+            "n_running": int(self.n_running),
+            "phase": str(phase or "walk"),
+            "job_key": str(job_key or ""),
+        }
+        if phase == "probe":
+            out["probe_done"] = int(self.probe_done)
+            out["probe_total"] = int(self.probe_total)
+        return out
+
+
+def _emit_walk_progress(
+    on_progress: Callable[..., None] | None,
+    state: WalkProgress,
+    cid: str,
+    label: str,
+    *,
+    phase: str = "walk",
+    job_key: str = "",
+) -> None:
+    extra = state.extras(phase=phase, job_key=job_key)
+    if phase == "probe":
+        done, tot = state.probe_done, max(state.probe_total, 1)
     else:
-        print("[%s] %s/%s %s" % (cid, done, tot, label), flush=True)
+        done, tot = state.completed, max(state.n_walks, 1)
+    _emit_progress(on_progress, cid, done, tot, label, **extra)
 
 
 def _json_ready(obj: Any) -> Any:
@@ -731,32 +846,49 @@ def init_walk_pool(local_bt_dir: str = "", progress_queue: Any = None) -> None:
     _WALK_PROGRESS_Q = progress_queue
 
 
+def _queue_put(
+    kind: str,
+    cid: str,
+    job_key: str,
+    walk_done: int,
+    walk_total: int,
+    label: str,
+) -> None:
+    q = _WALK_PROGRESS_Q
+    if q is None:
+        return
+    try:
+        q.put((str(kind), str(cid), str(job_key), int(walk_done or 0), int(walk_total or 0), str(label)))
+    except Exception:
+        pass
+
+
 def run_walk_job(payload: dict[str, Any]) -> dict[str, Any]:
     """模块级 walk 入口（Windows spawn 可 pickle）。payload 禁止带 progress_queue。"""
     cid = str(payload.get("cell_id") or "")
-    q = _WALK_PROGRESS_Q
+    job_key = walk_job_key(payload)
     label = str(payload.get("basket_id") or payload.get("sample") or "book")
-    if q is not None:
-        try:
-            q.put((cid, label))
-        except Exception:
-            pass
+    _queue_put("start", cid, job_key, 0, 0, label)
     if not payload.get("out_dir"):
-        return {"ok": False, "cell_id": cid, "error": "无 job", "basket_id": label}
+        return {"ok": False, "cell_id": cid, "error": "无 job", "basket_id": label, "job_key": job_key}
+
+    def _on_bar(done_bars: int, tot_bars: int, day: str) -> None:
+        year = str(day or "")[:4]
+        lab = "回放 %s · %s %s/%s" % (label, year, done_bars, tot_bars)
+        _queue_put("bar", cid, job_key, done_bars, tot_bars, lab)
+
     walk = {k: v for k, v in payload.items() if k != "cell_id"}
-    row = run_one_book_walk(walk)
+    row = run_one_book_walk(walk, on_bar_progress=_on_bar)
     row["cell_id"] = cid
+    row["job_key"] = job_key
     return row
 
 
-def _drain_walk_queue(
-    q: Any,
-    on_progress: Callable[..., None] | None,
-    cell_done: dict[str, int],
-    n_jobs: int,
-) -> None:
+def _drain_walk_queue(q: Any, state: WalkProgress) -> tuple[str, str, str]:
+    """把 Queue 事件打进 WalkProgress，不回调 UI。返回最后一条 cid/job_key/label。"""
+    last = ("", "", "")
     if q is None:
-        return
+        return last
     while True:
         try:
             item = q.get_nowait()
@@ -764,9 +896,29 @@ def _drain_walk_queue(
             break
         except Exception:
             break
-        cid = str(item[0] if item else "")
-        label = str(item[1] if item and len(item) > 1 else "")
-        _emit_progress(on_progress, cid, int(cell_done.get(cid) or 0), n_jobs, label)
+        if not item:
+            continue
+        if len(item) >= 6:
+            kind = str(item[0] or "")
+            cid = str(item[1] or "")
+            job_key = str(item[2] or "")
+            walk_done = int(item[3] or 0)
+            walk_total = int(item[4] or 0)
+            label = str(item[5] or "")
+        elif len(item) >= 2:
+            kind = "start"
+            cid = str(item[0] or "")
+            job_key = str(item[0] or "")
+            walk_done, walk_total = 0, 0
+            label = str(item[1] or "")
+        else:
+            continue
+        last = (cid, job_key, label)
+        if kind == "bar":
+            state.bar(job_key, walk_done, walk_total)
+        else:
+            state.start(job_key)
+    return last
 
 
 def write_cell_meta(cell: dict[str, Any], jobs: list[dict[str, Any]], cell_dir: Path) -> None:
@@ -795,7 +947,7 @@ def probe_cell(
     n_jobs: int,
     on_progress: Callable[..., None] | None = None,
 ) -> None:
-    _emit_progress(on_progress, str(cell["id"]), 0, n_jobs, "探针 init")
+    _emit_progress(on_progress, str(cell["id"]), 0, n_jobs, "探针 init", phase="probe")
     probe_log = cell_dir / "probe_init.txt"
     try:
         text = run_init_probe(cell.get("overrides") or {}, log_path=probe_log)
@@ -842,8 +994,17 @@ def run_cell(
     if w <= 1 or n <= 1:
         for payload in payloads:
             basket = _basket(payload)
+            sample = str(payload.get("sample") or "book")
+            jk = walk_job_key(payload, cid=str(cell["id"]))
 
-            def _on_bar(done_bars: int, tot_bars: int, day: str, _b=basket) -> None:
+            def _on_bar(
+                done_bars: int,
+                tot_bars: int,
+                day: str,
+                _b=basket,
+                _s=sample,
+                _jk=jk,
+            ) -> None:
                 year = str(day or "")[:4]
                 label = "回放 %s · %s %s/%s" % (_b, year, done_bars, tot_bars)
                 _progress(
@@ -852,16 +1013,19 @@ def run_cell(
                     label,
                     walk_done=done_bars,
                     walk_total=tot_bars,
+                    basket=_b,
+                    sample=_s,
+                    job_key=_jk,
                 )
 
-            _progress(done, n, "回放 %s" % basket)
+            _progress(done, n, "回放 %s" % basket, basket=basket, sample=sample, job_key=jk)
             row = run_one_book_walk(payload, on_bar_progress=_on_bar)
             done += 1
             if not row.get("ok"):
                 raise GridError(
                     "格子 %s walk 失败: %s" % (cell["id"], row.get("error") or payload.get("basket_id"))
                 )
-            _progress(done, n, basket)
+            _progress(done, n, basket, basket=basket, sample=sample, job_key=jk)
         return
     _progress(0, n, "回放 %s" % "+".join(_basket(p) for p in payloads))
     ctx = get_context("spawn")
@@ -899,6 +1063,7 @@ def _run_walks_in_pool(
     payloads: list[dict[str, Any]],
     pool_workers: int,
     n_jobs: int,
+    state: WalkProgress,
     on_progress: Callable[..., None] | None = None,
     succeeded: set[str] | None = None,
 ) -> set[str]:
@@ -913,9 +1078,9 @@ def _run_walks_in_pool(
     for p in payloads:
         cid = str(p.get("cell_id") or "")
         remaining[cid] = remaining.get(cid, 0) + 1
-    cell_done: dict[str, int] = {cid: 0 for cid in remaining}
     ctx = get_context("spawn")
     q = ctx.Queue()
+    last_cid, last_jk, last_label = "", "", ""
     with ProcessPoolExecutor(
         max_workers=int(pool_workers),
         mp_context=ctx,
@@ -925,37 +1090,109 @@ def _run_walks_in_pool(
         futs = {ex.submit(run_walk_job, p): p for p in payloads}
         pending = set(futs)
         while pending:
-            _drain_walk_queue(q, on_progress, cell_done, n_jobs)
+            cid, jk, lab = _drain_walk_queue(q, state)
+            if cid:
+                last_cid, last_jk, last_label = cid, jk, lab
             done, pending = wait(pending, timeout=0.2, return_when=FIRST_COMPLETED)
+            cid2, jk2, lab2 = _drain_walk_queue(q, state)
+            if cid2:
+                last_cid, last_jk, last_label = cid2, jk2, lab2
             for fut in done:
                 payload = futs[fut]
                 cid = str(payload.get("cell_id") or "")
+                jk = walk_job_key(payload)
                 try:
                     row = fut.result()
                 except Exception:
+                    state.drop(jk)
                     for rest in pending:
                         rest.cancel()
+                    _emit_walk_progress(
+                        on_progress, state, cid, last_label, phase="walk", job_key=jk
+                    )
                     raise
                 if not row.get("ok"):
+                    state.drop(jk)
                     for rest in pending:
                         rest.cancel()
+                    _emit_walk_progress(
+                        on_progress, state, cid, last_label, phase="walk", job_key=jk
+                    )
                     raise GridError(
                         "格子 %s walk 失败: %s"
                         % (cid, row.get("error") or payload.get("basket_id"))
                     )
-                cell_done[cid] = int(cell_done.get(cid) or 0) + 1
+                state.finish(jk)
                 remaining[cid] = int(remaining.get(cid) or 1) - 1
                 if remaining.get(cid, 1) <= 0:
                     succeeded.add(cid)
-                _emit_progress(
-                    on_progress,
-                    cid,
-                    cell_done[cid],
-                    n_jobs,
-                    str(payload.get("basket_id") or "book"),
-                )
-        _drain_walk_queue(q, on_progress, cell_done, n_jobs)
+                last_cid, last_jk, last_label = cid, jk, str(payload.get("basket_id") or "book")
+            _emit_walk_progress(
+                on_progress, state, last_cid, last_label, phase="walk", job_key=last_jk
+            )
+        cid3, jk3, lab3 = _drain_walk_queue(q, state)
+        if cid3:
+            last_cid, last_jk, last_label = cid3, jk3, lab3
+        _emit_walk_progress(
+            on_progress, state, last_cid, last_label, phase="walk", job_key=last_jk
+        )
     return succeeded
+
+
+def _wrap_serial_progress(
+    state: WalkProgress,
+    n_cells: int,
+    on_progress: Callable[..., None] | None,
+) -> Callable[..., None]:
+    last_done: dict[str, int] = {}
+    current_job: dict[str, str] = {}
+    probed: set[str] = set()
+    state.probe_total = max(int(n_cells), 0)
+
+    def wrapped(cid: str, done: int, tot: int, label: str, **extra: Any) -> None:
+        cid = str(cid or "")
+        lab = str(label or "")
+        if extra.get("phase") == "probe" or "探针" in lab:
+            if cid not in probed:
+                probed.add(cid)
+                state.probe_done = len(probed)
+            _emit_walk_progress(on_progress, state, cid, lab, phase="probe")
+            return
+        basket = str(extra.get("basket") or extra.get("basket_id") or "")
+        if not basket and lab.startswith("回放 "):
+            parts = lab.split()
+            if len(parts) >= 2:
+                basket = parts[1]
+        sample = str(extra.get("sample") or "book")
+        job_key = str(extra.get("job_key") or walk_job_key(None, cid=cid, sample=sample, basket=basket))
+        wt = extra.get("walk_total")
+        try:
+            wt_f = float(wt or 0)
+        except (TypeError, ValueError):
+            wt_f = 0.0
+        if wt_f > 0:
+            state.bar(job_key, int(extra.get("walk_done") or 0), int(wt_f))
+            current_job[cid] = job_key
+            _emit_walk_progress(on_progress, state, cid, lab, phase="walk", job_key=job_key)
+            return
+        prev = int(last_done.get(cid) or 0)
+        cur = int(done or 0)
+        if cur > prev:
+            delta = cur - prev
+            last_done[cid] = cur
+            jk = current_job.pop(cid, None)
+            if jk:
+                state.finish(jk)
+                delta -= 1
+            if delta > 0:
+                state.completed = min(state.n_walks, int(state.completed) + delta)
+            _emit_walk_progress(on_progress, state, cid, lab, phase="walk", job_key=jk or job_key)
+            return
+        current_job[cid] = job_key
+        state.start(job_key)
+        _emit_walk_progress(on_progress, state, cid, lab, phase="walk", job_key=job_key)
+
+    return wrapped
 
 
 def run_cells(
@@ -971,6 +1208,9 @@ def run_cells(
     n_walks = n_cells * n_jobs
     cw = resolve_pool_workers(workers, n_walks)
     print("pool_workers=%s n_walks=%s" % (cw, n_walks), flush=True)
+    state = WalkProgress(n_walks)
+    state.probe_total = n_cells
+    wrapped = _wrap_serial_progress(state, n_cells, on_progress)
     if cw <= 1:
         for cell in cells:
             print("== cell", cell["id"], cell["kind"], cell["overrides"], flush=True)
@@ -980,7 +1220,7 @@ def run_cells(
                 dest / cell["id"],
                 defaults,
                 1,
-                on_progress=on_progress,
+                on_progress=wrapped,
             )
         return
     succeeded: set[str] = set()
@@ -992,13 +1232,18 @@ def run_cells(
             write_cell_meta(cell, jobs, cell_dir)
             if not jobs:
                 raise GridError("格子 %s 无 job" % cell["id"])
-            probe_cell(cell, cell_dir, defaults, n_jobs, on_progress=on_progress)
+            probe_cell(cell, cell_dir, defaults, n_jobs, on_progress=wrapped)
             for j in jobs:
                 p = job_payload(j, cell_dir, cell["overrides"], defaults)
                 p["cell_id"] = str(cell["id"])
                 payloads.append(p)
         succeeded = _run_walks_in_pool(
-            payloads, cw, n_jobs, on_progress=on_progress, succeeded=succeeded
+            payloads,
+            cw,
+            n_jobs,
+            state,
+            on_progress=on_progress,
+            succeeded=succeeded,
         )
     except GridError:
         raise
@@ -1014,7 +1259,7 @@ def run_cells(
                 dest / cell["id"],
                 defaults,
                 1,
-                on_progress=on_progress,
+                on_progress=wrapped,
             )
 
 
