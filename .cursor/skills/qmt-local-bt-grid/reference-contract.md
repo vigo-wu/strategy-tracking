@@ -13,7 +13,7 @@
 2. **隔离产物目录**：`report/grid/<sweep>/<cell>/<sample>/<div>/`。禁止写回基线 `report/<div>/`。
 3. **init 指纹**（写进同一份 log，供 runner 校验）
    - 必有：`stop=`、`time_force_bars=`（若策略有这两项）。
-   - 扫阶梯止盈：`trail_arm=` = `TRAIL_TIERS` 档 1 的 `peak_lo`。
+   - 扫阶梯止盈：`trail_arm=` = `TRAIL_TIERS` 档 1 的 `peak_lo`；另打 compact `trail_tiers=` JSON，探针按整表相等（起步相同、giveback 不同也要能抓到）。
 4. **主样本 walk**：默认 config `BOOK_STOCKS` 一段 `run_book_backtest`（`year_start0101`–`year_end1231`）。`asset_split.mode=random_from_csv` 时调参 / 盲测 **各一段**（名单写入 `freeze.json` / `spec.json`；CSV 仍用 `csv_for`）。禁止 stock×年独立 10 万账户，禁止 `tune∪holdout` 同一钱包。
 5. **可选对照**：全 SMA / 全 EMA（`include_sma_ema`），不单独当选参器。
 6. **空间隔离（可选）**：`asset_split` 见 skill 示例 `stop_loss_space.json`。选参主 KPI 仅 tune 股；holdout × 验收年复用 `gate` 否决（无覆盖不得过门）。
@@ -61,7 +61,7 @@ JSON 可序列化。元组在 JSON 里用数组；`null` = Python `None`。
 
 ## 新主题最小增量
 
-1. `run.py`：`overrides` 注入 + 任意 `out_dir`（`init` 打出 `stop=` / `time_force_bars=` / `trail_arm=`）。
+1. `run.py`：`overrides` 注入 + 任意 `out_dir`（`init` 打出 `stop=` / `time_force_bars=` / `trail_arm=` / `trail_tiers=` JSON）。
 2. `book_backtest.py`：`run_book_backtest` 接受 `overrides`，资金键 `compound_backtest` / `wallet_cash`。
 3. 跟踪池 `BOOK_STOCKS`（主样本组合 walk）。
 4. 在主题 `scripts/local_bt/grid_run.py` 里提供 book walk 列表（不是 stock×年）。

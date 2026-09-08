@@ -46,7 +46,9 @@ from grid_spec import (  # noqa: E402
     GridSpecError,
     apply_year_windows,
     fill_year_windows,
+    json_ready,
     reject_retired_min_ret,
+    struct_eq,
 )
 from grid_gate import fill_gate, gate_for_json, validate_gate  # noqa: E402
 from asset_split import (  # noqa: E402
@@ -184,12 +186,13 @@ def load_config_defaults() -> dict[str, Any]:
     from grid_spec import param_catalog
 
     mod = _load_hlband_config()
-    out: dict[str, Any] = {"TRAIL_TIERS": getattr(mod, "TRAIL_TIERS")}
+    out: dict[str, Any] = {}
+    seen: set[str] = set()
     for spec in param_catalog():
-        if spec.key == "TRAIL_TIERS":
+        if spec.key in seen or not hasattr(mod, spec.key):
             continue
-        if hasattr(mod, spec.key):
-            out[spec.key] = getattr(mod, spec.key)
+        seen.add(spec.key)
+        out[spec.key] = getattr(mod, spec.key)
     return out
 
 
@@ -265,12 +268,30 @@ def expected_fingerprint(
         arm = float(merged["TRAIL_TIERS"][0][0])
     except (IndexError, TypeError, ValueError, KeyError):
         arm = None
-    return {
+    out = {
         "stop": float(merged["STOP_LOSS"]),
         "time_force_bars": int(merged["TIME_FORCE_BARS"]),
         "time_force_min_ret": float(arm) if arm is not None else 0.0,
         "trail_arm": arm,
     }
+    if "TRAIL_TIERS" in ov:
+        out["trail_tiers"] = json_ready(merged["TRAIL_TIERS"])
+    return out
+
+
+def _extract_tagged_json(text: str, tag: str) -> tuple[Any, bool]:
+    marker = tag if str(tag).endswith("=") else "%s=" % tag
+    i = text.find(marker)
+    if i < 0:
+        return None, False
+    rest = text[i + len(marker) :].lstrip()
+    if not rest:
+        return None, True
+    try:
+        obj, _end = json.JSONDecoder().raw_decode(rest)
+    except json.JSONDecodeError:
+        return None, True
+    return obj, True
 
 
 def parse_fingerprint(text: str) -> dict[str, Any]:
@@ -285,12 +306,15 @@ def parse_fingerprint(text: str) -> dict[str, Any]:
         arm = None
     else:
         arm = float(arm_m.group(1))
+    tiers, has_tiers = _extract_tagged_json(text, "trail_tiers=")
     return {
         "stop": None if stop_m is None else float(stop_m.group(1)),
         "time_force_bars": None if tfb_m is None else int(tfb_m.group(1)),
         "time_force_min_ret": None if tfm_m is None else float(tfm_m.group(1)),
         "trail_arm": arm,
+        "trail_tiers": tiers,
         "has_trail_arm": arm_m is not None,
+        "has_trail_tiers": has_tiers,
         "has_stop": stop_m is not None,
         "has_tfb": tfb_m is not None,
     }
@@ -334,6 +358,13 @@ def assert_fingerprint(
             raise GridError(
                 "指纹 trail_arm 不符 log=%s got=%s expected=%s"
                 % (log_path, got.get("trail_arm"), expected["trail_arm"])
+            )
+        if not got.get("has_trail_tiers") or not struct_eq(
+            got.get("trail_tiers"), expected.get("trail_tiers")
+        ):
+            raise GridError(
+                "指纹 trail_tiers 不符 log=%s got=%s expected=%s"
+                % (log_path, got.get("trail_tiers"), expected.get("trail_tiers"))
             )
 
 

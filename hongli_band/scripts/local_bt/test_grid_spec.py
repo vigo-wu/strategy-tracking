@@ -20,21 +20,25 @@ from grid_spec import (  # noqa: E402
     axes_from_selection,
     build_cells,
     catalog_ids,
+    coerce_level,
     correct_cell_kinds,
     default_param_selection,
+    family_token,
     family_value_label,
     fill_year_windows,
+    format_scan_values,
     generator_locked,
     infer_kind,
-    reject_retired_min_ret,
     keep_from_cells,
     make_spec,
     merge_param_selection,
     overrides_summary,
     parse_scan_token,
     parse_scan_values,
-    patch_trail_arm,
+    param_catalog,
     product_count,
+    reject_retired_min_ret,
+    struct_eq,
     sweep_stem_from_axes,
     unique_levels,
     validate_year_windows,
@@ -49,6 +53,21 @@ DEFAULTS = {
         (0.10, None, 0.04, None),
     ),
 }
+CUR_TIERS = [
+    [0.03, 0.06, 0.015, None],
+    [0.06, 0.10, 0.03, 0.03],
+    [0.10, None, 0.04, None],
+]
+ARM04_TIERS = [
+    [0.04, 0.06, 0.015, None],
+    [0.06, 0.10, 0.03, 0.03],
+    [0.10, None, 0.04, None],
+]
+GB02_TIERS = [
+    [0.03, 0.06, 0.02, None],
+    [0.06, 0.10, 0.03, 0.03],
+    [0.10, None, 0.04, None],
+]
 
 
 class GridSpecTest(unittest.TestCase):
@@ -76,24 +95,24 @@ class GridSpecTest(unittest.TestCase):
 
     def test_cartesian_stop_and_trail(self) -> None:
         cells = build_cells(
-            {"STOP_LOSS": [0.06, 0.10], "TRAIL": [0.04]},
+            {"STOP_LOSS": [0.06, 0.10], "TRAIL_TIERS": [ARM04_TIERS]},
             DEFAULTS,
         )
+        tok = family_token("TRAIL_TIERS", coerce_level("TRAIL_TIERS", ARM04_TIERS))
         ids = [c["id"] for c in cells]
-        self.assertEqual(set(ids), {"sl06_arm04", "sl10_arm04"})
+        self.assertEqual(set(ids), {"sl06_%s" % tok, "sl10_%s" % tok})
         self.assertEqual(len(cells), 2)
         by = {c["id"]: c for c in cells}
-        self.assertEqual(by["sl06_arm04"]["kind"], "other")
-        self.assertEqual(by["sl10_arm04"]["kind"], "other")
-        self.assertEqual(set(by["sl06_arm04"]["overrides"]), {"STOP_LOSS", "TRAIL_TIERS"})
-        arm = by["sl06_arm04"]["overrides"]["TRAIL_TIERS"][0][0]
-        self.assertAlmostEqual(arm, 0.04)
-        self.assertAlmostEqual(by["sl06_arm04"]["overrides"]["TRAIL_TIERS"][0][1], 0.06)
+        cid = "sl06_%s" % tok
+        self.assertEqual(by[cid]["kind"], "other")
+        self.assertEqual(set(by[cid]["overrides"]), {"STOP_LOSS", "TRAIL_TIERS"})
+        self.assertTrue(struct_eq(by[cid]["overrides"]["TRAIL_TIERS"], ARM04_TIERS))
+        self.assertAlmostEqual(by[cid]["overrides"]["TRAIL_TIERS"][0][0], 0.04)
 
     def test_product_count(self) -> None:
         self.assertEqual(product_count({"STOP_LOSS": [0.06, 0.10]}, DEFAULTS), 2)
         self.assertEqual(
-            product_count({"STOP_LOSS": [0.06, 0.10], "TRAIL": [0.04]}, DEFAULTS),
+            product_count({"STOP_LOSS": [0.06, 0.10], "TRAIL_TIERS": [ARM04_TIERS]}, DEFAULTS),
             2,
         )
         self.assertEqual(product_count({}, DEFAULTS), 0)
@@ -121,11 +140,15 @@ class GridSpecTest(unittest.TestCase):
         self.assertEqual(by["dmm0"]["kind"], "other")
         self.assertEqual(by["dmm0"]["label"], "日线中均线关闭")
 
-    def test_trail_arm_rejects_at_peak_hi(self) -> None:
-        with self.assertRaises(GridSpecError):
-            patch_trail_arm(DEFAULTS["TRAIL_TIERS"], 0.06)
-        with self.assertRaises(GridSpecError):
-            unique_levels("TRAIL", [0.06], DEFAULTS)
+    def test_trail_tiers_rejects_hi_le_lo(self) -> None:
+        bad = [
+            [0.06, 0.06, 0.015, None],
+            [0.06, 0.10, 0.03, 0.03],
+            [0.10, None, 0.04, None],
+        ]
+        with self.assertRaises(GridSpecError) as ctx:
+            unique_levels("TRAIL_TIERS", [bad], DEFAULTS)
+        self.assertIn("上限", str(ctx.exception))
 
     def test_keep_label_on_rebuild(self) -> None:
         first = build_cells({"STOP_LOSS": [0.06, 0.10]}, DEFAULTS)
@@ -185,10 +208,15 @@ class GridSpecTest(unittest.TestCase):
         self.assertIn("MA_TOUCH_TOL", ids)
         self.assertIn("VOL_PULLBACK_CONFIRM_DAYS", ids)
         self.assertIn("STOP_LOSS", ids)
-        self.assertIn("TRAIL", ids)
+        self.assertIn("TRAIL_TIERS", ids)
+        self.assertNotIn("TRAIL", ids)
         self.assertNotIn("STATE_FILE", ids)
         self.assertNotIn("DRY_RUN", ids)
-        self.assertNotIn("TRAIL_TIERS", ids)
+        spec = next(p for p in param_catalog() if p.id == "TRAIL_TIERS")
+        self.assertEqual(spec.key, "TRAIL_TIERS")
+        self.assertEqual(spec.dtype, "tuple")
+        self.assertEqual(spec.abbrev, "tt")
+        self.assertEqual(spec.kind_mode, "exit")
 
     def test_parse_percent_and_int(self) -> None:
         self.assertAlmostEqual(parse_scan_token("STOP_LOSS", "6"), 0.06)
@@ -243,9 +271,57 @@ class GridSpecTest(unittest.TestCase):
         self.assertEqual(merged["STOP_LOSS"]["scan"], "6,10")
         self.assertNotIn("NOT_A_CONFIG", merged)
 
-    def test_trail_scan_six_still_rejected(self) -> None:
-        with self.assertRaises(GridSpecError):
-            unique_levels("TRAIL", parse_scan_values("TRAIL", "6"), DEFAULTS)
+    def test_merge_drops_legacy_trail_axis(self) -> None:
+        stale = {
+            "TRAIL": {"selected": True, "scan": "4"},
+            "STOP_LOSS": {"selected": True, "scan": "6,10"},
+        }
+        merged = merge_param_selection(stale)
+        self.assertNotIn("TRAIL", merged)
+        self.assertIn("TRAIL_TIERS", merged)
+        self.assertFalse(merged["TRAIL_TIERS"]["selected"])
+        self.assertTrue(merged["STOP_LOSS"]["selected"])
+
+    def test_trail_json_scan_and_newline_roundtrip(self) -> None:
+        scan = json.dumps(ARM04_TIERS, ensure_ascii=False, separators=(",", ":"))
+        vals = parse_scan_values("TRAIL_TIERS", scan)
+        self.assertEqual(len(vals), 1)
+        self.assertTrue(struct_eq(vals[0], ARM04_TIERS))
+        text = format_scan_values("TRAIL_TIERS", [CUR_TIERS, ARM04_TIERS])
+        self.assertIn("\n", text)
+        parsed = parse_scan_values("TRAIL_TIERS", text)
+        self.assertEqual(len(parsed), 2)
+        self.assertTrue(struct_eq(parsed[0], CUR_TIERS))
+        self.assertTrue(struct_eq(parsed[1], ARM04_TIERS))
+
+    def test_trail_list_tuple_marks_current(self) -> None:
+        cells = build_cells({"TRAIL_TIERS": [CUR_TIERS]}, DEFAULTS)
+        self.assertEqual(len(cells), 1)
+        self.assertTrue(cells[0]["is_current"])
+        self.assertEqual(cells[0]["n_diffs"], 0)
+        self.assertIn("★现行", cells[0]["label"])
+
+    def test_trail_only_arm_is_tighten(self) -> None:
+        tight = [
+            [0.02, 0.06, 0.015, None],
+            [0.06, 0.10, 0.03, 0.03],
+            [0.10, None, 0.04, None],
+        ]
+        cells = build_cells({"TRAIL_TIERS": [tight]}, DEFAULTS)
+        self.assertEqual(cells[0]["kind"], "tighten")
+        self.assertFalse(cells[0]["is_current"])
+        self.assertEqual(infer_kind("TRAIL_TIERS", tight, DEFAULTS), "tighten")
+
+    def test_trail_giveback_change_is_other(self) -> None:
+        cells = build_cells({"TRAIL_TIERS": [GB02_TIERS]}, DEFAULTS)
+        self.assertEqual(cells[0]["kind"], "other")
+        self.assertFalse(cells[0]["is_current"])
+
+    def test_trail_table_summary_in_label(self) -> None:
+        self.assertEqual(
+            family_value_label("TRAIL_TIERS", CUR_TIERS),
+            "阶梯止盈 3%/1.5% · 6%/3%/底3% · 10%/4%",
+        )
 
     def test_year_windows_fill_and_overlap(self) -> None:
         filled = fill_year_windows({})

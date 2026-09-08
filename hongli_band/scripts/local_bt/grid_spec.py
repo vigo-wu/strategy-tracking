@@ -1,7 +1,8 @@
 # coding: utf-8
-"""命名格子 / 笛卡尔积生成：config 参数目录、kind/id、TRAIL_TIERS 按档位字段扫。"""
+"""命名格子 / 笛卡尔积生成：config 参数目录、kind/id、TRAIL_TIERS 整表轴。"""
 from __future__ import annotations
 
+import hashlib
 import itertools
 import json
 from dataclasses import dataclass
@@ -20,7 +21,7 @@ _HLBAND_CONFIG = _HERE.parent / "qmt" / "hlband" / "config.py"
 
 GROUP_ORDER = ("入场", "出场", "加仓", "资金", "结构")
 KIND_EXIT_IDS = frozenset(
-    {"STOP_LOSS", "TRAIL", "TIME_FORCE_BARS"}
+    {"STOP_LOSS", "TRAIL_TIERS", "TIME_FORCE_BARS"}
 )
 ENTRY_KEYS = (
     "MA_TOUCH_TOL",
@@ -36,7 +37,7 @@ ENTRY_KEYS = (
 )
 EXIT_KEYS = (
     "STOP_LOSS",
-    "TRAIL",
+    "TRAIL_TIERS",
     "TIME_FORCE_BARS",
     "TIME_FORCE_GRACE_BARS",
     "W_BEAR_CONFIRM_DAYS",
@@ -51,7 +52,6 @@ MONEY_KEYS = (
 PERCENT_KEYS = frozenset(
     {
         "STOP_LOSS",
-        "TRAIL",
         "MA_TOUCH_TOL",
         "VOL_PULLBACK_RATIO",
         "VOL_DRY_RATIO",
@@ -104,18 +104,10 @@ SKIP_NAMES = frozenset(
     }
 )
 NONE_TOKENS = frozenset({"none", "null", "-", "—", "无", "nan"})
-TRAIL_FIELD_META = (
-    ("LO", 0, "起步", False),
-    ("HI", 1, "上限", True),
-    ("GB", 2, "回撤", False),
-    ("FL", 3, "利润底线", True),
-)
-# family id → (档 0-based, 字段 0-based, 可否 None)；_build_catalog 填入
-TRAIL_SLOTS: dict[str, tuple[int, int, bool]] = {}
 
 PARAM_LABELS = {
     "STOP_LOSS": "止损",
-    "TRAIL": "TRAIL 档1 起步",
+    "TRAIL_TIERS": "阶梯止盈",
     "TIME_FORCE_BARS": "时间成本 BARS",
     "TIME_FORCE_GRACE_BARS": "时间成本宽限",
     "W_BEAR_CONFIRM_DAYS": "周线空确认日",
@@ -153,7 +145,7 @@ PARAM_LABELS = {
 }
 ABBREV_FIXED = {
     "STOP_LOSS": "sl",
-    "TRAIL": "arm",
+    "TRAIL_TIERS": "tt",
     "TIME_FORCE_BARS": "tfb",
     "TIME_FORCE_GRACE_BARS": "tfg",
     "W_BEAR_CONFIRM_DAYS": "wbc",
@@ -191,13 +183,11 @@ ABBREV_FIXED = {
 }
 DEFAULT_SCAN = {
     "STOP_LOSS": "6,10",
-    "TRAIL": "4",
     "TIME_FORCE_BARS": "0",
 }
 DEFAULT_SELECTED = ()
 DEFAULT_EXTRAS = {
     "STOP_LOSS": (0.06, 0.10),
-    "TRAIL": (0.04,),
     "TIME_FORCE_BARS": (0,),
 }
 
@@ -257,6 +247,21 @@ def num_eq(a: Any, b: Any, eps: float = EPS) -> bool:
         return a == b
 
 
+def struct_eq(a: Any, b: Any, eps: float = EPS) -> bool:
+    """json_ready 后递归比较；元组与列表视为同一结构。"""
+    left = json_ready(a)
+    right = json_ready(b)
+    if isinstance(left, list) and isinstance(right, list):
+        return len(left) == len(right) and all(
+            struct_eq(x, y, eps) for x, y in zip(left, right)
+        )
+    if isinstance(left, dict) and isinstance(right, dict):
+        if set(left) != set(right):
+            return False
+        return all(struct_eq(left[k], right[k], eps) for k in left)
+    return num_eq(left, right, eps)
+
+
 def json_ready(obj: Any) -> Any:
     if isinstance(obj, dict):
         return {str(k): json_ready(v) for k, v in obj.items()}
@@ -270,14 +275,6 @@ def json_ready(obj: Any) -> Any:
 def trail_arm(tiers: Any) -> float | None:
     try:
         return float(tiers[0][0])
-    except (IndexError, TypeError, ValueError, KeyError):
-        return None
-
-
-def trail_peak_hi(tiers: Any) -> float | None:
-    try:
-        hi = tiers[0][1]
-        return None if hi is None else float(hi)
     except (IndexError, TypeError, ValueError, KeyError):
         return None
 
@@ -300,16 +297,6 @@ def copy_trail_tiers(tiers: Any) -> list[list[Any]]:
     return out
 
 
-def trail_slot_value(tiers: Any, tier_idx: int, field_idx: int) -> float | None:
-    try:
-        val = tiers[tier_idx][field_idx]
-    except (IndexError, TypeError, ValueError, KeyError):
-        return None
-    if val is None:
-        return None
-    return float(val)
-
-
 def validate_trail_row(row: list[Any], tier_idx: int) -> None:
     n = tier_idx + 1
     lo, hi, gb, fl = row[0], row[1], row[2], row[3]
@@ -323,72 +310,15 @@ def validate_trail_row(row: list[Any], tier_idx: int) -> None:
         float(fl)
 
 
-def validate_trail_tiers(tiers: Any) -> None:
-    copied = copy_trail_tiers(tiers)
+def validate_trail_tiers(tiers: Any) -> list[list[Any]]:
+    try:
+        copied = copy_trail_tiers(tiers)
+    except (TypeError, ValueError, IndexError, KeyError) as exc:
+        raise GridSpecError("TRAIL_TIERS 格式无效") from exc
     if not copied:
         raise GridSpecError("TRAIL_TIERS 为空")
     for i, row in enumerate(copied):
         validate_trail_row(row, i)
-
-
-def patch_trail_arm(tiers: Any, new_arm: float) -> list[list[Any]]:
-    arm = float(new_arm)
-    if arm <= 0:
-        raise GridSpecError("TRAIL 起步必须 > 0")
-    copied = copy_trail_tiers(tiers)
-    if not copied:
-        raise GridSpecError("现行 TRAIL_TIERS 为空，无法改起步")
-    copied[0][0] = arm
-    validate_trail_row(copied[0], 0)
-    return copied
-
-
-def patch_trail_slot(
-    tiers: Any,
-    tier_idx: int,
-    field_idx: int,
-    new_val: Any,
-    *,
-    optional: bool,
-) -> list[list[Any]]:
-    copied = copy_trail_tiers(tiers)
-    if not copied:
-        raise GridSpecError("现行 TRAIL_TIERS 为空")
-    if tier_idx < 0 or tier_idx >= len(copied):
-        raise GridSpecError("TRAIL 档位越界")
-    if field_idx < 0 or field_idx > 3:
-        raise GridSpecError("TRAIL 字段越界")
-    if new_val is None:
-        if not optional:
-            raise GridSpecError("该 TRAIL 字段不能为空")
-        copied[tier_idx][field_idx] = None
-    else:
-        copied[tier_idx][field_idx] = float(new_val)
-    validate_trail_row(copied[tier_idx], tier_idx)
-    return copied
-
-
-def apply_trail_combo(
-    tiers: Any,
-    combo: Mapping[str, Any],
-) -> list[list[Any]]:
-    copied = copy_trail_tiers(tiers)
-    if not copied:
-        raise GridSpecError("现行 TRAIL_TIERS 为空")
-    for fam, val in combo.items():
-        slot = TRAIL_SLOTS.get(str(fam))
-        if slot is None:
-            continue
-        ti, fi, optional = slot
-        if ti >= len(copied):
-            raise GridSpecError("TRAIL 档位越界")
-        if val is None:
-            if not optional:
-                raise GridSpecError("%s 不能为空" % fam)
-            copied[ti][fi] = None
-        else:
-            copied[ti][fi] = float(val)
-    validate_trail_tiers(copied)
     return copied
 
 
@@ -417,18 +347,34 @@ def _load_config_ns() -> dict[str, Any]:
     return ns
 
 
-def _scan_scalar_names(ns: Mapping[str, Any]) -> list[str]:
+def _scan_config_names(ns: Mapping[str, Any]) -> list[str]:
     names: list[str] = []
     for name, val in ns.items():
         if _skip_name(str(name)):
             continue
         if isinstance(val, bool) or isinstance(val, int) or isinstance(val, float):
             names.append(str(name))
+        elif _is_numeric_tuple(val):
+            names.append(str(name))
     return names
 
 
-def _is_trail_family(name: str) -> bool:
-    return name == "TRAIL" or str(name).startswith("TRAIL_T")
+def _is_numeric_tuple(val: Any) -> bool:
+    if not isinstance(val, (list, tuple)) or not val:
+        return False
+    return all(_numeric_tuple_leaf_ok(x) for x in val)
+
+
+def _numeric_tuple_leaf_ok(val: Any) -> bool:
+    if val is None:
+        return True
+    if isinstance(val, bool):
+        return False
+    if isinstance(val, (int, float)):
+        return True
+    if isinstance(val, (list, tuple)):
+        return bool(val) and all(_numeric_tuple_leaf_ok(x) for x in val)
+    return False
 
 
 def _is_percent_dtype(dtype: str) -> bool:
@@ -442,44 +388,10 @@ def _is_none_raw(raw: Any) -> bool:
     return text in NONE_TOKENS
 
 
-def _trail_n_tiers(ns: Mapping[str, Any]) -> int:
-    raw = ns.get("TRAIL_TIERS") or ()
-    try:
-        return len(raw)
-    except TypeError:
-        return 0
-
-
-def _iter_trail_extra_slots(n_tiers: int):
-    """档1 起步仍用 TRAIL；其余 (peak_lo/hi, giveback, floor) 各一行。"""
-    for i in range(max(0, int(n_tiers))):
-        n = i + 1
-        for suffix, fi, zh, optional in TRAIL_FIELD_META:
-            if i == 0 and suffix == "LO":
-                continue
-            fid = "TRAIL_T%d_%s" % (n, suffix)
-            yield fid, i, fi, "TRAIL 档%d %s" % (n, zh), optional
-
-
-def _trail_abbrev(tier_idx: int, field_idx: int) -> str:
-    tags = ("lo", "hi", "gb", "fl")
-    return "t%d%s" % (tier_idx + 1, tags[field_idx] if 0 <= field_idx < 4 else "x")
-
-
-def _exit_keys_with_slots() -> tuple[str, ...]:
-    extra = [fid for fid in TRAIL_SLOTS if fid != "TRAIL"]
-    out: list[str] = []
-    for key in EXIT_KEYS:
-        out.append(key)
-        if key == "TRAIL":
-            out.extend(extra)
-    return tuple(out)
-
-
 def _group_for(name: str) -> str:
     if name in ENTRY_KEYS:
         return "入场"
-    if name in EXIT_KEYS or _is_trail_family(name):
+    if name in EXIT_KEYS:
         return "出场"
     if name.startswith("SCALE_"):
         return "加仓"
@@ -495,6 +407,8 @@ def _group_for(name: str) -> str:
 def _dtype_for(name: str, sample: Any) -> str:
     if name in PERCENT_KEYS:
         return "percent"
+    if _is_numeric_tuple(sample):
+        return "tuple"
     if isinstance(sample, bool):
         return "bool"
     if isinstance(sample, int) and not isinstance(sample, bool):
@@ -529,7 +443,7 @@ def _ordered_ids(found: Iterable[str]) -> list[str]:
     for key in ENTRY_KEYS:
         if key in have:
             out.append(key)
-    for key in _exit_keys_with_slots():
+    for key in EXIT_KEYS:
         if key in have and key not in out:
             out.append(key)
     rest = [n for n in found if n not in out]
@@ -543,45 +457,20 @@ def _ordered_ids(found: Iterable[str]) -> list[str]:
     return out
 
 
-def _register_trail_slots(ns: Mapping[str, Any]) -> list[str]:
-    TRAIL_SLOTS.clear()
-    TRAIL_SLOTS["TRAIL"] = (0, 0, False)
-    extra: list[str] = []
-    for fid, ti, fi, label, optional in _iter_trail_extra_slots(_trail_n_tiers(ns)):
-        TRAIL_SLOTS[fid] = (ti, fi, optional)
-        PARAM_LABELS.setdefault(fid, label)
-        ABBREV_FIXED.setdefault(fid, _trail_abbrev(ti, fi))
-        extra.append(fid)
-    return extra
-
-
 def _build_catalog() -> tuple[ParamSpec, ...]:
     ns = _load_config_ns()
-    found = _scan_scalar_names(ns)
-    extra = _register_trail_slots(ns)
-    found.extend(extra)
+    found = _scan_config_names(ns)
     ids = _ordered_ids(found)
-    if "TRAIL" not in ids:
-        stop_i = ids.index("STOP_LOSS") + 1 if "STOP_LOSS" in ids else 0
-        ids.insert(stop_i, "TRAIL")
     used_abbrev: set[str] = set()
     specs: list[ParamSpec] = []
     for name in ids:
-        sample: Any = 0.0 if _is_trail_family(name) else ns.get(name)
-        slot = TRAIL_SLOTS.get(name)
-        if slot is not None:
-            key = "TRAIL_TIERS"
-            dtype = "opt_percent" if slot[2] else "percent"
-            label = PARAM_LABELS.get(name, name)
-        else:
-            key = name
-            dtype = _dtype_for(name, sample)
-            label = PARAM_LABELS.get(name, name)
+        sample: Any = ns.get(name)
+        dtype = _dtype_for(name, sample)
         specs.append(
             ParamSpec(
                 id=name,
-                key=key,
-                label=label,
+                key=name,
+                label=PARAM_LABELS.get(name, name),
                 group=_group_for(name),
                 dtype=dtype,
                 abbrev=_unique_abbrev(name, used_abbrev),
@@ -595,7 +484,7 @@ def _build_catalog() -> tuple[ParamSpec, ...]:
 
 def _product_order(specs: tuple[ParamSpec, ...]) -> tuple[str, ...]:
     have = {p.id for p in specs}
-    head = [k for k in list(_exit_keys_with_slots()) + list(ENTRY_KEYS) if k in have]
+    head = [k for k in list(EXIT_KEYS) + list(ENTRY_KEYS) if k in have]
     rest = [p.id for p in specs if p.id not in head]
     return tuple(head + rest)
 
@@ -634,19 +523,14 @@ def catalog_override_keys() -> frozenset[str]:
 
 def current_value(family: str, defaults: Mapping[str, Any]) -> Any:
     spec = require_param(family)
-    slot = TRAIL_SLOTS.get(family)
-    if slot is not None:
-        ti, fi, optional = slot
-        val = trail_slot_value(defaults.get("TRAIL_TIERS"), ti, fi)
-        if val is None:
-            if optional or spec.dtype == "opt_percent":
-                return None
-            raise GridSpecError("现行 TRAIL_TIERS 无 %s" % spec.label)
-        return val
     key = spec.key
     if key not in defaults:
         raise GridSpecError("defaults 缺少 %s" % key)
     val = defaults[key]
+    if spec.dtype == "tuple":
+        if family == "TRAIL_TIERS":
+            return validate_trail_tiers(val)
+        return json_ready(val)
     if spec.dtype == "bool":
         return bool(val)
     if spec.dtype == "int":
@@ -667,6 +551,15 @@ def coerce_bool(raw: Any) -> bool:
 
 def coerce_level(family: str, raw: Any) -> Any:
     spec = require_param(family)
+    if spec.dtype == "tuple":
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                raise GridSpecError("无法解析 %s JSON" % spec.label) from exc
+        if family == "TRAIL_TIERS":
+            return validate_trail_tiers(raw)
+        return json_ready(raw)
     if spec.dtype == "opt_percent" and _is_none_raw(raw):
         return None
     if spec.dtype == "bool":
@@ -691,6 +584,8 @@ def parse_scan_token(family: str, token: str) -> Any:
     text = str(token).strip()
     if not text:
         raise GridSpecError("空取值")
+    if spec.dtype == "tuple":
+        return coerce_level(family, text)
     if spec.dtype == "opt_percent" and _is_none_raw(text):
         return None
     if spec.dtype == "bool":
@@ -709,7 +604,56 @@ def parse_scan_token(family: str, token: str) -> Any:
     return val
 
 
+def _tables_from_json_obj(obj: Any) -> list[Any]:
+    if not isinstance(obj, (list, tuple)) or not obj:
+        raise GridSpecError("TRAIL_TIERS 扫描须为 JSON 表")
+    first = obj[0]
+    if isinstance(first, (list, tuple)) and first and isinstance(first[0], (list, tuple)):
+        return list(obj)
+    if isinstance(first, (list, tuple)):
+        return [list(obj)]
+    raise GridSpecError("TRAIL_TIERS 扫描须为二维或三维 JSON 表")
+
+
+def _parse_tuple_scan(family: str, text: str) -> list[Any]:
+    raw = str(text or "").strip()
+    if not raw:
+        return []
+    tables: list[Any] = []
+    try:
+        obj = json.loads(raw)
+    except json.JSONDecodeError:
+        obj = None
+    if obj is not None:
+        tables = _tables_from_json_obj(obj)
+    else:
+        chunks: list[str] = []
+        for part in raw.replace("；", ";").split(";"):
+            for line in part.splitlines():
+                line = line.strip()
+                if line:
+                    chunks.append(line)
+        if not chunks:
+            return []
+        for chunk in chunks:
+            try:
+                piece = json.loads(chunk)
+            except json.JSONDecodeError as exc:
+                raise GridSpecError("无法解析 %s 扫描 JSON" % family) from exc
+            tables.extend(_tables_from_json_obj(piece))
+    out: list[Any] = []
+    for table in tables:
+        val = coerce_level(family, table)
+        if any(struct_eq(val, x) for x in out):
+            continue
+        out.append(val)
+    return out
+
+
 def parse_scan_values(family: str, text: str) -> list[Any]:
+    spec = require_param(family)
+    if spec.dtype == "tuple":
+        return _parse_tuple_scan(family, text)
     raw = (
         str(text or "")
         .replace("，", ",")
@@ -736,14 +680,15 @@ def unique_levels(family: str, extras: Iterable[Any], defaults: Mapping[str, Any
     out: list[Any] = []
     for raw in extras or ():
         val = coerce_level(family, raw)
-        if val is not None and _is_percent_dtype(spec.dtype) and abs(float(val)) > 1.0 + EPS:
+        if (
+            spec.dtype != "tuple"
+            and val is not None
+            and _is_percent_dtype(spec.dtype)
+            and abs(float(val)) > 1.0 + EPS
+        ):
             val = float(val) / 100.0
-        if any(num_eq(val, x) for x in out):
+        if any(struct_eq(val, x) for x in out):
             continue
-        slot = TRAIL_SLOTS.get(family)
-        if slot is not None:
-            ti, fi, optional = slot
-            patch_trail_slot(defaults.get("TRAIL_TIERS"), ti, fi, val, optional=optional)
         out.append(val)
     if not out:
         raise GridSpecError("%s 已选用但扫描取值为空" % spec.label)
@@ -773,7 +718,10 @@ def _pct_token(value: float) -> str:
 
 def family_token(family: str, value: Any) -> str:
     spec = require_param(family)
-    if value is None:
+    if spec.dtype == "tuple":
+        blob = json.dumps(json_ready(value), ensure_ascii=True, separators=(",", ":"))
+        token = hashlib.sha1(blob.encode("ascii")).hexdigest()[:6]
+    elif value is None:
         token = "n"
     elif _is_percent_dtype(spec.dtype):
         token = _pct_token(float(value))
@@ -804,6 +752,8 @@ def infer_kind(family: str, value: Any, defaults: Mapping[str, Any]) -> str:
     spec = require_param(family)
     if spec.kind_mode != "exit":
         return "other"
+    if spec.dtype == "tuple":
+        return _trail_tiers_kind(value, current_value(family, defaults))
     cur = current_value(family, defaults)
     if family == "TIME_FORCE_BARS":
         iv = int(value)
@@ -826,12 +776,31 @@ def _family_for_override(key: str) -> str | None:
     return _FAMILY_BY_OVERRIDE.get(str(key))
 
 
-def _trail_slot_diffs(ov_tiers: Any, def_tiers: Any) -> list[str]:
-    diffs: list[str] = []
-    for fam, (ti, fi, _) in TRAIL_SLOTS.items():
-        if not num_eq(trail_slot_value(ov_tiers, ti, fi), trail_slot_value(def_tiers, ti, fi)):
-            diffs.append(fam)
-    return diffs
+def _trail_tiers_kind(ov_tiers: Any, def_tiers: Any) -> str:
+    try:
+        ov = copy_trail_tiers(ov_tiers)
+        de = copy_trail_tiers(def_tiers)
+    except (TypeError, ValueError, IndexError, KeyError):
+        return "other"
+    if not ov or not de or len(ov) != len(de):
+        return "other"
+    rest_same = True
+    for i, (a, b) in enumerate(zip(ov, de)):
+        for j in range(4):
+            if i == 0 and j == 0:
+                continue
+            if not num_eq(a[j], b[j]):
+                rest_same = False
+                break
+        if not rest_same:
+            break
+    if not rest_same:
+        return "other"
+    if num_eq(ov[0][0], de[0][0]):
+        return "other"
+    if float(ov[0][0]) < float(de[0][0]):
+        return "tighten"
+    return "loosen"
 
 
 def infer_kind_from_overrides(
@@ -846,13 +815,7 @@ def infer_kind_from_overrides(
         return "other"
     key = keys[0]
     if key == "TRAIL_TIERS":
-        diffs = _trail_slot_diffs(ov[key], defaults.get("TRAIL_TIERS"))
-        if diffs == ["TRAIL"]:
-            arm = trail_arm(ov[key])
-            if arm is None:
-                return "other"
-            return infer_kind("TRAIL", arm, defaults)
-        return "other"
+        return _trail_tiers_kind(ov[key], defaults.get("TRAIL_TIERS"))
     fam = _family_for_override(key)
     if fam is None:
         return "other"
@@ -873,11 +836,34 @@ def _format_pct(value: float) -> str:
     return ("%g" % pct) + "%"
 
 
+def _trail_row_summary(row: list[Any]) -> str:
+    lo, _hi, gb, fl = row[0], row[1], row[2], row[3]
+    if fl is None:
+        return "%s/%s" % (_format_pct(float(lo)), _format_pct(float(gb)))
+    return "%s/%s/底%s" % (
+        _format_pct(float(lo)),
+        _format_pct(float(gb)),
+        _format_pct(float(fl)),
+    )
+
+
+def trail_table_summary(tiers: Any) -> str:
+    try:
+        copied = copy_trail_tiers(tiers)
+    except (TypeError, ValueError, IndexError, KeyError):
+        return "?"
+    if not copied:
+        return "?"
+    return " · ".join(_trail_row_summary(row) for row in copied)
+
+
 def format_current(family: str, defaults: Mapping[str, Any]) -> str:
     spec = require_param(family)
     val = current_value(family, defaults)
     if val is None:
         return "无"
+    if spec.dtype == "tuple":
+        return trail_table_summary(val)
     if _is_percent_dtype(spec.dtype):
         return _format_pct(float(val))
     if spec.dtype == "bool":
@@ -889,6 +875,8 @@ def format_current(family: str, defaults: Mapping[str, Any]) -> str:
 
 def _format_scan_token(family: str, value: Any) -> str:
     spec = require_param(family)
+    if spec.dtype == "tuple":
+        return json.dumps(json_ready(value), ensure_ascii=False, separators=(",", ":"))
     if value is None:
         return "none"
     if _is_percent_dtype(spec.dtype):
@@ -904,14 +892,17 @@ def _format_scan_token(family: str, value: Any) -> str:
 
 
 def format_scan_values(family: str, values: Iterable[Any]) -> str:
+    spec = require_param(family)
+    if spec.dtype == "tuple":
+        return "\n".join(_format_scan_token(family, v) for v in values)
     return ",".join(_format_scan_token(family, v) for v in values)
 
 
 def family_value_label(family: str, value: Any) -> str:
     if family == "STOP_LOSS":
         return "止损 %s" % _format_pct(float(value))
-    if family == "TRAIL":
-        return "TRAIL 起步 %s" % _format_pct(float(value))
+    if family == "TRAIL_TIERS":
+        return "阶梯止盈 %s" % trail_table_summary(value)
     if family == "TIME_FORCE_BARS":
         iv = int(value)
         if iv <= 0:
@@ -942,8 +933,8 @@ def base_label(defaults: Mapping[str, Any], families: Iterable[str]) -> str:
     fams = [f for f in FAMILY_ORDER if f in set(families)]
     if fams == ["STOP_LOSS"]:
         return "现行 %s" % _format_pct(float(current_value("STOP_LOSS", defaults)))
-    if fams == ["TRAIL"]:
-        return "现行起步 %s" % _format_pct(float(current_value("TRAIL", defaults)))
+    if fams == ["TRAIL_TIERS"]:
+        return "现行阶梯止盈 %s" % trail_table_summary(current_value("TRAIL_TIERS", defaults))
     if fams == ["TIME_FORCE_BARS"]:
         return "现行时间成本 %s 根" % int(current_value("TIME_FORCE_BARS", defaults))
     return "现行"
@@ -955,12 +946,12 @@ CURRENT_MARK = "★现行"
 def combo_matches_current(combo: Mapping[str, Any], defaults: Mapping[str, Any]) -> bool:
     if not combo:
         return False
-    return all(num_eq(combo[fam], current_value(fam, defaults)) for fam in combo)
+    return all(struct_eq(combo[fam], current_value(fam, defaults)) for fam in combo)
 
 
 def combo_n_diffs(combo: Mapping[str, Any], defaults: Mapping[str, Any]) -> int:
     return sum(
-        0 if num_eq(combo[fam], current_value(fam, defaults)) else 1 for fam in combo
+        0 if struct_eq(combo[fam], current_value(fam, defaults)) else 1 for fam in combo
     )
 
 
@@ -977,14 +968,11 @@ def overrides_for_combo(
     defaults: Mapping[str, Any],
 ) -> dict[str, Any]:
     ov: dict[str, Any] = {}
-    trail_combo = {fam: val for fam, val in combo.items() if fam in TRAIL_SLOTS}
-    if trail_combo:
-        ov["TRAIL_TIERS"] = apply_trail_combo(defaults.get("TRAIL_TIERS"), trail_combo)
     for fam, val in combo.items():
-        if fam in TRAIL_SLOTS:
-            continue
         spec = require_param(fam)
-        if spec.dtype == "int":
+        if spec.dtype == "tuple":
+            ov[spec.key] = json_ready(val)
+        elif spec.dtype == "int":
             ov[spec.key] = int(val)
         elif spec.dtype == "bool":
             ov[spec.key] = bool(val)
@@ -1013,23 +1001,6 @@ def combo_label(combo: Mapping[str, Any], defaults: Mapping[str, Any]) -> str:
     return " · ".join(bits)
 
 
-def _trail_override_bits(ov_tiers: Any, def_tiers: Any) -> list[str]:
-    bits: list[str] = []
-    for fam in _trail_slot_diffs(ov_tiers, def_tiers):
-        spec = get_param(fam)
-        ti, fi, _ = TRAIL_SLOTS[fam]
-        val = trail_slot_value(ov_tiers, ti, fi)
-        label = spec.label if spec else fam
-        if val is None:
-            bits.append("%s关闭" % label)
-        else:
-            bits.append("%s=%s" % (label, _format_pct(val)))
-    if not bits:
-        arm = trail_arm(ov_tiers)
-        bits.append("TRAIL 起步 %s（档1 peak_lo）" % (_format_pct(arm) if arm is not None else "?"))
-    return bits
-
-
 def overrides_summary(overrides: Mapping[str, Any] | None, defaults: Mapping[str, Any] | None = None) -> str:
     ov = dict(overrides or {})
     if not ov:
@@ -1038,7 +1009,7 @@ def overrides_summary(overrides: Mapping[str, Any] | None, defaults: Mapping[str
     if "STOP_LOSS" in ov:
         bits.append("STOP_LOSS=%s" % ov["STOP_LOSS"])
     if "TRAIL_TIERS" in ov:
-        bits.extend(_trail_override_bits(ov["TRAIL_TIERS"], (defaults or {}).get("TRAIL_TIERS")))
+        bits.append("TRAIL_TIERS=%s" % trail_table_summary(ov["TRAIL_TIERS"]))
     if "TIME_FORCE_BARS" in ov:
         bits.append("TIME_FORCE_BARS=%s" % ov["TIME_FORCE_BARS"])
     extra = [k for k in ov if k not in ("STOP_LOSS", "TRAIL_TIERS", "TIME_FORCE_BARS")]
@@ -1140,16 +1111,11 @@ def axes_from_cells(
             fam = _family_for_override(key)
             if fam is None:
                 continue
-            if fam == "TRAIL":
-                level: Any = trail_arm(val)
-                if level is None:
-                    continue
-            else:
-                try:
-                    level = coerce_level(fam, val)
-                except (GridSpecError, TypeError, ValueError):
-                    continue
-            if any(num_eq(level, x) for x in seen[fam]):
+            try:
+                level = coerce_level(fam, val)
+            except (GridSpecError, TypeError, ValueError):
+                continue
+            if any(struct_eq(level, x) for x in seen[fam]):
                 continue
             seen[fam].append(level)
             extras[fam].append(level)
@@ -1257,8 +1223,6 @@ def chip_presets(family: str, defaults: Mapping[str, Any]) -> list[Any]:
     cur = current_value(family, defaults)
     if family == "STOP_LOSS":
         return [0.06, 0.07, 0.08, 0.09, 0.10, 0.12]
-    if family == "TRAIL":
-        return [0.02, 0.03, 0.04, 0.05]
     if family == "TIME_FORCE_BARS":
         c = int(cur)
         vals = [0, max(0, c - 10), c, c + 10, 60]

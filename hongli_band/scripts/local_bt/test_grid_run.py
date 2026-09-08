@@ -18,11 +18,13 @@ from grid_run import (  # noqa: E402
     assemble_jobs,
     book_jobs,
     book_stock_entries,
+    expected_fingerprint,
     grid_book_overrides,
     job_payload,
     load_book_lock,
     load_config_defaults,
     load_spec,
+    parse_fingerprint,
     prune_stale_cell_dirs,
     reset_cell_sample_dirs,
     run_sweep,
@@ -310,6 +312,44 @@ class GridRunApiTest(unittest.TestCase):
         self.assertNotIn("STATE_FILE", defaults)
         self.assertAlmostEqual(float(defaults["CHASE_MAX_PCT"]), 0.05)
         self.assertAlmostEqual(float(defaults["STOP_LOSS"]), 0.08)
+
+    def test_parse_fingerprint_trail_tiers_distinguishes_giveback(self) -> None:
+        current = [
+            [0.03, 0.06, 0.015, None],
+            [0.06, 0.10, 0.03, 0.03],
+            [0.10, None, 0.04, None],
+        ]
+        other = [
+            [0.03, 0.06, 0.02, None],
+            [0.06, 0.10, 0.03, 0.03],
+            [0.10, None, 0.04, None],
+        ]
+        compact_cur = json.dumps(current, separators=(",", ":"))
+        compact_other = json.dumps(other, separators=(",", ":"))
+        text = (
+            "HlBand v1 init stop= 0.08 trail_arm= 0.03 trail_tiers= %s "
+            "time_force_bars= 30 time_force_min_ret= 0.03"
+            % compact_cur
+        )
+        got = parse_fingerprint(text)
+        self.assertTrue(got["has_trail_tiers"])
+        self.assertAlmostEqual(got["trail_arm"], 0.03)
+        self.assertAlmostEqual(got["trail_tiers"][0][2], 0.015)
+        expected = expected_fingerprint(
+            {
+                "STOP_LOSS": 0.08,
+                "TIME_FORCE_BARS": 30,
+                "TRAIL_TIERS": current,
+            },
+            {"TRAIL_TIERS": current},
+        )
+        self.assertEqual(expected["trail_tiers"][0][2], 0.015)
+        self.assertNotEqual(compact_cur, compact_other)
+        other_text = text.replace(compact_cur, compact_other)
+        other_got = parse_fingerprint(other_text)
+        self.assertAlmostEqual(other_got["trail_arm"], 0.03)
+        self.assertAlmostEqual(other_got["trail_tiers"][0][2], 0.02)
+        self.assertNotEqual(got["trail_tiers"][0][2], other_got["trail_tiers"][0][2])
 
     def test_grid_book_overrides_wallet_follows_trade_budget(self) -> None:
         ov = grid_book_overrides({"STOP_LOSS": 0.06, "TRADE_BUDGET": 200000})

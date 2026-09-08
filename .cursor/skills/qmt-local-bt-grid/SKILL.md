@@ -34,13 +34,13 @@ MAE 为何不可信、本轮数字：需要时再读 [reference-lessons.md](refe
 
 1. **只扫有经济含义的命名变体**，默认 ≤8 格。禁止 12 维笛卡尔积。
 2. 格子 = **扫描取值笛卡尔积**，不自动插入现行档。扫描值全等于 config 的格打 `is_current` / `★现行`。不强制 `id=base`。
-3. 关联常量不顺手改：动 TRAIL 起步不改 `SCALE_ARM`。让路阈值 = TRAIL 档1 `peak_lo`，不再单列 `TIME_FORCE_MIN_RET`；旧 spec 含该轴须拒绝重存。
+3. 关联常量不顺手改：动 `TRAIL_TIERS` 整表不改 `SCALE_ARM`。让路阈值 = `TRAIL_TIERS` 档1 `peak_lo`，不再单列 `TIME_FORCE_MIN_RET`；旧 spec 含该轴须拒绝重存。
 4. `TIME_FORCE_BARS<=0` 关闭整条 time_force。没有独立的「只关让路」轴。
 5. **主样本**：默认=跟踪池 `BOOK_STOCKS` 一段组合连续回放（`year_start0101`–`year_end1231`，单账户、最多 3 笔、`CASH_RATIO×`权益复利）。`asset_split.mode=random_from_csv` 时调参篮 / 盲测篮 **各跑一段**（两套钱包，禁止 `tune∪holdout` 同一 book）。不要用 `local_bt_ma_compare.csv` 冻结 winner。旧 `report/grid/<sweep>/` 的 stock×年 log **须重跑**，禁止只汇总。
 6. **时空双重隔离**：时间用 `tune_*` / `check_*`；空间用 `tune_stocks` / `holdout_stocks`（盲测只否决、不参与格子比大小）。`mode=off` 时无空间门。
 7. 每格写入主题 `report/grid/<sweep>/<cell>/`，**不得覆盖** `report/front_ratio/` 等基线 log。
 8. 格子之间**串行**；格内按 walk 并行（无空间隔离 1 段；空间隔离 2 段；再开 `--include-sma-ema` 则 ×3，最多 6 段）。进度按 walk 计，不要按「标的×年」估 ETA。
-9. 开跑后校验 init 指纹：`stop=` / `time_force_bars=`；扫 TRAIL 时 `trail_arm=` 与派生的 `time_force_min_ret=` 同值。不一致则停。
+9. 开跑后校验 init 指纹：`stop=` / `time_force_bars=`；扫 `TRAIL_TIERS` 时核 compact `trail_tiers=` JSON（整表相等），`trail_arm=` 与派生的 `time_force_min_ret=` 同值（人读）。不一致则停。
 10. **默认不改 `config.py`、不 deploy**。用户说「按建议修改」再改片段并部署。
 
 ## 选参

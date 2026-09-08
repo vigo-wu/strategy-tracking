@@ -72,6 +72,26 @@ def _register_live_timer(C):
     _event_log("run_time_fail", error=str(last_err))
 
 
+def _trail_tiers_json():
+    """整表 compact JSON；网格指纹 trail_tiers=。"""
+    tiers = globals().get("TRAIL_TIERS") or ()
+    out = []
+    for row in tiers:
+        seq = list(row)
+        while len(seq) < 4:
+            seq.append(None)
+        lo, hi, gb, fl = seq[0], seq[1], seq[2], seq[3]
+        out.append(
+            [
+                float(lo),
+                None if hi is None else float(hi),
+                float(gb),
+                None if fl is None else float(fl),
+            ]
+        )
+    return json.dumps(out, separators=(",", ":"))
+
+
 def init(C):
     A.busy = False
     A._hb_at = None
@@ -308,6 +328,8 @@ def _init_impl(C):
         STOP_LOSS,
         "trail_arm=",
         _trail_arm(),
+        "trail_tiers=",
+        _trail_tiers_json(),
         "chase<",
         CHASE_MAX_PCT,
         "scale=",
