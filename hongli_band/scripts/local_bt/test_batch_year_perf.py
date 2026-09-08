@@ -11,6 +11,7 @@ from batch_year_perf import (
     collect_batch_detail_trades,
     list_grid_samples_with_details,
     parse_detail_trades,
+    portfolio_year_perf_from_grid_sample,
     rows_from_grid_sample_dir,
 )
 
@@ -210,6 +211,40 @@ class GridSampleRowsTests(unittest.TestCase):
             self.assertIn("2018", [str(y) for y in book_out["table"]["year"].tolist()])
             self.assertEqual(int(book_out["n_ok"]), 2)
             self.assertEqual(int(book_out["n_buy"]), 1)
+
+
+class GridPortfolioYearPerfTests(unittest.TestCase):
+    def test_book_fixed_detail_one_account(self) -> None:
+        lines = [
+            "600000,浦发,股票,银行,多,2018-01-10 15:00:00,买入,10,10,0,0,0,100,0,1000,普通",
+            "600000,浦发,股票,银行,多,2018-01-15 15:00:00,卖出,11,11,1000,0,0,100,0,1100,普通",
+        ]
+        with tempfile.TemporaryDirectory() as td:
+            cell = Path(td)
+            book_dir = cell / "book" / "front_ratio"
+            book_dir.mkdir(parents=True)
+            detail = book_dir / "local_bt_book_fixed_20180101_20181231_kabc_操作明细.csv"
+            _write_detail(detail, lines)
+            (book_dir / "local_bt_book_fixed_20180101_20181231_kabc.txt").write_text(
+                "TRADE_BUDGET budget= 12345.0\n", encoding="utf-8"
+            )
+            hold = cell / "book" / "front_ratio" / "holdout"
+            hold.mkdir(parents=True)
+            _write_detail(
+                hold / "holdout_local_bt_book_fixed_20180101_20181231_kxyz_操作明细.csv",
+                [
+                    "000001,平安,股票,银行,多,2018-02-10 15:00:00,买入,10,10,0,0,0,100,0,1000,普通",
+                    "000001,平安,股票,银行,多,2018-02-15 15:00:00,卖出,12,12,2000,0,0,100,0,1200,普通",
+                ],
+            )
+            self.assertEqual(list_grid_samples_with_details(cell), ["book"])
+            out = portfolio_year_perf_from_grid_sample(cell, "book", fallback_budget=100000.0)
+            self.assertTrue(out["ok"])
+            self.assertEqual(int(out["n_ok"]), 1)
+            self.assertEqual(int(out["n_buy"]), 1)
+            self.assertAlmostEqual(float(out["budget"]), 12345.0)
+            self.assertIn("2018", [str(y) for y in out["table"]["year"].tolist()])
+            self.assertAlmostEqual(float(out["sum_pnl"]), 1000.0)
 
 
 if __name__ == "__main__":

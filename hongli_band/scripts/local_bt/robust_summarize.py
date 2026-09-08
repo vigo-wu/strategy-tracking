@@ -68,6 +68,7 @@ def trades_from_detail(detail_path: Path) -> list[dict[str, Any]]:
 def _empty_window() -> dict[str, Any]:
     return {
         "n_trades": 0,
+        "n_open": 0,
         "win_rate": None,
         "profit_factor": None,
         "max_dd": None,
@@ -75,6 +76,7 @@ def _empty_window() -> dict[str, Any]:
         "sharpe": None,
         "calmar": None,
         "avg_ann_pct": None,
+        "avg_year_pnl": None,
         "sum_pnl": None,
     }
 
@@ -121,6 +123,12 @@ def window_kpi_from_trades(
         y = _year_of_day(str(t.get("sell_exec_day") or ""))
         if y is not None and int(y) in years:
             win_trades.append(t)
+    n_open = 0
+    for t in trades:
+        y = _year_of_day(str(t.get("buy_open_day") or ""))
+        if y is not None and int(y) in years:
+            n_open += 1
+    out["n_open"] = n_open
     n = len(win_trades)
     out["n_trades"] = n
     if n:
@@ -152,6 +160,7 @@ def window_kpi_from_trades(
     # 年化：窗内首尾权益简单收益 / 年数
     eq0 = float(sub["equity"].iloc[0])
     eq1 = float(sub["equity"].iloc[-1])
+    out["avg_year_pnl"] = round(eq1 - eq0, 2)
     n_y = max(len(years), 1)
     if eq0 > 1e-12:
         total_ret = (eq1 / eq0) - 1.0

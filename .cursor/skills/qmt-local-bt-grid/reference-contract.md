@@ -14,7 +14,7 @@
 3. **init 指纹**（写进同一份 log，供 runner 校验）
    - 必有：`stop=`、`time_force_bars=`（若策略有这两项）。
    - 扫阶梯止盈：`trail_arm=` = `TRAIL_TIERS` 档 1 的 `peak_lo`。
-4. **主样本 job 列表**：默认 config `BOOK_STOCKS` × spec 回测年（均线/复权锁在跟踪池配置里）。`asset_split.mode=random_from_csv` 时改为从 `tools/csv/none` 抽取的 `tune_stocks ∪ holdout_stocks`（名单写入 `freeze.json` / `spec.json`；建 job 仍用现有 `csv_for`）。
+4. **主样本 walk**：默认 config `BOOK_STOCKS` 一段 `run_book_backtest`（`year_start0101`–`year_end1231`）。`asset_split.mode=random_from_csv` 时调参 / 盲测 **各一段**（名单写入 `freeze.json` / `spec.json`；CSV 仍用 `csv_for`）。禁止 stock×年独立 10 万账户，禁止 `tune∪holdout` 同一钱包。
 5. **可选对照**：全 SMA / 全 EMA（`include_sma_ema`），不单独当选参器。
 6. **空间隔离（可选）**：`asset_split` 见 skill 示例 `stop_loss_space.json`。选参主 KPI 仅 tune 股；holdout × 验收年复用 `gate` 否决（无覆盖不得过门）。
 7. **过门 `gate`**：绝对合格线（可逐项禁用）+ 可选相对 base + 可选卡玛同向；指标用 `windows.check.*`；排序用验收期卡玛 Δ。写入 spec/freeze/summary；只汇总可 `--gate-json` / 侧栏覆盖。
@@ -39,23 +39,30 @@ JSON 可序列化。元组在 JSON 里用数组；`null` = Python `None`。
 
 ## 格子之间
 
-- 格内：可按现有 `ProcessPool`（同 CSV 分组）。
+- 格内：按 walk 用 `ProcessPool`（最多 6 段：分篮 × SMA/EMA）。
 - 格间：**串行**，避免进程数 × 格数爆炸。
-- 每格写 `cell_meta.json`（`overrides`、kind、job 数）。
-- 先跑该格第一份 job 做探针，指纹不对则**停止整个 sweep**。
+- 每格写 `cell_meta.json`（`overrides`、kind、walk 数）。
+- 先跑该格第一段 book walk 做探针，指纹不对则**停止整个 sweep**。
+- 资金：`compound_backtest=True`，`wallet_cash=TRADE_BUDGET`；`BUDGET_BASE` / `CASH_RATIO` 跟现行 config。
 
 ## summarize 口径
 
-复用主题已有的 log 解析（hongli_band：`parse_local_bt_log`，认 `BUY filled` 的 `lots=` / `@close=`，不要用终端 `generate_report.parse_trades`）。
+解析组合明细（`window_kpi_from_trades`）。每格、每个样本（`book` / `sma` / `ema`）输出窗 KPI：
 
-每格、每个样本（`book` / `sma` / `ema`）输出：合计盈亏、胜率、利润因子、调参期、验收期、分年、出场结构、相对 `base` 的 Δ。年份窗口读该 sweep 的 `spec.json`。
+- 笔数 / 胜率 / 盈亏比：平仓日落在窗内（已是抢槽后的成交）
+- 回撤 / 夏普 / 卡玛 / 年化：窗内同一条权益；卡玛 = 几何年化 / `|max_dd|`
+- 几何年化 \((E_{end}/E_{start})^{1/n}-1\)，\(n=\) 窗内日历年数（空年也算）
+- 主表 `sum_pnl` / `is_pnl` / `oos_pnl` = 对应窗账户盈亏 \(E_{end}-E_{start}\)
+- 权益 = 预算 + 已实现盈亏台阶（与 robust 相同，不承诺全日盯市）
+
+年份窗口读该 sweep 的 `spec.json`。若目录仍是旧 `local_bt_{code}_{SZ|SH}_{year}_{MA}.txt`，直接报错要求重跑。
 
 写出 `<theme>/report/grid/<sweep>/summary.json`。选参规则见 SKILL.md，不要在 summarize 里改 `config.py`。
 
 ## 新主题最小增量
 
-1. `run.py`：`overrides` 注入 + 任意 `out_dir`。
-2. `batch_job.py`：payload `overrides` 透传。
-3. 跟踪池 `BOOK_STOCKS`（主样本）。
-4. 在主题 `scripts/local_bt/grid_run.py`（或共享 runner 的 `--theme`）里提供 job 列表。
+1. `run.py`：`overrides` 注入 + 任意 `out_dir`（`init` 打出 `stop=` / `time_force_bars=` / `trail_arm=`）。
+2. `book_backtest.py`：`run_book_backtest` 接受 `overrides`，资金键 `compound_backtest` / `wallet_cash`。
+3. 跟踪池 `BOOK_STOCKS`（主样本组合 walk）。
+4. 在主题 `scripts/local_bt/grid_run.py` 里提供 book walk 列表（不是 stock×年）。
 5. init 日志带指纹字段。

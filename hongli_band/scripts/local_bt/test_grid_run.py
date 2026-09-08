@@ -14,14 +14,42 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 from grid_run import (  # noqa: E402
+    GridError,
     assemble_jobs,
     book_jobs,
+    grid_book_overrides,
+    job_payload,
     load_config_defaults,
     prune_stale_cell_dirs,
+    reset_cell_sample_dirs,
     run_sweep,
     validate_spec,
 )
 from grid_spec import build_cells  # noqa: E402
+
+
+def _walk(
+    *,
+    sample: str = "book",
+    basket: str = "book",
+    stocks: list[str] | None = None,
+    start: str = "20180101",
+    end: str = "20261231",
+    ma: str = "EMA",
+) -> dict:
+    codes = stocks or ["600350.SH"]
+    book = {s: {"ma_type": ma, "dividend_type": "front_ratio"} for s in codes}
+    return {
+        "sample": sample,
+        "basket": basket,
+        "book_stocks": book,
+        "start": start,
+        "end": end,
+        "div": "front_ratio",
+        "ma": ma,
+        "n_stocks": len(book),
+        "stocks": sorted(book.keys()),
+    }
 
 
 def _nine_cell_spec() -> dict:
@@ -63,18 +91,7 @@ class GridRunApiTest(unittest.TestCase):
                 {"id": "sl06", "label": "止损 6%", "kind": "tighten", "overrides": {"STOP_LOSS": 0.06}},
             ],
         }
-        book = [
-            {
-                "sample": "book",
-                "stock": "600350.SH",
-                "year": "2020",
-                "ma": "EMA",
-                "div": "front_ratio",
-                "csv": Path("x.csv"),
-                "start": "20200101",
-                "end": "20201231",
-            }
-        ]
+        book = [_walk(start="20200101", end="20201231")]
         with tempfile.TemporaryDirectory() as td:
             sweep_dir = Path(td) / "report" / "grid" / "dry_unit"
             with patch("grid_run.assemble_jobs", return_value=(book, book)):
@@ -90,22 +107,14 @@ class GridRunApiTest(unittest.TestCase):
             self.assertNotIn("winner", freeze)
             self.assertEqual(freeze["year_start"], 2018)
             self.assertEqual(freeze["tune_end"], 2022)
+            self.assertEqual(freeze["book"][0]["basket"], "book")
+            self.assertNotIn("year", freeze["book"][0])
+            self.assertEqual(freeze["book"][0]["start"], "20200101")
 
 
     def test_assemble_jobs_book_and_sma_ema(self) -> None:
         spec = {"compare_div": "front_ratio", "cells": [{"id": "base", "overrides": {}}]}
-        fake_book = [
-            {
-                "sample": "book",
-                "stock": "A",
-                "year": "2020",
-                "ma": "EMA",
-                "div": "front_ratio",
-                "csv": Path("a.csv"),
-                "start": "20200101",
-                "end": "20201231",
-            }
-        ]
+        fake_book = [_walk()]
         with patch("grid_run.book_jobs", return_value=fake_book):
             book, jobs = assemble_jobs(spec)
             self.assertEqual(len(jobs), 1)
@@ -113,29 +122,53 @@ class GridRunApiTest(unittest.TestCase):
             _, many = assemble_jobs(spec, include_sma_ema=True)
         self.assertEqual(len(many), 3)
         self.assertEqual({j["sample"] for j in many}, {"book", "sma", "ema"})
+        sma = next(j for j in many if j["sample"] == "sma")
+        self.assertEqual(sma["book_stocks"]["600350.SH"]["ma_type"], "SMA")
+        self.assertEqual(sma["basket"], "book")
 
-    def test_book_jobs_respects_spec_years(self) -> None:
+    def test_assemble_jobs_space_sma_ema_max_six(self) -> None:
+        spec = {"compare_div": "front_ratio", "cells": [{"id": "base", "overrides": {}}]}
+        fake = [
+            _walk(basket="tune", stocks=["AAA111.SH"]),
+            _walk(basket="holdout", stocks=["BBB222.SZ"]),
+        ]
+        with patch("grid_run.book_jobs", return_value=fake):
+            _, many = assemble_jobs(spec, include_sma_ema=True)
+        self.assertEqual(len(many), 6)
+        self.assertEqual(
+            {(j["sample"], j["basket"]) for j in many},
+            {
+                ("book", "tune"),
+                ("book", "holdout"),
+                ("sma", "tune"),
+                ("sma", "holdout"),
+                ("ema", "tune"),
+                ("ema", "holdout"),
+            },
+        )
+
+    def test_book_jobs_one_walk_not_stock_year(self) -> None:
         csv_p = Path("fake.csv")
         spec = {"year_start": 2022, "year_end": 2023}
         with patch("grid_run.load_book_lock", return_value=[("600938.SH", "EMA", "front_ratio")]):
             with patch("grid_run.csv_for", return_value=csv_p):
                 with patch("grid_run._csv_span", return_value=("20220421", "20260904")):
                     jobs = book_jobs(spec)
-        years = {j["year"] for j in jobs}
-        self.assertEqual(years, {"2022", "2023"})
-        self.assertTrue(all(j["sample"] == "book" for j in jobs))
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0]["start"], "20220101")
+        self.assertEqual(jobs[0]["end"], "20231231")
+        self.assertEqual(jobs[0]["basket"], "book")
+        self.assertNotIn("year", jobs[0])
+        self.assertEqual(jobs[0]["stocks"], ["600938.SH"])
 
-    def test_book_jobs_skips_years_without_bars(self) -> None:
+    def test_book_jobs_skips_stocks_without_overlap(self) -> None:
         csv_p = Path("fake.csv")
         with patch("grid_run.load_book_lock", return_value=[("600938.SH", "EMA", "front_ratio")]):
             with patch("grid_run.csv_for", return_value=csv_p):
-                with patch("grid_run._csv_span", return_value=("20220421", "20260904")):
-                    jobs = book_jobs()
-        years = {j["year"] for j in jobs}
-        self.assertNotIn("2018", years)
-        self.assertNotIn("2021", years)
-        self.assertIn("2022", years)
-        self.assertTrue(all(j["stock"] == "600938.SH" for j in jobs))
+                with patch("grid_run._csv_span", return_value=("20100101", "20101231")):
+                    with self.assertRaises(GridError) as ctx:
+                        book_jobs({"year_start": 2018, "year_end": 2026})
+        self.assertIn("无可用 CSV", str(ctx.exception))
 
     def test_dry_run_random_from_csv_freeze_lists(self) -> None:
         spec = {
@@ -160,19 +193,7 @@ class GridRunApiTest(unittest.TestCase):
                 {"id": "base", "label": "现行", "kind": "base", "overrides": {}},
             ],
         }
-        pool = ["AAA111.SH", "BBB222.SZ", "CCC333.SH", "DDD444.SZ"]
-        book = [
-            {
-                "sample": "book",
-                "stock": "AAA111.SH",
-                "year": "2020",
-                "ma": "EMA",
-                "div": "front_ratio",
-                "csv": Path("x.csv"),
-                "start": "20200101",
-                "end": "20201231",
-            }
-        ]
+        book = [_walk(stocks=["AAA111.SH"], start="20200101", end="20211231")]
         with tempfile.TemporaryDirectory() as td:
             sweep_dir = Path(td) / "report" / "grid" / "space_unit"
             with patch("grid_run.draw_asset_split") as draw:
@@ -218,8 +239,13 @@ class GridRunApiTest(unittest.TestCase):
         with patch("grid_run.csv_for", return_value=csv_p):
             with patch("grid_run._csv_span", return_value=("20220101", "20221231")):
                 jobs = book_jobs(spec)
-        stocks = {j["stock"] for j in jobs}
-        self.assertEqual(stocks, {"600001.SH", "600002.SH"})
+        self.assertEqual(len(jobs), 2)
+        self.assertEqual([j["basket"] for j in jobs], ["tune", "holdout"])
+        self.assertEqual(jobs[0]["stocks"], ["600001.SH"])
+        self.assertEqual(jobs[1]["stocks"], ["600002.SH"])
+        self.assertTrue(all("year" not in j for j in jobs))
+        self.assertEqual(jobs[0]["start"], "20220101")
+        self.assertEqual(jobs[0]["end"], "20221231")
 
     def test_prune_stale_cell_dirs_keeps_current_ids(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -237,6 +263,19 @@ class GridRunApiTest(unittest.TestCase):
             self.assertFalse((dest / "vpn13").exists())
             self.assertTrue((dest / "spec.json").is_file())
 
+    def test_reset_cell_sample_dirs_drops_legacy_logs(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            cell = Path(td) / "base"
+            book = cell / "book" / "front_ratio"
+            book.mkdir(parents=True)
+            leftover = book / "local_bt_600000_SH_2018_EMA.txt"
+            leftover.write_text("old\n", encoding="utf-8")
+            (cell / "cell_meta.json").write_text("{}", encoding="utf-8")
+            reset_cell_sample_dirs(cell)
+            self.assertFalse(leftover.exists())
+            self.assertFalse((cell / "book").exists())
+            self.assertTrue((cell / "cell_meta.json").is_file())
+
     def test_dry_run_does_not_prune_stale_cells(self) -> None:
         spec = {
             "theme": "hongli_band",
@@ -246,18 +285,7 @@ class GridRunApiTest(unittest.TestCase):
                 {"id": "base", "label": "现行", "kind": "base", "overrides": {}},
             ],
         }
-        book = [
-            {
-                "sample": "book",
-                "stock": "600350.SH",
-                "year": "2020",
-                "ma": "EMA",
-                "div": "front_ratio",
-                "csv": Path("x.csv"),
-                "start": "20200101",
-                "end": "20201231",
-            }
-        ]
+        book = [_walk(start="20200101", end="20201231")]
         with tempfile.TemporaryDirectory() as td:
             sweep_dir = Path(td) / "report" / "grid" / "dry_prune"
             sweep_dir.mkdir(parents=True)
@@ -280,6 +308,30 @@ class GridRunApiTest(unittest.TestCase):
         self.assertNotIn("STATE_FILE", defaults)
         self.assertAlmostEqual(float(defaults["CHASE_MAX_PCT"]), 0.05)
         self.assertAlmostEqual(float(defaults["STOP_LOSS"]), 0.08)
+
+    def test_grid_book_overrides_wallet_follows_trade_budget(self) -> None:
+        ov = grid_book_overrides({"STOP_LOSS": 0.06, "TRADE_BUDGET": 200000})
+        self.assertTrue(ov["compound_backtest"])
+        self.assertEqual(ov["TRADE_BUDGET"], 200000.0)
+        self.assertEqual(ov["wallet_cash"], 200000.0)
+        ov2 = grid_book_overrides({}, {"TRADE_BUDGET": 150000.0})
+        self.assertEqual(ov2["wallet_cash"], 150000.0)
+
+    def test_job_payload_splits_tune_holdout_dirs(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            cell = Path(td) / "report" / "grid" / "s" / "base"
+            job = _walk(basket="tune", stocks=["600001.SH"], start="20220101", end="20221231")
+            payload = job_payload(job, cell, {"STOP_LOSS": 0.06, "TRADE_BUDGET": 100000})
+            out = Path(payload["out_dir"])
+            self.assertIn("tune", out.parts)
+            self.assertTrue(payload["log_name"].startswith("tune_"))
+            self.assertIn("local_bt_book_fixed", payload["log_name"])
+            self.assertTrue(payload["overrides"]["compound_backtest"])
+            hold = _walk(basket="holdout", stocks=["600002.SH"], start="20220101", end="20221231")
+            p2 = job_payload(hold, cell, {})
+            self.assertIn("holdout", Path(p2["out_dir"]).parts)
+            self.assertTrue(p2["log_name"].startswith("holdout_"))
+            self.assertNotEqual(payload["out_dir"], p2["out_dir"])
 
 
 if __name__ == "__main__":

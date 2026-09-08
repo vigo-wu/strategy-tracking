@@ -14,6 +14,9 @@ import json
 import re
 import shutil
 import sys
+import traceback
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from multiprocessing import get_context
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
@@ -53,14 +56,12 @@ from asset_split import (  # noqa: E402
     validate_asset_split,
 )
 from market_csv import compact_day, peek_daily_csv_meta  # noqa: E402
-from run import (  # noqa: E402
-    _as_trail_tiers,
-    _run_payloads,
-    default_log_name,
-)
+from book_backtest import book_log_name, book_stocks_hash, run_book_backtest  # noqa: E402
+from run import _as_trail_tiers  # noqa: E402
+from trades_csv import trades_csv_path  # noqa: E402
 
 WARN_CELL_SOFT = 8
-WARN_JOBS_SOFT = 200
+WARN_JOBS_SOFT = 12
 RE_STOP = re.compile(r"\bstop=\s*([0-9.eE+-]+)")
 RE_TFB = re.compile(r"\btime_force_bars=\s*(-?\d+)")
 RE_TFM = re.compile(r"\btime_force_min_ret=\s*([0-9.eE+-]+)")
@@ -351,45 +352,117 @@ def _year_overlaps_csv(csv_p: Path, start: str, end: str) -> bool:
     return max(str(start), span[0]) <= min(str(end), span[1])
 
 
-def _year_window(year: str) -> tuple[str, str]:
-    y = str(int(year))
-    return "%s0101" % y, "%s1231" % y
-
-
-def book_jobs(spec: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+def _walk_span(spec: dict[str, Any] | None = None) -> tuple[str, str]:
     win = fill_year_windows(spec)
-    y0, y1 = int(win["year_start"]), int(win["year_end"])
-    split = fill_asset_split(spec)
-    if split["mode"] == "random_from_csv":
-        locks = stock_lock_rows(split)
-        if not locks:
-            raise GridError("asset_split 名单为空，请先抽取 tune/holdout")
-    else:
-        locks = load_book_lock()
-    out: list[dict[str, Any]] = []
+    return "%s0101" % int(win["year_start"]), "%s1231" % int(win["year_end"])
+
+
+def _locks_to_book(
+    locks: list[tuple[str, str, str]],
+    start: str,
+    end: str,
+    *,
+    ma_force: str | None = None,
+) -> dict[str, dict[str, str]]:
+    out: dict[str, dict[str, str]] = {}
     for stock, ma, div in locks:
         csv_p = csv_for(stock, div)
         if csv_p is None:
             print("skip book 无 CSV", stock, div, flush=True)
             continue
-        for year in range(y0, y1 + 1):
-            ys, ye = _year_window(str(year))
-            if not _year_overlaps_csv(csv_p, ys, ye):
-                print("skip book 无行情", stock, year, flush=True)
-                continue
-            out.append(
-                {
-                    "sample": "book",
-                    "stock": stock,
-                    "year": str(year),
-                    "ma": ma,
-                    "div": div,
-                    "csv": csv_p,
-                    "start": ys,
-                    "end": ye,
-                }
-            )
+        if not _year_overlaps_csv(csv_p, start, end):
+            print("skip book 无行情", stock, start, end, flush=True)
+            continue
+        out[stock] = {
+            "ma_type": str(ma_force or ma),
+            "dividend_type": str(div),
+        }
     return out
+
+
+def _walk_job(
+    *,
+    sample: str,
+    basket: str,
+    book_stocks: dict[str, dict[str, str]],
+    start: str,
+    end: str,
+    div: str,
+    ma: str,
+) -> dict[str, Any]:
+    return {
+        "sample": sample,
+        "basket": basket,
+        "book_stocks": book_stocks,
+        "start": start,
+        "end": end,
+        "div": div,
+        "ma": ma,
+        "n_stocks": len(book_stocks),
+        "stocks": sorted(book_stocks.keys()),
+    }
+
+
+def book_jobs(spec: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    start, end = _walk_span(spec)
+    split = fill_asset_split(spec)
+    compare_div = str((spec or {}).get("compare_div") or "front_ratio")
+    if split["mode"] == "random_from_csv":
+        locks = stock_lock_rows(split)
+        if not locks:
+            raise GridError("asset_split 名单为空，请先抽取 tune/holdout")
+        tune_set = {str(s).strip().upper() for s in (split.get("tune_stocks") or [])}
+        hold_set = {str(s).strip().upper() for s in (split.get("holdout_stocks") or [])}
+        tune_locks = [row for row in locks if row[0] in tune_set]
+        hold_locks = [row for row in locks if row[0] in hold_set]
+        out: list[dict[str, Any]] = []
+        tune_book = _locks_to_book(tune_locks, start, end)
+        if not tune_book:
+            raise GridError("调参篮子无可用 CSV")
+        ma0 = str((split.get("ma_type") or "EMA")).upper()
+        out.append(
+            _walk_job(
+                sample="book",
+                basket="tune",
+                book_stocks=tune_book,
+                start=start,
+                end=end,
+                div=compare_div,
+                ma=ma0,
+            )
+        )
+        hold_book = _locks_to_book(hold_locks, start, end)
+        if not hold_book:
+            raise GridError("盲测篮子无可用 CSV")
+        out.append(
+            _walk_job(
+                sample="book",
+                basket="holdout",
+                book_stocks=hold_book,
+                start=start,
+                end=end,
+                div=compare_div,
+                ma=ma0,
+            )
+        )
+        return out
+    locks = load_book_lock()
+    book = _locks_to_book(locks, start, end)
+    if not book:
+        raise GridError("跟踪池无可用 CSV")
+    mas = {str(cfg.get("ma_type") or "EMA").upper() for cfg in book.values()}
+    ma = mas.pop() if len(mas) == 1 else "MIX"
+    return [
+        _walk_job(
+            sample="book",
+            basket="book",
+            book_stocks=book,
+            start=start,
+            end=end,
+            div=compare_div,
+            ma=ma,
+        )
+    ]
 
 
 def ma_control_jobs(src_jobs: list[dict[str, Any]], ma: str) -> list[dict[str, Any]]:
@@ -399,6 +472,14 @@ def ma_control_jobs(src_jobs: list[dict[str, Any]], ma: str) -> list[dict[str, A
         q = dict(j)
         q["sample"] = kind.lower()
         q["ma"] = kind
+        forced: dict[str, dict[str, str]] = {}
+        for stock, cfg in (j.get("book_stocks") or {}).items():
+            row = dict(cfg)
+            row["ma_type"] = kind
+            forced[str(stock)] = row
+        q["book_stocks"] = forced
+        q["n_stocks"] = len(forced)
+        q["stocks"] = sorted(forced.keys())
         out.append(q)
     return out
 
@@ -439,26 +520,103 @@ def prune_stale_cell_dirs(dest: Path, keep_ids: Iterable[str]) -> list[str]:
     return removed
 
 
-def job_payload(job: dict[str, Any], cell_dir: Path, overrides: dict[str, Any]) -> dict[str, Any]:
-    dest = cell_dir / str(job["sample"]) / str(job["div"])
+def reset_cell_sample_dirs(cell_dir: str | Path) -> None:
+    """全量重跑一格时清掉 book/sma/ema，避免旧 stock×年 log 混进组合汇总。"""
+    root = Path(cell_dir)
+    for name in _CELL_SAMPLE_DIRS:
+        dest = root / name
+        if dest.is_dir():
+            shutil.rmtree(dest)
+
+
+def grid_book_overrides(
+    cell_overrides: dict[str, Any] | None,
+    defaults: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    out = pickle_safe(cell_overrides)
+    tb = out.get("TRADE_BUDGET")
+    if tb is None and defaults:
+        tb = defaults.get("TRADE_BUDGET")
+    try:
+        tb_f = float(tb or 100000.0)
+    except (TypeError, ValueError):
+        tb_f = 100000.0
+    if tb_f <= 0:
+        tb_f = 100000.0
+    out["TRADE_BUDGET"] = tb_f
+    out["compound_backtest"] = True
+    out["wallet_cash"] = tb_f
+    return out
+
+
+def job_payload(
+    job: dict[str, Any],
+    cell_dir: Path,
+    overrides: dict[str, Any],
+    defaults: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    sample = str(job.get("sample") or "book")
+    div = str(job.get("div") or "front_ratio")
+    basket = str(job.get("basket") or "book")
+    dest = cell_dir / sample / div
+    if basket in ("tune", "holdout"):
+        dest = dest / basket
     dest.mkdir(parents=True, exist_ok=True)
     _assert_grid_dir(dest)
-    stock = str(job["stock"])
-    year = str(job["year"])
-    ma = str(job["ma"])
+    book = job.get("book_stocks") or {}
+    htag = book_stocks_hash(book)
+    start = str(job["start"])
+    end = str(job["end"])
+    log_name = book_log_name(kind="fixed", year=start, tag=htag, end=end)
+    if basket in ("tune", "holdout"):
+        log_name = "%s_%s" % (basket, log_name)
     return {
-        "csv": str(job["csv"]),
-        "stock": stock,
-        "start": str(job["start"]),
-        "end": str(job["end"]),
-        "year": year,
+        "basket_id": basket,
+        "book_stocks": pickle_safe(book),
+        "start": start,
+        "end": end,
         "out_dir": str(dest),
-        "quiet": True,
-        "log_name": default_log_name(stock, year=year, ma_type=ma),
-        "ma_type": ma,
-        "dividend_type": str(job["div"]),
-        "overrides": pickle_safe(overrides),
+        "csv_root": str(DEFAULT_CSV_ROOT),
+        "log_name": log_name,
+        "overrides": grid_book_overrides(overrides, defaults),
+        "sample": sample,
+        "div": div,
     }
+
+
+def run_one_book_walk(payload: dict[str, Any]) -> dict[str, Any]:
+    """子进程入口：一段组合连续回放。"""
+    basket_id = str(payload.get("basket_id") or "book")
+    out_dir = Path(payload["out_dir"])
+    out_dir.mkdir(parents=True, exist_ok=True)
+    log_name = str(payload.get("log_name") or "")
+    try:
+        lp, meta = run_book_backtest(
+            payload.get("book_stocks") or {},
+            str(payload["start"]),
+            str(payload["end"]),
+            payload.get("csv_root") or DEFAULT_CSV_ROOT,
+            out_dir,
+            log_name=log_name,
+            quiet=True,
+            overrides=payload.get("overrides") or {},
+        )
+        return {
+            "ok": True,
+            "basket_id": basket_id,
+            "log_path": str(lp),
+            "trades_path": str(trades_csv_path(lp)),
+            "meta": meta,
+            "sample": payload.get("sample"),
+        }
+    except Exception as e:
+        return {
+            "ok": False,
+            "basket_id": basket_id,
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+            "sample": payload.get("sample"),
+        }
 
 
 def _load_summarize():
@@ -479,6 +637,7 @@ def run_cell(
     on_progress: Callable[[str, int, int, str], None] | None = None,
 ) -> None:
     cell_dir.mkdir(parents=True, exist_ok=True)
+    reset_cell_sample_dirs(cell_dir)
     meta = {
         "id": cell["id"],
         "label": cell["label"],
@@ -495,7 +654,7 @@ def run_cell(
     )
     if not jobs:
         raise GridError("格子 %s 无 job" % cell["id"])
-    payloads = [job_payload(j, cell_dir, cell["overrides"]) for j in jobs]
+    payloads = [job_payload(j, cell_dir, cell["overrides"], defaults) for j in jobs]
     expected = expected_fingerprint(defaults, cell["overrides"])
     need_trail = "TRAIL_TIERS" in (cell.get("overrides") or {})
 
@@ -505,30 +664,44 @@ def run_cell(
         else:
             print("[%s] %s/%s %s" % (cell["id"], done, total, label), flush=True)
 
-    probe_idx = None
-    rest: list[dict[str, Any]] = []
-    for i, payload in enumerate(payloads):
-        probe_rows = _run_payloads([payload], Path(payload["out_dir"]), _progress, 1)
-        log0 = Path(str(probe_rows[0].get("log") or ""))
-        if probe_rows[0].get("ok") and log0.is_file():
-            assert_fingerprint(log0, expected, need_trail=need_trail)
-            probe_idx = i
-            rest = payloads[i + 1 :]
-            break
-        err = str(probe_rows[0].get("error") or "")
-        if "无行情交集" in err:
-            print(
-                "skip probe 无行情",
-                payload.get("stock"),
-                payload.get("year"),
-                flush=True,
-            )
-            continue
-        raise GridError("格子 %s 探针失败: %s" % (cell["id"], err or log0))
-    if probe_idx is None:
-        raise GridError("格子 %s 探针失败: 全部 job 无行情交集" % cell["id"])
+    first = payloads[0]
+    _progress(0, len(payloads), "探针 %s" % first.get("basket_id"))
+    probe = run_one_book_walk(first)
+    log0 = Path(str(probe.get("log_path") or ""))
+    if not probe.get("ok") or not log0.is_file():
+        raise GridError("格子 %s 探针失败: %s" % (cell["id"], probe.get("error") or log0))
+    assert_fingerprint(log0, expected, need_trail=need_trail)
+    rest = payloads[1:]
+    done = 1
+    _progress(done, len(payloads), str(first.get("basket_id") or "book"))
+    w = int(workers or 0)
     if rest:
-        _run_payloads(rest, Path(rest[0]["out_dir"]), _progress, workers)
+        if w <= 1:
+            for payload in rest:
+                row = run_one_book_walk(payload)
+                done += 1
+                if not row.get("ok"):
+                    raise GridError(
+                        "格子 %s walk 失败: %s" % (cell["id"], row.get("error") or payload.get("basket_id"))
+                    )
+                _progress(done, len(payloads), str(payload.get("basket_id") or ""))
+        else:
+            ctx = get_context("spawn")
+            with ProcessPoolExecutor(max_workers=w, mp_context=ctx) as ex:
+                futs = {ex.submit(run_one_book_walk, p): p for p in rest}
+                for fut in as_completed(futs):
+                    payload = futs[fut]
+                    try:
+                        row = fut.result()
+                    except Exception as e:
+                        raise GridError("格子 %s walk 失败: %s" % (cell["id"], e)) from e
+                    done += 1
+                    if not row.get("ok"):
+                        raise GridError(
+                            "格子 %s walk 失败: %s"
+                            % (cell["id"], row.get("error") or payload.get("basket_id"))
+                        )
+                    _progress(done, len(payloads), str(payload.get("basket_id") or ""))
 
 
 def assemble_jobs(
@@ -588,7 +761,7 @@ def run_sweep(
     book, jobs = assemble_jobs(spec, include_sma_ema=include_sma_ema)
     if len(jobs) > WARN_JOBS_SOFT:
         print(
-            "WARN jobs/cell=%s > %s（空间抽取或年窗偏大；SMA/EMA 对照再 ×3）"
+            "WARN jobs/cell=%s > %s（空间隔离×SMA/EMA 最多 6 段组合 walk）"
             % (len(jobs), WARN_JOBS_SOFT),
             flush=True,
         )
@@ -603,7 +776,16 @@ def run_sweep(
         "n_jobs": len(jobs),
         "include_sma_ema": bool(include_sma_ema),
         "book": [
-            {"stock": j["stock"], "year": j["year"], "ma": j["ma"], "div": j["div"]}
+            {
+                "sample": j.get("sample"),
+                "basket": j.get("basket"),
+                "n_stocks": j.get("n_stocks"),
+                "start": j.get("start"),
+                "end": j.get("end"),
+                "stocks": list(j.get("stocks") or []),
+                "ma": j.get("ma"),
+                "div": j.get("div"),
+            }
             for j in book
         ],
         "asset_split": _json_ready(split),
@@ -661,7 +843,10 @@ def run_sweep(
             on_progress=progress,
         )
     mod = _load_summarize()
-    out = mod.summarize_sweep(dest, gate=spec.get("gate"))
+    try:
+        out = mod.summarize_sweep(dest, gate=spec.get("gate"))
+    except Exception as e:
+        raise GridError(str(e)) from e
     rec = out.get("recommend") or {}
     print("wrote", out.get("summary_path"))
     print("recommend", rec.get("id"), rec.get("reason"))
@@ -679,7 +864,10 @@ def summarize_only(
     dest = Path(sweep_dir)
     _assert_grid_dir(dest)
     mod = _load_summarize()
-    out = mod.summarize_sweep(dest, gate=gate, cell_ids=cell_ids)
+    try:
+        out = mod.summarize_sweep(dest, gate=gate, cell_ids=cell_ids)
+    except Exception as e:
+        raise GridError(str(e)) from e
     rec = out.get("recommend") or {}
     print("wrote", out.get("summary_path"))
     print("recommend", rec.get("id"), rec.get("reason"))
@@ -694,7 +882,7 @@ def main() -> None:
     ap.add_argument("--sweep-dir", default="", help="覆盖输出目录")
     ap.add_argument("--cell", default="", help="只跑指定格子 id")
     ap.add_argument("--summarize-only", action="store_true", help="不重跑，只 summarize")
-    ap.add_argument("--dry-run", action="store_true", help="只打印 job 数")
+    ap.add_argument("--dry-run", action="store_true", help="只打印每格 walk 数")
     ap.add_argument("--year-start", type=int, default=None)
     ap.add_argument("--year-end", type=int, default=None)
     ap.add_argument("--tune-start", type=int, default=None)

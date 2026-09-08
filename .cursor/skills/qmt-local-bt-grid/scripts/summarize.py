@@ -1,5 +1,5 @@
 # coding: utf-8
-"""解析 local_bt 网格各格 log → 合计 / 调参期 / 验收期 / 稳健推荐 JSON。
+"""解析网格各格组合 walk log → 账户盈亏 / 几何年化 / 过门推荐 JSON。
 
 用法（仓库根目录）::
 
@@ -13,7 +13,7 @@ import re
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Sequence
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[3]
@@ -26,18 +26,12 @@ if str(LOCAL_BT) not in sys.path:
 
 from local_bt_log import (  # noqa: E402
     BUDGET,
-    _max_dd,
-    _year_of,
     parse_local_bt_log,
     parse_trade_budget,
 )
-from equity_yearly import (  # noqa: E402
-    build_daily_equity,
-    sharpe_from_returns,
-    simple_returns,
-    year_equity_path,
-    year_performance_table,
-)
+from compound_wallet import parse_wallet_from_log  # noqa: E402
+from robust_summarize import window_kpi_from_trades  # noqa: E402
+from trades_csv import trades_csv_path  # noqa: E402
 from grid_spec import (  # noqa: E402
     YEAR_WINDOW_KEYS,
     fill_year_windows,
@@ -52,11 +46,15 @@ from grid_gate import (  # noqa: E402
 )
 
 SAMPLES = ("book", "sma", "ema")
-RE_LOG = re.compile(
+RE_LEGACY_LOG = re.compile(
     r"^local_bt_(\d{6})_(SZ|SH)_(\d{4})_(SMA|EMA)\.txt$",
     re.I,
 )
 EPS_PNL = 1.0
+
+
+class GridSummarizeError(ValueError):
+    """旧口径 log 或组合明细无法汇总。"""
 
 
 def _json_ready(obj: Any) -> Any:
@@ -69,226 +67,58 @@ def _json_ready(obj: Any) -> Any:
     return obj
 
 
-def _job_year(t: dict[str, Any]) -> int | None:
-    raw = str(t.get("year") or "").strip()
-    if len(raw) >= 4 and raw[:4].isdigit():
-        return int(raw[:4])
-    return _year_of(
-        str(t.get("sell_exec_day") or t.get("buy_open_day") or "")
-    )
+def _assert_not_legacy_logs(paths: Sequence[Path]) -> None:
+    for path in paths:
+        if RE_LEGACY_LOG.match(path.name):
+            raise GridSummarizeError(
+                "检测到旧 stock×年 网格 log（%s）。组合口径须重跑，不能只汇总。"
+                % path.name
+            )
 
 
-def _empty_window() -> dict[str, Any]:
-    return {
-        "sharpe": None,
-        "n_open": 0,
-        "avg_ann_pct": None,
-        "avg_year_pnl": None,
-        "n_trades": 0,
-        "win_rate": None,
-        "profit_factor": None,
-        "max_dd": None,
-        "calmar": None,
-    }
-
-
-def _calmar(avg_ann_pct: Any, max_dd: Any) -> float | None:
-    if avg_ann_pct is None or max_dd is None:
-        return None
+def _walk_budget(log_path: Path, fallback: float = BUDGET) -> float:
+    text = ""
     try:
-        ann = float(avg_ann_pct) / 100.0
-        dd = float(max_dd)
-    except (TypeError, ValueError):
-        return None
-    if dd >= -1e-12:
-        return None
-    return round(ann / abs(dd), 6)
+        text = log_path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        text = ""
+    wallet = parse_wallet_from_log(text) if text else {}
+    start = wallet.get("wallet_cash_start")
+    if start is not None:
+        try:
+            v = float(start)
+            if v > 0:
+                return v
+        except (TypeError, ValueError):
+            pass
+    bud = parse_trade_budget(log_path, default=0.0)
+    if bud > 0:
+        return float(bud)
+    return float(fallback)
 
 
-def _agg_window(year_rows: list[dict[str, Any]], years: set[int]) -> dict[str, Any]:
-    rows = [r for r in year_rows if int(r["year"]) in years]
-    if not rows:
-        return _empty_window()
-    n_open = sum(int(r.get("n_open") or 0) for r in rows)
-    anns = [
-        float(r["year_ret_pct"])
-        for r in rows
-        if r.get("year_ret_pct") is not None
-    ]
-    pnls = [
-        float(r["year_pnl"])
-        for r in rows
-        if r.get("year_pnl") is not None
-    ]
-    rets: list[float] = []
-    for r in rows:
-        rets.extend(float(x) for x in (r.get("returns") or []))
-    out = _empty_window()
-    out.update(
-        {
-            "sharpe": sharpe_from_returns(rets) if rets else None,
-            "n_open": n_open,
-            "avg_ann_pct": round(sum(anns) / len(anns), 4) if anns else None,
-            "avg_year_pnl": round(sum(pnls) / len(pnls), 2) if pnls else None,
-        }
-    )
-    return out
-
-
-def _trades_for_years(trades: list[dict[str, Any]], years: set[int]) -> list[dict[str, Any]]:
-    out: list[dict[str, Any]] = []
+def _sell_counts(trades: list[dict[str, Any]]) -> dict[str, Any]:
+    by_sig: dict[str, int] = defaultdict(int)
+    by_year: dict[int, float] = defaultdict(float)
     for t in trades:
-        y = _job_year(t)
-        if y is not None and y in years:
-            out.append(t)
-    return out
-
-
-def _trade_kpi(
-    trades: list[dict[str, Any]],
-    n_accounts_by_year: dict[int, int],
-) -> dict[str, Any]:
-    if not trades:
-        return {
-            "n_trades": 0,
-            "win_rate": None,
-            "profit_factor": None,
-            "max_dd": None,
-        }
-    pnls = [float(t["pnl"]) for t in trades]
-    n = len(pnls)
-    gp = sum(p for p in pnls if p > 0)
-    gl = abs(sum(p for p in pnls if p < 0))
-    pf = (gp / gl) if gl > 1e-12 else (99.0 if gp > 0 else None)
-    wins = sum(1 for p in pnls if p > 0)
-    day_pnls: list[tuple[str, float]] = []
-    years_present: set[int] = set()
-    for t in trades:
-        day = str(t.get("sell_exec_day") or t.get("year") or "")
-        day_pnls.append((day, float(t["pnl"])))
-        y = _job_year(t)
-        if y is not None:
-            years_present.add(int(y))
-    n_acc = 0
-    for y in years_present:
-        n_acc = max(n_acc, int(n_accounts_by_year.get(y) or 0))
-    if n_acc <= 0:
-        n_acc = len({(_job_year(t), _stock_of(t)) for t in trades}) or 1
+        sig = str(t.get("sell_signal") or "-")
+        by_sig[sig] += 1
+        day = str(t.get("sell_exec_day") or "")
+        if len(day) >= 4 and day[:4].isdigit():
+            by_year[int(day[:4])] += float(t.get("pnl") or 0)
     return {
-        "n_trades": n,
-        "win_rate": round(100.0 * wins / n, 2) if n else None,
-        "profit_factor": None if pf is None else round(float(pf), 3),
-        "max_dd": _max_dd(day_pnls, n_acc),
+        "sell": dict(by_sig),
+        "n_trail": int(by_sig.get("trail_stop", 0)),
+        "n_stop": int(by_sig.get("stop_loss", 0)),
+        "n_weekly": int(by_sig.get("weekly_bear", 0)),
+        "n_time": int(by_sig.get("time_force", 0)),
+        "by_year": {str(y): round(by_year[y], 2) for y in sorted(by_year)},
     }
-
-
-def _build_window(
-    year_rows: list[dict[str, Any]],
-    years: set[int],
-    trades: list[dict[str, Any]],
-    n_accounts_by_year: dict[int, int],
-) -> dict[str, Any]:
-    out = _agg_window(year_rows, years)
-    kpi = _trade_kpi(_trades_for_years(trades, years), n_accounts_by_year)
-    out.update(kpi)
-    out["calmar"] = _calmar(out.get("avg_ann_pct"), out.get("max_dd"))
-    return out
-
-
-def _job_year_rows(
-    trades: list[dict[str, Any]],
-    n_accounts_by_year: dict[int, int],
-    per_budget: float,
-) -> list[dict[str, Any]]:
-    """每年独立空仓；只保留任务年那一行（跨年卖出不另开邻年行）。"""
-    by_job: dict[int, list[dict[str, Any]]] = defaultdict(list)
-    for t in trades:
-        y = _job_year(t)
-        if y is not None:
-            by_job[y].append(t)
-    years = set(n_accounts_by_year) | set(by_job)
-    rows: list[dict[str, Any]] = []
-    bud_one = float(per_budget)
-    for y in sorted(years):
-        trades_y = by_job.get(y) or []
-        n_acc = int(n_accounts_by_year.get(y) or 0)
-        if n_acc <= 0:
-            n_acc = 1 if trades_y else 0
-        if n_acc <= 0:
-            continue
-        bud_y = float(n_acc) * bud_one
-        tbl = year_performance_table(trades_y, bud_y)
-        if tbl is None or tbl.empty:
-            continue
-        match = tbl.loc[tbl["year"].astype(str) == str(y)]
-        if match.empty:
-            continue
-        rec = match.iloc[0]
-        daily = build_daily_equity(trades_y, bud_y)
-        path = year_equity_path(daily, y, bud_y)
-        rets = simple_returns(path)
-        rows.append(
-            {
-                "year": int(y),
-                "n_open": int(rec["n_open"] or 0),
-                "year_ret_pct": None
-                if rec["year_ret_pct"] is None or rec["year_ret_pct"] != rec["year_ret_pct"]
-                else float(rec["year_ret_pct"]),
-                "year_pnl": float(rec["year_pnl"]),
-                "returns": [float(x) for x in rets.tolist()],
-            }
-        )
-    return rows
-
-
-def _stock_of(t: dict[str, Any]) -> str:
-    return str(t.get("stock") or "").strip().upper()
-
-
-def _norm_stock_set(raw: Any) -> set[str] | None:
-    if raw is None:
-        return None
-    if isinstance(raw, (set, frozenset)):
-        out = {str(x).strip().upper() for x in raw if str(x).strip()}
-        return out or None
-    if isinstance(raw, str):
-        parts = [p.strip().upper() for p in raw.replace(",", " ").split() if p.strip()]
-        return set(parts) or None
-    out = {str(x).strip().upper() for x in raw if str(x).strip()}
-    return out or None
-
-
-def _accounts_from_trades(trades: list[dict[str, Any]]) -> dict[int, int]:
-    n_accounts: dict[int, int] = defaultdict(int)
-    seen: set[tuple[int, str]] = set()
-    for t in trades:
-        stock = _stock_of(t)
-        y = _job_year(t)
-        if y is None:
-            y = _year_of(str(t.get("sell_exec_day") or t.get("buy_open_day") or ""))
-        if y is None:
-            continue
-        key = (int(y), stock or "?")
-        if key in seen:
-            continue
-        seen.add(key)
-        n_accounts[int(y)] += 1
-    return dict(n_accounts)
-
-
-def _pnl_in_years(trades: list[dict[str, Any]], years: set[int]) -> float:
-    total = 0.0
-    for t in trades:
-        day = str(t.get("sell_exec_day") or t.get("year") or "")
-        y = _year_of(day)
-        if y is not None and y in years:
-            total += float(t["pnl"])
-    return round(total, 2)
 
 
 def stats_from_trades(
     trades: list[dict[str, Any]],
-    n_accounts_by_year: dict[int, int],
+    n_accounts_by_year: dict[int, int] | None = None,
     *,
     tune_years: set[int] | None = None,
     check_years: set[int] | None = None,
@@ -297,38 +127,8 @@ def stats_from_trades(
     tune_stocks: Any = None,
     holdout_stocks: Any = None,
 ) -> dict[str, Any]:
-    tune_set = _norm_stock_set(tune_stocks)
-    holdout_set = _norm_stock_set(holdout_stocks)
-    if tune_set is not None:
-        primary = [t for t in trades if _stock_of(t) in tune_set]
-        holdout_trades = (
-            [t for t in trades if _stock_of(t) in holdout_set] if holdout_set else []
-        )
-        n_accounts_by_year = _accounts_from_trades(primary)
-    else:
-        primary = trades
-        holdout_trades = (
-            [t for t in trades if _stock_of(t) in holdout_set] if holdout_set else []
-        )
-
-    pnls = [float(t["pnl"]) for t in primary]
-    n = len(pnls)
-    gp = sum(p for p in pnls if p > 0)
-    gl = abs(sum(p for p in pnls if p < 0))
-    pf = (gp / gl) if gl > 1e-12 else (99.0 if gp > 0 else None)
-    wins = sum(1 for p in pnls if p > 0)
-    by_year: dict[int, float] = defaultdict(float)
-    by_sig: dict[str, int] = defaultdict(int)
-    day_pnls: list[tuple[str, float]] = []
-    for t in primary:
-        sig = str(t.get("sell_signal") or "-")
-        by_sig[sig] += 1
-        day = str(t.get("sell_exec_day") or t.get("year") or "")
-        y = _year_of(day)
-        pnl = float(t["pnl"])
-        if y is not None:
-            by_year[y] += pnl
-        day_pnls.append((day, pnl))
+    """单账户组合窗 KPI。n_accounts_by_year / tune_stocks 仅兼容旧调用，不再按独立账户加总。"""
+    del n_accounts_by_year, tune_stocks, holdout_stocks
     win = fill_year_windows(None)
     tune = set(tune_years) if tune_years is not None else year_range_set(
         win["tune_start"], win["tune_end"]
@@ -339,49 +139,26 @@ def stats_from_trades(
     run = set(run_years) if run_years is not None else year_range_set(
         win["year_start"], win["year_end"]
     )
-    is_pnl = sum(by_year[y] for y in by_year if y in tune)
-    oos_pnl = sum(by_year[y] for y in by_year if y in check)
-    n_acc = max(n_accounts_by_year.values()) if n_accounts_by_year else 0
     budget = float(BUDGET if per_budget is None else per_budget)
-    year_rows = _job_year_rows(primary, n_accounts_by_year, budget)
-    corner = _pnl_in_years(holdout_trades, check)
-    asset_oos = _pnl_in_years(holdout_trades, tune)
-    out: dict[str, Any] = {
-        "n_trades": n,
-        "sum_pnl": round(sum(pnls), 2),
-        "win_rate": round(100.0 * wins / n, 2) if n else None,
-        "profit_factor": None if pf is None else round(float(pf), 3),
-        "is_pnl": round(is_pnl, 2),
-        "oos_pnl": round(oos_pnl, 2),
-        "max_dd": _max_dd(day_pnls, n_acc),
-        "sell": dict(by_sig),
-        "n_trail": int(by_sig.get("trail_stop", 0)),
-        "n_stop": int(by_sig.get("stop_loss", 0)),
-        "n_weekly": int(by_sig.get("weekly_bear", 0)),
-        "n_time": int(by_sig.get("time_force", 0)),
-        "by_year": {str(y): round(by_year[y], 2) for y in sorted(by_year)},
-        "n_accounts_by_year": {
-            str(y): int(n_accounts_by_year[y]) for y in sorted(n_accounts_by_year)
-        },
-        "per_budget": budget,
-        "windows": {
-            "all": _build_window(year_rows, run, primary, n_accounts_by_year),
-            "tune": _build_window(year_rows, tune, primary, n_accounts_by_year),
-            "check": _build_window(year_rows, check, primary, n_accounts_by_year),
-        },
+    windows = {
+        "all": window_kpi_from_trades(trades, run, budget=budget),
+        "tune": window_kpi_from_trades(trades, tune, budget=budget),
+        "check": window_kpi_from_trades(trades, check, budget=budget),
     }
-    if holdout_set is not None:
-        out["corner_oos_pnl"] = corner
-        out["asset_oos_pnl"] = asset_oos
-        out["holdout_n_trades"] = len(holdout_trades)
-        out["holdout_has_coverage"] = bool(holdout_trades)
-        hold_acc = _accounts_from_trades(holdout_trades)
-        hold_year_rows = _job_year_rows(holdout_trades, hold_acc, budget)
-        out["holdout_windows"] = {
-            "all": _build_window(hold_year_rows, run, holdout_trades, hold_acc),
-            "tune": _build_window(hold_year_rows, tune, holdout_trades, hold_acc),
-            "check": _build_window(hold_year_rows, check, holdout_trades, hold_acc),
-        }
+    extra = _sell_counts(trades)
+    all_w = windows["all"]
+    out: dict[str, Any] = {
+        "n_trades": int(all_w.get("n_trades") or 0),
+        "sum_pnl": all_w.get("avg_year_pnl"),
+        "win_rate": all_w.get("win_rate"),
+        "profit_factor": all_w.get("profit_factor"),
+        "is_pnl": windows["tune"].get("avg_year_pnl"),
+        "oos_pnl": windows["check"].get("avg_year_pnl"),
+        "max_dd": all_w.get("max_dd"),
+        "per_budget": budget,
+        "windows": windows,
+    }
+    out.update(extra)
     return out
 
 
@@ -447,36 +224,40 @@ def summarize_cell(
     tune_stocks: Any = None,
     holdout_stocks: Any = None,
 ) -> dict[str, Any]:
+    del tune_stocks
     meta = _load_cell_meta(cell_dir)
     samples: dict[str, Any] = {}
+    space_on = bool(holdout_stocks)
     for name in SAMPLES:
-        logs = _list_logs(cell_dir / name)
-        trades, n_acc, n_ok, n_fail, per_budget = parse_logs(logs)
+        primary_logs, holdout_logs = _split_walk_logs(cell_dir / name)
+        _assert_not_legacy_logs(primary_logs + holdout_logs)
+        trades, n_ok, n_fail, budget = parse_walk_logs(primary_logs)
         st = stats_from_trades(
             trades,
-            n_acc,
             tune_years=tune_years,
             check_years=check_years,
             run_years=run_years,
-            per_budget=per_budget,
-            tune_stocks=tune_stocks,
-            holdout_stocks=holdout_stocks,
+            per_budget=budget,
         )
         st["n_logs_ok"] = n_ok
         st["n_logs_fail"] = n_fail
-        if holdout_stocks:
-            hold_set = _norm_stock_set(holdout_stocks) or set()
-            hold_logs = 0
-            for path in logs:
-                m = RE_LOG.match(path.name)
-                if not m:
-                    continue
-                stock = "%s.%s" % (m.group(1), m.group(2).upper())
-                if stock in hold_set:
-                    hold_logs += 1
-            st["holdout_n_logs"] = hold_logs
-            if hold_logs <= 0:
-                st["holdout_has_coverage"] = False
+        if space_on:
+            h_trades, h_ok, h_fail, h_bud = parse_walk_logs(holdout_logs)
+            hold = stats_from_trades(
+                h_trades,
+                tune_years=tune_years,
+                check_years=check_years,
+                run_years=run_years,
+                per_budget=h_bud,
+            )
+            st["holdout_windows"] = hold.get("windows") or {}
+            st["holdout_n_trades"] = int(hold.get("n_trades") or 0)
+            st["holdout_n_logs"] = h_ok
+            st["holdout_has_coverage"] = bool(h_ok > 0)
+            st["corner_oos_pnl"] = hold.get("oos_pnl")
+            st["asset_oos_pnl"] = hold.get("is_pnl")
+            st["n_logs_ok"] = n_ok + h_ok
+            st["n_logs_fail"] = n_fail + h_fail
         samples[name] = st
     rec = {
         "id": str(meta.get("id") or cell_dir.name),
@@ -491,13 +272,11 @@ def summarize_cell(
     return rec
 
 
-def parse_logs(log_paths: list[Path]) -> tuple[list[dict[str, Any]], dict[int, int], int, int, float]:
+def parse_walk_logs(log_paths: list[Path]) -> tuple[list[dict[str, Any]], int, int, float]:
     trades: list[dict[str, Any]] = []
-    n_accounts: dict[int, int] = defaultdict(int)
     n_ok = 0
     n_fail = 0
-    seen_acc: set[tuple[int, str]] = set()
-    per_budget: float | None = None
+    budget = float(BUDGET)
     for path in log_paths:
         try:
             _banner, raw = parse_local_bt_log(path)
@@ -505,36 +284,45 @@ def parse_logs(log_paths: list[Path]) -> tuple[list[dict[str, Any]], dict[int, i
             n_fail += 1
             continue
         n_ok += 1
-        bud = parse_trade_budget(path, default=0.0)
-        if per_budget is None and bud > 0:
-            per_budget = bud
-        m = RE_LOG.match(path.name)
-        stock = ""
-        year = ""
-        ma = ""
-        if m:
-            stock = "%s.%s" % (m.group(1), m.group(2).upper())
-            year = m.group(3)
-            ma = m.group(4).upper()
-        y_acc = int(year) if year.isdigit() else None
-        if y_acc is not None:
-            key = (y_acc, stock or path.name)
-            if key not in seen_acc:
-                seen_acc.add(key)
-                n_accounts[y_acc] += 1
+        budget = _walk_budget(path, fallback=budget)
         for t in raw:
-            row = dict(t)
-            row["stock"] = stock
-            row["year"] = year
-            row["ma"] = ma
-            trades.append(row)
-    return trades, dict(n_accounts), n_ok, n_fail, float(per_budget or BUDGET)
+            trades.append(dict(t))
+    return trades, n_ok, n_fail, float(budget)
+
+
+def parse_logs(log_paths: list[Path]) -> tuple[list[dict[str, Any]], dict[int, int], int, int, float]:
+    """兼容旧测试入口；组合 walk 不再计 n_accounts。"""
+    _assert_not_legacy_logs(log_paths)
+    trades, n_ok, n_fail, budget = parse_walk_logs(log_paths)
+    return trades, {}, n_ok, n_fail, budget
+
+
+def _is_holdout_log(path: Path) -> bool:
+    if path.name.lower().startswith("holdout_"):
+        return True
+    return "holdout" in [str(p).lower() for p in path.parts]
+
+
+def _split_walk_logs(sample_dir: Path) -> tuple[list[Path], list[Path]]:
+    logs = _list_logs(sample_dir)
+    primary: list[Path] = []
+    holdout: list[Path] = []
+    for path in logs:
+        if _is_holdout_log(path):
+            holdout.append(path)
+        else:
+            primary.append(path)
+    return primary, holdout
 
 
 def _list_logs(sample_dir: Path) -> list[Path]:
     if not sample_dir.is_dir():
         return []
-    return sorted(p for p in sample_dir.rglob("local_bt_*.txt") if p.is_file())
+    return sorted(
+        p
+        for p in sample_dir.rglob("*local_bt_book*.txt")
+        if p.is_file()
+    )
 
 
 def _load_cell_meta(cell_dir: Path) -> dict[str, Any]:
@@ -949,6 +737,34 @@ def _load_sweep_windows(root: Path) -> dict[str, int]:
     return fill_year_windows(None)
 
 
+def _has_book_walk_logs(root: Path) -> bool:
+    return any(p.is_file() for p in root.rglob("*local_bt_book*.txt"))
+
+
+def legacy_sweep_reason(root: Path) -> str | None:
+    """旧 stock×年 产物则返回须重跑文案。"""
+    freeze_p = root / "freeze.json"
+    if freeze_p.is_file():
+        try:
+            data = json.loads(freeze_p.read_text(encoding="utf-8"))
+        except Exception:
+            data = None
+        if isinstance(data, dict):
+            book = data.get("book")
+            if isinstance(book, list) and book and isinstance(book[0], dict):
+                row = book[0]
+                if "year" in row and "basket" not in row:
+                    return "该 sweep 是旧 stock×年 口径，须重跑网格后才能汇总。"
+    if _has_book_walk_logs(root):
+        return None
+    logs = list(root.rglob("local_bt_*.txt"))
+    try:
+        _assert_not_legacy_logs(logs)
+    except GridSummarizeError as e:
+        return str(e)
+    return None
+
+
 def summarize_sweep(
     sweep_dir: str | Path,
     gate: dict[str, Any] | None = None,
@@ -957,6 +773,9 @@ def summarize_sweep(
     root = Path(sweep_dir)
     if not root.is_dir():
         raise FileNotFoundError("sweep dir not found: %s" % root)
+    why = legacy_sweep_reason(root)
+    if why:
+        raise GridSummarizeError(why)
     win = _load_sweep_windows(root)
     tune = year_range_set(win["tune_start"], win["tune_end"])
     check = year_range_set(win["check_start"], win["check_end"])

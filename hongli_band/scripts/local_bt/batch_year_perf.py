@@ -104,9 +104,7 @@ def _iter_grid_sample_details(cell_dir: str | Path, sample: str) -> list[Path]:
     root = Path(cell_dir) / str(sample)
     if not root.is_dir():
         return []
-    return sorted(
-        p for p in root.rglob("*_操作明细.csv") if GRID_DETAIL_NAME_RE.match(p.name)
-    )
+    return sorted(p for p in root.rglob("*_操作明细.csv") if p.is_file())
 
 
 def list_grid_samples_with_details(cell_dir: str | Path) -> list[str]:
@@ -160,6 +158,85 @@ def rows_from_grid_sample_dir(
             }
         )
     return rows
+
+
+def _is_holdout_path(path: Path) -> bool:
+    return "holdout" in [str(p).lower() for p in path.parts] or path.name.lower().startswith(
+        "holdout_"
+    )
+
+
+def portfolio_year_perf_from_grid_sample(
+    cell_dir: str | Path,
+    sample: str,
+    *,
+    fallback_budget: float = 100000.0,
+    cache: dict | None = None,
+) -> dict[str, Any]:
+    """组合 walk 明细 → 连续账户分年绩效（非多票独立账户加总）。"""
+    from analyze import parse_budget_from_log, sibling_log_path  # noqa: WPS433
+
+    empty = {
+        "ok": False,
+        "reason": "该格无操作明细",
+        "table": pd.DataFrame(),
+        "trades": [],
+        "trades_by_year": {},
+        "budget": 0.0,
+        "budget_by_year": {},
+        "n_ok": 0,
+        "n_buy": 0,
+        "sum_pnl": 0.0,
+        "pos_ratio": None,
+        "split": "range",
+    }
+    try:
+        fb = float(fallback_budget)
+    except (TypeError, ValueError):
+        fb = 100000.0
+    if fb <= 0:
+        fb = 100000.0
+    details = [
+        p for p in _iter_grid_sample_details(cell_dir, sample) if not _is_holdout_path(p)
+    ]
+    if not details:
+        return empty
+    trades: list[dict[str, Any]] = []
+    budget = fb
+    for path in details:
+        trades.extend(parse_detail_trades(path, cache=cache))
+        log = sibling_log_path(path)
+        if log:
+            budget = parse_budget_from_log(log, default=budget)
+    if not trades:
+        empty["reason"] = "无成交轮次，无法按年汇总。"
+        empty["n_ok"] = len(details)
+        empty["budget"] = float(budget)
+        return empty
+    tbl = year_performance_table(trades, float(budget))
+    by_year: dict[str, list[dict[str, Any]]] = {}
+    for t in trades:
+        day = compact_day(str(t.get("sell_exec_day") or t.get("buy_open_day") or ""))
+        y = day[:4] if len(day) >= 4 else "?"
+        by_year.setdefault(y, []).append(t)
+    n_buy = len(trades)
+    sum_pnl = _sum_trade_pnl(trades)
+    return {
+        "ok": True,
+        "reason": "",
+        "table": tbl if tbl is not None else pd.DataFrame(),
+        "trades": trades,
+        "trades_by_year": by_year,
+        "budget": float(budget),
+        "budget_by_year": {
+            str(y): float(budget) for y in (tbl["year"].astype(str).tolist() if tbl is not None and not tbl.empty else [])
+        },
+        "n_ok": 1,
+        "n_buy": n_buy,
+        "sum_pnl": round(sum_pnl, 2),
+        "pos_ratio": (1.0 if sum_pnl > 0 else 0.0) if n_buy else None,
+        "split": "range",
+    }
 
 
 def _filter_perf_rows(

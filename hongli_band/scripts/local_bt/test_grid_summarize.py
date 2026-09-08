@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -19,9 +20,16 @@ if str(SKILL) not in sys.path:
     sys.path.insert(0, str(SKILL))
 
 from grid_gate import default_gate, fill_gate  # noqa: E402
-from summarize import pick_recommend, stats_from_trades, summarize_sweep  # noqa: E402
+from summarize import (  # noqa: E402
+    GridSummarizeError,
+    legacy_sweep_reason,
+    pick_recommend,
+    stats_from_trades,
+    summarize_cell,
+    summarize_sweep,
+)
+from robust_summarize import window_kpi_from_trades  # noqa: E402
 from equity_yearly import (  # noqa: E402
-    _sharpe_daily,
     build_daily_equity,
     sharpe_from_returns,
     simple_returns,
@@ -113,7 +121,7 @@ class GridSummarizeTest(unittest.TestCase):
             {
                 "year": "2024",
                 "buy_open_day": "20240701",
-                "sell_exec_day": "20240901",
+                "sell_exec_day": "20240902",
                 "pnl": -5000.0,
                 "sell_signal": "stop_loss",
             },
@@ -336,29 +344,76 @@ class GridSummarizeTest(unittest.TestCase):
         self.assertEqual(rec["id"], "less_keys")
         self.assertEqual(rec["by_kind"]["other"]["id"], "more_keys")
 
-    def test_stats_tune_excludes_holdout_pnl(self) -> None:
-        trades = [
-            {"pnl": 100.0, "sell_exec_day": "20180615", "sell_signal": "trail_stop", "stock": "A.SH"},
-            {"pnl": 999.0, "sell_exec_day": "20180615", "sell_signal": "trail_stop", "stock": "B.SH"},
-            {"pnl": -20.0, "sell_exec_day": "20240615", "sell_signal": "time_force", "stock": "A.SH"},
-            {"pnl": -500.0, "sell_exec_day": "20240615", "sell_signal": "time_force", "stock": "B.SH"},
-        ]
-        st = stats_from_trades(
-            trades,
-            {2018: 2, 2024: 2},
-            tune_years={2018},
-            check_years={2024},
-            tune_stocks=["A.SH"],
-            holdout_stocks=["B.SH"],
-        )
-        self.assertEqual(st["sum_pnl"], 80.0)
-        self.assertEqual(st["is_pnl"], 100.0)
-        self.assertEqual(st["oos_pnl"], -20.0)
-        self.assertEqual(st["corner_oos_pnl"], -500.0)
-        self.assertTrue(st["holdout_has_coverage"])
-        self.assertIn("holdout_windows", st)
-        self.assertEqual(st["holdout_windows"]["tune"]["n_trades"], 1)
-        self.assertEqual(st["holdout_windows"]["check"]["n_trades"], 1)
+    def test_stats_tune_and_holdout_are_separate_walks(self) -> None:
+        """空间隔离不再靠 stock 过滤同一份成交，而是两段 wallet。"""
+        with tempfile.TemporaryDirectory() as td:
+            cell = Path(td)
+            (cell / "cell_meta.json").write_text(
+                json.dumps({"id": "base", "label": "base", "kind": "base", "overrides": {}}),
+                encoding="utf-8",
+            )
+            tune_dir = cell / "book" / "front_ratio" / "tune"
+            hold_dir = cell / "book" / "front_ratio" / "holdout"
+            tune_dir.mkdir(parents=True)
+            hold_dir.mkdir(parents=True)
+            tune_log = tune_dir / "tune_local_bt_book_fixed_20180101_20261231_kabc.txt"
+            hold_log = hold_dir / "holdout_local_bt_book_fixed_20180101_20261231_kabc.txt"
+            tune_log.write_text("wallet_cash_start=100000.0\n", encoding="utf-8")
+            hold_log.write_text("wallet_cash_start=100000.0\n", encoding="utf-8")
+            tune_trades = [
+                {
+                    "pnl": 100.0,
+                    "buy_open_day": "20180102",
+                    "sell_exec_day": "20180615",
+                    "sell_signal": "trail_stop",
+                    "stock": "A.SH",
+                },
+                {
+                    "pnl": -20.0,
+                    "buy_open_day": "20240102",
+                    "sell_exec_day": "20240614",
+                    "sell_signal": "time_force",
+                    "stock": "A.SH",
+                },
+            ]
+            hold_trades = [
+                {
+                    "pnl": 999.0,
+                    "buy_open_day": "20180102",
+                    "sell_exec_day": "20180615",
+                    "sell_signal": "trail_stop",
+                    "stock": "B.SH",
+                },
+                {
+                    "pnl": -500.0,
+                    "buy_open_day": "20240102",
+                    "sell_exec_day": "20240614",
+                    "sell_signal": "time_force",
+                    "stock": "B.SH",
+                },
+            ]
+
+            def _parse(path):
+                p = Path(path)
+                if "holdout" in p.name or "holdout" in [str(x).lower() for x in p.parts]:
+                    return {}, hold_trades
+                return {}, tune_trades
+
+            with patch("summarize.parse_local_bt_log", side_effect=_parse):
+                rec = summarize_cell(
+                    cell,
+                    tune_years={2018},
+                    check_years={2024},
+                    run_years={2018, 2024},
+                    holdout_stocks=["B.SH"],
+                )
+            book = rec["samples"]["book"]
+            self.assertTrue(book["holdout_has_coverage"])
+            self.assertEqual(book["windows"]["tune"]["n_trades"], 1)
+            self.assertEqual(book["windows"]["check"]["n_trades"], 1)
+            self.assertEqual(book["holdout_windows"]["tune"]["n_trades"], 1)
+            self.assertEqual(book["holdout_windows"]["check"]["n_trades"], 1)
+            self.assertNotEqual(book["oos_pnl"], book["corner_oos_pnl"])
 
     def test_pick_recommend_ignores_winner_sample(self) -> None:
         gate = _gate_off_absolute(relative_to_base=False, calmar_same_sign=False)
@@ -487,23 +542,47 @@ class GridSummarizeTest(unittest.TestCase):
             out = summarize_sweep(root, cell_ids=["base", "vpn15_vpc1"])
             self.assertEqual([c["id"] for c in out["cells"]], ["base", "vpn15_vpc1"])
 
-    def test_stats_from_trades_uses_year_sets(self) -> None:
+    def test_stats_from_trades_account_pnl_matches_window_kpi(self) -> None:
         trades = [
-            {"pnl": 100.0, "sell_exec_day": "20180615", "sell_signal": "trail_stop"},
-            {"pnl": 50.0, "sell_exec_day": "20210615", "sell_signal": "stop_loss"},
-            {"pnl": -20.0, "sell_exec_day": "20240615", "sell_signal": "time_force"},
+            {
+                "pnl": 100.0,
+                "buy_open_day": "20180102",
+                "sell_exec_day": "20180615",
+                "sell_signal": "trail_stop",
+            },
+            {
+                "pnl": 50.0,
+                "buy_open_day": "20210104",
+                "sell_exec_day": "20210615",
+                "sell_signal": "stop_loss",
+            },
+            {
+                "pnl": -20.0,
+                "buy_open_day": "20240102",
+                "sell_exec_day": "20240615",
+                "sell_signal": "time_force",
+            },
         ]
+        tune = {2018, 2019, 2020}
+        check = {2023, 2024}
+        run = {2018, 2019, 2020, 2021, 2022, 2023, 2024}
         st = stats_from_trades(
             trades,
-            {2018: 1, 2021: 1, 2024: 1},
-            tune_years={2018, 2019, 2020},
-            check_years={2023, 2024},
+            tune_years=tune,
+            check_years=check,
+            run_years=run,
+            per_budget=100000.0,
         )
-        self.assertEqual(st["is_pnl"], 100.0)
-        self.assertEqual(st["oos_pnl"], -20.0)
-        self.assertEqual(st["sum_pnl"], 130.0)
+        all_w = window_kpi_from_trades(trades, run, budget=100000.0)
+        tune_w = window_kpi_from_trades(trades, tune, budget=100000.0)
+        chk_w = window_kpi_from_trades(trades, check, budget=100000.0)
+        self.assertEqual(st["sum_pnl"], all_w["avg_year_pnl"])
+        self.assertEqual(st["is_pnl"], tune_w["avg_year_pnl"])
+        self.assertEqual(st["oos_pnl"], chk_w["avg_year_pnl"])
+        self.assertEqual(st["windows"]["tune"]["n_trades"], 1)
+        self.assertEqual(st["windows"]["check"]["n_trades"], 1)
 
-    def test_windows_cross_year_sell_stays_on_job_year(self) -> None:
+    def test_windows_cross_year_sell_counts_on_sell_year(self) -> None:
         trades = [
             {
                 "year": "2018",
@@ -515,7 +594,6 @@ class GridSummarizeTest(unittest.TestCase):
         ]
         st = stats_from_trades(
             trades,
-            {2018: 1},
             tune_years={2018},
             check_years={2019},
             run_years={2018, 2019},
@@ -523,10 +601,10 @@ class GridSummarizeTest(unittest.TestCase):
         )
         self.assertEqual(st["windows"]["tune"]["n_open"], 1)
         self.assertEqual(st["windows"]["check"]["n_open"], 0)
-        self.assertEqual(st["windows"]["tune"]["n_trades"], 1)
-        self.assertEqual(st["windows"]["check"]["n_trades"], 0)
-        self.assertEqual(st["is_pnl"], 0.0)
-        self.assertEqual(st["oos_pnl"], 500.0)
+        self.assertEqual(st["windows"]["tune"]["n_trades"], 0)
+        self.assertEqual(st["windows"]["check"]["n_trades"], 1)
+        self.assertEqual(st["oos_pnl"], st["windows"]["check"]["avg_year_pnl"])
+        self.assertEqual(st["is_pnl"], st["windows"]["tune"]["avg_year_pnl"])
 
     def test_windows_empty_check_sharpe_none(self) -> None:
         trades = [
@@ -553,7 +631,7 @@ class GridSummarizeTest(unittest.TestCase):
         self.assertIsNone(chk["calmar"])
         self.assertIsNone(chk["avg_ann_pct"])
 
-    def test_windows_sharpe_concat_returns_not_stitched_equity(self) -> None:
+    def test_windows_path_sharpe_geom_ann_and_check_starts_after_tune(self) -> None:
         t18 = {
             "year": "2018",
             "buy_open_day": "20180102",
@@ -568,27 +646,103 @@ class GridSummarizeTest(unittest.TestCase):
             "pnl": -15000.0,
             "sell_signal": "stop_loss",
         }
+        trades = [t18, t19]
         st = stats_from_trades(
-            [t18, t19],
-            {2018: 1, 2019: 1},
+            trades,
             tune_years={2018},
             check_years={2019},
             run_years={2018, 2019},
             per_budget=100000.0,
         )
+        daily = build_daily_equity(trades, 100000.0)
+        rets = daily["equity"].pct_change().dropna()
+        path_sharpe = sharpe_from_returns(rets.tolist())
+        self.assertAlmostEqual(st["windows"]["all"]["sharpe"], path_sharpe, places=6)
         p18 = year_equity_path(build_daily_equity([t18], 100000.0), 2018, 100000.0)
         p19 = year_equity_path(build_daily_equity([t19], 100000.0), 2019, 100000.0)
-        stitched = _sharpe_daily(pd.concat([p18, p19], ignore_index=True))
         concat_rets = list(simple_returns(p18)) + list(simple_returns(p19))
         concat_sharpe = sharpe_from_returns(concat_rets)
-        self.assertIsNotNone(concat_sharpe)
-        self.assertNotEqual(concat_sharpe, stitched)
-        self.assertEqual(st["windows"]["all"]["sharpe"], concat_sharpe)
+        self.assertNotEqual(st["windows"]["all"]["sharpe"], concat_sharpe)
+        eq0 = float(daily["equity"].iloc[0])
+        eq1 = float(daily["equity"].iloc[-1])
+        geom = (eq1 / eq0) ** 0.5 - 1.0
+        self.assertAlmostEqual(st["windows"]["all"]["avg_ann_pct"], 100.0 * geom, places=2)
+        self.assertEqual(st["windows"]["all"]["avg_year_pnl"], round(eq1 - eq0, 2))
         self.assertEqual(st["windows"]["tune"]["n_open"], 1)
         self.assertEqual(st["windows"]["check"]["n_open"], 1)
-        self.assertAlmostEqual(st["windows"]["all"]["avg_year_pnl"], (20000.0 - 15000.0) / 2.0, places=2)
-        self.assertAlmostEqual(st["windows"]["tune"]["avg_ann_pct"], 20.0, places=2)
-        self.assertAlmostEqual(st["windows"]["check"]["avg_ann_pct"], -15.0, places=2)
+        mask19 = daily["date"].map(lambda d: int(pd.Timestamp(d).year) == 2019)
+        sub19 = daily.loc[mask19]
+        e0 = float(sub19["equity"].iloc[0])
+        e1 = float(sub19["equity"].iloc[-1])
+        self.assertGreater(e0, 100000.0)
+        self.assertAlmostEqual(st["windows"]["check"]["avg_year_pnl"], round(e1 - e0, 2), places=2)
+        dd = st["windows"]["all"]["max_dd"]
+        self.assertIsNotNone(dd)
+        self.assertLess(dd, 0)
+        peak = daily["equity"].cummax()
+        path_dd = float(((daily["equity"] - peak) / peak).min())
+        self.assertAlmostEqual(dd, path_dd, places=5)
+
+    def test_legacy_stock_year_logs_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cell = root / "base" / "book" / "front_ratio"
+            cell.mkdir(parents=True)
+            (cell / "local_bt_600000_SH_2018_EMA.txt").write_text("x\n", encoding="utf-8")
+            why = legacy_sweep_reason(root)
+            self.assertIsNotNone(why)
+            self.assertIn("重跑", why or "")
+            with self.assertRaises(GridSummarizeError):
+                summarize_sweep(root)
+
+    def test_legacy_leftover_ignored_when_book_walk_present(self) -> None:
+        from summarize import _list_logs  # noqa: WPS433
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "freeze.json").write_text(
+                json.dumps(
+                    {
+                        "book": [
+                            {
+                                "basket": "book",
+                                "start": "20180101",
+                                "end": "20261231",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            d = root / "base" / "book" / "front_ratio"
+            d.mkdir(parents=True)
+            (d / "local_bt_600000_SH_2018_EMA.txt").write_text("old\n", encoding="utf-8")
+            book_log = d / "local_bt_book_fixed_20180101_20261231_kabc.txt"
+            book_log.write_text("new\n", encoding="utf-8")
+            self.assertIsNone(legacy_sweep_reason(root))
+            self.assertEqual([p.name for p in _list_logs(d)], [book_log.name])
+
+    def test_legacy_freeze_year_jobs_still_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "freeze.json").write_text(
+                json.dumps(
+                    {
+                        "book": [
+                            {
+                                "stock": "600000.SH",
+                                "year": "2018",
+                                "start": "20180101",
+                                "end": "20181231",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            why = legacy_sweep_reason(root)
+            self.assertIsNotNone(why)
+            self.assertIn("stock", why or "")
 
 
 if __name__ == "__main__":

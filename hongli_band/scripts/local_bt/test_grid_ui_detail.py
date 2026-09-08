@@ -27,7 +27,7 @@ class GridUiDetailRowsTest(unittest.TestCase):
             self.assertEqual(row["id"], "sl06")
             self.assertEqual(row["label"], "止损 6%")
             self.assertIsNone(row["夏普"])
-            self.assertIsNone(row["开仓"])
+            self.assertIsNone(row["笔数"])
             self.assertIsNone(row["回撤%"])
 
     def test_drawdown_abs_pct_and_metrics(self) -> None:
@@ -51,8 +51,9 @@ class GridUiDetailRowsTest(unittest.TestCase):
         self.assertEqual(len(rows), 3)
         self.assertAlmostEqual(rows[0]["回撤%"], 12.34)
         self.assertEqual(rows[0]["夏普"], 1.23456)
-        self.assertEqual(rows[0]["开仓"], 4)
         self.assertEqual(rows[0]["笔数"], 3)
+        self.assertEqual(rows[0]["几何年化%"], 12.3)
+        self.assertEqual(rows[0]["账户盈亏"], 100.0)
         self.assertAlmostEqual(rows[1]["回撤%"], 8.0)
         self.assertEqual(rows[1]["夏普"], 0.5)
         self.assertIsNone(rows[2]["夏普"])
@@ -79,7 +80,7 @@ class GridUiDetailToneTest(unittest.TestCase):
     def test_missing_and_non_tone_cols(self) -> None:
         gate = {"oos_sharpe": {"enabled": True, "min": 0.8}}
         self.assertIsNone(_detail_metric_tone("夏普", None, gate))
-        self.assertIsNone(_detail_metric_tone("开仓", 10, gate))
+        self.assertIsNone(_detail_metric_tone("笔数", 10, gate))
         self.assertIsNone(_detail_metric_tone("回撤%", 2.5, gate))
 
     def test_sharpe_enabled_gate(self) -> None:
@@ -103,10 +104,10 @@ class GridUiDetailToneTest(unittest.TestCase):
         self.assertIsNone(_detail_metric_tone("卡玛", -0.01, off))
 
     def test_ann_and_pnl_vs_zero(self) -> None:
-        self.assertEqual(_detail_metric_tone("平均年化%", 0.0, {}), "pass")
-        self.assertIsNone(_detail_metric_tone("平均年化%", -0.67, {}))
-        self.assertEqual(_detail_metric_tone("平均盈亏", 1.0, None), "pass")
-        self.assertIsNone(_detail_metric_tone("平均盈亏", -3593.38, None))
+        self.assertEqual(_detail_metric_tone("几何年化%", 0.0, {}), "pass")
+        self.assertIsNone(_detail_metric_tone("几何年化%", -0.67, {}))
+        self.assertEqual(_detail_metric_tone("账户盈亏", 1.0, None), "pass")
+        self.assertIsNone(_detail_metric_tone("账户盈亏", -3593.38, None))
 
     def test_win_rate_and_profit_factor(self) -> None:
         wr = {"win_rate": {"enabled": True, "min": 45.0}}

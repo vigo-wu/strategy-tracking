@@ -36,10 +36,10 @@ MAE 为何不可信、本轮数字：需要时再读 [reference-lessons.md](refe
 2. 格子 = **扫描取值笛卡尔积**，不自动插入现行档。扫描值全等于 config 的格打 `is_current` / `★现行`。不强制 `id=base`。
 3. 关联常量不顺手改：动 TRAIL 起步不改 `SCALE_ARM` / `TIME_FORCE_MIN_RET`，除非格子里显式写了。
 4. `TIME_FORCE_BARS<=0` 关闭整条 time_force；`MIN_RET=0` 只关掉让路，不是关闭 time_force。
-5. **主样本**：默认=跟踪池 `BOOK_STOCKS` × spec 回测年（均线/复权锁 config）。`asset_split.mode=random_from_csv` 时=从 `tools/csv/none` 抽取的 **调参∪盲测** 名单（均线/复权锁 compare_div）。不要用 `local_bt_ma_compare.csv` 冻结 winner。
+5. **主样本**：默认=跟踪池 `BOOK_STOCKS` 一段组合连续回放（`year_start0101`–`year_end1231`，单账户、最多 3 笔、`CASH_RATIO×`权益复利）。`asset_split.mode=random_from_csv` 时调参篮 / 盲测篮 **各跑一段**（两套钱包，禁止 `tune∪holdout` 同一 book）。不要用 `local_bt_ma_compare.csv` 冻结 winner。旧 `report/grid/<sweep>/` 的 stock×年 log **须重跑**，禁止只汇总。
 6. **时空双重隔离**：时间用 `tune_*` / `check_*`；空间用 `tune_stocks` / `holdout_stocks`（盲测只否决、不参与格子比大小）。`mode=off` 时无空间门。
 7. 每格写入主题 `report/grid/<sweep>/<cell>/`，**不得覆盖** `report/front_ratio/` 等基线 log。
-8. 格子之间**串行**；格内可用现有 ProcessPool。
+8. 格子之间**串行**；格内按 walk 并行（无空间隔离 1 段；空间隔离 2 段；再开 `--include-sma-ema` 则 ×3，最多 6 段）。进度按 walk 计，不要按「标的×年」估 ETA。
 9. 开跑后校验 init 指纹：`stop=` / `time_force_bars=`（扫 TRAIL 时还要 `trail_arm=`）与该格一致，不一致则停。
 10. **默认不改 `config.py`、不 deploy**。用户说「按建议修改」再改片段并部署。
 
@@ -48,6 +48,7 @@ MAE 为何不可信、本轮数字：需要时再读 [reference-lessons.md](refe
 过门 = **侧栏/spec `gate` 已启用的绝对合格线** ∧（可选）相对现行格不劣 ∧（可选）调参/验收卡玛同向。无 `is_current` / `id=base` 格时相对门与同向跳过。
 默认关闭：卡玛绝对线、笔数、卡玛同向、相对现行。默认开启：回撤、夏普、胜率、盈亏比。
 指标一律用窗内 `windows.check.*`（空间隔离时盲测用 `holdout_windows.check.*` 复用同一 gate 否决）；禁止用样本级整段 `max_dd`/`win_rate`。
+口径：几何年化 \((E_{end}/E_{start})^{1/n}-1\)（空年也算）、路径回撤、卡玛 = 几何年化 / `|max_dd|`、账户盈亏 \(E_{end}-E_{start}\)。权益 = 预算 + 已实现盈亏台阶（与实盘评估相同，不承诺全日盯市）。验收窗接在调参权益之后（同一 walk 切开）。过门数字默认仍是 1.5 / 10% / 0.8，但抢槽后通过率会变，须用新跑的 ★现行格看线。
 通过者按验收期**卡玛**排序（接近则少改与 config 的差异键）；盈亏仅展示。全不过则无推荐（不要写「最优」或「维持现行」）。侧栏可逐项启用/改阈值；「只汇总」传入当前侧栏 gate 重算推荐（不回写 widget 键）。
 
 Agent 输出：过门推荐一句。不要把 MAE 数字写进推荐。
@@ -57,7 +58,7 @@ Agent 输出：过门推荐一句。不要把 MAE 数字写进推荐。
 ```
 进度:
 - [ ] 1. 扫描叉乘格子 JSON（≤8；等于 config 则 ★现行）
-- [ ] 2. 主样本=BOOK_STOCKS 或 asset_split 抽取名单；spec 含回测年 / 调参期 / 验收期
+- [ ] 2. 主样本=BOOK_STOCKS（或 asset_split 分篮）组合 walk；spec 含回测年 / 调参期 / 验收期；旧 stock×年 sweep 须重跑
 - [ ] 3. 若空间隔离：freeze 含 tune/holdout；盲测只否决
 - [ ] 4. 运行时 overrides（禁止改 config 扫参）
 - [ ] 5. 隔离 report/grid/<sweep>/；格间串行
@@ -90,7 +91,7 @@ python .cursor/skills/qmt-local-bt-grid/scripts/summarize.py --sweep-dir hongli_
 | `--n-tune` / `--n-holdout` / `--seed` | 空间抽取数量与种子 |
 | `--reshuffle` | 忽略 freeze 旧名单重新抽取 |
 | `--gate-json` | 过门配置 JSON 文件或内联对象（覆盖 spec.gate；只汇总同样生效） |
-| `--dry-run` | 只打印 job 数 |
+| `--dry-run` | 只打印每格 walk 数 |
 
 ## 格子 JSON
 
@@ -116,3 +117,10 @@ python .cursor/skills/qmt-local-bt-grid/scripts/summarize.py --sweep-dir hongli_
 空间隔离示例见 `examples/stop_loss_space.json`（`asset_split.mode=random_from_csv`，宇宙默认 `tools/csv/none`）。
 
 `kind`：`base` / `tighten` / `loosen` / `off` / `other`（`id=base` 仅兼容旧 spec）。扫描生成的格子用 token id；等于 config 时 `is_current=true`。`overrides` 的键是拼接脚本里的全局名（如 `STOP_LOSS`、`TRAIL_TIERS`、`TIME_FORCE_BARS`）。
+
+## 已知限制（继承 `run_book_backtest`）
+
+- walk 日历跟排序第一只票的交易日。
+- 回测无集合竞价冻结 / `_allocate_equal`。
+- `_buy_budget_fixed` 按 cap×档位，不走实盘 `min(现金, 房间)`。
+- 这些与固定标的 / 实盘评估一致；本轮不改 `budget.py`、不改主题 `config.py`、不 deploy。

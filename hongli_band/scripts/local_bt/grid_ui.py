@@ -5,7 +5,7 @@ from __future__ import annotations
 import html
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping, MutableMapping
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -18,9 +18,8 @@ from analyze import (
     DIVIDEND_TYPES,
 )
 from batch_year_perf import (
-    batch_naive_year_perf,
     list_grid_samples_with_details,
-    rows_from_grid_sample_dir,
+    portfolio_year_perf_from_grid_sample,
 )
 from equity_yearly import (
     build_daily_equity,
@@ -52,7 +51,6 @@ from grid_spec import (
     YEAR_WINDOW_KEYS,
     EDITOR_CELL_MAX,
     GROUP_ORDER,
-    JOB_CONFIRM_THRESHOLD,
     KIND_ENUM,
     WARN_CELL_SOFT,
     GridSpecError,
@@ -121,6 +119,8 @@ def _ensure_state() -> None:
     ss.setdefault("grid_busy", False)
     ss.setdefault("grid_overwrite_ok", False)
     ss.setdefault("grid_run_ok", False)
+    ss.setdefault("grid_await_confirm", False)
+    ss.setdefault("grid_confirm_nonce", 0)
     ss.setdefault("grid_import_text", "")
     ss.setdefault("grid_param_group", "全部")
     ss.setdefault("grid_param_search", "")
@@ -365,7 +365,9 @@ def render_grid_sidebar() -> None:
                 st.code(", ".join(st.session_state.get("grid_holdout_stocks") or []))
 
     with st.expander("过门合格线", expanded=False):
-        st.caption("只汇总会用当前侧栏重算推荐；勿在开跑后改 widget 回写同名键。")
+        st.caption(
+            "数字未改（盈亏比 1.5 / 回撤 10% / 卡玛 0.8）。口径已是单账户组合：须用新跑的 ★现行格看线，旧 sweep 作废。"
+        )
         st.checkbox(
             "相对 base 不劣",
             key="grid_gate_relative",
@@ -543,16 +545,63 @@ def _mint_sweep_name() -> str:
     return auto_sweep_name(_axes(), existing=_existing_sweep_names())
 
 
-def _mark_start() -> None:
-    ss = st.session_state
+def _confirm_open_key(nonce: int) -> str:
+    return "grid_confirm_go_%s" % int(nonce or 0)
+
+
+def _clear_stale_confirm_keys(ss: MutableMapping[str, Any]) -> None:
+    for key in list(ss.keys()):
+        name = str(key)
+        if name.startswith("grid_confirm_go") or name.startswith("grid_confirm_cancel"):
+            del ss[key]
+
+
+def _needs_run_confirm(ss: Mapping[str, Any]) -> bool:
+    """开跑一律先弹确认。禁止按格子/任务数跳过（旧逻辑会表现为时而弹窗时而直跑）。"""
+    return not bool(ss.get("grid_run_ok"))
+
+
+def _begin_run_request(ss: MutableMapping[str, Any]) -> None:
     ss["grid_action"] = "run"
     ss.pop("grid_pending_sweep", None)
+    ss.pop("grid_yield_for_dialog", None)
     ss["grid_run_ok"] = False
     ss["grid_overwrite_ok"] = False
+    ss["grid_await_confirm"] = True
+    ss["grid_confirm_nonce"] = int(ss.get("grid_confirm_nonce") or 0) + 1
+    _clear_stale_confirm_keys(ss)
+
+
+def _apply_run_confirmed(ss: MutableMapping[str, Any]) -> None:
+    ss["grid_run_ok"] = True
+    ss["grid_overwrite_ok"] = True
+    ss["grid_action"] = "run"
+    ss["grid_await_confirm"] = False
+    ss["grid_yield_for_dialog"] = True
+
+
+def _apply_run_dismissed(ss: MutableMapping[str, Any]) -> None:
+    if ss.get("grid_run_ok") or ss.get("grid_yield_for_dialog"):
+        return
+    ss["grid_await_confirm"] = False
+    ss["grid_run_ok"] = False
+    ss["grid_overwrite_ok"] = False
+    if ss.get("grid_action") == "run":
+        ss.pop("grid_action", None)
+        ss.pop("grid_pending_sweep", None)
+
+
+def _mark_start() -> None:
+    _begin_run_request(st.session_state)
+
+
+def _on_dismiss_confirm() -> None:
+    _apply_run_dismissed(st.session_state)
 
 
 def _mark_summarize() -> None:
     st.session_state["grid_action"] = "summarize"
+    st.session_state["grid_await_confirm"] = False
 
 
 def _save_spec_clicked() -> None:
@@ -726,6 +775,7 @@ def _render_action_bar(defaults: dict[str, Any], busy: bool) -> None:
             st.session_state.pop("grid_cells_editor", None)
             st.session_state["grid_overwrite_ok"] = False
             st.session_state["grid_run_ok"] = False
+            st.session_state["grid_await_confirm"] = False
             st.success("已生成 %s 格" % len(cells))
         except GridSpecError as e:
             st.error(str(e))
@@ -837,8 +887,18 @@ def _render_advanced(defaults: dict[str, Any], busy: bool) -> None:
             hi = st.selectbox("打开历史 summary", hlabels, key="grid_hist_pick")
             if st.button("加载历史", key="grid_hist_load"):
                 path = hist[hlabels.index(hi)]
-                st.session_state["grid_summary"] = json.loads(path.read_text(encoding="utf-8"))
-                st.session_state["grid_sweep"] = path.parent.name
+                try:
+                    from summarize import legacy_sweep_reason  # noqa: WPS433
+                except Exception:
+                    legacy_sweep_reason = None  # type: ignore[assignment]
+                why = None
+                if callable(legacy_sweep_reason):
+                    why = legacy_sweep_reason(path.parent)
+                if why:
+                    st.error(why)
+                else:
+                    st.session_state["grid_summary"] = json.loads(path.read_text(encoding="utf-8"))
+                    st.session_state["grid_sweep"] = path.parent.name
 
 
 def _import_spec_text(text: str, defaults: dict[str, Any]) -> None:
@@ -876,32 +936,47 @@ def _rerun_app() -> None:
         st.rerun()
 
 
-@st.dialog("覆盖已有 sweep 目录")
-def _dialog_overwrite(path: Path) -> None:
-    st.write("目录已存在：`%s`" % path)
-    if st.button("确认覆盖", type="primary"):
-        st.session_state["grid_overwrite_ok"] = True
-        st.session_state["grid_action"] = "run"
-        st.session_state["grid_yield_for_dialog"] = True
-        _rerun_app()
-
-
-@st.dialog("确认开跑")
-def _dialog_confirm_run(n_cells: int, n_jobs: int, total: int, sweep: str) -> None:
-    st.write("sweep **%s** · 格子 **%s** · 每格 job **%s** · 总任务约 **%s**" % (sweep, n_cells, n_jobs, total))
-    st.caption("格间串行，可能很久。默认不改 config。")
-    if st.button("确认开跑", type="primary"):
-        st.session_state["grid_run_ok"] = True
-        st.session_state["grid_action"] = "run"
-        st.session_state["grid_yield_for_dialog"] = True
-        _rerun_app()
+@st.dialog("确认开跑", on_dismiss=_on_dismiss_confirm)
+def _dialog_confirm_run(
+    n_cells: int,
+    n_jobs: int,
+    total: int,
+    sweep: str,
+    dest_existing: Path | None = None,
+) -> None:
+    st.write(
+        "sweep **%s** · 格子 **%s** · 每格 walk **%s** · 总任务约 **%s**"
+        % (sweep, n_cells, n_jobs, total)
+    )
+    if dest_existing is not None:
+        st.warning("目录已存在：`%s`，确认后将覆盖。" % dest_existing)
+    st.caption("格间串行；每格是组合连续回放（单账户、最多 3 笔、复利）。默认不改 config。")
+    nonce = int(st.session_state.get("grid_confirm_nonce") or 0)
+    with st.container(horizontal=True, wrap=False, vertical_alignment="center"):
+        if st.button(
+            "确认开跑",
+            type="primary",
+            key=_confirm_open_key(nonce),
+            wrap=False,
+            width="stretch",
+        ):
+            _apply_run_confirmed(st.session_state)
+            _rerun_app()
+        if st.button(
+            "取消",
+            key="grid_confirm_cancel_%s" % nonce,
+            wrap=False,
+            width="stretch",
+        ):
+            _apply_run_dismissed(st.session_state)
+            _rerun_app()
 
 
 def _handle_actions(defaults: dict[str, Any]) -> None:
     # 确认弹窗关掉后先完整画一帧，再开跑；否则长任务会把 overlay 卡住。
     if st.session_state.pop("grid_yield_for_dialog", None):
         return
-    action = st.session_state.pop("grid_action", None)
+    action = st.session_state.get("grid_action")
     if not action:
         return
     if action == "run" and not st.session_state.get("grid_pending_sweep"):
@@ -910,6 +985,7 @@ def _handle_actions(defaults: dict[str, Any]) -> None:
         st.session_state["grid_sweep"] = name
     spec = _current_spec(defaults)
     if action == "summarize":
+        st.session_state.pop("grid_action", None)
         name = str(st.session_state.get("grid_sweep") or "").strip()
         if not sweep_name_ok(name):
             st.error("还没有 sweep：请先开跑或从高级里加载历史")
@@ -932,6 +1008,8 @@ def _handle_actions(defaults: dict[str, Any]) -> None:
         validate_spec(spec)
     except GridError as e:
         st.error(str(e))
+        st.session_state.pop("grid_action", None)
+        st.session_state["grid_await_confirm"] = False
         return
     if action != "run":
         return
@@ -949,9 +1027,6 @@ def _handle_actions(defaults: dict[str, Any]) -> None:
             st.session_state["grid_holdout_stocks"] = list(drawn.get("holdout_stocks") or [])
             st.session_state["grid_eligible_n"] = int(drawn.get("eligible_n") or 0)
     dest = _sweep_dir(spec)
-    if dest.exists() and any(dest.iterdir()) and not st.session_state.get("grid_overwrite_ok"):
-        _dialog_overwrite(dest)
-        return
     try:
         _book, jobs = assemble_jobs(
             spec,
@@ -960,13 +1035,24 @@ def _handle_actions(defaults: dict[str, Any]) -> None:
         n_jobs = len(jobs)
     except GridError as e:
         st.error(str(e))
+        st.session_state.pop("grid_action", None)
+        st.session_state["grid_await_confirm"] = False
         return
     n_cells = len(spec["cells"])
     total = n_cells * n_jobs
-    need_confirm = n_cells > WARN_CELL_SOFT or total > JOB_CONFIRM_THRESHOLD
-    if need_confirm and not st.session_state.get("grid_run_ok"):
-        _dialog_confirm_run(n_cells, n_jobs, total, str(spec.get("sweep") or ""))
+    # 必须每帧重呼 dialog，且确认钮每次开跑换 key：旧 key 残留 True 会跳过弹窗直接开跑。
+    if _needs_run_confirm(st.session_state):
+        dest_existing = dest if dest.exists() and any(dest.iterdir()) else None
+        _dialog_confirm_run(
+            n_cells,
+            n_jobs,
+            total,
+            str(spec.get("sweep") or ""),
+            dest_existing,
+        )
         return
+    st.session_state.pop("grid_action", None)
+    st.session_state["grid_await_confirm"] = False
     _run_now(spec, n_jobs, total)
 
 
@@ -1011,6 +1097,7 @@ def _run_now(spec: dict[str, Any], n_jobs: int, total: int) -> None:
         st.session_state["grid_busy"] = False
         st.session_state["grid_overwrite_ok"] = False
         st.session_state["grid_run_ok"] = False
+        st.session_state["grid_await_confirm"] = False
         st.session_state.pop("grid_pending_sweep", None)
         _persist_app()
 
@@ -1064,7 +1151,7 @@ def _render_grid_year_perf(summary: dict[str, Any]) -> None:
         if c.get("id")
     }
     sweep_dir = _grid_sweep_dir(summary)
-    st.subheader("分年绩效（单票合计）")
+    st.subheader("分年绩效（组合权益切年）")
     rec_id = str((summary.get("recommend") or {}).get("id") or "")
     if st.session_state.get("grid_year_cell") not in cell_ids:
         st.session_state["grid_year_cell"] = rec_id if rec_id in cell_ids else cell_ids[0]
@@ -1091,39 +1178,25 @@ def _render_grid_year_perf(summary: dict[str, Any]) -> None:
         fallback = float(_defaults().get("TRADE_BUDGET") or 100000.0)
     except (TypeError, ValueError):
         fallback = 100000.0
-    job_rows = rows_from_grid_sample_dir(cell_dir, sample, fallback_budget=fallback)
-    if not job_rows:
-        st.info("该格无操作明细")
-        return
     cache = st.session_state.setdefault("_batch_detail_trade_cache", {})
-    result = batch_naive_year_perf(
-        job_rows,
-        split="year",
-        cache=cache,
-        allow_mixed_ma=True,
+    result = portfolio_year_perf_from_grid_sample(
+        cell_dir, sample, fallback_budget=fallback, cache=cache
     )
     if not result.get("ok"):
         reason = str(result.get("reason") or "")
         st.info(reason if reason else "该格无操作明细")
         return
 
-    n_ok = int(result.get("n_ok") or 0)
     n_buy = int(result.get("n_buy") or 0)
     sum_pnl = float(result.get("sum_pnl") or 0)
-    pos_ratio = result.get("pos_ratio")
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("成功任务数", n_ok)
-    m2.metric("轮次合计", n_buy)
-    m3.metric("总盈亏", "%.2f" % sum_pnl)
-    if pos_ratio is None:
-        m4.metric("盈利任务占比", "—")
-    else:
-        m4.metric("盈利任务占比", "%.1f%%" % (float(pos_ratio) * 100.0))
+    m1, m2, m3 = st.columns(3)
+    m1.metric("账户", 1)
+    m2.metric("轮次", n_buy)
+    m3.metric("已实现盈亏", "%.2f" % sum_pnl)
 
     st.caption(
-        "各票独立账户的已实现盈亏按卖出年相加（数据分析里的「单票合计盈亏」），"
-        "不是共享钱包的组合净值。年化 / 回撤分母 = 成功任务数 × 单票预算"
-        "（按年分段用该年成功任务数）。本表多了年化、回撤、夏普。"
+        "单账户连续回放（最多 3 笔、CASH_RATIO × 权益复利）。分年切同一条组合权益，"
+        "不是多票独立 10 万账户加总。权益 = 预算 + 已实现盈亏台阶（与实盘评估相同，非全日盯市）。"
     )
     tbl = result.get("table")
     if tbl is None or getattr(tbl, "empty", True):
@@ -1141,13 +1214,12 @@ def _render_grid_year_perf(summary: dict[str, Any]) -> None:
         st.info("该年无权益点。")
         return
     start_eq = float(match.iloc[0]["start_equity"])
-    trades_y = list((result.get("trades_by_year") or {}).get(year) or [])
-    bud_y = float((result.get("budget_by_year") or {}).get(year) or result.get("budget") or 0)
-    daily = build_daily_equity(trades_y, bud_y)
+    bud = float(result.get("budget") or fallback)
+    daily = build_daily_equity(list(result.get("trades") or []), bud)
     eq_y = daily_equity_for_year(daily, year, start_equity=start_eq)
     st.plotly_chart(
         _plot_grid_year_equity(
-            eq_y, bud_y, "%s 年权益曲线（单票合计 · 预算 + 已实现盈亏累计）" % year
+            eq_y, bud, "%s 年组合权益（预算 + 已实现盈亏台阶）" % year
         ),
         use_container_width=True,
     )
@@ -1165,14 +1237,13 @@ _DETAIL_PERIODS = (
 )
 _DETAIL_METRIC_COLS = (
     "夏普",
-    "开仓",
     "笔数",
     "卡玛",
     "回撤%",
     "胜率%",
     "盈亏比",
-    "平均年化%",
-    "平均盈亏",
+    "几何年化%",
+    "账户盈亏",
 )
 _DETAIL_GROUP_SIZE = len(_DETAIL_PERIODS)
 
@@ -1195,7 +1266,6 @@ def _detail_window_rows(
                 "label": label,
                 "区间": period,
                 "夏普": _window_metric(book, wkey, "sharpe", windows_key=windows_key),
-                "开仓": _window_metric(book, wkey, "n_open", windows_key=windows_key),
                 "笔数": _window_metric(book, wkey, "n_trades", windows_key=windows_key),
                 "卡玛": _window_metric(book, wkey, "calmar", windows_key=windows_key),
                 "回撤%": None if mdd is None else round(abs(float(mdd)) * 100.0, 2),
@@ -1203,10 +1273,10 @@ def _detail_window_rows(
                 "盈亏比": _window_metric(
                     book, wkey, "profit_factor", windows_key=windows_key
                 ),
-                "平均年化%": _window_metric(
+                "几何年化%": _window_metric(
                     book, wkey, "avg_ann_pct", windows_key=windows_key
                 ),
-                "平均盈亏": _window_metric(
+                "账户盈亏": _window_metric(
                     book, wkey, "avg_year_pnl", windows_key=windows_key
                 ),
             }
@@ -1214,7 +1284,7 @@ def _detail_window_rows(
     return rows
 
 
-_DETAIL_TONE_COLS = ("夏普", "卡玛", "胜率%", "盈亏比", "平均年化%", "平均盈亏")
+_DETAIL_TONE_COLS = ("夏普", "卡玛", "胜率%", "盈亏比", "几何年化%", "账户盈亏")
 _DETAIL_PASS_COLOR = "#e74c3c"
 _DETAIL_TONE_GATE_KEYS = {
     "夏普": "oos_sharpe",
@@ -1232,7 +1302,7 @@ def _fmt_detail_metric(col: str, val: Any) -> str:
         x = float(val)
     except (TypeError, ValueError):
         return html.escape(str(val))
-    if col in ("开仓", "笔数"):
+    if col == "笔数":
         return "%d" % int(round(x))
     if col == "夏普":
         return "%.4f" % x
@@ -1659,7 +1729,7 @@ def _render_results() -> None:
     st.dataframe(styled, width="stretch", hide_index=True)
     _render_fail_detail(notes_by_id, cells)
 
-    with st.expander("窗内夏普 / 开仓 / 年化", expanded=False):
+    with st.expander("窗内夏普 / 笔数 / 年化", expanded=False):
         _render_detail_window_table(
             tune_detail_rows,
             "调参标的" if space_on or hold_detail_rows else "跟踪池 / 主样本",
@@ -1668,9 +1738,11 @@ def _render_results() -> None:
             _render_detail_window_table(hold_detail_rows, "盲测标的（未参与调参）")
         st.caption(
             "过门用验收期窗内：卡玛、回撤%、夏普、笔数、胜率、盈亏比（非样本级整段）。"
-            "旧 summary 缺字段时「只汇总」会重解析 log。"
+            "笔数 = 窗内平仓；胜率 / 盈亏比按笔数。"
+            "几何年化 / 卡玛 / 回撤来自同一条组合权益；账户盈亏 = 窗内期末 − 期初。"
+            "旧 stock×年 sweep 须重跑，不能只汇总。"
         )
     st.caption(
-        "合计 / 调参期 / 验收期是卖出年已实现盈亏之和（空间隔离时仅调参标的）。"
+        "合计 / 调参 / 验收是该窗账户盈亏（单账户、最多 3 笔、复利；空间隔离时主列=调参篮子）。"
     )
     _render_grid_year_perf(summary)
