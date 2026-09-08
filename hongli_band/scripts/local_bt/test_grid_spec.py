@@ -371,6 +371,7 @@ class GridSpecTest(unittest.TestCase):
     def test_catalog_omits_retired_knobs(self) -> None:
         ids = catalog_ids()
         self.assertNotIn("TIME_FORCE_MIN_RET", ids)
+        self.assertNotIn("TIME_FORCE_GRACE_BARS", ids)
         self.assertNotIn("SCALE_MAX", ids)
         self.assertNotIn("W_MA_MID", ids)
         self.assertNotIn("W_MA_SLOW", ids)
@@ -390,6 +391,20 @@ class GridSpecTest(unittest.TestCase):
                 }
             )
         self.assertIn("TIME_FORCE_MIN_RET", str(ctx.exception))
+
+    def test_reject_retired_grace_spec(self) -> None:
+        with self.assertRaises(GridSpecError) as ctx:
+            reject_retired_min_ret(
+                {
+                    "cells": [
+                        {
+                            "id": "tfg5",
+                            "overrides": {"TIME_FORCE_GRACE_BARS": 5},
+                        }
+                    ]
+                }
+            )
+        self.assertIn("TIME_FORCE_GRACE_BARS", str(ctx.exception))
 
 
 if __name__ == "__main__":

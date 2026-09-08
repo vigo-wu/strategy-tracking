@@ -39,7 +39,6 @@ EXIT_KEYS = (
     "STOP_LOSS",
     "TRAIL_TIERS",
     "TIME_FORCE_BARS",
-    "TIME_FORCE_GRACE_BARS",
     "W_BEAR_CONFIRM_DAYS",
 )
 MONEY_KEYS = (
@@ -109,7 +108,6 @@ PARAM_LABELS = {
     "STOP_LOSS": "止损",
     "TRAIL_TIERS": "阶梯止盈",
     "TIME_FORCE_BARS": "时间成本 BARS",
-    "TIME_FORCE_GRACE_BARS": "时间成本宽限",
     "W_BEAR_CONFIRM_DAYS": "周线空确认日",
     "MA_TOUCH_TOL": "回踩容差",
     "VOL_PULLBACK_RATIO": "缩量回踩比例",
@@ -147,7 +145,6 @@ ABBREV_FIXED = {
     "STOP_LOSS": "sl",
     "TRAIL_TIERS": "tt",
     "TIME_FORCE_BARS": "tfb",
-    "TIME_FORCE_GRACE_BARS": "tfg",
     "W_BEAR_CONFIRM_DAYS": "wbc",
     "CHASE_MAX_PCT": "ch",
     "W_BIAS_HARD": "wb",
@@ -213,27 +210,41 @@ RETIRED_MIN_RET_MSG = (
     "TIME_FORCE_MIN_RET 已删除：让路阈值跟 TRAIL 档1 peak_lo。"
     "请去掉该轴后重存 spec；关时间成本请扫 TIME_FORCE_BARS=0。"
 )
+RETIRED_GRACE_MSG = (
+    "TIME_FORCE_GRACE_BARS 已删除：死钱仓满 BARS 后立即强平，不再宽限。"
+    "请去掉该轴后重存 spec。"
+)
 
 
-def spec_has_retired_min_ret(spec: Mapping[str, Any] | None) -> bool:
+def _spec_has_retired_key(spec: Mapping[str, Any] | None, key: str) -> bool:
     data = dict(spec or {})
-    if "TIME_FORCE_MIN_RET" in dict(data.get("axes") or {}):
+    if key in dict(data.get("axes") or {}):
         return True
     sel = data.get("param_selection") or {}
-    if isinstance(sel, dict) and "TIME_FORCE_MIN_RET" in sel:
+    if isinstance(sel, dict) and key in sel:
         return True
     for cell in data.get("cells") or []:
         if not isinstance(cell, dict):
             continue
         ov = cell.get("overrides") or {}
-        if isinstance(ov, dict) and "TIME_FORCE_MIN_RET" in ov:
+        if isinstance(ov, dict) and key in ov:
             return True
     return False
+
+
+def spec_has_retired_min_ret(spec: Mapping[str, Any] | None) -> bool:
+    return _spec_has_retired_key(spec, "TIME_FORCE_MIN_RET")
+
+
+def spec_has_retired_grace(spec: Mapping[str, Any] | None) -> bool:
+    return _spec_has_retired_key(spec, "TIME_FORCE_GRACE_BARS")
 
 
 def reject_retired_min_ret(spec: Mapping[str, Any] | None) -> None:
     if spec_has_retired_min_ret(spec):
         raise GridSpecError(RETIRED_MIN_RET_MSG)
+    if spec_has_retired_grace(spec):
+        raise GridSpecError(RETIRED_GRACE_MSG)
 
 
 def num_eq(a: Any, b: Any, eps: float = EPS) -> bool:
