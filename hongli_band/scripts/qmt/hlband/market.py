@@ -579,7 +579,8 @@ def _ohlcv_need_1d():
 
 
 def _ohlcv_need_1w():
-    return max(int(W_MA_SLOW), int(MACD_SLOW) + int(MACD_SIGNAL)) + 5
+    # 55 = 原 W_MA_SLOW 暖机地板，不是均线周期
+    return max(int(W_MA_LIFE), int(MACD_SLOW) + int(MACD_SIGNAL), 55) + 5
 
 
 def _prefetch_watch_ohlcv(C, stocks):

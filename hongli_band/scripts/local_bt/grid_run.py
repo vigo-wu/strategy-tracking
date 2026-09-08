@@ -46,6 +46,7 @@ from grid_spec import (  # noqa: E402
     GridSpecError,
     apply_year_windows,
     fill_year_windows,
+    reject_retired_min_ret,
 )
 from grid_gate import fill_gate, gate_for_json, validate_gate  # noqa: E402
 from asset_split import (  # noqa: E402
@@ -105,10 +106,18 @@ def load_spec(path: str | Path) -> dict[str, Any]:
         data = json.loads(text)
     if not isinstance(data, dict):
         raise GridError("spec 必须是对象")
+    try:
+        reject_retired_min_ret(data)
+    except GridSpecError as e:
+        raise GridError(str(e)) from e
     return data
 
 
 def validate_spec(spec: dict[str, Any]) -> list[dict[str, Any]]:
+    try:
+        reject_retired_min_ret(spec)
+    except GridSpecError as e:
+        raise GridError(str(e)) from e
     cells = list(spec.get("cells") or [])
     if not cells:
         raise GridError("spec.cells 为空")
@@ -188,6 +197,25 @@ def load_exit_defaults() -> dict[str, Any]:
     return load_config_defaults()
 
 
+def book_stock_entries(raw: Any) -> list[tuple[Any, Any]]:
+    """BOOK_STOCKS → [(key, value), ...]。兼容 dict / set / frozenset / list / tuple。"""
+    if isinstance(raw, dict):
+        return list(raw.items())
+    if raw is None or isinstance(raw, (str, bytes)):
+        return []
+    try:
+        seq = list(raw)
+    except TypeError:
+        return []
+    out: list[tuple[Any, Any]] = []
+    for x in seq:
+        if isinstance(x, (list, tuple)) and len(x) >= 1:
+            out.append((x[0], x[1] if len(x) >= 2 else {}))
+        else:
+            out.append((x, {}))
+    return out
+
+
 def load_book_lock() -> list[tuple[str, str, str]]:
     """config.BOOK_STOCKS → [(stock, ma_type, dividend_type), ...]。"""
     mod = _load_hlband_config()
@@ -196,12 +224,10 @@ def load_book_lock() -> list[tuple[str, str, str]]:
     default_div = (
         normalize_dividend_type(getattr(mod, "DIVIDEND_TYPE", "")) or DEFAULT_DIVIDEND_TYPE
     )
-    items: list[tuple[Any, Any]]
-    if isinstance(raw, dict):
-        items = list(raw.items())
-    elif isinstance(raw, (list, tuple)):
-        items = [(str(x), {}) for x in raw]
-    else:
+    items = book_stock_entries(raw)
+    if raw is None or (
+        not items and not isinstance(raw, (dict, list, tuple, set, frozenset))
+    ):
         raise GridError("config.BOOK_STOCKS 为空或无法解析")
     out: list[tuple[str, str, str]] = []
     for k, v in items:
@@ -242,7 +268,7 @@ def expected_fingerprint(
     return {
         "stop": float(merged["STOP_LOSS"]),
         "time_force_bars": int(merged["TIME_FORCE_BARS"]),
-        "time_force_min_ret": float(merged["TIME_FORCE_MIN_RET"]),
+        "time_force_min_ret": float(arm) if arm is not None else 0.0,
         "trail_arm": arm,
     }
 

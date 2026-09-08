@@ -11,9 +11,9 @@ ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 # 第 3 笔：金额吃剩余可部署资金；book_frac 仍记空档（0.50 / 0.30 / 剩余档）。
 # 同标的一轮只加一次；加过仓后该只须全平才能再开。卖掉大仓由其他空仓标的开仓补回。
 # cap = CASH_RATIO * 基数。BUDGET_BASE=equity：基数=E_s=总资产-非白名单股票市值；
-# BUDGET_BASE=fixed：基数=TRADE_BUDGET（不读其它市值、不读按标的覆盖）。
-# k / book_mv 只统计 BOOK_STOCKS。N = 字典长度。实盘单实例监视全池并写账本；回测用 TRADE_BUDGET。
-# 形态：code → 配置字典。ma_type（EMA|SMA）；dividend_type 见下方复权注释。
+# BUDGET_BASE=fixed：基数=TRADE_BUDGET（不读其它市值）。
+# k / book_mv 只统计 BOOK_STOCKS。N = 集合/字典长度。实盘单实例监视全池并写账本；回测用 TRADE_BUDGET。
+# 形态：code 集合，或 code → 配置字典。ma_type（EMA|SMA）；dividend_type 见下方复权注释。
 # 简写兼容：value 写成 "SMA" 视为 {"ma_type": "SMA"}；旧纯字符串 tuple 仍认作白名单。
 BOOK_STOCKS = {
     "600938.SH",
@@ -27,9 +27,6 @@ BOOK_STOCKS = {
 
 # 单实例共享信号账本（不是 STATE_FILE；禁止按标的分文件）
 BOOK_FILE = r"D:\HlBandV7\hlband_book.json"
-# 账本冻结截止：确认窗内打卡，到点（或打卡满 N）冻结；须在收盘集合竞价前完成分档下单
-BOOK_FREEZE_CLOSE = "145640"
-BOOK_FREEZE_OPEN = "093030"
 # 资金基数：equity=总资产减其它股票市值；fixed=下面 TRADE_BUDGET。面板下拉会写成中文，代码归一成这两值。
 BUDGET_BASE = "equity"
 # 可部署比例（相对所选基数）；其余留作 T+1 / 废单重试
@@ -43,21 +40,17 @@ LOT_OPEN_FRAC = 0.50
 LOT_ADD_FRAC = 0.30
 # 固定金额（元）：实盘 BUDGET_BASE=fixed 时的基数；编辑器回测袖子也用此值（回测不乘 CASH_RATIO）
 TRADE_BUDGET = 100000.0
-# 按标的覆盖预算（key 须与 A.stock 一致）；仅回测生效
-TRADE_BUDGET_BY_STOCK = {}
 
 # ---- 周线过滤（跨周期；主图仍是日线）----
 # 价格均线缺省：EMA 或 SMA（大小写不敏感）。BOOK_STOCKS[code].ma_type 优先；
 # 缺省/非法回落本常量。只作用于周/日价格均线；成交量均量始终 SMA；MACD 仍用 EMA。
 MA_TYPE = "EMA"
-# 周线均线：快/中/生命线/慢线（斐波那契 5/13/34/55）；算法见标的 ma_type / MA_TYPE
-#   MA5 vs MA13 + MACD → 多头判定（仅日志；开仓不强制 weekly_bull）
+# 周线均线：快/生命线（斐波那契 5/34）；算法见标的 ma_type / MA_TYPE
+#   MA5 vs MA13 + MACD → 多头判定（仅日志，中线周期写死 13；开仓不强制 weekly_bull）
 #   MA34 → 生命线（收盘跌破即周线空，强制清仓）；乖离/斜率过滤也用它
-#   MA55 → 数据暖机长度参考（market 取数 need）
+# 周线取数 need 另钳原 MA55 暖机地板（见 market._ohlcv_need_1w）
 W_MA_FAST = 5
-W_MA_MID = 13
 W_MA_LIFE = 34
-W_MA_SLOW = 55
 # 周线 MACD 参数（DIF/DEA/柱）；多头要求 DIF>0 且柱>0；死叉且双线在零轴下 → 空
 MACD_FAST = 12
 MACD_SLOW = 26
@@ -103,6 +96,7 @@ VOL_DRY_RATIO = 0.60          # 量 < 20 日均量的 60% 视为无量阴跌
 #   档1 起步保护 [3%,6%)：回撤>1.5%（同旧版，防破本）
 #   档2 落袋为安 [6%,10%)：回撤>3% 或 利润跌破 3%
 #   档3 放鹰吃肉 >=10%：回撤>4%（利润垫扛日线洗盘）
+#   档1 peak_lo 同时是 time_force 让路阈值（_trail_arm）；加仓门槛 SCALE_ARM 仍独立
 TRAIL_TIERS = (
     (0.03, 0.06, 0.015, None),
     (0.06, 0.10, 0.03, 0.03),
@@ -110,14 +104,12 @@ TRAIL_TIERS = (
 )
 # 卖② time_force：智能时间成本（防长期磨人，不砍还在趋势里的仓）
 #   BARS = 日线慢均线一半：满此日后才把 MA60 当出场地板，不是最长持仓
-#   BARS<=0：关闭整条 time_force（不是 MIN_RET=0）
+#   BARS<=0：关闭整条 time_force
 #   收盘破日线 MA60 → 立即强制平仓
-#   仍站上 MA60 且峰值浮盈 < MIN_RET → 豁免一次，再观察 GRACE_BARS 日，期满强平（回收死钱）
-#   仍站上 MA60 且峰值 >= MIN_RET → 不按日历强平，交给 trail / 破 MA60 / 周线空
-#   MIN_RET 对齐阶梯止盈起步档；0 = 关闭让路（回到期满强平）
+#   仍站上 MA60 且峰值浮盈 < 档1 peak_lo → 豁免一次，再观察 GRACE_BARS 日，期满强平
+#   仍站上 MA60 且峰值 >= 档1 peak_lo → 不按日历强平，交给 trail / 破 MA60 / 周线空
 TIME_FORCE_BARS = D_MA_SLOW // 2
 TIME_FORCE_GRACE_BARS = 5
-TIME_FORCE_MIN_RET = 0.03
 
 # 兜底风控（优先级高）
 # chase_skip：当日涨幅 (收-昨收)/昨收 >= 此值 → 禁开（防追高）
@@ -137,20 +129,19 @@ W_BEAR_CONFIRM_DAYS = 2
 #   回踩加仓仍受 chase_skip；破平台/金叉不受（突破日允许较大涨幅）
 #   执行日若已触发卖点则取消加仓、让路出场
 # SCALE_ONCE_PER_ROUND：同一轮只加一次。加过仓后该只须全平才能再开，不能把剩余仓当新开
+#   关掉 once 后单票不再有数字顶，只剩 BOOK_LOT_MAX
 # SCALE_W_HIST_MIN：周线 MACD 柱低于此值不加（过滤深空头里的冲高）；None 关闭
 # SCALE_LOTS=True：每笔独立成本/峰值/止盈；False：均价合并后整仓出
 # weekly_bear 仍一次出清剩余各笔；trail_stop / time_force / stop_loss 按笔
 SCALE_ENABLE = True
-SCALE_MAX = 2
 SCALE_ONCE_PER_ROUND = True
 SCALE_ARM = 0.03
 SCALE_ARM_BARS = 8
 SCALE_W_HIST_MIN = -0.01
 SCALE_LOTS = True
-# 日线平台：回看 N 日（不含当日）高低点；振幅 <= 此值视为平台；收盘站上高点且昨收仍在平台内
+# 日线平台：回看 N 日（不含当日）高低点；振幅 <= 此值视为平台；收盘严格站上高点且昨收仍在平台内
 SCALE_PLAT_LOOKBACK = 20
 SCALE_PLAT_MAX_RANGE = 0.10          # 0.10 = 平台振幅不超过 10%
-SCALE_PLAT_BREAK_BUF = 0.0           # 收盘超过平台高点的缓冲；0=收盘严格站上
 # 周线 MACD：本周或上周 DIF 上穿 DEA；上周金叉则本周红柱须比上周放大此倍数
 SCALE_W_HIST_EXPAND_RATIO = 1.2
 
@@ -186,20 +177,24 @@ LIVE_ONLY_LAST_BAR = True
 # 周线：bt/confirm/开盘一律丢掉未收盘周（对齐 QMT 回测 0000 原生 1w；周五仍看上周）
 # 日线开盘仍去未收盘日 K
 LIVE_CLOSE_CONFIRM = True
-# 实盘决策时窗（HHmmss）：盘中处理券商 pending / 心跳；信号成交见 PENDING_EXEC_* / OPEN_EXEC_*
-DECISION_START = "093000"
-DECISION_END = "150000"
 # 信号 pending 主成交窗：连续竞价尾盘限价（买挂卖一 / 卖挂买一）。
 # 截止后进入收盘集合竞价，本窗不再报单；错过则次日开盘窗补。
-# 建议：FREEZE≈本窗起点，且起点晚于 SIGNAL_CONFIRM_START（先打卡再成交）。
 PENDING_EXEC_START = "145640"
 PENDING_EXEC_END = "145700"
 # 隔夜残留 / 开盘兜底：错过尾盘时次日开盘窗按开盘价补成交
 OPEN_EXEC_START = "093000"
 OPEN_EXEC_END = "094500"
 # 收盘确认信号时窗（与尾盘成交窗重叠；盘后仍可确认，成交则等到次日开盘窗）
+# 确认须早于尾盘成交（先打卡再成交）
 SIGNAL_CONFIRM_START = "145630"
 SIGNAL_CONFIRM_END = "150000"
+# 账本冻结：收盘跟尾盘成交窗起点（勿单独改）；开盘保留打卡缓冲（可改）
+BOOK_FREEZE_CLOSE = PENDING_EXEC_START
+BOOK_FREEZE_OPEN = "093030"
+# 实盘决策时窗（HHmmss）：盘中处理券商 pending / 心跳；信号成交见 PENDING_EXEC_* / OPEN_EXEC_*
+# START 是「策略醒着」，不要绑 OPEN_EXEC_START（推迟补单窗不应睡过 09:30 pending）
+DECISION_START = "093000"
+DECISION_END = SIGNAL_CONFIRM_END
 # 实盘心跳/状态行间隔（秒）；空仓与持仓无新信号沿时均按此节流
 LIVE_HEARTBEAT_SEC = 300
 # 实盘取数：window=确认窗/开盘兜底才拉日+周，盘中只 pending；always=决策窗内每次当确认窗
@@ -234,7 +229,7 @@ LOG_DIR = r"D:\HlBandV7\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBandV7"
-STRATEGY_VER = "v1.66"
+STRATEGY_VER = "v1.67"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）

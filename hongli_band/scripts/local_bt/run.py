@@ -458,9 +458,11 @@ def _patch_fast_ohlcv(ns: dict) -> None:
         )
 
     def _get_ohlcv_1w(C, stock):
+        # 55 = 原 W_MA_SLOW 暖机地板，不是均线周期
         need = max(
-            int(ns.get("W_MA_SLOW") or 0),
+            int(ns.get("W_MA_LIFE") or 0),
             int(ns.get("MACD_SLOW") or 0) + int(ns.get("MACD_SIGNAL") or 0),
+            55,
         ) + 5
         return _ohlcv_from_ctx(
             C, "1w", int(ns.get("WEEKLY_OHLC_COUNT") or 120), need, "w1", stock=stock

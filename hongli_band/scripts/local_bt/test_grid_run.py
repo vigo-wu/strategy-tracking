@@ -17,9 +17,12 @@ from grid_run import (  # noqa: E402
     GridError,
     assemble_jobs,
     book_jobs,
+    book_stock_entries,
     grid_book_overrides,
     job_payload,
+    load_book_lock,
     load_config_defaults,
+    load_spec,
     prune_stale_cell_dirs,
     reset_cell_sample_dirs,
     run_sweep,
@@ -56,7 +59,6 @@ def _nine_cell_spec() -> dict:
     defaults = {
         "STOP_LOSS": 0.08,
         "TIME_FORCE_BARS": 30,
-        "TIME_FORCE_MIN_RET": 0.03,
         "TRAIL_TIERS": ((0.03, 0.06, 0.015, None), (0.06, 0.10, 0.03, 0.03), (0.10, None, 0.04, None)),
     }
     cells = build_cells({"STOP_LOSS": [0.05, 0.06, 0.07, 0.09, 0.10, 0.11, 0.12, 0.13]}, defaults)
@@ -332,6 +334,56 @@ class GridRunApiTest(unittest.TestCase):
             self.assertIn("holdout", Path(p2["out_dir"]).parts)
             self.assertTrue(p2["log_name"].startswith("holdout_"))
             self.assertNotEqual(payload["out_dir"], p2["out_dir"])
+
+    def test_book_stock_entries_accepts_set(self) -> None:
+        codes = {"600938.SH", "601615.SH"}
+        got = {str(k).upper() for k, _v in book_stock_entries(codes)}
+        self.assertEqual(got, codes)
+        frozen = book_stock_entries(frozenset(codes))
+        self.assertEqual({str(k).upper() for k, _v in frozen}, codes)
+        items = book_stock_entries({"600938.SH": {"ma_type": "SMA"}})
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0][0], "600938.SH")
+        self.assertEqual(items[0][1].get("ma_type"), "SMA")
+        listed = book_stock_entries(["600350.SH", "601857.SH"])
+        self.assertEqual([str(k) for k, _v in listed], ["600350.SH", "601857.SH"])
+        self.assertEqual(book_stock_entries(None), [])
+        self.assertEqual(book_stock_entries("600938.SH"), [])
+
+    def test_load_book_lock_real_config_set(self) -> None:
+        locks = load_book_lock()
+        codes = {row[0] for row in locks}
+        self.assertIn("600938.SH", codes)
+        self.assertGreaterEqual(len(locks), 1)
+        for _stock, ma, div in locks:
+            self.assertEqual(ma, "EMA")
+            self.assertEqual(div, "front_ratio")
+
+    def test_load_book_lock_empty_set_raises(self) -> None:
+        class EmptyBook:
+            BOOK_STOCKS = set()
+            MA_TYPE = "EMA"
+            DIVIDEND_TYPE = "front_ratio"
+
+        with patch("grid_run._load_hlband_config", return_value=EmptyBook):
+            with self.assertRaises(GridError) as ctx:
+                load_book_lock()
+        self.assertIn("没有有效标的", str(ctx.exception))
+
+    def test_load_spec_rejects_min_ret(self) -> None:
+        spec = {
+            "cells": [
+                {"id": "tfm0", "kind": "other", "overrides": {"TIME_FORCE_MIN_RET": 0.0}},
+            ]
+        }
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "old.json"
+            path.write_text(json.dumps(spec), encoding="utf-8")
+            with self.assertRaises(GridError) as ctx:
+                load_spec(path)
+        self.assertIn("TIME_FORCE_MIN_RET", str(ctx.exception))
+        with self.assertRaises(GridError):
+            validate_spec(spec)
 
 
 if __name__ == "__main__":

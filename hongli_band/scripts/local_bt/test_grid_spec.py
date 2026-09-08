@@ -26,6 +26,7 @@ from grid_spec import (  # noqa: E402
     fill_year_windows,
     generator_locked,
     infer_kind,
+    reject_retired_min_ret,
     keep_from_cells,
     make_spec,
     merge_param_selection,
@@ -42,7 +43,6 @@ from grid_spec import (  # noqa: E402
 DEFAULTS = {
     "STOP_LOSS": 0.08,
     "TIME_FORCE_BARS": 30,
-    "TIME_FORCE_MIN_RET": 0.03,
     "TRAIL_TIERS": (
         (0.03, 0.06, 0.015, None),
         (0.06, 0.10, 0.03, 0.03),
@@ -104,12 +104,6 @@ class GridSpecTest(unittest.TestCase):
         self.assertIn("扫描取值", str(ctx.exception))
         with self.assertRaises(GridSpecError):
             build_cells({"STOP_LOSS": []}, DEFAULTS)
-
-    def test_min_ret_zero_is_other_not_off(self) -> None:
-        cells = build_cells({"TIME_FORCE_MIN_RET": [0.0]}, DEFAULTS)
-        by = {c["id"]: c for c in cells}
-        self.assertEqual(by["tfm0"]["kind"], "other")
-        self.assertIn("关闭让路", by["tfm0"]["label"])
 
     def test_bars_zero_is_off(self) -> None:
         cells = build_cells({"TIME_FORCE_BARS": [0]}, DEFAULTS)
@@ -297,6 +291,29 @@ class GridSpecTest(unittest.TestCase):
         self.assertEqual(sweep_stem_from_axes({}), "grid")
         taken = auto_sweep_name({}, when=when, existing=["grid_20260907_203412"])
         self.assertEqual(taken, "grid_20260907_203412_2")
+
+    def test_catalog_omits_retired_knobs(self) -> None:
+        ids = catalog_ids()
+        self.assertNotIn("TIME_FORCE_MIN_RET", ids)
+        self.assertNotIn("SCALE_MAX", ids)
+        self.assertNotIn("W_MA_MID", ids)
+        self.assertNotIn("W_MA_SLOW", ids)
+        self.assertIn("SCALE_ARM", ids)
+        self.assertIn("TIME_FORCE_BARS", ids)
+
+    def test_reject_retired_min_ret_spec(self) -> None:
+        with self.assertRaises(GridSpecError) as ctx:
+            reject_retired_min_ret(
+                {
+                    "cells": [
+                        {
+                            "id": "tfm0",
+                            "overrides": {"TIME_FORCE_MIN_RET": 0.0},
+                        }
+                    ]
+                }
+            )
+        self.assertIn("TIME_FORCE_MIN_RET", str(ctx.exception))
 
 
 if __name__ == "__main__":

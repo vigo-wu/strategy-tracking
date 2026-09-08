@@ -43,7 +43,7 @@ def _eval_weekly(closes_w):
         "close": None,
     }
     ma5 = _price_ma(closes_w, W_MA_FAST)
-    ma10 = _price_ma(closes_w, W_MA_MID)
+    ma10 = _price_ma(closes_w, 13)
     ma30 = _price_ma(closes_w, W_MA_LIFE)
     macd = _calc_macd(closes_w)
     if ma5 is None or ma10 is None or ma30 is None or macd is None:
@@ -348,10 +348,22 @@ def _trail_stop_hit(price, cost, peak=None):
     return False
 
 
-def _time_force_min_ret():
+def _trail_arm():
+    """档 1 起步 peak_lo；time_force 让路与网格 init 指纹共用。"""
+    tiers = globals().get("TRAIL_TIERS") or ()
     try:
-        return float(globals().get("TIME_FORCE_MIN_RET") or 0)
-    except Exception:
+        return float(tiers[0][0])
+    except (IndexError, TypeError, ValueError):
+        return None
+
+
+def _time_force_min_ret():
+    arm = _trail_arm()
+    if arm is None:
+        return 0.0
+    try:
+        return float(arm)
+    except (TypeError, ValueError):
         return 0.0
 
 
@@ -401,9 +413,9 @@ def _time_force_mark_skip(lot, peak_ret, hold_bars, m60):
 
 def _time_force_hit(price, closes, hold_bars, lot=None):
     """智能时间成本：持仓 > TIME_FORCE_BARS 后，破日线慢均线强制平仓。
-    BARS<=0 关闭整条规则（MIN_RET=0 只关掉让路，不是关闭）。
+    BARS<=0 关闭整条规则。
     D_MA_SLOW<=0 时慢线地板不存在，同样不触发（BARS 仍独立）。
-    仍站上慢线时：峰值已达 TIME_FORCE_MIN_RET（阶梯止盈起步档）则不按日历强平；
+    仍站上慢线时：峰值已达 TRAIL 档1 peak_lo 则不按日历强平；
     从未武装的死钱仓豁免 GRACE 日后强平。"""
     try:
         bars_lim = int(TIME_FORCE_BARS)
@@ -598,8 +610,6 @@ def _scale_gate(w_detail=None, price=None):
         return False, "scale_no_pos"
     if bool(globals().get("SCALE_ONCE_PER_ROUND", True)) and _round_scaled_now():
         return False, "scale_once"
-    if _pos_lots() >= int(globals().get("SCALE_MAX") or 1):
-        return False, "scale_max"
     blocked, why_b = _book_scale_blocked()
     if blocked:
         return False, why_b or "book_lot_cap"

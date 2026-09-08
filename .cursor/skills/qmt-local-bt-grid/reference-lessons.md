@@ -31,7 +31,7 @@ TRAIL 当时不进 init 行，只能靠反事实猜口径。网格扫 TRAIL 必�
 MAE：关掉整条规则（`TIME_FORCE_BARS<=0`）约 **+3.4 万**。
 真实重跑：winner 合计约 **+0.63 万**，**OOS 为负**。MAE 高估且样本外符号翻了。
 
-`MIN_RET=0` 不是关闭 time_force，只关掉「峰值已武装则让路」。关闭整条规则只能 `TIME_FORCE_BARS<=0`。
+关闭整条规则只能 `TIME_FORCE_BARS<=0`。让路阈值跟 TRAIL 档1 `peak_lo`，没有独立 MIN_RET 轴。
 
 ## 均线 winner
 

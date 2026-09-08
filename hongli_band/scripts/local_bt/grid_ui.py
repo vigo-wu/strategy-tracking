@@ -73,6 +73,7 @@ from grid_spec import (
     overrides_summary,
     param_catalog,
     product_count,
+    reject_retired_min_ret,
     spec_json,
     sweep_name_ok,
     sweep_stem_from_axes,
@@ -636,10 +637,6 @@ def render_grid_mode() -> None:
         "选参看调参标的验收期，且须与调参期同向；盲测盈亏只否决。"
         "默认不改 config.py / 不 deploy。"
     )
-    axes = _axes()
-    if "TIME_FORCE_BARS" in axes and "TIME_FORCE_MIN_RET" in axes:
-        st.caption("BARS=0 再叉乘 MIN_RET 经济上重复，不自动删格。")
-
     _render_param_table(defaults, busy)
     _render_action_bar(defaults, busy)
     _render_preview(defaults, busy)
@@ -909,6 +906,11 @@ def _import_spec_text(text: str, defaults: dict[str, Any]) -> None:
         return
     if not isinstance(spec, dict):
         st.error("spec 必须是对象")
+        return
+    try:
+        reject_retired_min_ret(spec)
+    except GridSpecError as e:
+        st.error(str(e))
         return
     cells = correct_cell_kinds(spec.get("cells") or [], defaults)
     st.session_state["grid_cells"] = cells

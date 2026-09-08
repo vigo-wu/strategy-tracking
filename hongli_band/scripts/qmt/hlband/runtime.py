@@ -41,8 +41,6 @@ def _apply_panel():
         applied.append(const)
         if new != cur:
             print(_strategy_tag(), "panel", const, cur, "->", new)
-        if const == "TRADE_BUDGET":
-            g["TRADE_BUDGET_BY_STOCK"] = {}
     if applied:
         g["_PANEL_APPLIED"] = set(applied)
         print(_strategy_tag(), "panel applied", ",".join(applied))
@@ -72,15 +70,6 @@ def _register_live_timer(C):
                 e,
             )
     _event_log("run_time_fail", error=str(last_err))
-
-
-def _trail_arm():
-    """档 1 起步 peak_lo；网格扫 TRAIL 时写进 init 指纹。"""
-    tiers = globals().get("TRAIL_TIERS") or ()
-    try:
-        return float(tiers[0][0])
-    except (IndexError, TypeError, ValueError):
-        return None
 
 
 def init(C):
@@ -310,7 +299,7 @@ def _init_impl(C):
         "book_freeze=",
         "%s/%s" % (BOOK_FREEZE_CLOSE, BOOK_FREEZE_OPEN),
         "wMA=",
-        "%d/%d/%d" % (W_MA_FAST, W_MA_MID, W_MA_LIFE),
+        "%d/%d" % (W_MA_FAST, W_MA_LIFE),
         "dMA=",
         "%d/%d" % (D_MA_MID, D_MA_SLOW),
         "ma_type=",
@@ -338,7 +327,7 @@ def _init_impl(C):
         "time_force_bars=",
         TIME_FORCE_BARS,
         "time_force_min_ret=",
-        TIME_FORCE_MIN_RET,
+        _time_force_min_ret(),
         "close_exec=",
         "%s-%s" % (
             globals().get("PENDING_EXEC_START", "145600"),
@@ -378,7 +367,7 @@ def _init_impl(C):
         stop=STOP_LOSS,
         trail_arm=_trail_arm(),
         time_force_bars=TIME_FORCE_BARS,
-        time_force_min_ret=TIME_FORCE_MIN_RET,
+        time_force_min_ret=_time_force_min_ret(),
         close_exec="%s-%s"
         % (
             globals().get("PENDING_EXEC_START", "145600"),
