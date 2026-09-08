@@ -27,10 +27,12 @@ from grid_run import (  # noqa: E402
     parse_fingerprint,
     prune_stale_cell_dirs,
     reset_cell_sample_dirs,
+    run_cell,
     run_sweep,
     validate_spec,
 )
 from grid_spec import build_cells  # noqa: E402
+from run import run_init_probe  # noqa: E402
 
 
 def _walk(
@@ -424,6 +426,87 @@ class GridRunApiTest(unittest.TestCase):
         self.assertIn("TIME_FORCE_MIN_RET", str(ctx.exception))
         with self.assertRaises(GridError):
             validate_spec(spec)
+
+
+class GridInitProbeTest(unittest.TestCase):
+    def test_run_init_probe_applies_stop_loss(self) -> None:
+        text = run_init_probe({"STOP_LOSS": 0.06})
+        got = parse_fingerprint(text)
+        self.assertTrue(got["has_stop"])
+        self.assertTrue(got["has_tfb"])
+        self.assertAlmostEqual(float(got["stop"]), 0.06)
+        defaults = load_config_defaults()
+        expected = expected_fingerprint(defaults, {"STOP_LOSS": 0.06})
+        self.assertAlmostEqual(float(got["stop"]), expected["stop"])
+        self.assertEqual(got["time_force_bars"], expected["time_force_bars"])
+
+    def test_run_cell_probe_then_all_walks(self) -> None:
+        defaults = {
+            "STOP_LOSS": 0.08,
+            "TIME_FORCE_BARS": 30,
+            "TRAIL_TIERS": (
+                (0.03, 0.06, 0.015, None),
+                (0.06, 0.10, 0.03, 0.03),
+                (0.10, None, 0.04, None),
+            ),
+            "TRADE_BUDGET": 100000.0,
+        }
+        cell = {
+            "id": "sl06",
+            "label": "止损 6%",
+            "kind": "tighten",
+            "overrides": {"STOP_LOSS": 0.06},
+        }
+        jobs = [
+            _walk(basket="tune", stocks=["AAA111.SH"]),
+            _walk(basket="holdout", stocks=["BBB222.SZ"]),
+        ]
+        probe_text = (
+            "HlBand v1 init stop= 0.06 trail_arm= 0.03 "
+            "time_force_bars= 30 time_force_min_ret= 0.03"
+        )
+        ok_row = {"ok": True, "basket_id": "tune", "log_path": "x", "error": ""}
+        labels: list[tuple[int, int, str]] = []
+
+        def on_progress(_cid: str, done: int, tot: int, label: str) -> None:
+            labels.append((done, tot, label))
+
+        with tempfile.TemporaryDirectory() as td:
+            cell_dir = Path(td) / "report" / "grid" / "s" / "sl06"
+            with patch("grid_run.run_init_probe", return_value=probe_text) as probe:
+                with patch("grid_run.run_one_book_walk", return_value=ok_row) as walk:
+                    run_cell(cell, jobs, cell_dir, defaults, workers=1, on_progress=on_progress)
+            self.assertEqual(probe.call_count, 1)
+            self.assertEqual(walk.call_count, 2)
+            self.assertTrue((cell_dir / "cell_meta.json").is_file())
+            self.assertEqual(labels[0], (0, 2, "探针 init"))
+            self.assertEqual(labels[1], (0, 2, "回放 tune"))
+            self.assertIn((1, 2, "tune"), labels)
+            self.assertEqual(labels[-2], (1, 2, "回放 holdout"))
+            self.assertEqual(labels[-1], (2, 2, "holdout"))
+
+    def test_run_cell_probe_fail_skips_walks(self) -> None:
+        defaults = {
+            "STOP_LOSS": 0.08,
+            "TIME_FORCE_BARS": 30,
+            "TRAIL_TIERS": ((0.03, 0.06, 0.015, None),),
+            "TRADE_BUDGET": 100000.0,
+        }
+        cell = {
+            "id": "sl06",
+            "label": "止损 6%",
+            "kind": "tighten",
+            "overrides": {"STOP_LOSS": 0.06},
+        }
+        jobs = [_walk()]
+        with tempfile.TemporaryDirectory() as td:
+            cell_dir = Path(td) / "report" / "grid" / "s" / "sl06"
+            with patch("grid_run.run_init_probe", side_effect=RuntimeError("boom")):
+                with patch("grid_run.run_one_book_walk") as walk:
+                    with self.assertRaises(GridError) as ctx:
+                        run_cell(cell, jobs, cell_dir, defaults, workers=1)
+            self.assertIn("探针失败", str(ctx.exception))
+            walk.assert_not_called()
 
 
 if __name__ == "__main__":

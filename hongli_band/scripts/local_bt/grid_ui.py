@@ -5,7 +5,7 @@ from __future__ import annotations
 import html
 import json
 from pathlib import Path
-from typing import Any, Mapping, MutableMapping
+from typing import Any, MutableMapping
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -118,10 +118,6 @@ def _ensure_state() -> None:
     ss.setdefault("grid_cells", [])
     ss.setdefault("grid_summary", None)
     ss.setdefault("grid_busy", False)
-    ss.setdefault("grid_overwrite_ok", False)
-    ss.setdefault("grid_run_ok", False)
-    ss.setdefault("grid_await_confirm", False)
-    ss.setdefault("grid_confirm_nonce", 0)
     ss.setdefault("grid_import_text", "")
     ss.setdefault("grid_param_group", "全部")
     ss.setdefault("grid_param_search", "")
@@ -546,63 +542,17 @@ def _mint_sweep_name() -> str:
     return auto_sweep_name(_axes(), existing=_existing_sweep_names())
 
 
-def _confirm_open_key(nonce: int) -> str:
-    return "grid_confirm_go_%s" % int(nonce or 0)
-
-
-def _clear_stale_confirm_keys(ss: MutableMapping[str, Any]) -> None:
-    for key in list(ss.keys()):
-        name = str(key)
-        if name.startswith("grid_confirm_go") or name.startswith("grid_confirm_cancel"):
-            del ss[key]
-
-
-def _needs_run_confirm(ss: Mapping[str, Any]) -> bool:
-    """开跑一律先弹确认。禁止按格子/任务数跳过（旧逻辑会表现为时而弹窗时而直跑）。"""
-    return not bool(ss.get("grid_run_ok"))
-
-
 def _begin_run_request(ss: MutableMapping[str, Any]) -> None:
     ss["grid_action"] = "run"
     ss.pop("grid_pending_sweep", None)
-    ss.pop("grid_yield_for_dialog", None)
-    ss["grid_run_ok"] = False
-    ss["grid_overwrite_ok"] = False
-    ss["grid_await_confirm"] = True
-    ss["grid_confirm_nonce"] = int(ss.get("grid_confirm_nonce") or 0) + 1
-    _clear_stale_confirm_keys(ss)
-
-
-def _apply_run_confirmed(ss: MutableMapping[str, Any]) -> None:
-    ss["grid_run_ok"] = True
-    ss["grid_overwrite_ok"] = True
-    ss["grid_action"] = "run"
-    ss["grid_await_confirm"] = False
-    ss["grid_yield_for_dialog"] = True
-
-
-def _apply_run_dismissed(ss: MutableMapping[str, Any]) -> None:
-    if ss.get("grid_run_ok") or ss.get("grid_yield_for_dialog"):
-        return
-    ss["grid_await_confirm"] = False
-    ss["grid_run_ok"] = False
-    ss["grid_overwrite_ok"] = False
-    if ss.get("grid_action") == "run":
-        ss.pop("grid_action", None)
-        ss.pop("grid_pending_sweep", None)
 
 
 def _mark_start() -> None:
     _begin_run_request(st.session_state)
 
 
-def _on_dismiss_confirm() -> None:
-    _apply_run_dismissed(st.session_state)
-
-
 def _mark_summarize() -> None:
     st.session_state["grid_action"] = "summarize"
-    st.session_state["grid_await_confirm"] = False
 
 
 def _save_spec_clicked() -> None:
@@ -641,11 +591,8 @@ def render_grid_mode() -> None:
     _render_action_bar(defaults, busy)
     _render_preview(defaults, busy)
     _render_advanced(defaults, busy)
-    close_dialog_first = bool(st.session_state.get("grid_yield_for_dialog"))
     _handle_actions(defaults)
     _render_results()
-    if close_dialog_first:
-        _rerun_app()
 
 
 def _render_param_table(defaults: dict[str, Any], busy: bool) -> None:
@@ -770,9 +717,6 @@ def _render_action_bar(defaults: dict[str, Any], busy: bool) -> None:
             cells = build_cells(_axes(), defaults, keep=keep)
             st.session_state["grid_cells"] = cells
             st.session_state.pop("grid_cells_editor", None)
-            st.session_state["grid_overwrite_ok"] = False
-            st.session_state["grid_run_ok"] = False
-            st.session_state["grid_await_confirm"] = False
             st.success("已生成 %s 格" % len(cells))
         except GridSpecError as e:
             st.error(str(e))
@@ -931,53 +875,7 @@ def _import_spec_text(text: str, defaults: dict[str, Any]) -> None:
     st.rerun()
 
 
-def _rerun_app() -> None:
-    try:
-        st.rerun(scope="app")
-    except TypeError:
-        st.rerun()
-
-
-@st.dialog("确认开跑", on_dismiss=_on_dismiss_confirm)
-def _dialog_confirm_run(
-    n_cells: int,
-    n_jobs: int,
-    total: int,
-    sweep: str,
-    dest_existing: Path | None = None,
-) -> None:
-    st.write(
-        "sweep **%s** · 格子 **%s** · 每格 walk **%s** · 总任务约 **%s**"
-        % (sweep, n_cells, n_jobs, total)
-    )
-    if dest_existing is not None:
-        st.warning("目录已存在：`%s`，确认后将覆盖。" % dest_existing)
-    st.caption("格间串行；每格是组合连续回放（单账户、最多 3 笔、复利）。默认不改 config。")
-    nonce = int(st.session_state.get("grid_confirm_nonce") or 0)
-    with st.container(horizontal=True, wrap=False, vertical_alignment="center"):
-        if st.button(
-            "确认开跑",
-            type="primary",
-            key=_confirm_open_key(nonce),
-            wrap=False,
-            width="stretch",
-        ):
-            _apply_run_confirmed(st.session_state)
-            _rerun_app()
-        if st.button(
-            "取消",
-            key="grid_confirm_cancel_%s" % nonce,
-            wrap=False,
-            width="stretch",
-        ):
-            _apply_run_dismissed(st.session_state)
-            _rerun_app()
-
-
 def _handle_actions(defaults: dict[str, Any]) -> None:
-    # 确认弹窗关掉后先完整画一帧，再开跑；否则长任务会把 overlay 卡住。
-    if st.session_state.pop("grid_yield_for_dialog", None):
-        return
     action = st.session_state.get("grid_action")
     if not action:
         return
@@ -1011,7 +909,6 @@ def _handle_actions(defaults: dict[str, Any]) -> None:
     except GridError as e:
         st.error(str(e))
         st.session_state.pop("grid_action", None)
-        st.session_state["grid_await_confirm"] = False
         return
     if action != "run":
         return
@@ -1028,37 +925,20 @@ def _handle_actions(defaults: dict[str, Any]) -> None:
             st.session_state["grid_tune_stocks"] = list(drawn.get("tune_stocks") or [])
             st.session_state["grid_holdout_stocks"] = list(drawn.get("holdout_stocks") or [])
             st.session_state["grid_eligible_n"] = int(drawn.get("eligible_n") or 0)
-    dest = _sweep_dir(spec)
     try:
-        _book, jobs = assemble_jobs(
+        assemble_jobs(
             spec,
             include_sma_ema=bool(st.session_state.get("grid_sma_ema")),
         )
-        n_jobs = len(jobs)
     except GridError as e:
         st.error(str(e))
         st.session_state.pop("grid_action", None)
-        st.session_state["grid_await_confirm"] = False
-        return
-    n_cells = len(spec["cells"])
-    total = n_cells * n_jobs
-    # 必须每帧重呼 dialog，且确认钮每次开跑换 key：旧 key 残留 True 会跳过弹窗直接开跑。
-    if _needs_run_confirm(st.session_state):
-        dest_existing = dest if dest.exists() and any(dest.iterdir()) else None
-        _dialog_confirm_run(
-            n_cells,
-            n_jobs,
-            total,
-            str(spec.get("sweep") or ""),
-            dest_existing,
-        )
         return
     st.session_state.pop("grid_action", None)
-    st.session_state["grid_await_confirm"] = False
-    _run_now(spec, n_jobs, total)
+    _run_now(spec)
 
 
-def _run_now(spec: dict[str, Any], n_jobs: int, total: int) -> None:
+def _run_now(spec: dict[str, Any]) -> None:
     st.session_state["grid_busy"] = True
     bar = st.progress(0.0)
     status = st.empty()
@@ -1097,11 +977,9 @@ def _run_now(spec: dict[str, Any], n_jobs: int, total: int) -> None:
         st.error("%s: %s" % (type(e).__name__, e))
     finally:
         st.session_state["grid_busy"] = False
-        st.session_state["grid_overwrite_ok"] = False
-        st.session_state["grid_run_ok"] = False
-        st.session_state["grid_await_confirm"] = False
         st.session_state.pop("grid_pending_sweep", None)
         _persist_app()
+
 
 def _grid_sweep_dir(summary: dict[str, Any]) -> Path:
     raw = str(summary.get("sweep_dir") or "").strip()

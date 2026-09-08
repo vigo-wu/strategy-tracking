@@ -53,7 +53,7 @@ python hongli_band/scripts/local_bt/app.py   # 模式「实盘评估」
 - [ ] 1. 网格 summary 已有 recommend
 - [ ] 2. spec 含 tune/check/deploy，deploy 晚于 check
 - [ ] 3. N/K/seed 与硬软门确认
-- [ ] 4. 探针指纹与 overrides 一致
+- [ ] 4. 探针 init 指纹与 overrides 一致（不回放 K 线）
 - [ ] 5. summary verdict = GO / NO-GO
 - [ ] 6. 不改 config / 不 deploy
 ```

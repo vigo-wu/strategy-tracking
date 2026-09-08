@@ -42,7 +42,7 @@ JSON 可序列化。元组在 JSON 里用数组；`null` = Python `None`。
 - 格内：按 walk 用 `ProcessPool`（最多 6 段：分篮 × SMA/EMA）。
 - 格间：**串行**，避免进程数 × 格数爆炸。
 - 每格写 `cell_meta.json`（`overrides`、kind、walk 数）。
-- 先跑该格第一段 book walk 做探针，指纹不对则**停止整个 sweep**。
+- 每格先跑 **init 探针**（dummy context，不回放 K 线），指纹不对则**停止整个 sweep**。通过后该格全部 walk 再跑（第一段不再兼探针）。
 - 资金：`compound_backtest=True`，`wallet_cash=TRADE_BUDGET`；`BUDGET_BASE` / `CASH_RATIO` 跟现行 config。
 
 ## summarize 口径

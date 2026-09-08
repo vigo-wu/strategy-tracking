@@ -40,7 +40,7 @@ MAE 为何不可信、本轮数字：需要时再读 [reference-lessons.md](refe
 6. **时空双重隔离**：时间用 `tune_*` / `check_*`；空间用 `tune_stocks` / `holdout_stocks`（盲测只否决、不参与格子比大小）。`mode=off` 时无空间门。
 7. 每格写入主题 `report/grid/<sweep>/<cell>/`，**不得覆盖** `report/front_ratio/` 等基线 log。
 8. 格子之间**串行**；格内按 walk 并行（无空间隔离 1 段；空间隔离 2 段；再开 `--include-sma-ema` 则 ×3，最多 6 段）。进度按 walk 计，不要按「标的×年」估 ETA。
-9. 开跑后校验 init 指纹：`stop=` / `time_force_bars=`；扫 `TRAIL_TIERS` 时核 compact `trail_tiers=` JSON（整表相等），`trail_arm=` 与派生的 `time_force_min_ret=` 同值（人读）。不一致则停。
+9. 每格先跑 init 探针（dummy context，不回放 K 线）校验指纹：`stop=` / `time_force_bars=`；扫 `TRAIL_TIERS` 时核 compact `trail_tiers=` JSON（整表相等），`trail_arm=` 与派生的 `time_force_min_ret=` 同值（人读）。不一致则停。通过后该格全部 walk 再跑。
 10. **默认不改 `config.py`、不 deploy**。用户说「按建议修改」再改片段并部署。
 
 ## 选参
@@ -62,7 +62,7 @@ Agent 输出：过门推荐一句。不要把 MAE 数字写进推荐。
 - [ ] 3. 若空间隔离：freeze 含 tune/holdout；盲测只否决
 - [ ] 4. 运行时 overrides（禁止改 config 扫参）
 - [ ] 5. 隔离 report/grid/<sweep>/；格间串行
-- [ ] 6. 探针 log 指纹与格子一致
+- [ ] 6. 探针 init 指纹与格子一致（只跑 init，不走 K 线）
 - [ ] 7. summarize → summary.json；绝对过门 + 验收期卡玛推荐
 - [ ] 8. 一句过门推荐；默认不改 config / 不 deploy
 ```

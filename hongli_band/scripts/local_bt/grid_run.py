@@ -60,7 +60,7 @@ from asset_split import (  # noqa: E402
 )
 from market_csv import compact_day, peek_daily_csv_meta  # noqa: E402
 from book_backtest import book_log_name, book_stocks_hash, run_book_backtest  # noqa: E402
-from run import _as_trail_tiers  # noqa: E402
+from run import _as_trail_tiers, run_init_probe  # noqa: E402
 from trades_csv import trades_csv_path  # noqa: E402
 
 WARN_CELL_SOFT = 8
@@ -329,6 +329,46 @@ def _num_eq(a: Any, b: Any, eps: float = 1e-9) -> bool:
         return False
 
 
+def assert_fingerprint_text(
+    text: str,
+    expected: dict[str, Any],
+    *,
+    need_trail: bool,
+    source: str = "",
+) -> None:
+    label = source or "probe"
+    got = parse_fingerprint(text)
+    if not got["has_stop"] or not _num_eq(got["stop"], expected["stop"]):
+        raise GridError(
+            "指纹 stop 不符 log=%s got=%s expected=%s" % (label, got["stop"], expected["stop"])
+        )
+    if not got["has_tfb"] or got["time_force_bars"] != expected["time_force_bars"]:
+        raise GridError(
+            "指纹 time_force_bars 不符 log=%s got=%s expected=%s"
+            % (label, got["time_force_bars"], expected["time_force_bars"])
+        )
+    if got["time_force_min_ret"] is not None and not _num_eq(
+        got["time_force_min_ret"], expected["time_force_min_ret"]
+    ):
+        raise GridError(
+            "指纹 time_force_min_ret 不符 log=%s got=%s expected=%s"
+            % (label, got["time_force_min_ret"], expected["time_force_min_ret"])
+        )
+    if need_trail:
+        if not got["has_trail_arm"] or not _num_eq(got["trail_arm"], expected["trail_arm"]):
+            raise GridError(
+                "指纹 trail_arm 不符 log=%s got=%s expected=%s"
+                % (label, got.get("trail_arm"), expected["trail_arm"])
+            )
+        if not got.get("has_trail_tiers") or not struct_eq(
+            got.get("trail_tiers"), expected.get("trail_tiers")
+        ):
+            raise GridError(
+                "指纹 trail_tiers 不符 log=%s got=%s expected=%s"
+                % (label, got.get("trail_tiers"), expected.get("trail_tiers"))
+            )
+
+
 def assert_fingerprint(
     log_path: Path,
     expected: dict[str, Any],
@@ -336,36 +376,7 @@ def assert_fingerprint(
     need_trail: bool,
 ) -> None:
     text = log_path.read_text(encoding="utf-8", errors="replace")
-    got = parse_fingerprint(text)
-    if not got["has_stop"] or not _num_eq(got["stop"], expected["stop"]):
-        raise GridError(
-            "指纹 stop 不符 log=%s got=%s expected=%s" % (log_path, got["stop"], expected["stop"])
-        )
-    if not got["has_tfb"] or got["time_force_bars"] != expected["time_force_bars"]:
-        raise GridError(
-            "指纹 time_force_bars 不符 log=%s got=%s expected=%s"
-            % (log_path, got["time_force_bars"], expected["time_force_bars"])
-        )
-    if got["time_force_min_ret"] is not None and not _num_eq(
-        got["time_force_min_ret"], expected["time_force_min_ret"]
-    ):
-        raise GridError(
-            "指纹 time_force_min_ret 不符 log=%s got=%s expected=%s"
-            % (log_path, got["time_force_min_ret"], expected["time_force_min_ret"])
-        )
-    if need_trail:
-        if not got["has_trail_arm"] or not _num_eq(got["trail_arm"], expected["trail_arm"]):
-            raise GridError(
-                "指纹 trail_arm 不符 log=%s got=%s expected=%s"
-                % (log_path, got.get("trail_arm"), expected["trail_arm"])
-            )
-        if not got.get("has_trail_tiers") or not struct_eq(
-            got.get("trail_tiers"), expected.get("trail_tiers")
-        ):
-            raise GridError(
-                "指纹 trail_tiers 不符 log=%s got=%s expected=%s"
-                % (log_path, got.get("trail_tiers"), expected.get("trail_tiers"))
-            )
+    assert_fingerprint_text(text, expected, need_trail=need_trail, source=str(log_path))
 
 
 def csv_for(stock: str, div: str) -> Path | None:
@@ -721,44 +732,48 @@ def run_cell(
         else:
             print("[%s] %s/%s %s" % (cell["id"], done, total, label), flush=True)
 
-    first = payloads[0]
-    _progress(0, len(payloads), "探针 %s" % first.get("basket_id"))
-    probe = run_one_book_walk(first)
-    log0 = Path(str(probe.get("log_path") or ""))
-    if not probe.get("ok") or not log0.is_file():
-        raise GridError("格子 %s 探针失败: %s" % (cell["id"], probe.get("error") or log0))
-    assert_fingerprint(log0, expected, need_trail=need_trail)
-    rest = payloads[1:]
-    done = 1
-    _progress(done, len(payloads), str(first.get("basket_id") or "book"))
+    n = len(payloads)
+    _progress(0, n, "探针 init")
+    probe_log = cell_dir / "probe_init.txt"
+    try:
+        text = run_init_probe(cell.get("overrides") or {}, log_path=probe_log)
+    except Exception as e:
+        raise GridError("格子 %s 探针失败: %s" % (cell["id"], e)) from e
+    assert_fingerprint_text(text, expected, need_trail=need_trail, source=str(probe_log))
+    done = 0
     w = int(workers or 0)
-    if rest:
-        if w <= 1:
-            for payload in rest:
-                row = run_one_book_walk(payload)
-                done += 1
-                if not row.get("ok"):
-                    raise GridError(
-                        "格子 %s walk 失败: %s" % (cell["id"], row.get("error") or payload.get("basket_id"))
-                    )
-                _progress(done, len(payloads), str(payload.get("basket_id") or ""))
-        else:
-            ctx = get_context("spawn")
-            with ProcessPoolExecutor(max_workers=w, mp_context=ctx) as ex:
-                futs = {ex.submit(run_one_book_walk, p): p for p in rest}
-                for fut in as_completed(futs):
-                    payload = futs[fut]
-                    try:
-                        row = fut.result()
-                    except Exception as e:
-                        raise GridError("格子 %s walk 失败: %s" % (cell["id"], e)) from e
-                    done += 1
-                    if not row.get("ok"):
-                        raise GridError(
-                            "格子 %s walk 失败: %s"
-                            % (cell["id"], row.get("error") or payload.get("basket_id"))
-                        )
-                    _progress(done, len(payloads), str(payload.get("basket_id") or ""))
+
+    def _basket(payload: dict[str, Any]) -> str:
+        return str(payload.get("basket_id") or "book")
+
+    if w <= 1 or n <= 1:
+        for payload in payloads:
+            _progress(done, n, "回放 %s" % _basket(payload))
+            row = run_one_book_walk(payload)
+            done += 1
+            if not row.get("ok"):
+                raise GridError(
+                    "格子 %s walk 失败: %s" % (cell["id"], row.get("error") or payload.get("basket_id"))
+                )
+            _progress(done, n, _basket(payload))
+        return
+    _progress(0, n, "回放 %s" % "+".join(_basket(p) for p in payloads))
+    ctx = get_context("spawn")
+    with ProcessPoolExecutor(max_workers=w, mp_context=ctx) as ex:
+        futs = {ex.submit(run_one_book_walk, p): p for p in payloads}
+        for fut in as_completed(futs):
+            payload = futs[fut]
+            try:
+                row = fut.result()
+            except Exception as e:
+                raise GridError("格子 %s walk 失败: %s" % (cell["id"], e)) from e
+            done += 1
+            if not row.get("ok"):
+                raise GridError(
+                    "格子 %s walk 失败: %s"
+                    % (cell["id"], row.get("error") or payload.get("basket_id"))
+                )
+            _progress(done, n, _basket(payload))
 
 
 def assemble_jobs(

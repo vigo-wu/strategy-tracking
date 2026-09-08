@@ -26,10 +26,11 @@ if str(HERE) not in sys.path:
 from analyze import DEFAULT_CSV_ROOT, resolve_typed_dir  # noqa: E402
 from book_backtest import book_log_name, book_stocks_hash, run_book_backtest  # noqa: E402
 from grid_run import (  # noqa: E402
-    assert_fingerprint,
+    assert_fingerprint_text,
     expected_fingerprint,
     load_config_defaults,
 )
+from run import run_init_probe  # noqa: E402
 from robust_sample import load_freeze, sample_baskets_for_spec, write_freeze  # noqa: E402
 from robust_spec import (  # noqa: E402
     ROBUST_ROOT,
@@ -253,33 +254,41 @@ def run_robust(
         )
         return {"dry_run": True, "n_baskets": n, "root": str(root), "spec": json_ready(spec)}
 
-    # probe first basket
+    # init 探针：不回放 K 线；通过后全部篮子（含第一组）再跑
     defaults = load_config_defaults()
     need_trail = "TRAIL_TIERS" in (spec.get("overrides") or {})
     expected = expected_fingerprint(defaults, spec.get("overrides") or {})
-    first = jobs[0]
-    _emit(on_progress, phase="probe", done=0, total=n, label="探针 %s" % first["basket_id"])
-    probe = run_one_basket(first)
-    if not probe.get("ok"):
-        raise RobustError("探针失败: %s" % probe.get("error"))
-    log_path = Path(str(probe.get("log_path") or ""))
-    if log_path.is_file():
-        try:
-            assert_fingerprint(log_path, expected, need_trail=need_trail)
-        except Exception as e:
-            raise RobustError(str(e)) from e
+    _emit(on_progress, phase="probe", done=0, total=n, label="探针 init")
+    probe_log = root / "probe_init.txt"
+    try:
+        text = run_init_probe(spec.get("overrides") or {}, log_path=probe_log)
+        assert_fingerprint_text(text, expected, need_trail=need_trail, source=str(probe_log))
+    except Exception as e:
+        raise RobustError("探针失败: %s" % e) from e
 
-    results = [probe]
-    rest = jobs[1:]
+    results: list[dict[str, Any]] = []
+    rest = jobs
     w = int(workers or 0)
     if w <= 0:
         w = min(4, max(1, (len(rest) or 1)))
-    done = 1
-    _emit(on_progress, phase="run", done=done, total=n, label=first["basket_id"])
-
+    done = 0
     if rest:
+        _emit(
+            on_progress,
+            phase="run",
+            done=0,
+            total=n,
+            label="回放 %s" % str(rest[0]["basket_id"]),
+        )
         if w == 1:
             for job in rest:
+                _emit(
+                    on_progress,
+                    phase="run",
+                    done=done,
+                    total=n,
+                    label="回放 %s" % str(job["basket_id"]),
+                )
                 row = run_one_basket(job)
                 results.append(row)
                 done += 1

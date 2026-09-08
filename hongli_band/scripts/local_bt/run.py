@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import io
 import os
 import runpy
 import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from datetime import datetime
 from multiprocessing import get_context
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence, TextIO
@@ -29,6 +31,7 @@ if str(REPO / "scripts") not in sys.path:
     sys.path.insert(0, str(REPO / "scripts"))
 
 from market_csv import (  # noqa: E402
+    DailyBar,
     MarketStore,
     find_weekly_csv,
     load_daily_csv,
@@ -203,6 +206,62 @@ def install_config_overrides(ns: dict[str, Any], overrides: Mapping[str, Any] | 
         apply_config_overrides(ns, overrides)
 
     ns["_apply_panel"] = _apply_panel_then_overrides
+
+
+def _probe_mock_context() -> MockContext:
+    stock = "000001.SH"
+    dt = datetime(2020, 1, 2, 15, 0, 0)
+    bar = DailyBar(
+        day="20200102",
+        dt=dt,
+        open=1.0,
+        high=1.0,
+        low=1.0,
+        close=1.0,
+        volume=1.0,
+        stock=stock,
+    )
+    store = MarketStore([bar], stock)
+    return MockContext(store, [_as_tag(dt)], stock)
+
+
+def run_init_probe(
+    overrides: Mapping[str, Any] | None = None,
+    *,
+    log_path: str | Path | None = None,
+) -> str:
+    """只跑 init()（dummy K 线），写出含 stop=/trail_tiers= 的指纹日志。"""
+    ns = _exec_bundle()
+    install_config_overrides(ns, overrides)
+    ctx = _probe_mock_context()
+    buf = io.StringIO()
+    dest = Path(log_path) if log_path else None
+    log_f: TextIO | None = None
+    old_out, old_err = sys.stdout, sys.stderr
+    try:
+        if dest is not None:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            log_f = open(dest, "w", encoding="utf-8", newline="\n")
+            sink: TextIO = _Tee(buf, log_f)
+        else:
+            sink = buf
+        sys.stdout = sink
+        sys.stderr = sink
+        keys = ",".join(sorted(str(k) for k in dict(overrides or {}))) or "-"
+        print("probe_init keys=%s" % keys)
+        ns["init"](ctx)
+        try:
+            sink.flush()
+        except Exception:
+            pass
+    finally:
+        sys.stdout, sys.stderr = old_out, old_err
+        if log_f is not None:
+            try:
+                log_f.close()
+            except Exception:
+                pass
+    return buf.getvalue()
 
 
 def _apply_ma_type(ns: dict, kind: str) -> str:
