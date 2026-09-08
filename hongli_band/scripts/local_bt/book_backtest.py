@@ -6,7 +6,7 @@ import hashlib
 import json
 import sys
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -187,6 +187,7 @@ def run_book_backtest(
     log_name: str = "",
     quiet: bool = True,
     overrides: Mapping[str, Any] | None = None,
+    on_progress: Callable[[int, int, str], None] | None = None,
 ) -> tuple[Path, dict[str, Any]]:
     """组合 universe 回放 → (log_path, meta)。"""
     norm = normalize_book_stocks(book_stocks)
@@ -271,9 +272,20 @@ def run_book_backtest(
         handle_uni = ns.get("_handle_universe")
         if not callable(handle_uni):
             raise RuntimeError("_handle_universe 不可用")
-        for i, _bar in enumerate(walk):
+        n_walk = len(walk)
+        step = walk_progress_step(n_walk)
+        last_year = ""
+        last_emit = -10**9
+        for i, bar in enumerate(walk):
             ctx.barpos = i
             handle_uni(ctx)
+            day = str(getattr(bar, "day", "") or "")
+            if on_progress is not None and should_emit_walk_progress(
+                i, n_walk, day, last_year, last_emit, step
+            ):
+                _call_walk_progress(on_progress, i + 1, n_walk, day, old_out, old_err)
+                last_year = day[:4]
+                last_emit = i
     finally:
         if quiet:
             try:
@@ -331,3 +343,42 @@ def analyze_book_detail(
     combo["per_stock"] = per_stock
     combo["sum_pnl"] = float((combo.get("stats") or {}).get("sum_pnl") or 0.0)
     return combo
+
+
+def walk_progress_step(n_bars: int) -> int:
+    n = max(int(n_bars or 0), 1)
+    return max(1, n // 40)
+
+
+def should_emit_walk_progress(
+    i: int,
+    n: int,
+    day: str,
+    last_year: str,
+    last_i: int,
+    step: int,
+) -> bool:
+    if i <= 0 or i >= max(int(n), 1) - 1:
+        return True
+    year = str(day or "")[:4]
+    if year and year != str(last_year or ""):
+        return True
+    return (int(i) - int(last_i)) >= max(int(step), 1)
+
+
+def _call_walk_progress(
+    cb: Callable[[int, int, str], None] | None,
+    done: int,
+    total: int,
+    day: str,
+    stdout: Any,
+    stderr: Any,
+) -> None:
+    if cb is None:
+        return
+    cur_out, cur_err = sys.stdout, sys.stderr
+    try:
+        sys.stdout, sys.stderr = stdout, stderr
+        cb(int(done), int(total), str(day or ""))
+    finally:
+        sys.stdout, sys.stderr = cur_out, cur_err

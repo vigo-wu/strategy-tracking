@@ -945,13 +945,26 @@ def _run_now(spec: dict[str, Any]) -> None:
     n_cells = max(len(spec.get("cells") or []), 1)
     cell_ids = [str(c.get("id") or "") for c in spec.get("cells") or []]
 
-    def on_progress(cid: str, done: int, tot: int, label: str) -> None:
+    def on_progress(cid: str, done: int, tot: int, label: str, **extra: Any) -> None:
         try:
             idx = cell_ids.index(str(cid))
         except ValueError:
             idx = 0
-        frac = (float(idx) + (float(done) / float(tot or 1))) / float(n_cells)
-        bar.progress(min(1.0, frac))
+        inner = 0.0
+        walk_total = extra.get("walk_total")
+        try:
+            wt = float(walk_total or 0)
+            if wt > 0:
+                inner = min(1.0, float(extra.get("walk_done") or 0) / wt)
+        except (TypeError, ValueError):
+            inner = 0.0
+        frac = (float(idx) + (float(done) + inner) / float(tot or 1)) / float(n_cells)
+        frac = min(1.0, frac)
+        text = "%s/%s %s" % (done, tot, label)
+        try:
+            bar.progress(frac, text=text)
+        except TypeError:
+            bar.progress(frac)
         status.info("格子 **%s** · %s/%s %s" % (cid, done, tot, label))
 
     try:

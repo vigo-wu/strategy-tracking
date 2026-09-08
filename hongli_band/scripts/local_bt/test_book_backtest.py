@@ -64,5 +64,16 @@ class BookBacktestUnitTests(unittest.TestCase):
             self.assertEqual(attribute_portfolio_kpi(p), {})
 
 
+class WalkProgressHelperTest(unittest.TestCase):
+    def test_year_change_and_step(self) -> None:
+        from book_backtest import should_emit_walk_progress, walk_progress_step
+
+        self.assertEqual(walk_progress_step(2000), 50)
+        self.assertTrue(should_emit_walk_progress(0, 100, "20180102", "", -1, 10))
+        self.assertTrue(should_emit_walk_progress(99, 100, "20200102", "2019", 90, 10))
+        self.assertTrue(should_emit_walk_progress(20, 100, "20190102", "2018", 10, 50))
+        self.assertFalse(should_emit_walk_progress(15, 100, "20180120", "2018", 10, 50))
+
+
 if __name__ == "__main__":
     unittest.main()

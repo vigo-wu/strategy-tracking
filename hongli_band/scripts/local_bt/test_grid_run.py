@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
@@ -468,7 +469,7 @@ class GridInitProbeTest(unittest.TestCase):
         ok_row = {"ok": True, "basket_id": "tune", "log_path": "x", "error": ""}
         labels: list[tuple[int, int, str]] = []
 
-        def on_progress(_cid: str, done: int, tot: int, label: str) -> None:
+        def on_progress(_cid: str, done: int, tot: int, label: str, **_kw: Any) -> None:
             labels.append((done, tot, label))
 
         with tempfile.TemporaryDirectory() as td:
@@ -484,6 +485,61 @@ class GridInitProbeTest(unittest.TestCase):
             self.assertIn((1, 2, "tune"), labels)
             self.assertEqual(labels[-2], (1, 2, "回放 holdout"))
             self.assertEqual(labels[-1], (2, 2, "holdout"))
+
+    def test_run_cell_bar_progress_updates_label(self) -> None:
+        defaults = {
+            "STOP_LOSS": 0.08,
+            "TIME_FORCE_BARS": 30,
+            "TRAIL_TIERS": ((0.03, 0.06, 0.015, None),),
+            "TRADE_BUDGET": 100000.0,
+        }
+        cell = {
+            "id": "sl06",
+            "label": "止损 6%",
+            "kind": "tighten",
+            "overrides": {"STOP_LOSS": 0.06},
+        }
+        jobs = [_walk(basket="tune")]
+        probe_text = (
+            "HlBand v1 init stop= 0.06 trail_arm= 0.03 "
+            "time_force_bars= 30 time_force_min_ret= 0.03"
+        )
+        events: list[tuple[int, int, str, int, int]] = []
+
+        def on_progress(
+            _cid: str, done: int, tot: int, label: str, **extra: Any
+        ) -> None:
+            events.append(
+                (
+                    done,
+                    tot,
+                    label,
+                    int(extra.get("walk_done") or 0),
+                    int(extra.get("walk_total") or 0),
+                )
+            )
+
+        def fake_walk(payload, on_bar_progress=None):
+            if on_bar_progress:
+                on_bar_progress(12, 100, "20190506")
+            return {
+                "ok": True,
+                "basket_id": payload.get("basket_id"),
+                "log_path": "x",
+                "error": "",
+            }
+
+        with tempfile.TemporaryDirectory() as td:
+            cell_dir = Path(td) / "report" / "grid" / "s" / "sl06"
+            with patch("grid_run.run_init_probe", return_value=probe_text):
+                with patch("grid_run.run_one_book_walk", side_effect=fake_walk):
+                    run_cell(cell, jobs, cell_dir, defaults, workers=1, on_progress=on_progress)
+        self.assertTrue(
+            any(
+                ev[2] == "回放 tune · 2019 12/100" and ev[3] == 12 and ev[4] == 100
+                for ev in events
+            )
+        )
 
     def test_run_cell_probe_fail_skips_walks(self) -> None:
         defaults = {

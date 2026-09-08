@@ -652,7 +652,10 @@ def job_payload(
     }
 
 
-def run_one_book_walk(payload: dict[str, Any]) -> dict[str, Any]:
+def run_one_book_walk(
+    payload: dict[str, Any],
+    on_bar_progress: Callable[[int, int, str], None] | None = None,
+) -> dict[str, Any]:
     """子进程入口：一段组合连续回放。"""
     basket_id = str(payload.get("basket_id") or "book")
     out_dir = Path(payload["out_dir"])
@@ -668,6 +671,7 @@ def run_one_book_walk(payload: dict[str, Any]) -> dict[str, Any]:
             log_name=log_name,
             quiet=True,
             overrides=payload.get("overrides") or {},
+            on_progress=on_bar_progress,
         )
         return {
             "ok": True,
@@ -726,9 +730,9 @@ def run_cell(
     expected = expected_fingerprint(defaults, cell["overrides"])
     need_trail = "TRAIL_TIERS" in (cell.get("overrides") or {})
 
-    def _progress(done: int, total: int, label: str) -> None:
+    def _progress(done: int, total: int, label: str, **extra: Any) -> None:
         if on_progress is not None:
-            on_progress(str(cell["id"]), done, total, label)
+            on_progress(str(cell["id"]), done, total, label, **extra)
         else:
             print("[%s] %s/%s %s" % (cell["id"], done, total, label), flush=True)
 
@@ -748,14 +752,27 @@ def run_cell(
 
     if w <= 1 or n <= 1:
         for payload in payloads:
-            _progress(done, n, "回放 %s" % _basket(payload))
-            row = run_one_book_walk(payload)
+            basket = _basket(payload)
+
+            def _on_bar(done_bars: int, tot_bars: int, day: str, _b=basket) -> None:
+                year = str(day or "")[:4]
+                label = "回放 %s · %s %s/%s" % (_b, year, done_bars, tot_bars)
+                _progress(
+                    done,
+                    n,
+                    label,
+                    walk_done=done_bars,
+                    walk_total=tot_bars,
+                )
+
+            _progress(done, n, "回放 %s" % basket)
+            row = run_one_book_walk(payload, on_bar_progress=_on_bar)
             done += 1
             if not row.get("ok"):
                 raise GridError(
                     "格子 %s walk 失败: %s" % (cell["id"], row.get("error") or payload.get("basket_id"))
                 )
-            _progress(done, n, _basket(payload))
+            _progress(done, n, basket)
         return
     _progress(0, n, "回放 %s" % "+".join(_basket(p) for p in payloads))
     ctx = get_context("spawn")
