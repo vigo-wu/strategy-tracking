@@ -1,5 +1,5 @@
 # coding: utf-8
-"""真实 local_bt 命名网格：跟踪池 BOOK_STOCKS、隔离目录、格间串行。
+"""真实 local_bt 命名网格：跟踪池 BOOK_STOCKS、隔离目录、一层全局 walk 池。
 
 用法（仓库根目录）::
 
@@ -11,13 +11,15 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import re
 import shutil
 import sys
 import traceback
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, as_completed, wait
 from multiprocessing import get_context
 from pathlib import Path
+from queue import Empty
 from typing import Any, Callable, Iterable
 
 HERE = Path(__file__).resolve().parent
@@ -72,10 +74,39 @@ RE_ARM = re.compile(r"\btrail_arm=\s*([0-9.eE+-]+|None)")
 
 _CSV_INDEX: dict[tuple[str, str], Path] = {}
 _CSV_SPAN: dict[str, tuple[str, str] | None] = {}
+_WALK_PROGRESS_Q: Any = None
 
 
 class GridError(Exception):
     """网格 spec / 运行错误（CLI 转成 exit）。"""
+
+
+def resolve_pool_workers(requested: int, n_walks: int) -> int:
+    """全局 walk 池大小。自动 min(walk 数, CPU)；手动只夹 walk 数，不夹 16。"""
+    n_walks = max(0, int(n_walks))
+    if n_walks <= 1:
+        return 1
+    cpu = os.cpu_count() or 2
+    req = int(requested or 0)
+    if req <= 0:
+        return max(1, min(n_walks, int(cpu)))
+    if req == 1:
+        return 1
+    return max(1, min(req, n_walks))
+
+
+def _emit_progress(
+    on_progress: Callable[..., None] | None,
+    cid: str,
+    done: int,
+    tot: int,
+    label: str,
+    **extra: Any,
+) -> None:
+    if on_progress is not None:
+        on_progress(str(cid), int(done), int(tot), str(label), **extra)
+    else:
+        print("[%s] %s/%s %s" % (cid, done, tot, label), flush=True)
 
 
 def _json_ready(obj: Any) -> Any:
@@ -691,6 +722,90 @@ def run_one_book_walk(
         }
 
 
+def init_walk_pool(local_bt_dir: str = "", progress_queue: Any = None) -> None:
+    """spawn 子进程：补 sys.path，Queue 只能走 initializer 继承。"""
+    from batch_job import init_worker
+
+    init_worker(str(local_bt_dir or HERE))
+    global _WALK_PROGRESS_Q
+    _WALK_PROGRESS_Q = progress_queue
+
+
+def run_walk_job(payload: dict[str, Any]) -> dict[str, Any]:
+    """模块级 walk 入口（Windows spawn 可 pickle）。payload 禁止带 progress_queue。"""
+    cid = str(payload.get("cell_id") or "")
+    q = _WALK_PROGRESS_Q
+    label = str(payload.get("basket_id") or payload.get("sample") or "book")
+    if q is not None:
+        try:
+            q.put((cid, label))
+        except Exception:
+            pass
+    if not payload.get("out_dir"):
+        return {"ok": False, "cell_id": cid, "error": "无 job", "basket_id": label}
+    walk = {k: v for k, v in payload.items() if k != "cell_id"}
+    row = run_one_book_walk(walk)
+    row["cell_id"] = cid
+    return row
+
+
+def _drain_walk_queue(
+    q: Any,
+    on_progress: Callable[..., None] | None,
+    cell_done: dict[str, int],
+    n_jobs: int,
+) -> None:
+    if q is None:
+        return
+    while True:
+        try:
+            item = q.get_nowait()
+        except Empty:
+            break
+        except Exception:
+            break
+        cid = str(item[0] if item else "")
+        label = str(item[1] if item and len(item) > 1 else "")
+        _emit_progress(on_progress, cid, int(cell_done.get(cid) or 0), n_jobs, label)
+
+
+def write_cell_meta(cell: dict[str, Any], jobs: list[dict[str, Any]], cell_dir: Path) -> None:
+    cell_dir.mkdir(parents=True, exist_ok=True)
+    reset_cell_sample_dirs(cell_dir)
+    meta = {
+        "id": cell["id"],
+        "label": cell["label"],
+        "kind": cell["kind"],
+        "overrides": cell["overrides"],
+        "is_current": bool(cell.get("is_current")) or str(cell.get("id") or "") == "base",
+        "n_jobs": len(jobs),
+    }
+    if cell.get("n_diffs") is not None:
+        meta["n_diffs"] = cell.get("n_diffs")
+    (cell_dir / "cell_meta.json").write_text(
+        json.dumps(_json_ready(meta), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def probe_cell(
+    cell: dict[str, Any],
+    cell_dir: Path,
+    defaults: dict[str, Any],
+    n_jobs: int,
+    on_progress: Callable[..., None] | None = None,
+) -> None:
+    _emit_progress(on_progress, str(cell["id"]), 0, n_jobs, "探针 init")
+    probe_log = cell_dir / "probe_init.txt"
+    try:
+        text = run_init_probe(cell.get("overrides") or {}, log_path=probe_log)
+    except Exception as e:
+        raise GridError("格子 %s 探针失败: %s" % (cell["id"], e)) from e
+    expected = expected_fingerprint(defaults, cell["overrides"])
+    need_trail = "TRAIL_TIERS" in (cell.get("overrides") or {})
+    assert_fingerprint_text(text, expected, need_trail=need_trail, source=str(probe_log))
+
+
 def _load_summarize():
     spec = importlib.util.spec_from_file_location("qmt_local_bt_grid_summarize", SKILL_SUMMARIZE)
     if spec is None or spec.loader is None:
@@ -708,42 +823,16 @@ def run_cell(
     workers: int,
     on_progress: Callable[[str, int, int, str], None] | None = None,
 ) -> None:
-    cell_dir.mkdir(parents=True, exist_ok=True)
-    reset_cell_sample_dirs(cell_dir)
-    meta = {
-        "id": cell["id"],
-        "label": cell["label"],
-        "kind": cell["kind"],
-        "overrides": cell["overrides"],
-        "is_current": bool(cell.get("is_current")) or str(cell.get("id") or "") == "base",
-        "n_jobs": len(jobs),
-    }
-    if cell.get("n_diffs") is not None:
-        meta["n_diffs"] = cell.get("n_diffs")
-    (cell_dir / "cell_meta.json").write_text(
-        json.dumps(_json_ready(meta), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    write_cell_meta(cell, jobs, cell_dir)
     if not jobs:
         raise GridError("格子 %s 无 job" % cell["id"])
     payloads = [job_payload(j, cell_dir, cell["overrides"], defaults) for j in jobs]
-    expected = expected_fingerprint(defaults, cell["overrides"])
-    need_trail = "TRAIL_TIERS" in (cell.get("overrides") or {})
+    n = len(payloads)
+    probe_cell(cell, cell_dir, defaults, n, on_progress=on_progress)
 
     def _progress(done: int, total: int, label: str, **extra: Any) -> None:
-        if on_progress is not None:
-            on_progress(str(cell["id"]), done, total, label, **extra)
-        else:
-            print("[%s] %s/%s %s" % (cell["id"], done, total, label), flush=True)
+        _emit_progress(on_progress, str(cell["id"]), done, total, label, **extra)
 
-    n = len(payloads)
-    _progress(0, n, "探针 init")
-    probe_log = cell_dir / "probe_init.txt"
-    try:
-        text = run_init_probe(cell.get("overrides") or {}, log_path=probe_log)
-    except Exception as e:
-        raise GridError("格子 %s 探针失败: %s" % (cell["id"], e)) from e
-    assert_fingerprint_text(text, expected, need_trail=need_trail, source=str(probe_log))
     done = 0
     w = int(workers or 0)
 
@@ -804,6 +893,129 @@ def assemble_jobs(
         jobs.extend(ma_control_jobs(book, "SMA"))
         jobs.extend(ma_control_jobs(book, "EMA"))
     return book, jobs
+
+
+def _run_walks_in_pool(
+    payloads: list[dict[str, Any]],
+    pool_workers: int,
+    n_jobs: int,
+    on_progress: Callable[..., None] | None = None,
+    succeeded: set[str] | None = None,
+) -> set[str]:
+    """一层全局 walk 池。返回已全部 walk 成功的 cell_id。逻辑失败升 GridError。"""
+    if succeeded is None:
+        succeeded = set()
+    else:
+        succeeded.clear()
+    if not payloads:
+        return succeeded
+    remaining: dict[str, int] = {}
+    for p in payloads:
+        cid = str(p.get("cell_id") or "")
+        remaining[cid] = remaining.get(cid, 0) + 1
+    cell_done: dict[str, int] = {cid: 0 for cid in remaining}
+    ctx = get_context("spawn")
+    q = ctx.Queue()
+    with ProcessPoolExecutor(
+        max_workers=int(pool_workers),
+        mp_context=ctx,
+        initializer=init_walk_pool,
+        initargs=(str(HERE), q),
+    ) as ex:
+        futs = {ex.submit(run_walk_job, p): p for p in payloads}
+        pending = set(futs)
+        while pending:
+            _drain_walk_queue(q, on_progress, cell_done, n_jobs)
+            done, pending = wait(pending, timeout=0.2, return_when=FIRST_COMPLETED)
+            for fut in done:
+                payload = futs[fut]
+                cid = str(payload.get("cell_id") or "")
+                try:
+                    row = fut.result()
+                except Exception:
+                    for rest in pending:
+                        rest.cancel()
+                    raise
+                if not row.get("ok"):
+                    for rest in pending:
+                        rest.cancel()
+                    raise GridError(
+                        "格子 %s walk 失败: %s"
+                        % (cid, row.get("error") or payload.get("basket_id"))
+                    )
+                cell_done[cid] = int(cell_done.get(cid) or 0) + 1
+                remaining[cid] = int(remaining.get(cid) or 1) - 1
+                if remaining.get(cid, 1) <= 0:
+                    succeeded.add(cid)
+                _emit_progress(
+                    on_progress,
+                    cid,
+                    cell_done[cid],
+                    n_jobs,
+                    str(payload.get("basket_id") or "book"),
+                )
+        _drain_walk_queue(q, on_progress, cell_done, n_jobs)
+    return succeeded
+
+
+def run_cells(
+    cells: list[dict[str, Any]],
+    jobs: list[dict[str, Any]],
+    dest: Path,
+    defaults: dict[str, Any],
+    workers: int,
+    on_progress: Callable[..., None] | None = None,
+) -> None:
+    n_cells = len(cells)
+    n_jobs = len(jobs)
+    n_walks = n_cells * n_jobs
+    cw = resolve_pool_workers(workers, n_walks)
+    print("pool_workers=%s n_walks=%s" % (cw, n_walks), flush=True)
+    if cw <= 1:
+        for cell in cells:
+            print("== cell", cell["id"], cell["kind"], cell["overrides"], flush=True)
+            run_cell(
+                cell,
+                jobs,
+                dest / cell["id"],
+                defaults,
+                1,
+                on_progress=on_progress,
+            )
+        return
+    succeeded: set[str] = set()
+    try:
+        payloads: list[dict[str, Any]] = []
+        for cell in cells:
+            print("== cell", cell["id"], cell["kind"], cell["overrides"], flush=True)
+            cell_dir = dest / cell["id"]
+            write_cell_meta(cell, jobs, cell_dir)
+            if not jobs:
+                raise GridError("格子 %s 无 job" % cell["id"])
+            probe_cell(cell, cell_dir, defaults, n_jobs, on_progress=on_progress)
+            for j in jobs:
+                p = job_payload(j, cell_dir, cell["overrides"], defaults)
+                p["cell_id"] = str(cell["id"])
+                payloads.append(p)
+        succeeded = _run_walks_in_pool(
+            payloads, cw, n_jobs, on_progress=on_progress, succeeded=succeeded
+        )
+    except GridError:
+        raise
+    except Exception as e:
+        print("WARN 格间池失败，回退串行: %s" % e, flush=True)
+        for cell in cells:
+            if str(cell["id"]) in succeeded:
+                continue
+            print("== cell fallback", cell["id"], flush=True)
+            run_cell(
+                cell,
+                jobs,
+                dest / cell["id"],
+                defaults,
+                1,
+                on_progress=on_progress,
+            )
 
 
 def run_sweep(
@@ -921,16 +1133,14 @@ def run_sweep(
         cells,
         key=lambda c: 0 if (c.get("is_current") or c["id"] == "base") else 1,
     )
-    for cell in cells:
-        print("== cell", cell["id"], cell["kind"], cell["overrides"], flush=True)
-        run_cell(
-            cell,
-            jobs,
-            dest / cell["id"],
-            defaults,
-            int(workers or 0),
-            on_progress=progress,
-        )
+    run_cells(
+        cells,
+        jobs,
+        dest,
+        defaults,
+        int(workers or 0),
+        on_progress=progress,
+    )
     mod = _load_summarize()
     try:
         out = mod.summarize_sweep(dest, gate=spec.get("gate"))
@@ -967,7 +1177,12 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="真实 local_bt 命名网格")
     ap.add_argument("--spec", default="", help="命名格子 JSON/YAML")
     ap.add_argument("--include-sma-ema", action="store_true", help="额外全 SMA / 全 EMA 对照")
-    ap.add_argument("--workers", type=int, default=0, help="格内进程数；格子之间串行")
+    ap.add_argument(
+        "--workers",
+        type=int,
+        default=0,
+        help="全局并行进程数（0=自动=min(walk数, CPU)；1=串行；不夹 16）",
+    )
     ap.add_argument("--sweep-dir", default="", help="覆盖输出目录")
     ap.add_argument("--cell", default="", help="只跑指定格子 id")
     ap.add_argument("--summarize-only", action="store_true", help="不重跑，只 summarize")

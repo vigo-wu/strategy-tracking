@@ -39,8 +39,8 @@ JSON 可序列化。元组在 JSON 里用数组；`null` = Python `None`。
 
 ## 格子之间
 
-- 格内：按 walk 用 `ProcessPool`（最多 6 段：分篮 × SMA/EMA）。
-- 格间：**串行**，避免进程数 × 格数爆炸。
+- **一层全局 walk 池**：探针在主进程串行；通过后把各格 walk 铺平进同一个 `ProcessPool`（最多 6 段/格：分篮 × SMA/EMA）。禁止格间池再套格内池。
+- `--workers<=0`：`min(n_cells × n_jobs, CPU)`；`1` 全串行；`>=2` 为池大小（只夹 walk 数，不夹 16）。
 - 每格写 `cell_meta.json`（`overrides`、kind、walk 数）。
 - 每格先跑 **init 探针**（dummy context，不回放 K 线），指纹不对则**停止整个 sweep**。通过后该格全部 walk 再跑（第一段不再兼探针）。
 - 资金：`compound_backtest=True`，`wallet_cash=TRADE_BUDGET`；`BUDGET_BASE` / `CASH_RATIO` 跟现行 config。

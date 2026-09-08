@@ -41,6 +41,7 @@ from grid_run import (
     THEME,
     assemble_jobs,
     load_config_defaults,
+    resolve_pool_workers,
     run_sweep,
     summarize_only,
     validate_spec,
@@ -481,7 +482,7 @@ def render_grid_sidebar() -> None:
 
     st.checkbox("额外全 SMA / EMA 对照", key="grid_sma_ema", disabled=busy, persist_state="session")
     st.number_input(
-        "格内进程数（0=自动）",
+        "并行进程数（0=自动=min(walk 数, CPU)；格间与格内共用）",
         min_value=0,
         max_value=16,
         step=1,
@@ -489,6 +490,13 @@ def render_grid_sidebar() -> None:
         disabled=busy,
         persist_state="session",
     )
+    n_preview = len(st.session_state.get("grid_cells") or [])
+    jobs_per = 2 if st.session_state.get("grid_asset_split") else 1
+    if st.session_state.get("grid_sma_ema"):
+        jobs_per *= 3
+    n_walks = max(0, n_preview * jobs_per)
+    pool_n = resolve_pool_workers(int(st.session_state.get("grid_workers") or 0), n_walks)
+    st.caption("将开 %s 路（%s 格 × %s walk）" % (pool_n, n_preview, jobs_per))
     if st.button("保存 spec 到 gridConfig", disabled=busy, key="grid_save_spec"):
         _save_spec_clicked()
     with st.container(horizontal=True, wrap=False, vertical_alignment="center"):
@@ -943,13 +951,11 @@ def _run_now(spec: dict[str, Any]) -> None:
     bar = st.progress(0.0)
     status = st.empty()
     n_cells = max(len(spec.get("cells") or []), 1)
-    cell_ids = [str(c.get("id") or "") for c in spec.get("cells") or []]
+    cell_done: dict[str, int] = {}
 
     def on_progress(cid: str, done: int, tot: int, label: str, **extra: Any) -> None:
-        try:
-            idx = cell_ids.index(str(cid))
-        except ValueError:
-            idx = 0
+        cell_done[str(cid)] = int(done or 0)
+        n_jobs = max(int(tot or 1), 1)
         inner = 0.0
         walk_total = extra.get("walk_total")
         try:
@@ -958,8 +964,8 @@ def _run_now(spec: dict[str, Any]) -> None:
                 inner = min(1.0, float(extra.get("walk_done") or 0) / wt)
         except (TypeError, ValueError):
             inner = 0.0
-        frac = (float(idx) + (float(done) + inner) / float(tot or 1)) / float(n_cells)
-        frac = min(1.0, frac)
+        frac = (float(sum(cell_done.values())) + inner) / float(n_cells * n_jobs)
+        frac = min(1.0, max(0.0, frac))
         text = "%s/%s %s" % (done, tot, label)
         try:
             bar.progress(frac, text=text)

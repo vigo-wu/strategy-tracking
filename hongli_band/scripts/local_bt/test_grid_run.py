@@ -21,6 +21,7 @@ from grid_run import (  # noqa: E402
     book_stock_entries,
     expected_fingerprint,
     grid_book_overrides,
+    init_walk_pool,
     job_payload,
     load_book_lock,
     load_config_defaults,
@@ -28,8 +29,10 @@ from grid_run import (  # noqa: E402
     parse_fingerprint,
     prune_stale_cell_dirs,
     reset_cell_sample_dirs,
+    resolve_pool_workers,
     run_cell,
     run_sweep,
+    run_walk_job,
     validate_spec,
 )
 from grid_spec import build_cells  # noqa: E402
@@ -563,6 +566,276 @@ class GridInitProbeTest(unittest.TestCase):
                         run_cell(cell, jobs, cell_dir, defaults, workers=1)
             self.assertIn("探针失败", str(ctx.exception))
             walk.assert_not_called()
+
+
+_POOL_DEFAULTS = {
+    "STOP_LOSS": 0.08,
+    "TIME_FORCE_BARS": 30,
+    "TRAIL_TIERS": ((0.03, 0.06, 0.015, None),),
+    "TRADE_BUDGET": 100000.0,
+}
+_POOL_PROBE = (
+    "HlBand v1 init stop= 0.08 trail_arm= 0.03 "
+    "time_force_bars= 30 time_force_min_ret= 0.03"
+)
+
+
+class _FakeFuture:
+    def __init__(self, row=None, exc=None):
+        self._row = row
+        self._exc = exc
+        self.cancelled = False
+
+    def result(self, timeout=None):
+        if self._exc:
+            raise self._exc
+        return self._row
+
+    def cancel(self):
+        self.cancelled = True
+        return True
+
+
+class _FakePool:
+    last = None
+
+    def __init__(self, max_workers=1, mp_context=None, initializer=None, initargs=()):
+        self.max_workers = max_workers
+        self.initializer = initializer
+        self.initargs = initargs
+        self.submitted: list = []
+        self.fail_cell = None
+        self.raise_on = -1
+        _FakePool.last = self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def submit(self, fn, payload):
+        idx = len(self.submitted)
+        if "progress_queue" in payload:
+            raise AssertionError("payload must not contain progress_queue")
+        if self.raise_on == idx:
+            fut = _FakeFuture(exc=RuntimeError("broken"))
+        elif self.fail_cell and payload.get("cell_id") == self.fail_cell:
+            fut = _FakeFuture(
+                row={
+                    "ok": False,
+                    "error": "boom",
+                    "cell_id": payload.get("cell_id"),
+                    "basket_id": payload.get("basket_id"),
+                }
+            )
+        else:
+            fut = _FakeFuture(
+                row={
+                    "ok": True,
+                    "cell_id": payload.get("cell_id"),
+                    "basket_id": payload.get("basket_id"),
+                }
+            )
+        self.submitted.append((fn, payload, fut))
+        return fut
+
+
+def _fake_wait(fs, timeout=None, return_when=None):
+    pending = set(fs)
+    if not pending:
+        return set(), set()
+    pool = _FakePool.last
+    if pool is not None:
+        for _fn, _payload, fut in pool.submitted:
+            if fut in pending:
+                return {fut}, pending - {fut}
+    one = next(iter(pending))
+    return {one}, pending - {one}
+
+
+class _FakeSummarize:
+    def __init__(self):
+        self.called = False
+
+    def summarize_sweep(self, dest, gate=None, cell_ids=None):
+        self.called = True
+        return {
+            "summary_path": str(Path(dest) / "summary.json"),
+            "recommend": {"id": "base", "reason": "ok"},
+        }
+
+
+def _n_cell_spec(n: int, sweep: str = "pool_unit") -> dict:
+    cells = []
+    for i in range(n):
+        cid = "base" if i == 0 else "c%s" % i
+        cells.append(
+            {
+                "id": cid,
+                "label": cid,
+                "kind": "base" if i == 0 else "other",
+                "overrides": {},
+                "is_current": i == 0,
+            }
+        )
+    return {
+        "theme": "hongli_band",
+        "sweep": sweep,
+        "compare_div": "front_ratio",
+        "cells": cells,
+    }
+
+
+class GridWalkPoolTest(unittest.TestCase):
+    def test_resolve_pool_workers_auto_and_cli_24(self) -> None:
+        with patch("grid_run.os.cpu_count", return_value=4):
+            self.assertEqual(resolve_pool_workers(0, 9), 4)
+            self.assertEqual(resolve_pool_workers(1, 9), 1)
+            self.assertEqual(resolve_pool_workers(24, 32), 24)
+        with patch("grid_run.os.cpu_count", return_value=32):
+            self.assertEqual(resolve_pool_workers(0, 9), 9)
+        self.assertEqual(resolve_pool_workers(0, 1), 1)
+
+    def test_workers_1_serial_run_cell(self) -> None:
+        spec = _n_cell_spec(4, "serial_unit")
+        book = [_walk(start="20200101", end="20201231")]
+        with tempfile.TemporaryDirectory() as td:
+            sweep_dir = Path(td) / "report" / "grid" / "serial_unit"
+            with patch("grid_run.assemble_jobs", return_value=(book, book)):
+                with patch("grid_run.load_exit_defaults", return_value=_POOL_DEFAULTS):
+                    with patch("grid_run.run_cell") as rc:
+                        with patch("grid_run._load_summarize", return_value=_FakeSummarize()):
+                            with patch("grid_run.ProcessPoolExecutor") as pool_cls:
+                                run_sweep(spec, workers=1, sweep_dir=sweep_dir)
+            self.assertEqual(rc.call_count, 4)
+            for call in rc.call_args_list:
+                args = call.args
+                kwargs = call.kwargs
+                w = kwargs.get("workers", args[4] if len(args) > 4 else None)
+                self.assertEqual(w, 1)
+            pool_cls.assert_not_called()
+
+    def test_workers_4_flat_pool_eight_walks(self) -> None:
+        spec = _n_cell_spec(4, "flat_unit")
+        jobs = [
+            _walk(basket="tune", stocks=["AAA111.SH"]),
+            _walk(basket="holdout", stocks=["BBB222.SZ"]),
+        ]
+        _FakePool.last = None
+        fake_sum = _FakeSummarize()
+        with tempfile.TemporaryDirectory() as td:
+            sweep_dir = Path(td) / "report" / "grid" / "flat_unit"
+            with patch("grid_run.assemble_jobs", return_value=(jobs, jobs)):
+                with patch("grid_run.load_exit_defaults", return_value=_POOL_DEFAULTS):
+                    with patch("grid_run.run_init_probe", return_value=_POOL_PROBE):
+                        with patch("grid_run._load_summarize", return_value=fake_sum):
+                            with patch("grid_run.ProcessPoolExecutor", _FakePool):
+                                with patch("grid_run.wait", _fake_wait):
+                                    run_sweep(spec, workers=4, sweep_dir=sweep_dir)
+        pool = _FakePool.last
+        self.assertIsNotNone(pool)
+        self.assertEqual(pool.max_workers, 4)
+        self.assertEqual(len(pool.submitted), 8)
+        self.assertEqual(pool.submitted[0][0], run_walk_job)
+        for _fn, payload, _fut in pool.submitted:
+            self.assertNotIn("progress_queue", payload)
+            self.assertIn("cell_id", payload)
+            self.assertTrue(payload.get("out_dir"))
+        self.assertTrue(fake_sum.called)
+
+    def test_walk_ok_false_cancels_and_skips_summarize(self) -> None:
+        spec = _n_cell_spec(4, "fail_unit")
+        jobs = [
+            _walk(basket="tune"),
+            _walk(basket="holdout"),
+        ]
+        fake_sum = _FakeSummarize()
+
+        def _pool(*a, **k):
+            p = _FakePool(*a, **k)
+            p.fail_cell = "c1"
+            return p
+
+        with tempfile.TemporaryDirectory() as td:
+            sweep_dir = Path(td) / "report" / "grid" / "fail_unit"
+            with patch("grid_run.assemble_jobs", return_value=(jobs, jobs)):
+                with patch("grid_run.load_exit_defaults", return_value=_POOL_DEFAULTS):
+                    with patch("grid_run.run_init_probe", return_value=_POOL_PROBE):
+                        with patch("grid_run._load_summarize", return_value=fake_sum):
+                            with patch("grid_run.ProcessPoolExecutor", _pool):
+                                with patch("grid_run.wait", _fake_wait):
+                                    with patch("grid_run.run_cell") as rc:
+                                        with self.assertRaises(GridError) as ctx:
+                                            run_sweep(spec, workers=4, sweep_dir=sweep_dir)
+        self.assertIn("walk 失败", str(ctx.exception))
+        self.assertFalse(fake_sum.called)
+        rc.assert_not_called()
+        cancelled = [fut for _fn, _p, fut in _FakePool.last.submitted if fut.cancelled]
+        self.assertGreaterEqual(len(cancelled), 1)
+
+    def test_pool_runtimeerror_fallback_skips_done_cells(self) -> None:
+        spec = _n_cell_spec(2, "fb_unit")
+        jobs = [
+            _walk(basket="tune"),
+            _walk(basket="holdout"),
+        ]
+
+        def _pool(*a, **k):
+            p = _FakePool(*a, **k)
+            p.raise_on = 2
+            return p
+
+        fake_sum = _FakeSummarize()
+        with tempfile.TemporaryDirectory() as td:
+            sweep_dir = Path(td) / "report" / "grid" / "fb_unit"
+            with patch("grid_run.assemble_jobs", return_value=(jobs, jobs)):
+                with patch("grid_run.load_exit_defaults", return_value=_POOL_DEFAULTS):
+                    with patch("grid_run.run_init_probe", return_value=_POOL_PROBE):
+                        with patch("grid_run._load_summarize", return_value=fake_sum):
+                            with patch("grid_run.ProcessPoolExecutor", _pool):
+                                with patch("grid_run.wait", _fake_wait):
+                                    with patch("grid_run.run_cell") as rc:
+                                        run_sweep(spec, workers=4, sweep_dir=sweep_dir)
+        self.assertTrue(fake_sum.called)
+        ids = [call.args[0]["id"] for call in rc.call_args_list]
+        self.assertEqual(ids, ["c1"])
+
+    def test_queue_inherited_spawn_from_thread(self) -> None:
+        import threading
+
+        from concurrent.futures import ProcessPoolExecutor
+        from multiprocessing import get_context
+
+        from grid_run import HERE
+
+        err: list[BaseException] = []
+        out: list[dict] = []
+
+        def _in_thread() -> None:
+            try:
+                ctx = get_context("spawn")
+                q = ctx.Queue()
+                with ProcessPoolExecutor(
+                    max_workers=1,
+                    mp_context=ctx,
+                    initializer=init_walk_pool,
+                    initargs=(str(HERE), q),
+                ) as ex:
+                    fut = ex.submit(run_walk_job, {"cell_id": "x"})
+                    out.append(fut.result(timeout=60))
+            except BaseException as e:
+                err.append(e)
+
+        t = threading.Thread(target=_in_thread, daemon=False)
+        t.start()
+        t.join(timeout=90)
+        self.assertFalse(t.is_alive())
+        self.assertEqual(err, [], msg=str(err))
+        self.assertEqual(len(out), 1)
+        self.assertFalse(out[0].get("ok"))
+        self.assertIn("无 job", str(out[0].get("error") or ""))
+        self.assertNotIn("Queue objects should only be shared", str(out[0]))
 
 
 if __name__ == "__main__":

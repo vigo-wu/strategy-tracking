@@ -39,7 +39,7 @@ MAE 为何不可信、本轮数字：需要时再读 [reference-lessons.md](refe
 5. **主样本**：默认=跟踪池 `BOOK_STOCKS` 一段组合连续回放（`year_start0101`–`year_end1231`，单账户、最多 3 笔、`CASH_RATIO×`权益复利）。`asset_split.mode=random_from_csv` 时调参篮 / 盲测篮 **各跑一段**（两套钱包，禁止 `tune∪holdout` 同一 book）。不要用 `local_bt_ma_compare.csv` 冻结 winner。旧 `report/grid/<sweep>/` 的 stock×年 log **须重跑**，禁止只汇总。
 6. **时空双重隔离**：时间用 `tune_*` / `check_*`；空间用 `tune_stocks` / `holdout_stocks`（盲测只否决、不参与格子比大小）。`mode=off` 时无空间门。
 7. 每格写入主题 `report/grid/<sweep>/<cell>/`，**不得覆盖** `report/front_ratio/` 等基线 log。
-8. 格子之间**串行**；格内按 walk 并行（无空间隔离 1 段；空间隔离 2 段；再开 `--include-sma-ema` 则 ×3，最多 6 段）。进度按 walk 计，不要按「标的×年」估 ETA。
+8. **一层全局 walk 池**（禁止格间×格内嵌套 ProcessPool）：`--workers` / `grid_workers` = 全局进程数。`<=0` 自动 `min(总 walk 数, CPU)`；`1` 全串行；`>=2` 铺平各格 walk 进同一池（不夹 16）。格内最多 6 段（分篮 × SMA/EMA）。进度按已完成 walk / `(n_cells × n_jobs)` 计，不要按「标的×年」估 ETA。
 9. 每格先跑 init 探针（dummy context，不回放 K 线）校验指纹：`stop=` / `time_force_bars=`；扫 `TRAIL_TIERS` 时核 compact `trail_tiers=` JSON（整表相等），`trail_arm=` 与派生的 `time_force_min_ret=` 同值（人读）。不一致则停。通过后该格全部 walk 再跑。
 10. **默认不改 `config.py`、不 deploy**。用户说「按建议修改」再改片段并部署。
 
@@ -61,7 +61,7 @@ Agent 输出：过门推荐一句。不要把 MAE 数字写进推荐。
 - [ ] 2. 主样本=BOOK_STOCKS（或 asset_split 分篮）组合 walk；spec 含回测年 / 调参期 / 验收期；旧 stock×年 sweep 须重跑
 - [ ] 3. 若空间隔离：freeze 含 tune/holdout；盲测只否决
 - [ ] 4. 运行时 overrides（禁止改 config 扫参）
-- [ ] 5. 隔离 report/grid/<sweep>/；格间串行
+- [ ] 5. 隔离 report/grid/<sweep>/；一层全局 walk 池（禁止嵌套）
 - [ ] 6. 探针 init 指纹与格子一致（只跑 init，不走 K 线）
 - [ ] 7. summarize → summary.json；绝对过门 + 验收期卡玛推荐
 - [ ] 8. 一句过门推荐；默认不改 config / 不 deploy
@@ -84,7 +84,7 @@ python .cursor/skills/qmt-local-bt-grid/scripts/summarize.py --sweep-dir hongli_
 | :--- | :--- |
 | `--spec` | 命名格子 JSON/YAML |
 | `--include-sma-ema` | 额外全 SMA / 全 EMA 对照 |
-| `--workers` | 格内进程数；格子之间始终串行 |
+| `--workers` | 全局并行进程数（0=自动=min(walk 数, CPU)；1=串行；格间与格内 walk 共用一层池） |
 | `--summarize-only` | 不重跑，只解析已有格子 log |
 | `--year-start` 等 | 覆盖 spec 回测年 / 调参期 / 验收期 |
 | `--asset-mode` | `off` / `random_from_csv` |
