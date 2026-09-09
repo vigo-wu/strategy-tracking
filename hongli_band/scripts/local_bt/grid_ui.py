@@ -29,9 +29,7 @@ from equity_yearly import (
     year_perf_display_df,
 )
 from asset_split import (
-    DEFAULT_N_HOLDOUT,
     DEFAULT_N_TUNE,
-    DEFAULT_SEED,
     DEFAULT_UNIVERSE_DIR,
     AssetSplitError,
     draw_asset_split,
@@ -217,9 +215,12 @@ def _ensure_state() -> None:
     ss.setdefault("grid_param_group", "全部")
     ss.setdefault("grid_param_search", "")
     ss.setdefault("grid_asset_split", False)
-    ss.setdefault("grid_n_tune", DEFAULT_N_TUNE)
-    ss.setdefault("grid_n_holdout", DEFAULT_N_HOLDOUT)
-    ss.setdefault("grid_asset_seed", DEFAULT_SEED)
+    if "grid_n_draw" not in ss:
+        legacy = ss.get("grid_n_tune")
+        try:
+            ss["grid_n_draw"] = int(legacy if legacy is not None else DEFAULT_N_TUNE)
+        except (TypeError, ValueError):
+            ss["grid_n_draw"] = int(DEFAULT_N_TUNE)
     ss.setdefault("grid_tune_stocks", [])
     ss.setdefault("grid_holdout_stocks", [])
     ss.setdefault("grid_eligible_n", 0)
@@ -280,12 +281,18 @@ def _gate_from_state() -> dict[str, Any]:
 def _asset_split_from_state() -> dict[str, Any]:
     if not st.session_state.get("grid_asset_split"):
         return fill_asset_split({"asset_split": {"mode": "off"}})
+    try:
+        n = int(st.session_state.get("grid_n_draw") or DEFAULT_N_TUNE)
+    except (TypeError, ValueError):
+        n = int(DEFAULT_N_TUNE)
+    if n < 1:
+        n = 1
     return {
         "mode": "random_from_csv",
         "universe_dir": DEFAULT_UNIVERSE_DIR,
-        "n_tune": int(st.session_state.get("grid_n_tune") or DEFAULT_N_TUNE),
-        "n_holdout": int(st.session_state.get("grid_n_holdout") or DEFAULT_N_HOLDOUT),
-        "seed": int(st.session_state.get("grid_asset_seed") or DEFAULT_SEED),
+        "n": n,
+        "n_tune": n,
+        "n_holdout": n,
         "ma_type": "EMA",
         "dividend_type": str(
             st.session_state.get("grid_compare_div") or DEFAULT_DIVIDEND_TYPE
@@ -415,44 +422,22 @@ def render_grid_sidebar() -> None:
         persist_state="session",
     )
     if st.session_state.get("grid_asset_split"):
-        st.caption("宇宙：`%s` · 调参/盲测互不重叠；盲测只否决不选参" % DEFAULT_UNIVERSE_DIR)
-        a1, a2 = st.columns(2)
-        with a1:
-            st.number_input(
-                "调参抽取数",
-                min_value=1,
-                max_value=500,
-                step=1,
-                key="grid_n_tune",
-                disabled=busy,
-                persist_state="session",
-            )
-        with a2:
-            st.number_input(
-                "盲测抽取数",
-                min_value=1,
-                max_value=500,
-                step=1,
-                key="grid_n_holdout",
-                disabled=busy,
-                persist_state="session",
-            )
+        st.caption(
+            "宇宙：`%s` · 抽 N 只调参，再从剩余抽 N 只盲测（不重叠）。"
+            "盲测只否决不选参。改数量后须再点抽取，否则开跑沿用已抽名单。"
+            % DEFAULT_UNIVERSE_DIR
+        )
         st.number_input(
-            "抽取 seed",
-            min_value=0,
-            max_value=2_147_483_647,
+            "抽取数",
+            min_value=1,
+            max_value=500,
             step=1,
-            key="grid_asset_seed",
+            key="grid_n_draw",
             disabled=busy,
             persist_state="session",
         )
-        b1, b2 = st.columns(2)
-        with b1:
-            if st.button("抽取", disabled=busy, key="grid_draw_split"):
-                _draw_split_clicked(reshuffle=True)
-        with b2:
-            if st.button("重新抽取", disabled=busy, key="grid_redraw_split"):
-                _draw_split_clicked(reshuffle=True)
+        if st.button("抽取", disabled=busy, key="grid_draw_split"):
+            _draw_split_clicked(reshuffle=True)
         n_t = len(st.session_state.get("grid_tune_stocks") or [])
         n_h = len(st.session_state.get("grid_holdout_stocks") or [])
         st.caption(
@@ -663,7 +648,7 @@ def _draw_split_clicked(*, reshuffle: bool) -> None:
     except (AssetSplitError, GridSpecError) as e:
         st.session_state["grid_flash"] = str(e)
         return
-    # 勿回写 grid_n_tune / grid_n_holdout：已绑定 number_input，实例化后改会抛 StreamlitAPIException
+    # 勿回写 grid_n_draw：已绑定 number_input，实例化后改会抛 StreamlitAPIException
     st.session_state["grid_tune_stocks"] = list(split.get("tune_stocks") or [])
     st.session_state["grid_holdout_stocks"] = list(split.get("holdout_stocks") or [])
     st.session_state["grid_eligible_n"] = int(split.get("eligible_n") or 0)

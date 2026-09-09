@@ -60,9 +60,7 @@ GRID_KEYS: tuple[str, ...] = (
     "grid_check_end",
     "grid_param_sel",
     "grid_asset_split",
-    "grid_n_tune",
-    "grid_n_holdout",
-    "grid_asset_seed",
+    "grid_n_draw",
     "grid_tune_stocks",
     "grid_holdout_stocks",
     "grid_eligible_n",
@@ -191,6 +189,11 @@ def load_form_cache(path: Path | None = None) -> dict[str, Any]:
         if is_editor_key(k) or k not in allowed:
             continue
         out[k] = value
+    if "grid_n_draw" not in out and "grid_n_tune" in data:
+        try:
+            out["grid_n_draw"] = int(data["grid_n_tune"])
+        except (TypeError, ValueError):
+            pass
     return out
 
 

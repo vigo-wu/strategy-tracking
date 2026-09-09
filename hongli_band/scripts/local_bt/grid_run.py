@@ -1699,13 +1699,14 @@ def main() -> None:
         default="",
         help="空间隔离: off | random_from_csv（覆盖 spec.asset_split.mode）",
     )
+    ap.add_argument("--n", type=int, default=None, dest="n_draw", help="调参与盲测各抽此数")
     ap.add_argument("--n-tune", type=int, default=None, help="调参抽取数")
     ap.add_argument("--n-holdout", type=int, default=None, help="盲测抽取数")
-    ap.add_argument("--seed", type=int, default=None, help="抽取 seed")
+    ap.add_argument("--seed", type=int, default=None, help="抽取 seed（可选；缺省系统随机）")
     ap.add_argument(
         "--reshuffle",
         action="store_true",
-        help="忽略 freeze/spec 旧名单，按 seed 重新抽取",
+        help="忽略 freeze/spec 旧名单，重新抽取（缺 seed 则系统随机）",
     )
     ap.add_argument(
         "--gate-json",
@@ -1782,10 +1783,15 @@ def main() -> None:
             split = fill_asset_split(spec)
             if args.asset_mode:
                 split["mode"] = str(args.asset_mode).strip().lower()
-            if args.n_tune is not None:
-                split["n_tune"] = int(args.n_tune)
-            if args.n_holdout is not None:
-                split["n_holdout"] = int(args.n_holdout)
+            if args.n_draw is not None:
+                split["n"] = int(args.n_draw)
+                split["n_tune"] = int(args.n_draw)
+                split["n_holdout"] = int(args.n_draw)
+            else:
+                if args.n_tune is not None:
+                    split["n_tune"] = int(args.n_tune)
+                if args.n_holdout is not None:
+                    split["n_holdout"] = int(args.n_holdout)
             if args.seed is not None:
                 split["seed"] = int(args.seed)
             spec["asset_split"] = split

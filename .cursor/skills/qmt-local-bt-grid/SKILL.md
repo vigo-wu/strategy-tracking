@@ -93,7 +93,8 @@ python .cursor/skills/qmt-local-bt-grid/scripts/summarize.py --sweep-dir hongli_
 | `--summarize-only` | 不重跑，只 summarize |
 | `--year-start` 等 | 覆盖 spec 回测年 / 调参期 / 验收期 |
 | `--asset-mode` | `off` / `random_from_csv` |
-| `--n-tune` / `--n-holdout` / `--seed` | 空间抽取数量与种子 |
+| `--n` | 空间抽取：调参与盲测各抽此数（互不重叠） |
+| `--n-tune` / `--n-holdout` / `--seed` | 旧覆盖；与 `--n` 同时出现时 `--n` 优先。缺 seed 则系统随机 |
 | `--reshuffle` | 忽略 freeze 旧名单重新抽取 |
 | `--gate-json` | 过门配置 JSON 文件或内联对象（覆盖 spec.gate；只汇总同样生效） |
 | `--dry-run` | 只打印每格 walk 数 |

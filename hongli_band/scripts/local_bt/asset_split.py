@@ -109,8 +109,36 @@ def _norm_stock_list(raw: Any) -> list[str]:
     return sorted(set(out))
 
 
+def _opt_int(block: Mapping[str, Any], key: str) -> int | None:
+    if key not in block or block.get(key) is None:
+        return None
+    try:
+        return int(block.get(key))
+    except (TypeError, ValueError):
+        return None
+
+
+def _counts_from_block(block: Mapping[str, Any]) -> tuple[int, int]:
+    """n 同时填两篮；只填一侧则另一侧同值；两侧都有则保持（旧 freeze 可不等）。"""
+    n_one = _opt_int(block, "n")
+    n_tune_raw = _opt_int(block, "n_tune")
+    n_hold_raw = _opt_int(block, "n_holdout")
+    if n_one is not None:
+        n = max(0, n_one)
+        return n, n
+    if n_tune_raw is not None and n_hold_raw is not None:
+        return max(0, n_tune_raw), max(0, n_hold_raw)
+    if n_tune_raw is not None:
+        n = max(0, n_tune_raw)
+        return n, n
+    if n_hold_raw is not None:
+        n = max(0, n_hold_raw)
+        return n, n
+    return DEFAULT_N_TUNE, DEFAULT_N_HOLDOUT
+
+
 def fill_asset_split(spec: Mapping[str, Any] | None) -> dict[str, Any]:
-    """缺字段回落默认；不抽名单。"""
+    """缺字段回落默认；不抽名单。无 seed 则为 None（抽取用系统随机）。"""
     src = spec if isinstance(spec, Mapping) else {}
     raw = src.get("asset_split")
     block: Mapping[str, Any] = raw if isinstance(raw, Mapping) else {}
@@ -124,27 +152,15 @@ def fill_asset_split(spec: Mapping[str, Any] | None) -> dict[str, Any]:
     )
     ma = normalize_ma_type(block.get("ma_type")) or "EMA"
     div = normalize_dividend_type(block.get("dividend_type")) or compare
-    try:
-        n_tune = int(block.get("n_tune") if block.get("n_tune") is not None else DEFAULT_N_TUNE)
-    except (TypeError, ValueError):
-        n_tune = DEFAULT_N_TUNE
-    try:
-        n_holdout = int(
-            block.get("n_holdout") if block.get("n_holdout") is not None else DEFAULT_N_HOLDOUT
-        )
-    except (TypeError, ValueError):
-        n_holdout = DEFAULT_N_HOLDOUT
-    try:
-        seed = int(block.get("seed") if block.get("seed") is not None else DEFAULT_SEED)
-    except (TypeError, ValueError):
-        seed = DEFAULT_SEED
+    n_tune, n_holdout = _counts_from_block(block)
+    seed = _opt_int(block, "seed")
     uni = str(block.get("universe_dir") or DEFAULT_UNIVERSE_DIR).strip() or DEFAULT_UNIVERSE_DIR
     exclude = _norm_stock_list(block.get("exclude"))
-    return {
+    out: dict[str, Any] = {
         "mode": mode,
         "universe_dir": uni,
-        "n_tune": max(0, n_tune),
-        "n_holdout": max(0, n_holdout),
+        "n_tune": n_tune,
+        "n_holdout": n_holdout,
         "seed": seed,
         "ma_type": ma,
         "dividend_type": div,
@@ -153,6 +169,9 @@ def fill_asset_split(spec: Mapping[str, Any] | None) -> dict[str, Any]:
         "holdout_stocks": _norm_stock_list(block.get("holdout_stocks")),
         "eligible_n": int(block.get("eligible_n") or 0),
     }
+    if n_tune == n_holdout:
+        out["n"] = n_tune
+    return out
 
 
 def validate_asset_split(split: Mapping[str, Any]) -> dict[str, Any]:
@@ -221,6 +240,10 @@ def draw_asset_split(
             out["holdout_stocks"] = list(holdout)
             out["n_tune"] = len(tune)
             out["n_holdout"] = len(holdout)
+            if out["n_tune"] == out["n_holdout"]:
+                out["n"] = out["n_tune"]
+            else:
+                out.pop("n", None)
             if eligible is not None:
                 out["eligible_n"] = len(eligible)
             elif out.get("eligible_n"):
@@ -241,7 +264,8 @@ def draw_asset_split(
             "合格池 %s 只，不足 n_tune(%s)+n_holdout(%s)=%s"
             % (len(pool), filled["n_tune"], filled["n_holdout"], need)
         )
-    rng = random.Random(int(filled["seed"]))
+    raw_seed = filled.get("seed")
+    rng = random.Random() if raw_seed is None else random.Random(int(raw_seed))
     shuf = list(pool)
     rng.shuffle(shuf)
     n_t = int(filled["n_tune"])
@@ -252,6 +276,10 @@ def draw_asset_split(
     out["tune_stocks"] = tune
     out["holdout_stocks"] = holdout
     out["eligible_n"] = len(pool)
+    if n_t == n_h:
+        out["n"] = n_t
+    else:
+        out.pop("n", None)
     return validate_asset_split(out)
 
 

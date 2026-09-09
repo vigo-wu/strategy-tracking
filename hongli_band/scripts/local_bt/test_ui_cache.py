@@ -32,6 +32,9 @@ class UiCacheTest(unittest.TestCase):
         self.assertNotIn("analysis_book_editor", keys)
         self.assertIn("grid_sweep", keys)
         self.assertIn("grid_param_sel", keys)
+        self.assertIn("grid_n_draw", keys)
+        self.assertNotIn("grid_n_tune", keys)
+        self.assertNotIn("grid_asset_seed", keys)
         self.assertNotIn("grid_cells_editor", keys)
         self.assertNotIn("grid_param_editor", keys)
         self.assertTrue(is_editor_key("analysis_book_editor"))
@@ -127,6 +130,18 @@ class UiCacheTest(unittest.TestCase):
             raw = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(raw["bt_scope"], "批量")
             self.assertEqual(raw["bt_dividend_types"], ["front", "none"])
+
+    def test_load_migrates_grid_n_tune(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "cache.json"
+            path.write_text(
+                json.dumps({"grid_n_tune": 4, "grid_asset_seed": 43, "ui_mode": "参数网格"}),
+                encoding="utf-8",
+            )
+            loaded = load_form_cache(path)
+            self.assertEqual(loaded["grid_n_draw"], 4)
+            self.assertNotIn("grid_n_tune", loaded)
+            self.assertNotIn("grid_asset_seed", loaded)
 
 
 if __name__ == "__main__":
