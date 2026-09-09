@@ -7,7 +7,7 @@ import json
 import subprocess
 import time
 from pathlib import Path
-from typing import Any, MutableMapping
+from typing import Any, Mapping, MutableMapping
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -197,6 +197,9 @@ def _migrate_old_sel(ss: Any) -> dict[str, dict[str, Any]]:
 
 def _ensure_state() -> None:
     ss = st.session_state
+    pending = ss.pop("grid_pending_import", None)
+    if isinstance(pending, dict) and pending:
+        _apply_pending_import(ss, pending)
     ss.setdefault("grid_sweep", "")
     ss.setdefault("grid_compare_div", DEFAULT_DIVIDEND_TYPE)
     ss.setdefault("grid_workers", 0)
@@ -1004,6 +1007,47 @@ def _render_advanced(defaults: dict[str, Any], busy: bool) -> None:
                     st.session_state["grid_sweep"] = path.parent.name
 
 
+def _spec_import_payload(spec: Mapping[str, Any], defaults: dict[str, Any]) -> dict[str, Any]:
+    """解析 spec → pending；不写 widget 键（须在下一轮 _ensure_state 里套）。"""
+    reject_retired_min_ret(spec)
+    cells = correct_cell_kinds(spec.get("cells") or [], defaults)
+    win = fill_year_windows(spec)
+    axes = axes_from_cells(cells, defaults)
+    payload: dict[str, Any] = {
+        "cells": cells,
+        "windows": {key: int(win[key]) for key in YEAR_WINDOW_KEYS},
+        "param_sel": apply_axes_to_selection(None, axes),
+        "flash": "已导入 %s 格%s"
+        % (len(cells), "（生成器锁定）" if generator_locked(cells) else ""),
+    }
+    if spec.get("sweep"):
+        payload["sweep"] = str(spec["sweep"])
+    if spec.get("compare_div"):
+        payload["compare_div"] = str(spec["compare_div"])
+    return payload
+
+
+def _apply_pending_import(ss: MutableMapping[str, Any], pending: Mapping[str, Any]) -> None:
+    ss["grid_cells"] = list(pending.get("cells") or [])
+    ss.pop("grid_cells_editor", None)
+    ss.pop("grid_cells_editor_v2", None)
+    ss.pop("grid_param_editor", None)
+    name = str(pending.get("sweep") or "").strip()
+    if name and (GRID_ROOT / name / "summary.json").is_file():
+        ss["grid_sweep"] = name
+    if pending.get("compare_div"):
+        ss["grid_compare_div"] = str(pending["compare_div"])
+    windows = pending.get("windows") or {}
+    if isinstance(windows, Mapping):
+        for key in YEAR_WINDOW_KEYS:
+            if key in windows:
+                ss["grid_%s" % key] = int(windows[key])
+    if pending.get("param_sel") is not None:
+        ss["grid_param_sel"] = dict(pending["param_sel"])
+    if pending.get("flash"):
+        ss["grid_flash"] = str(pending["flash"])
+
+
 def _import_spec_text(text: str, defaults: dict[str, Any]) -> None:
     try:
         spec = json.loads(text)
@@ -1014,26 +1058,11 @@ def _import_spec_text(text: str, defaults: dict[str, Any]) -> None:
         st.error("spec 必须是对象")
         return
     try:
-        reject_retired_min_ret(spec)
+        payload = _spec_import_payload(spec, defaults)
     except GridSpecError as e:
         st.error(str(e))
         return
-    cells = correct_cell_kinds(spec.get("cells") or [], defaults)
-    st.session_state["grid_cells"] = cells
-    st.session_state.pop("grid_cells_editor", None)
-    st.session_state.pop("grid_param_editor", None)
-    if spec.get("sweep"):
-        name = str(spec["sweep"])
-        if (GRID_ROOT / name / "summary.json").is_file():
-            st.session_state["grid_sweep"] = name
-    if spec.get("compare_div"):
-        st.session_state["grid_compare_div"] = str(spec["compare_div"])
-    win = fill_year_windows(spec)
-    for key in YEAR_WINDOW_KEYS:
-        st.session_state["grid_%s" % key] = int(win[key])
-    axes = axes_from_cells(cells, defaults)
-    st.session_state["grid_param_sel"] = apply_axes_to_selection(None, axes)
-    st.success("已导入 %s 格%s" % (len(cells), "（生成器锁定）" if generator_locked(cells) else ""))
+    st.session_state["grid_pending_import"] = payload
     st.rerun()
 
 
