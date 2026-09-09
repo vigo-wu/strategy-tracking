@@ -33,6 +33,7 @@ class UiCacheTest(unittest.TestCase):
         self.assertIn("grid_sweep", keys)
         self.assertIn("grid_param_sel", keys)
         self.assertIn("grid_n_draw", keys)
+        self.assertIn("grid_full_span", keys)
         self.assertNotIn("grid_n_tune", keys)
         self.assertNotIn("grid_asset_seed", keys)
         self.assertNotIn("grid_cells_editor", keys)

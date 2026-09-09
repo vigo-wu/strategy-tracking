@@ -225,6 +225,7 @@ def _ensure_state() -> None:
     ss.setdefault("grid_holdout_stocks", [])
     ss.setdefault("grid_eligible_n", 0)
     ss.setdefault("grid_reshuffle", False)
+    ss.setdefault("grid_full_span", False)
     dg = default_gate()
     ss.setdefault("grid_gate_relative", bool(dg["relative_to_base"]))
     ss.setdefault("grid_gate_calmar_same_sign", bool(dg["calmar_same_sign"]))
@@ -298,6 +299,7 @@ def _asset_split_from_state() -> dict[str, Any]:
             st.session_state.get("grid_compare_div") or DEFAULT_DIVIDEND_TYPE
         ),
         "exclude": [],
+        "full_span": bool(st.session_state.get("grid_full_span")),
         "tune_stocks": list(st.session_state.get("grid_tune_stocks") or []),
         "holdout_stocks": list(st.session_state.get("grid_holdout_stocks") or []),
         "eligible_n": int(st.session_state.get("grid_eligible_n") or 0),
@@ -424,7 +426,7 @@ def render_grid_sidebar() -> None:
     if st.session_state.get("grid_asset_split"):
         st.caption(
             "宇宙：`%s` · 抽 N 只调参，再从剩余抽 N 只盲测（不重叠）。"
-            "盲测只否决不选参。改数量后须再点抽取，否则开跑沿用已抽名单。"
+            "盲测只否决不选参。改数量或勾选后须再点抽取，否则开跑沿用已抽名单。"
             % DEFAULT_UNIVERSE_DIR
         )
         st.number_input(
@@ -436,6 +438,13 @@ def render_grid_sidebar() -> None:
             disabled=busy,
             persist_state="session",
         )
+        st.checkbox(
+            "只抽全区间有行情",
+            key="grid_full_span",
+            disabled=busy,
+            persist_state="session",
+        )
+        st.caption("勾选后：起始年年内已有第一根、且行情接到宇宙最末日。改勾选须再点抽取。")
         if st.button("抽取", disabled=busy, key="grid_draw_split"):
             _draw_split_clicked(reshuffle=True)
         n_t = len(st.session_state.get("grid_tune_stocks") or [])

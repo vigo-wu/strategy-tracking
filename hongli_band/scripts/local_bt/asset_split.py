@@ -63,14 +63,37 @@ def _meta_span(meta: Mapping[str, Any]) -> tuple[str, str] | None:
     return None
 
 
+def _as_bool(raw: Any, default: bool = False) -> bool:
+    if raw is None:
+        return bool(default)
+    if isinstance(raw, bool):
+        return raw
+    s = str(raw).strip().lower()
+    if s in ("1", "true", "yes", "on"):
+        return True
+    if s in ("0", "false", "no", "off"):
+        return False
+    return bool(default)
+
+
+def _any_year_overlap(span: tuple[str, str] | None, year_start: int, year_end: int) -> bool:
+    y0, y1 = int(year_start), int(year_end)
+    for year in range(y0, y1 + 1):
+        ys, ye = _year_window(year)
+        if _span_overlaps(span, ys, ye):
+            return True
+    return False
+
+
 def list_eligible_stocks(
     universe_dir: str | Path | None = None,
     year_start: int = 2018,
     year_end: int = 2026,
     *,
     exclude: list[str] | tuple[str, ...] | None = None,
+    full_span: bool = False,
 ) -> list[str]:
-    """合格池：日线存在且与 [year_start, year_end] 至少一年有交集。"""
+    """合格池。默认：与回测年至少一年交集。full_span：头尾覆盖窗（起始年年内有第一根也算；右端卡宇宙最晚一根 K）。"""
     data_dir = resolve_universe_dir(universe_dir)
     ban = {str(x).strip().upper() for x in (exclude or []) if str(x).strip()}
     y0, y1 = int(year_start), int(year_end)
@@ -79,17 +102,28 @@ def list_eligible_stocks(
         rows = daily_csvs_by_stock(data_dir)
     except Exception as e:
         raise AssetSplitError("无法枚举宇宙 %s: %s" % (data_dir, e)) from e
+    max_end = ""
+    candidates: list[tuple[str, tuple[str, str]]] = []
     for meta in rows:
         stock = str(meta.get("stock") or "").strip().upper()
-        if not stock or stock in ban:
+        if not stock:
             continue
         span = _meta_span(meta)
-        ok = False
-        for year in range(y0, y1 + 1):
-            ys, ye = _year_window(year)
-            if _span_overlaps(span, ys, ye):
-                ok = True
-                break
+        if span is None:
+            continue
+        if span[1] > max_end:
+            max_end = span[1]
+        if stock in ban:
+            continue
+        candidates.append((stock, span))
+    left_limit = "%s1231" % y0
+    need_end_cal = "%s1231" % y1
+    need_end = min(need_end_cal, max_end) if max_end else need_end_cal
+    for stock, span in candidates:
+        if full_span:
+            ok = span[0] <= left_limit and span[1] >= need_end
+        else:
+            ok = _any_year_overlap(span, y0, y1)
         if ok:
             out.append(stock)
     return sorted(set(out))
@@ -165,6 +199,7 @@ def fill_asset_split(spec: Mapping[str, Any] | None) -> dict[str, Any]:
         "ma_type": ma,
         "dividend_type": div,
         "exclude": exclude,
+        "full_span": _as_bool(block.get("full_span"), False),
         "tune_stocks": _norm_stock_list(block.get("tune_stocks")),
         "holdout_stocks": _norm_stock_list(block.get("holdout_stocks")),
         "eligible_n": int(block.get("eligible_n") or 0),
@@ -257,6 +292,7 @@ def draw_asset_split(
         win["year_start"],
         win["year_end"],
         exclude=filled["exclude"],
+        full_span=bool(filled.get("full_span")),
     )
     need = int(filled["n_tune"]) + int(filled["n_holdout"])
     if need > len(pool):

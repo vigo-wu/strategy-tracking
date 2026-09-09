@@ -61,6 +61,7 @@ GRID_KEYS: tuple[str, ...] = (
     "grid_param_sel",
     "grid_asset_split",
     "grid_n_draw",
+    "grid_full_span",
     "grid_tune_stocks",
     "grid_holdout_stocks",
     "grid_eligible_n",

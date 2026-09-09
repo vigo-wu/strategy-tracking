@@ -141,6 +141,21 @@ class AssetSplitTest(unittest.TestCase):
                     got = list_eligible_stocks(none, 2018, 2020)
             self.assertEqual(got, ["222222.SZ"])
 
+    def test_full_span_head_tail(self) -> None:
+        none = Path("none")
+        metas = [
+            {"stock": "MID2018.SH", "start": "20180315", "end": "20260909"},
+            {"stock": "LATE2019.SZ", "start": "20190102", "end": "20260909"},
+            {"stock": "STALE.SH", "start": "20170101", "end": "20201231"},
+            {"stock": "IPO2020.SZ", "start": "20200301", "end": "20260909"},
+        ]
+        with patch("asset_split.daily_csvs_by_stock", return_value=metas):
+            with patch("asset_split.resolve_universe_dir", return_value=none):
+                loose = list_eligible_stocks(none, 2018, 2026, full_span=False)
+                tight = list_eligible_stocks(none, 2018, 2026, full_span=True)
+        self.assertEqual(loose, ["IPO2020.SZ", "LATE2019.SZ", "MID2018.SH", "STALE.SH"])
+        self.assertEqual(tight, ["MID2018.SH"])
+
     def test_fill_defaults(self) -> None:
         filled = fill_asset_split({})
         self.assertEqual(filled["mode"], "off")
@@ -149,6 +164,7 @@ class AssetSplitTest(unittest.TestCase):
         self.assertEqual(filled2["n_holdout"], 20)
         self.assertEqual(filled2.get("n"), 20)
         self.assertIsNone(filled2["seed"])
+        self.assertFalse(filled2.get("full_span"))
 
     def test_fill_n_copies_both(self) -> None:
         only_tune = fill_asset_split({"asset_split": {"mode": "random_from_csv", "n_tune": 8}})
