@@ -11,9 +11,11 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 try:
-    from grid_ui import _begin_run_request
+    from grid_ui import _begin_pause_request, _begin_resume_request, _begin_run_request
 except ImportError:
     _begin_run_request = None  # type: ignore[misc, assignment]
+    _begin_resume_request = None  # type: ignore[misc, assignment]
+    _begin_pause_request = None  # type: ignore[misc, assignment]
 
 
 @unittest.skipIf(_begin_run_request is None, "streamlit (or grid_ui deps) not installed")
@@ -34,6 +36,19 @@ class GridUiRunStartTest(unittest.TestCase):
         _begin_run_request(ss)
         self.assertEqual(ss["grid_action"], "run")
         self.assertNotIn("grid_pending_sweep", ss)
+
+    def test_resume_does_not_mint(self) -> None:
+        ss: dict = {"grid_sweep": "keep_me", "grid_pending_sweep": "old"}
+        _begin_resume_request(ss)
+        self.assertEqual(ss["grid_action"], "resume")
+        self.assertEqual(ss["grid_sweep"], "keep_me")
+        self.assertNotIn("grid_pending_sweep", ss)
+
+    def test_pause_sets_action(self) -> None:
+        ss: dict = {"grid_sweep": "keep_me"}
+        _begin_pause_request(ss)
+        self.assertEqual(ss["grid_action"], "pause")
+        self.assertEqual(ss["grid_sweep"], "keep_me")
 
 
 if __name__ == "__main__":

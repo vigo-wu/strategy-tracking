@@ -39,8 +39,9 @@ JSON 可序列化。元组在 JSON 里用数组；`null` = Python `None`。
 
 ## 格子之间
 
-- **一层全局 walk 池**：探针在主进程串行；通过后把各格 walk 铺平进同一个 `ProcessPool`（最多 6 段/格：分篮 × SMA/EMA）。禁止格间池再套格内池。
-- `--workers<=0`：`min(n_cells × n_jobs, CPU)`；`1` 全串行；`>=2` 为池大小（只夹 walk 数，不夹 16）。
+- **一层全局 walk 池**：探针在主进程串行；通过后把**当前组**各格 walk 铺平进同一个 `ProcessPool`（最多 6 段/格：分篮 × SMA/EMA）。禁止格间池再套格内池；禁止一次把全部格子丢进同一池。
+- `--workers<=0`：`min(本组 n_cells × n_jobs, CPU)`；`1` 全串行；`>=2` 为池大小（只夹 walk 数，不夹 16）。
+- `--batch-size` / `--resume` / `progress.json`：组级检查点。`done` 跳过；`dirty` 或杀进程留下的 `running` 整组删目录后重跑。暂停须等进程退出再删目录。cmdline 证明已死或 pid 不存在才自动 dirty。`--resume` 不 prune、不按 CLI 默认改写 `freeze.include_sma_ema`。summarize 只收已 done 的 cell id。
 - 每格写 `cell_meta.json`（`overrides`、kind、walk 数）。
 - 每格先跑 **init 探针**（dummy context，不回放 K 线），指纹不对则**停止整个 sweep**。通过后该格全部 walk 再跑（第一段不再兼探针）。
 - 资金：`compound_backtest=True`，`wallet_cash=TRADE_BUDGET`；`BUDGET_BASE` / `CASH_RATIO` 跟现行 config。

@@ -2,6 +2,8 @@
 """grid_run：GridError、8 格以上通过、dry_run 组 job。"""
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import sys
 import tempfile
@@ -84,6 +86,20 @@ class GridRunApiTest(unittest.TestCase):
         cells = validate_spec(spec)
         self.assertEqual(len(cells), len(spec["cells"]))
         self.assertEqual(len(cells), 8)
+
+    def test_validate_warns_over_eight_but_continues(self) -> None:
+        spec = {
+            "cells": [
+                {"id": "c%s" % i, "kind": "other", "overrides": {}}
+                for i in range(9)
+            ]
+        }
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            cells = validate_spec(spec)
+        self.assertEqual(len(cells), 9)
+        self.assertIn("仍继续跑", buf.getvalue())
+        self.assertNotIn("确认后再跑", buf.getvalue())
 
     def test_missing_base_ok(self) -> None:
         spec = {

@@ -39,9 +39,10 @@ MAE 为何不可信、本轮数字：需要时再读 [reference-lessons.md](refe
 5. **主样本**：默认=跟踪池 `BOOK_STOCKS` 一段组合连续回放（`year_start0101`–`year_end1231`，单账户、最多 3 笔、`CASH_RATIO×`权益复利）。`asset_split.mode=random_from_csv` 时调参篮 / 盲测篮 **各跑一段**（两套钱包，禁止 `tune∪holdout` 同一 book）。不要用 `local_bt_ma_compare.csv` 冻结 winner。旧 `report/grid/<sweep>/` 的 stock×年 log **须重跑**，禁止只汇总。
 6. **时空双重隔离**：时间用 `tune_*` / `check_*`；空间用 `tune_stocks` / `holdout_stocks`（盲测只否决、不参与格子比大小）。`mode=off` 时无空间门。
 7. 每格写入主题 `report/grid/<sweep>/<cell>/`，**不得覆盖** `report/front_ratio/` 等基线 log。
-8. **一层全局 walk 池**（禁止格间×格内嵌套 ProcessPool）：`--workers` / `grid_workers` = 全局进程数。`<=0` 自动 `min(总 walk 数, CPU)`；`1` 全串行；`>=2` 铺平各格 walk 进同一池（不夹 16）。格内最多 6 段（分篮 × SMA/EMA）。进度 = (已完成 walk + 在跑 bar 分数) / `(n_cells × n_jobs)`，探针不占分母；不要按「标的×年」估 ETA。
+8. **一层全局 walk 池**（禁止格间×格内嵌套 ProcessPool）：`--workers` / `grid_workers` = 全局进程数。`<=0` 自动 `min(walk 数, CPU)`；`1` 全串行；`>=2` 铺平**当前组**各格 walk 进同一池（不夹 16）。一次只提交一组，禁止把全部格子塞进同一个池。格内最多 6 段（分篮 × SMA/EMA）。进度 = (已完成 walk + 在跑 bar 分数) / `(本组格数 × n_jobs)`，探针不占分母。
 9. 每格先跑 init 探针（dummy context，不回放 K 线）校验指纹：`stop=` / `time_force_bars=`；扫 `TRAIL_TIERS` 时核 compact `trail_tiers=` JSON（整表相等），`trail_arm=` 与派生的 `time_force_min_ret=` 同值（人读）。不一致则停。通过后该格全部 walk 再跑。
-10. **默认不改 `config.py`、不 deploy**。用户说「按建议修改」再改片段并部署。
+10. **分组续跑**：`report/grid/<sweep>/progress.json`。已 `done` 的组跳过；未跑完的组标 `dirty`，继续时**整组清空重跑**。`--resume` 不 prune、不改 freeze 的 `include_sma_ema`。`--cell` 与 `--resume` / `--batch-size>0` 互斥。CLI `--batch-size` 默认 0（一组=现状）；UI 默认 10。UI 暂停杀进程树，**等到 pid 退出后再 dirty**；认活用 cmdline（Win11 走 CIM，不依赖 wmic）——命令行读不到且 pid 仍在则**不**自动删目录。CLI 可用 `pause.flag`。summarize 只传已 done 的格子 id。未跑完时推荐只基于已完成组。格子数>8 只 WARN、**不阻断、不等确认**。
+11. **默认不改 `config.py`、不 deploy**。用户说「按建议修改」再改片段并部署。
 
 ## 选参
 
@@ -73,6 +74,8 @@ Agent 输出：过门推荐一句。不要把 MAE 数字写进推荐。
 
 ```bash
 python hongli_band/scripts/local_bt/grid_run.py --spec .cursor/skills/qmt-local-bt-grid/examples/stop_loss.json
+python hongli_band/scripts/local_bt/grid_run.py --spec path/to/cells.json --batch-size 10
+python hongli_band/scripts/local_bt/grid_run.py --resume --sweep-dir hongli_band/report/grid/<sweep>
 python hongli_band/scripts/local_bt/grid_run.py --spec .cursor/skills/qmt-local-bt-grid/examples/stop_loss_space.json --reshuffle
 python hongli_band/scripts/local_bt/grid_run.py --spec path/to/cells.json --include-sma-ema
 python .cursor/skills/qmt-local-bt-grid/scripts/summarize.py --sweep-dir hongli_band/report/grid/<sweep>
@@ -84,8 +87,10 @@ python .cursor/skills/qmt-local-bt-grid/scripts/summarize.py --sweep-dir hongli_
 | :--- | :--- |
 | `--spec` | 命名格子 JSON/YAML |
 | `--include-sma-ema` | 额外全 SMA / 全 EMA 对照 |
-| `--workers` | 全局并行进程数（0=自动=min(walk 数, CPU)；1=串行；格间与格内 walk 共用一层池） |
-| `--summarize-only` | 不重跑，只解析已有格子 log |
+| `--workers` | 全局并行进程数（0=自动=min(walk数, CPU)；1=串行；格间与格内 walk 共用一层池） |
+| `--batch-size` | 每组格子数；0=一组跑完全部（CLI 默认）。未完成组整组重来 |
+| `--resume` | 同一 sweep 续跑：跳过 done，dirty 整组重跑；读磁盘 spec/freeze，忽略侧栏年份/SMA |
+| `--summarize-only` | 不重跑，只 summarize |
 | `--year-start` 等 | 覆盖 spec 回测年 / 调参期 / 验收期 |
 | `--asset-mode` | `off` / `random_from_csv` |
 | `--n-tune` / `--n-holdout` / `--seed` | 空间抽取数量与种子 |

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import html
 import json
+import subprocess
+import time
 from pathlib import Path
 from typing import Any, MutableMapping
 
@@ -37,14 +39,31 @@ from asset_split import (
 )
 from grid_run import (
     GRID_ROOT,
+    REPO,
     GridError,
     THEME,
     assemble_jobs,
+    is_cell_dir,
     load_config_defaults,
     resolve_pool_workers,
-    run_sweep,
     summarize_only,
     validate_spec,
+)
+from grid_progress import (
+    SPAWN_GRACE_SEC,
+    can_resume,
+    done_cell_ids,
+    grid_worker_argv,
+    load_progress,
+    mark_running_dead_as_dirty,
+    progress_caption,
+    spawn_creationflags,
+    stop_worker_and_dirty,
+    tail_text,
+    ui_worker_busy,
+    walk_progress_ratio,
+    worker_definitely_dead,
+    worker_is_alive,
 )
 from grid_gate import EPS_GATE, default_gate, validate_gate  # noqa: E402  # path via grid_run
 from grid_spec import (
@@ -88,6 +107,77 @@ def _defaults() -> dict[str, Any]:
     return load_config_defaults()
 
 
+def _sweep_path(name: str) -> Path:
+    return GRID_ROOT / str(name or "").strip()
+
+
+def _load_grid_progress(name: str) -> dict[str, Any] | None:
+    dest = _sweep_path(name)
+    if not str(name or "").strip() or not dest.is_dir():
+        return None
+    return load_progress(dest)
+
+
+def _reconcile_if_dead(name: str) -> dict[str, Any] | None:
+    dest = _sweep_path(name)
+    prog = _load_grid_progress(name)
+    if not prog:
+        return None
+    if not worker_definitely_dead(prog):
+        return prog
+    return mark_running_dead_as_dirty(dest, prog, is_cell_dir)
+
+
+def _grid_session_busy_kwargs() -> dict[str, Any]:
+    spawned = st.session_state.get("grid_worker_spawned_at")
+    try:
+        spawned_at = float(spawned) if spawned is not None else None
+    except (TypeError, ValueError):
+        spawned_at = None
+    return {
+        "session_pid": int(st.session_state.get("grid_worker_pid") or 0),
+        "spawned_at": spawned_at,
+        "grace": SPAWN_GRACE_SEC,
+        "stopping": bool(st.session_state.get("grid_stopping")),
+    }
+
+
+def _grid_worker_live(name: str = "") -> bool:
+    sweep = str(name or st.session_state.get("grid_sweep") or "").strip()
+    if not sweep:
+        return False
+    return ui_worker_busy(_load_grid_progress(sweep), **_grid_session_busy_kwargs())
+
+
+def _grid_is_busy() -> bool:
+    name = str(st.session_state.get("grid_sweep") or "").strip()
+    prog = _load_grid_progress(name) if name else None
+    busy = ui_worker_busy(prog, **_grid_session_busy_kwargs())
+    st.session_state["grid_busy"] = busy
+    if not busy:
+        st.session_state["grid_worker_pid"] = 0
+        st.session_state.pop("grid_worker_spawned_at", None)
+        st.session_state["grid_stopping"] = False
+    return busy
+
+
+def _begin_resume_request(ss: MutableMapping[str, Any]) -> None:
+    ss["grid_action"] = "resume"
+    ss.pop("grid_pending_sweep", None)
+
+
+def _begin_pause_request(ss: MutableMapping[str, Any]) -> None:
+    ss["grid_action"] = "pause"
+
+
+def _mark_resume() -> None:
+    _begin_resume_request(st.session_state)
+
+
+def _mark_pause() -> None:
+    _begin_pause_request(st.session_state)
+
+
 def _migrate_old_sel(ss: Any) -> dict[str, dict[str, Any]]:
     sel = default_param_selection()
     fams = list(ss.get("grid_families") or [])
@@ -119,6 +209,7 @@ def _ensure_state() -> None:
     ss.setdefault("grid_cells", [])
     ss.setdefault("grid_summary", None)
     ss.setdefault("grid_busy", False)
+    ss.setdefault("grid_batch_size", 10)
     ss.setdefault("grid_import_text", "")
     ss.setdefault("grid_param_group", "全部")
     ss.setdefault("grid_param_search", "")
@@ -261,7 +352,7 @@ def _persist_app() -> None:
 
 def render_grid_sidebar() -> None:
     _ensure_state()
-    busy = bool(st.session_state.get("grid_busy"))
+    busy = _grid_is_busy()
     if st.session_state.get("grid_asset_split"):
         st.caption(
             "主样本=csv/none 抽取名单（调参∪盲测）；均线/复权锁 compare_div。"
@@ -270,10 +361,20 @@ def render_grid_sidebar() -> None:
     else:
         st.caption("主样本=跟踪池 BOOK_STOCKS（config 锁定均线/复权），不可勾选。")
     last = str(st.session_state.get("grid_sweep") or "").strip()
-    st.caption(
-        "sweep 每次开跑自动生成"
-        + (" · 当前 `%s`" % last if last else " · 尚未开跑")
-    )
+    prog = _load_grid_progress(last) if last else None
+    if _grid_is_busy():
+        st.caption(
+            "正在跑 sweep `%s` · 暂停后本组整组重来；继续不换目录"
+            % last
+        )
+    elif last:
+        st.caption("当前 sweep `%s` · 新开跑会 mint 新目录；继续沿用此目录" % last)
+    else:
+        st.caption("sweep 新开跑自动生成 · 尚未开跑")
+    if prog:
+        cap = progress_caption(prog)
+        if cap:
+            st.caption(cap)
     y1, y2 = st.columns(2)
     with y1:
         st.number_input("回测年起", min_value=1990, max_value=2100, step=1, key="grid_year_start", disabled=busy, persist_state="session")
@@ -490,15 +591,30 @@ def render_grid_sidebar() -> None:
         disabled=busy,
         persist_state="session",
     )
+    st.number_input(
+        "每批格数（一组没跑完则整组重来）",
+        min_value=1,
+        max_value=500,
+        step=1,
+        key="grid_batch_size",
+        disabled=busy,
+        persist_state="session",
+    )
     n_preview = len(st.session_state.get("grid_cells") or [])
     jobs_per = 2 if st.session_state.get("grid_asset_split") else 1
     if st.session_state.get("grid_sma_ema"):
         jobs_per *= 3
     n_walks = max(0, n_preview * jobs_per)
     pool_n = resolve_pool_workers(int(st.session_state.get("grid_workers") or 0), n_walks)
-    st.caption("将开 %s 路（%s 格 × %s walk）" % (pool_n, n_preview, jobs_per))
+    bs = int(st.session_state.get("grid_batch_size") or 10)
+    n_batches = (n_preview + bs - 1) // bs if n_preview and bs else 0
+    st.caption(
+        "将开 %s 路（%s 格 × %s walk）· 约 %s 组"
+        % (pool_n, n_preview, jobs_per, n_batches)
+    )
     if st.button("保存 spec 到 gridConfig", disabled=busy, key="grid_save_spec"):
         _save_spec_clicked()
+    resume_ok = bool(not busy and last and can_resume(prog))
     with st.container(horizontal=True, wrap=False, vertical_alignment="center"):
         st.button(
             "开始网格",
@@ -506,6 +622,22 @@ def render_grid_sidebar() -> None:
             disabled=busy,
             key="grid_start",
             on_click=_mark_start,
+            wrap=False,
+            width="stretch",
+        )
+        st.button(
+            "暂停",
+            disabled=not busy,
+            key="grid_pause",
+            on_click=_mark_pause,
+            wrap=False,
+            width="stretch",
+        )
+        st.button(
+            "继续",
+            disabled=not resume_ok,
+            key="grid_resume",
+            on_click=_mark_resume,
             wrap=False,
             width="stretch",
         )
@@ -585,7 +717,7 @@ def _save_spec_clicked() -> None:
 def render_grid_mode() -> None:
     _ensure_state()
     defaults = _defaults()
-    busy = bool(st.session_state.get("grid_busy"))
+    _handle_actions(defaults)
     flash = st.session_state.pop("grid_flash", None)
     if flash:
         st.info(str(flash))
@@ -595,11 +727,12 @@ def render_grid_mode() -> None:
         "选参看调参标的验收期，且须与调参期同向；盲测盈亏只否决。"
         "默认不改 config.py / 不 deploy。"
     )
+    _poll_grid_worker()
+    busy = _grid_is_busy()
     _render_param_table(defaults, busy)
     _render_action_bar(defaults, busy)
     _render_preview(defaults, busy)
     _render_advanced(defaults, busy)
-    _handle_actions(defaults)
     _render_results()
 
 
@@ -704,6 +837,9 @@ def _render_action_bar(defaults: dict[str, Any], busy: bool) -> None:
     locked = generator_locked(st.session_state.get("grid_cells") or [])
     if locked:
         st.warning("导入 spec 含非白名单键，生成器已锁定。仍可开跑。")
+    name = str(st.session_state.get("grid_sweep") or "").strip()
+    prog = _load_grid_progress(name) if name else None
+    resume_ok = bool(not busy and name and can_resume(prog))
     with st.container(horizontal=True):
         do_build = st.button("生成格子", disabled=busy or locked, key="grid_build")
         st.button(
@@ -714,11 +850,29 @@ def _render_action_bar(defaults: dict[str, Any], busy: bool) -> None:
             on_click=_mark_start,
         )
         st.button(
+            "暂停",
+            disabled=not busy,
+            key="grid_pause_main",
+            on_click=_mark_pause,
+        )
+        st.button(
+            "继续",
+            disabled=not resume_ok,
+            key="grid_resume_main",
+            on_click=_mark_resume,
+        )
+        st.button(
             "只汇总已有结果",
             disabled=busy,
             key="grid_sum_main",
             on_click=_mark_summarize,
         )
+    if prog:
+        cap = progress_caption(prog)
+        if cap:
+            st.caption(cap)
+    if busy:
+        st.caption("暂停已请求后将结束进程；未完成的一组会整组重跑。")
     if do_build:
         try:
             keep = keep_from_cells(st.session_state.get("grid_cells") or [])
@@ -833,8 +987,8 @@ def _render_advanced(defaults: dict[str, Any], busy: bool) -> None:
         hist = _list_history()
         if hist:
             hlabels = [p.parent.name for p in hist]
-            hi = st.selectbox("打开历史 summary", hlabels, key="grid_hist_pick")
-            if st.button("加载历史", key="grid_hist_load"):
+            hi = st.selectbox("打开历史 summary", hlabels, key="grid_hist_pick", disabled=busy)
+            if st.button("加载历史", key="grid_hist_load", disabled=busy):
                 path = hist[hlabels.index(hi)]
                 try:
                     from summarize import legacy_sweep_reason  # noqa: WPS433
@@ -887,6 +1041,35 @@ def _handle_actions(defaults: dict[str, Any]) -> None:
     action = st.session_state.get("grid_action")
     if not action:
         return
+    if action == "pause":
+        st.session_state.pop("grid_action", None)
+        name = str(st.session_state.get("grid_sweep") or "").strip()
+        dest = GRID_ROOT / name if name else None
+        pid = int(st.session_state.get("grid_worker_pid") or 0)
+        prog = _load_grid_progress(name) if name else None
+        if not pid and prog:
+            pid = int(prog.get("worker_pid") or 0)
+        st.session_state["grid_stopping"] = True
+        st.session_state["grid_busy"] = True
+        if dest is None or not name:
+            st.session_state["grid_stopping"] = False
+            st.session_state["grid_busy"] = False
+            st.session_state["grid_worker_pid"] = 0
+            return
+        with st.spinner("正在结束进程树，退出后再标脏组…"):
+            result = stop_worker_and_dirty(dest, pid, is_cell_dir)
+        if not result.get("ok"):
+            st.error("进程未在时限内退出，请再点暂停；继续已禁用。")
+            _persist_app()
+            return
+        st.session_state["grid_stopping"] = False
+        st.session_state["grid_busy"] = False
+        st.session_state["grid_worker_pid"] = 0
+        st.session_state.pop("grid_worker_spawned_at", None)
+        st.session_state["grid_flash"] = "已暂停：进程已退出，本组将整组重跑。"
+        _persist_app()
+        st.rerun()
+        return
     if action == "run" and not st.session_state.get("grid_pending_sweep"):
         name = _mint_sweep_name()
         st.session_state["grid_pending_sweep"] = name
@@ -900,17 +1083,39 @@ def _handle_actions(defaults: dict[str, Any]) -> None:
             return
         dest = _sweep_dir(spec)
         try:
-            # 侧栏 gate 优先；勿回写 widget 键。按当前预览 id 过滤，避免同 sweep 残留格进主表。
-            want = [
-                str(c.get("id") or "")
-                for c in (spec.get("cells") or [])
-                if str(c.get("id") or "").strip()
-            ]
+            prog = load_progress(dest)
+            want = done_cell_ids(prog) if prog else []
+            if not want:
+                want = [
+                    str(c.get("id") or "")
+                    for c in (spec.get("cells") or [])
+                    if str(c.get("id") or "").strip()
+                ]
             out = summarize_only(dest, gate=_gate_from_state(), cell_ids=want or None)
             st.session_state["grid_summary"] = out
             st.success("已汇总")
         except Exception as e:
             st.error(str(e))
+        return
+    if action == "resume":
+        st.session_state.pop("grid_action", None)
+        name = str(st.session_state.get("grid_sweep") or "").strip()
+        if not sweep_name_ok(name):
+            st.error("还没有 sweep：请先开跑")
+            return
+        dest = GRID_ROOT / name
+        spec_file = dest / "spec.json"
+        if not spec_file.is_file():
+            st.error("找不到 %s" % spec_file)
+            return
+        if ui_worker_busy(_load_grid_progress(name), **_grid_session_busy_kwargs()):
+            st.error("仍有 worker 在跑，请先暂停")
+            return
+        prog = _reconcile_if_dead(name)
+        if not can_resume(prog):
+            st.error("没有可继续的组")
+            return
+        _spawn_grid_worker(dest, spec_file, resume=True)
         return
     try:
         validate_spec(spec)
@@ -919,8 +1124,12 @@ def _handle_actions(defaults: dict[str, Any]) -> None:
         st.session_state.pop("grid_action", None)
         return
     if action != "run":
+        st.session_state.pop("grid_action", None)
         return
-    # 空间隔离：开跑前若无名单则先抽一次
+    if _grid_is_busy():
+        st.session_state.pop("grid_action", None)
+        st.error("已有网格在跑")
+        return
     if (spec.get("asset_split") or {}).get("mode") == "random_from_csv":
         split = spec.get("asset_split") or {}
         if not split.get("tune_stocks") or not split.get("holdout_stocks"):
@@ -943,86 +1152,160 @@ def _handle_actions(defaults: dict[str, Any]) -> None:
         st.session_state.pop("grid_action", None)
         return
     st.session_state.pop("grid_action", None)
-    _run_now(spec)
+    dest = _sweep_dir(spec)
+    dest.mkdir(parents=True, exist_ok=True)
+    spec_file = dest / "spec.json"
+    spec_file.write_text(spec_json(spec), encoding="utf-8")
+    _spawn_grid_worker(dest, spec_file, resume=False, spec=spec)
 
 
-def _run_now(spec: dict[str, Any]) -> None:
-    st.session_state["grid_busy"] = True
-    bar = st.progress(0.0)
-    status = st.empty()
-    n_cells = max(len(spec.get("cells") or []), 1)
-    cell_done: dict[str, int] = {}
-
-    def on_progress(cid: str, done: int, tot: int, label: str, **extra: Any) -> None:
-        n_walks = extra.get("n_walks")
-        phase = str(extra.get("phase") or "")
-        if n_walks:
-            if phase == "probe":
-                pdone = int(extra.get("probe_done") or done or 0)
-                ptot = max(int(extra.get("probe_total") or tot or 1), 1)
-                text = "探针 %s/%s" % (pdone, ptot)
-                try:
-                    bar.progress(0.0, text=text)
-                except TypeError:
-                    bar.progress(0.0)
-                status.info("%s · %s" % (text, label))
-                return
-            completed = float(extra.get("completed") or 0)
-            inflight = float(extra.get("inflight_frac") or 0)
-            nw = max(int(n_walks), 1)
-            n_running = int(extra.get("n_running") or 0)
-            frac = min(1.0, max(0.0, (completed + inflight) / float(nw)))
-            text = "%.1f/%s walk · %s 路" % (completed + inflight, nw, n_running)
-            try:
-                bar.progress(frac, text=text)
-            except TypeError:
-                bar.progress(frac)
-            status.info("%s · %s" % (text, label))
-            return
-        cell_done[str(cid)] = int(done or 0)
-        n_jobs = max(int(tot or 1), 1)
-        inner = 0.0
-        walk_total = extra.get("walk_total")
-        try:
-            wt = float(walk_total or 0)
-            if wt > 0:
-                inner = min(1.0, float(extra.get("walk_done") or 0) / wt)
-        except (TypeError, ValueError):
-            inner = 0.0
-        frac = (float(sum(cell_done.values())) + inner) / float(n_cells * n_jobs)
-        frac = min(1.0, max(0.0, frac))
-        text = "%s/%s %s" % (done, tot, label)
-        try:
-            bar.progress(frac, text=text)
-        except TypeError:
-            bar.progress(frac)
-        status.info("格子 **%s** · %s/%s %s" % (cid, done, tot, label))
-
+def _spawn_grid_worker(
+    dest: Path,
+    spec_file: Path,
+    *,
+    resume: bool,
+    spec: dict[str, Any] | None = None,
+) -> None:
+    dest.mkdir(parents=True, exist_ok=True)
+    cmd = grid_worker_argv(
+        spec_path=str(spec_file),
+        sweep_dir=str(dest),
+        workers=int(st.session_state.get("grid_workers") or 0),
+        batch_size=int(st.session_state.get("grid_batch_size") or 10),
+        resume=bool(resume),
+        include_sma_ema=bool(st.session_state.get("grid_sma_ema")),
+    )
+    log_path = dest / "worker.log"
+    log_f = open(log_path, "ab")
     try:
-        info = run_sweep(
-            spec,
-            include_sma_ema=bool(st.session_state.get("grid_sma_ema")),
-            workers=int(st.session_state.get("grid_workers") or 0),
-            progress=on_progress,
-            reshuffle=False,
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(REPO),
+            stdout=log_f,
+            stderr=subprocess.STDOUT,
+            shell=False,
+            creationflags=spawn_creationflags(),
         )
-        split = info.get("asset_split") or {}
+    except Exception as e:
+        log_f.close()
+        st.error("无法启动网格进程：%s" % e)
+        st.session_state["grid_busy"] = False
+        st.session_state["grid_stopping"] = False
+        st.session_state.pop("grid_pending_sweep", None)
+        return
+    log_f.close()
+    st.session_state["grid_worker_pid"] = int(proc.pid)
+    st.session_state["grid_worker_spawned_at"] = time.time()
+    st.session_state["grid_busy"] = True
+    st.session_state["grid_stopping"] = False
+    st.session_state.pop("grid_pending_sweep", None)
+    if spec:
+        split = spec.get("asset_split") or {}
         if split.get("tune_stocks"):
             st.session_state["grid_tune_stocks"] = list(split.get("tune_stocks") or [])
             st.session_state["grid_holdout_stocks"] = list(split.get("holdout_stocks") or [])
             st.session_state["grid_eligible_n"] = int(split.get("eligible_n") or 0)
-        st.session_state["grid_summary"] = info.get("summary")
-        rec = (info.get("recommend") or {}) if isinstance(info.get("recommend"), dict) else {}
-        status.success("完成 · sweep **%s** · 推荐 %s" % (spec.get("sweep") or "", rec.get("id") or ""))
-        bar.progress(1.0)
-    except GridError as e:
-        st.error(str(e))
-    except Exception as e:
-        st.error("%s: %s" % (type(e).__name__, e))
-    finally:
-        st.session_state["grid_busy"] = False
+    st.session_state["grid_flash"] = (
+        "已启动进程 pid=%s。进度在下方刷新；日志 WARN 格子数>8 只是提示，不会停。"
+        % proc.pid
+    )
+    _persist_app()
+    st.rerun()
+
+
+def _sync_grid_worker_state(*, load_summary: bool = True) -> dict[str, Any] | None:
+    name = str(st.session_state.get("grid_sweep") or "").strip()
+    if not name:
+        return None
+    dest = GRID_ROOT / name
+    prog = _reconcile_if_dead(name)
+    live = ui_worker_busy(prog, **_grid_session_busy_kwargs())
+    was_busy = bool(st.session_state.get("grid_busy"))
+    st.session_state["grid_busy"] = bool(live)
+    if was_busy and not live:
+        st.session_state["grid_worker_pid"] = 0
         st.session_state.pop("grid_pending_sweep", None)
+        st.session_state.pop("grid_worker_spawned_at", None)
+        st.session_state["grid_stopping"] = False
+        if load_summary:
+            summary_p = dest / "summary.json"
+            if summary_p.is_file():
+                try:
+                    st.session_state["grid_summary"] = json.loads(summary_p.read_text(encoding="utf-8"))
+                except Exception:
+                    pass
         _persist_app()
+    return prog
+
+
+def _render_run_status() -> None:
+    name = str(st.session_state.get("grid_sweep") or "").strip()
+    prog = _load_grid_progress(name) if name else None
+    busy = bool(st.session_state.get("grid_busy")) or ui_worker_busy(
+        prog, **_grid_session_busy_kwargs()
+    )
+    if not name and not busy:
+        return
+    cap = progress_caption(prog) if prog else ""
+    if busy:
+        st.info(
+            "正在跑网格"
+            + (" · %s" % cap if cap else " · 正在写 progress")
+            + "。日志里格子数>8 的 WARN 不会停下来等确认。"
+        )
+    elif cap:
+        st.caption(cap)
+    frac, walk_tot = walk_progress_ratio(prog)
+    if walk_tot > 0:
+        st.progress(frac)
+        st.caption("本组 walk %.1f / %s" % (float(prog.get("batch_walk_done") or 0), walk_tot))
+    if prog:
+        n_done = len(done_cell_ids(prog))
+        n_all = len([x for x in (prog.get("cell_ids") or []) if str(x).strip()])
+        if n_all:
+            st.caption("已完成格子 %s / %s" % (n_done, n_all))
+        batches = prog.get("batches") or []
+        if (
+            n_done
+            and not worker_is_alive(prog)
+            and any(isinstance(b, dict) and str(b.get("status") or "") != "done" for b in batches)
+        ):
+            st.caption("未跑完：推荐只基于已完成组。")
+    if name:
+        log_path = GRID_ROOT / name / "worker.log"
+        tail = tail_text(log_path, 16)
+        if tail:
+            st.code(tail, language="text")
+
+
+def _progress_tick() -> None:
+    was = bool(st.session_state.get("grid_busy"))
+    _sync_grid_worker_state()
+    _render_run_status()
+    now = bool(st.session_state.get("grid_busy"))
+    if was != now:
+        st.rerun()
+
+
+_PROGRESS_FRAG = None
+
+
+def _call_progress_fragment() -> None:
+    global _PROGRESS_FRAG
+    if _PROGRESS_FRAG is None:
+        fn = _progress_tick
+        if hasattr(st, "fragment"):
+            try:
+                fn = st.fragment(run_every=2.0)(_progress_tick)
+            except Exception:
+                fn = _progress_tick
+        _PROGRESS_FRAG = fn
+    _PROGRESS_FRAG()
+
+
+def _poll_grid_worker() -> None:
+    _sync_grid_worker_state()
+    _call_progress_fragment()
 
 
 def _grid_sweep_dir(summary: dict[str, Any]) -> Path:
@@ -1537,6 +1820,12 @@ def _render_results() -> None:
     if sweep_label:
         st.caption("sweep `%s`" % sweep_label)
     rec_reason = str(rec.get("reason") or "")
+    name = str(st.session_state.get("grid_sweep") or summary.get("sweep") or "").strip()
+    prog = _load_grid_progress(name) if name else None
+    if prog and done_cell_ids(prog):
+        batches = prog.get("batches") or []
+        if any(isinstance(b, dict) and str(b.get("status") or "") != "done" for b in batches):
+            st.caption("未跑完：推荐只基于已完成组；★现行若尚未跑完，相对门会跳过。")
     if rec_id:
         st.success("过门推荐 **%s** · %s" % (rec.get("label") or rec_id, rec_reason))
     else:

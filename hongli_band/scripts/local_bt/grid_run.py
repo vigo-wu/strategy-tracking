@@ -15,6 +15,7 @@ import os
 import re
 import shutil
 import sys
+import time
 import traceback
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, as_completed, wait
 from multiprocessing import get_context
@@ -45,12 +46,35 @@ from analyze import (  # noqa: E402
     resolve_typed_dir,
 )
 from grid_spec import (  # noqa: E402
+    YEAR_WINDOW_KEYS,
     GridSpecError,
     apply_year_windows,
     fill_year_windows,
     json_ready,
     reject_retired_min_ret,
     struct_eq,
+)
+from grid_progress import (  # noqa: E402
+    STATUS_DIRTY,
+    STATUS_DONE,
+    STATUS_RUNNING,
+    GridPaused,
+    build_progress,
+    cell_ids_of,
+    check_pause,
+    chunk_ids,
+    clear_pause,
+    delete_cell_dirs,
+    done_cell_ids,
+    infer_existing_batch_status,
+    iter_batches,
+    load_progress,
+    mark_running_dead_as_dirty,
+    order_cells_current_first,
+    pause_requested,
+    save_progress,
+    set_batch_status,
+    worker_is_alive,
 )
 from grid_gate import fill_gate, gate_for_json, validate_gate  # noqa: E402
 from asset_split import (  # noqa: E402
@@ -148,6 +172,7 @@ class WalkProgress:
         self._finished: set[str] = set()
         self.probe_done = 0
         self.probe_total = 0
+        self.cells_done = 0
 
     @property
     def inflight_frac(self) -> float:
@@ -198,6 +223,7 @@ class WalkProgress:
             "n_walks": int(self.n_walks),
             "inflight_frac": float(self.inflight_frac),
             "n_running": int(self.n_running),
+            "cells_done": int(self.cells_done),
             "phase": str(phase or "walk"),
             "job_key": str(job_key or ""),
         }
@@ -271,7 +297,7 @@ def validate_spec(spec: dict[str, Any]) -> list[dict[str, Any]]:
         raise GridError("spec.cells 为空")
     if len(cells) > WARN_CELL_SOFT:
         print(
-            "WARN 格子数 %s > %s；叉乘交互项多，确认后再跑"
+            "WARN 格子数 %s > %s；叉乘交互项多，仅提示仍继续跑（技能建议选参 ≤8 格）"
             % (len(cells), WARN_CELL_SOFT),
             flush=True,
         )
@@ -1066,6 +1092,7 @@ def _run_walks_in_pool(
     state: WalkProgress,
     on_progress: Callable[..., None] | None = None,
     succeeded: set[str] | None = None,
+    pause_dest: Path | None = None,
 ) -> set[str]:
     """一层全局 walk 池。返回已全部 walk 成功的 cell_id。逻辑失败升 GridError。"""
     if succeeded is None:
@@ -1090,6 +1117,10 @@ def _run_walks_in_pool(
         futs = {ex.submit(run_walk_job, p): p for p in payloads}
         pending = set(futs)
         while pending:
+            if pause_dest is not None and pause_requested(pause_dest):
+                for rest in pending:
+                    rest.cancel()
+                raise GridPaused()
             cid, jk, lab = _drain_walk_queue(q, state)
             if cid:
                 last_cid, last_jk, last_label = cid, jk, lab
@@ -1126,6 +1157,7 @@ def _run_walks_in_pool(
                 remaining[cid] = int(remaining.get(cid) or 1) - 1
                 if remaining.get(cid, 1) <= 0:
                     succeeded.add(cid)
+                    state.cells_done = len(succeeded)
                 last_cid, last_jk, last_label = cid, jk, str(payload.get("basket_id") or "book")
             _emit_walk_progress(
                 on_progress, state, last_cid, last_label, phase="walk", job_key=last_jk
@@ -1202,6 +1234,7 @@ def run_cells(
     defaults: dict[str, Any],
     workers: int,
     on_progress: Callable[..., None] | None = None,
+    pause_dest: Path | None = None,
 ) -> None:
     n_cells = len(cells)
     n_jobs = len(jobs)
@@ -1213,6 +1246,8 @@ def run_cells(
     wrapped = _wrap_serial_progress(state, n_cells, on_progress)
     if cw <= 1:
         for cell in cells:
+            if pause_dest is not None:
+                check_pause(pause_dest)
             print("== cell", cell["id"], cell["kind"], cell["overrides"], flush=True)
             run_cell(
                 cell,
@@ -1222,11 +1257,17 @@ def run_cells(
                 1,
                 on_progress=wrapped,
             )
+            state.cells_done += 1
+            _emit_walk_progress(
+                on_progress, state, str(cell["id"]), "格子完成", phase="walk"
+            )
         return
     succeeded: set[str] = set()
     try:
         payloads: list[dict[str, Any]] = []
         for cell in cells:
+            if pause_dest is not None:
+                check_pause(pause_dest)
             print("== cell", cell["id"], cell["kind"], cell["overrides"], flush=True)
             cell_dir = dest / cell["id"]
             write_cell_meta(cell, jobs, cell_dir)
@@ -1244,7 +1285,10 @@ def run_cells(
             state,
             on_progress=on_progress,
             succeeded=succeeded,
+            pause_dest=pause_dest,
         )
+    except GridPaused:
+        raise
     except GridError:
         raise
     except Exception as e:
@@ -1252,6 +1296,8 @@ def run_cells(
         for cell in cells:
             if str(cell["id"]) in succeeded:
                 continue
+            if pause_dest is not None:
+                check_pause(pause_dest)
             print("== cell fallback", cell["id"], flush=True)
             run_cell(
                 cell,
@@ -1260,6 +1306,10 @@ def run_cells(
                 defaults,
                 1,
                 on_progress=wrapped,
+            )
+            state.cells_done += 1
+            _emit_walk_progress(
+                on_progress, state, str(cell["id"]), "格子完成", phase="walk"
             )
 
 
@@ -1274,13 +1324,19 @@ def run_sweep(
     cell_id: str = "",
     spec_path: str = "",
     reshuffle: bool = False,
+    batch_size: int = 0,
+    resume: bool = False,
 ) -> dict[str, Any]:
+    if resume:
+        reshuffle = False
     cells = validate_spec(spec)
     if cell_id:
         want = str(cell_id).strip()
         cells = [c for c in cells if c["id"] == want]
         if not cells:
             raise GridError("没有格子 id=%s" % want)
+    elif not resume:
+        cells = order_cells_current_first(cells)
     sweep = str(spec.get("sweep") or Path(spec_path).stem or "grid")
     dest = Path(sweep_dir) if sweep_dir else GRID_ROOT / sweep
     _assert_grid_dir(dest)
@@ -1293,6 +1349,16 @@ def run_sweep(
             prev_freeze = json.loads(freeze_p.read_text(encoding="utf-8"))
         except Exception:
             prev_freeze = None
+    if resume and prev_freeze:
+        include_sma_ema = bool(prev_freeze.get("include_sma_ema"))
+        for key in YEAR_WINDOW_KEYS:
+            if prev_freeze.get(key) is not None:
+                spec[key] = int(prev_freeze[key])
+        if prev_freeze.get("compare_div"):
+            spec["compare_div"] = str(prev_freeze.get("compare_div"))
+        split_prev = prev_freeze.get("asset_split")
+        if isinstance(split_prev, dict):
+            spec["asset_split"] = split_prev
     try:
         split = draw_asset_split(spec, reshuffle=bool(reshuffle), freeze=prev_freeze)
     except AssetSplitError as e:
@@ -1305,6 +1371,12 @@ def run_sweep(
     spec["gate"] = gate_for_json(gate)
 
     book, jobs = assemble_jobs(spec, include_sma_ema=include_sma_ema)
+    if resume and prev_freeze and prev_freeze.get("n_jobs") is not None:
+        if int(prev_freeze.get("n_jobs") or 0) != len(jobs):
+            raise GridError(
+                "resume freeze n_jobs=%s 与当前 jobs=%s 不一致"
+                % (prev_freeze.get("n_jobs"), len(jobs))
+            )
     if len(jobs) > WARN_JOBS_SOFT:
         print(
             "WARN jobs/cell=%s > %s（空间隔离×SMA/EMA 最多 6 段组合 walk）"
@@ -1338,6 +1410,11 @@ def run_sweep(
         "tune_stocks": list(split.get("tune_stocks") or []),
         "holdout_stocks": list(split.get("holdout_stocks") or []),
         "gate": gate_for_json(gate),
+        "batch_size": int(
+            (prev_freeze or {}).get("batch_size")
+            if resume and prev_freeze and prev_freeze.get("batch_size") is not None
+            else (batch_size or 0)
+        ),
     }
     freeze_meta.update(win)
     (dest / "freeze.json").write_text(
@@ -1367,37 +1444,205 @@ def run_sweep(
         "cells": cells,
         "dry_run": bool(dry_run),
         "asset_split": split,
+        "resume": bool(resume),
+        "paused": False,
     }
     info.update(win)
     if dry_run:
+        info["n_batches"] = len(chunk_ids(cell_ids_of(cells), int(batch_size or 0)))
         return info
-    if not cell_id:
+    if not cell_id and not resume:
         prune_stale_cell_dirs(dest, [c["id"] for c in cells])
     defaults = load_exit_defaults()
-    cells = sorted(
-        cells,
-        key=lambda c: 0 if (c.get("is_current") or c["id"] == "base") else 1,
-    )
-    run_cells(
-        cells,
-        jobs,
-        dest,
-        defaults,
-        int(workers or 0),
-        on_progress=progress,
-    )
+    if cell_id:
+        run_cells(
+            cells,
+            jobs,
+            dest,
+            defaults,
+            int(workers or 0),
+            on_progress=progress,
+            pause_dest=dest,
+        )
+        out = _summarize_sweep_cells(
+            dest,
+            spec.get("gate"),
+            cell_ids=[str(c["id"]) for c in cells],
+        )
+        rec = out.get("recommend") or {}
+        info["summary"] = out
+        info["recommend"] = rec
+        return info
+
+    by_id = {str(c["id"]): c for c in cells}
+    freeze_bs = int(freeze_meta.get("batch_size") or batch_size or 0)
+    prog = load_progress(dest) if resume else None
+    if resume:
+        if worker_is_alive(prog):
+            raise GridError(
+                "sweep 仍有 worker pid=%s 在跑，请先暂停或等其退出"
+                % (prog or {}).get("worker_pid")
+            )
+        prog = mark_running_dead_as_dirty(dest, prog, is_cell_dir, force=True)
+        frozen_ids = [str(x).strip() for x in ((prog or {}).get("cell_ids") or []) if str(x).strip()]
+        if frozen_ids:
+            cells = [by_id[i] for i in frozen_ids if i in by_id]
+            by_id = {str(c["id"]): c for c in cells}
+        elif prog is None:
+            cells = order_cells_current_first(list(by_id.values()))
+            by_id = {str(c["id"]): c for c in cells}
+            prog = build_progress(cell_ids_of(cells), freeze_bs, worker_pid=os.getpid())
+            infer_existing_batch_status(dest, prog, is_cell_dir)
+    if prog is None:
+        prog = build_progress(cell_ids_of(cells), int(batch_size or 0), worker_pid=os.getpid())
+    prog["worker_pid"] = os.getpid()
+    save_progress(dest, prog)
+    info["n_batches"] = len(iter_batches(prog))
+    info["cells"] = cells
+
+    last_hb = 0.0
+    last_sum_ids: list[str] | None = None
+
+    def _heartbeat(force: bool = False, **extra: Any) -> None:
+        nonlocal last_hb, prog
+        now = time.time()
+        if not force and now - last_hb < 2.0:
+            return
+        last_hb = now
+        n_walks = extra.get("n_walks")
+        completed = extra.get("completed")
+        inflight = extra.get("inflight_frac")
+        if n_walks is not None:
+            try:
+                prog["batch_walk_total"] = int(n_walks)
+                prog["batch_walk_done"] = float(completed or 0) + float(inflight or 0)
+            except (TypeError, ValueError):
+                pass
+        cells_done = extra.get("cells_done")
+        if cells_done is not None:
+            try:
+                prog["batch_cell_done"] = min(
+                    int(prog.get("batch_cell_total") or 0),
+                    int(cells_done),
+                )
+            except (TypeError, ValueError):
+                pass
+        prog["worker_pid"] = os.getpid()
+        prog = save_progress(dest, prog)
+
+    def on_progress_wrap(cid: str, done: int, tot: int, label: str, **extra: Any) -> None:
+        if progress is not None:
+            progress(cid, done, tot, label, **extra)
+        _heartbeat(
+            cid=cid,
+            completed=extra.get("completed"),
+            n_walks=extra.get("n_walks"),
+            inflight_frac=extra.get("inflight_frac"),
+            cells_done=extra.get("cells_done"),
+            force=False,
+        )
+
+    def _maybe_summarize() -> None:
+        nonlocal last_sum_ids
+        want = done_cell_ids(prog)
+        if not want or want == last_sum_ids:
+            return
+        out = _summarize_sweep_cells(dest, spec.get("gate"), cell_ids=want)
+        last_sum_ids = list(want)
+        info["summary"] = out
+        info["recommend"] = out.get("recommend") or {}
+
+    paused = False
+    try:
+        for batch in iter_batches(prog):
+            status = str(batch.get("status") or "")
+            if status == STATUS_DONE:
+                continue
+            ids = list(batch.get("cell_ids") or [])
+            chunk = [by_id[i] for i in ids if i in by_id]
+            if status == STATUS_DIRTY:
+                delete_cell_dirs(dest, ids, is_cell_dir)
+            set_batch_status(prog, int(batch["index"]), STATUS_RUNNING)
+            prog["batch_cell_done"] = 0
+            prog["batch_cell_total"] = len(chunk)
+            prog["batch_walk_done"] = 0
+            prog["batch_walk_total"] = len(chunk) * max(len(jobs), 0)
+            prog["worker_pid"] = os.getpid()
+            save_progress(dest, prog)
+            print(
+                "== batch %s/%s cells=%s"
+                % (int(batch["index"]) + 1, info["n_batches"], ",".join(ids)),
+                flush=True,
+            )
+            try:
+                run_cells(
+                    chunk,
+                    jobs,
+                    dest,
+                    defaults,
+                    int(workers or 0),
+                    on_progress=on_progress_wrap,
+                    pause_dest=dest,
+                )
+            except GridPaused:
+                paused = True
+                set_batch_status(prog, int(batch["index"]), STATUS_DIRTY)
+                delete_cell_dirs(dest, ids, is_cell_dir)
+                prog["worker_pid"] = 0
+                save_progress(dest, prog)
+                clear_pause(dest)
+                print("paused batch", batch["index"], flush=True)
+                break
+            except GridError:
+                set_batch_status(prog, int(batch["index"]), STATUS_DIRTY)
+                delete_cell_dirs(dest, ids, is_cell_dir)
+                prog["worker_pid"] = 0
+                save_progress(dest, prog)
+                raise
+            set_batch_status(prog, int(batch["index"]), STATUS_DONE)
+            prog["batch_cell_done"] = len(chunk)
+            prog["worker_pid"] = os.getpid()
+            save_progress(dest, prog)
+            _maybe_summarize()
+        if not paused:
+            prog["worker_pid"] = 0
+            save_progress(dest, prog)
+            _maybe_summarize()
+    except KeyboardInterrupt:
+        paused = True
+        mark_running_dead_as_dirty(dest, prog, is_cell_dir, force=True)
+        clear_pause(dest)
+        print("interrupted; running batch marked dirty", flush=True)
+        _maybe_summarize()
+    except GridPaused:
+        paused = True
+        prog["worker_pid"] = 0
+        save_progress(dest, prog)
+        clear_pause(dest)
+        _maybe_summarize()
+    info["paused"] = bool(paused)
+    info["progress"] = load_progress(dest)
+    rec = info.get("recommend") or {}
+    if rec:
+        print("recommend", rec.get("id"), rec.get("reason"))
+    print("默认不改 config.py、不 deploy；用户说按建议修改后再改片段")
+    return info
+
+
+def _summarize_sweep_cells(
+    dest: Path,
+    gate: dict[str, Any] | None,
+    cell_ids: Iterable[str] | None,
+) -> dict[str, Any]:
     mod = _load_summarize()
     try:
-        out = mod.summarize_sweep(dest, gate=spec.get("gate"))
+        out = mod.summarize_sweep(dest, gate=gate, cell_ids=cell_ids)
     except Exception as e:
         raise GridError(str(e)) from e
     rec = out.get("recommend") or {}
     print("wrote", out.get("summary_path"))
     print("recommend", rec.get("id"), rec.get("reason"))
-    print("默认不改 config.py、不 deploy；用户说按建议修改后再改片段")
-    info["summary"] = out
-    info["recommend"] = rec
-    return info
+    return out
 
 
 def summarize_only(
@@ -1430,6 +1675,17 @@ def main() -> None:
     )
     ap.add_argument("--sweep-dir", default="", help="覆盖输出目录")
     ap.add_argument("--cell", default="", help="只跑指定格子 id")
+    ap.add_argument(
+        "--batch-size",
+        type=int,
+        default=0,
+        help="每组格子数（0=一组全量；UI 默认 10）",
+    )
+    ap.add_argument(
+        "--resume",
+        action="store_true",
+        help="同一 sweep 续跑：跳过 done 组，dirty 组整组重来",
+    )
     ap.add_argument("--summarize-only", action="store_true", help="不重跑，只 summarize")
     ap.add_argument("--dry-run", action="store_true", help="只打印每格 walk 数")
     ap.add_argument("--year-start", type=int, default=None)
@@ -1478,46 +1734,79 @@ def main() -> None:
                 sweep_dir = GRID_ROOT / sweep
             summarize_only(sweep_dir, gate=gate_override)
             return
-        if not args.spec:
-            raise GridError("需要 --spec")
-        spec = load_spec(args.spec)
-        cli_years = {
-            "year_start": args.year_start,
-            "year_end": args.year_end,
-            "tune_start": args.tune_start,
-            "tune_end": args.tune_end,
-            "check_start": args.check_start,
-            "check_end": args.check_end,
-        }
-        for key, val in cli_years.items():
-            if val is not None:
-                spec[key] = int(val)
+        if args.cell and args.resume:
+            raise GridError("--cell 不能与 --resume 同时使用")
+        if args.cell and int(args.batch_size or 0) > 0:
+            raise GridError("--cell 不能与 --batch-size>0 同时使用")
+        resume = bool(args.resume)
+        spec_path = str(args.spec or "")
+        sweep_dir_arg = str(args.sweep_dir or "").strip()
+        if resume:
+            if spec_path:
+                spec = load_spec(spec_path)
+                dest = Path(sweep_dir_arg) if sweep_dir_arg else GRID_ROOT / str(
+                    spec.get("sweep") or Path(spec_path).stem
+                )
+            elif sweep_dir_arg:
+                dest = Path(sweep_dir_arg)
+                spec_file = dest / "spec.json"
+                if not spec_file.is_file():
+                    raise GridError("--resume 需要 %s" % spec_file)
+                spec = load_spec(spec_file)
+                spec_path = str(spec_file)
+            else:
+                raise GridError("--resume 需要 --sweep-dir 或 --spec")
+        else:
+            if not spec_path:
+                raise GridError("需要 --spec")
+            spec = load_spec(spec_path)
+        if not resume:
+            cli_years = {
+                "year_start": args.year_start,
+                "year_end": args.year_end,
+                "tune_start": args.tune_start,
+                "tune_end": args.tune_end,
+                "check_start": args.check_start,
+                "check_end": args.check_end,
+            }
+            for key, val in cli_years.items():
+                if val is not None:
+                    spec[key] = int(val)
         if gate_override is not None:
             spec["gate"] = gate_for_json(gate_override)
         elif spec.get("gate") is not None:
             spec["gate"] = gate_for_json(validate_gate(spec.get("gate")))
         else:
             spec["gate"] = gate_for_json(fill_gate(None))
-        split = fill_asset_split(spec)
-        if args.asset_mode:
-            split["mode"] = str(args.asset_mode).strip().lower()
-        if args.n_tune is not None:
-            split["n_tune"] = int(args.n_tune)
-        if args.n_holdout is not None:
-            split["n_holdout"] = int(args.n_holdout)
-        if args.seed is not None:
-            split["seed"] = int(args.seed)
-        spec["asset_split"] = split
-        run_sweep(
-            spec,
-            include_sma_ema=bool(args.include_sma_ema),
-            workers=int(args.workers or 0),
-            sweep_dir=args.sweep_dir or None,
-            dry_run=bool(args.dry_run),
-            cell_id=str(args.cell or ""),
-            spec_path=str(args.spec),
-            reshuffle=bool(args.reshuffle),
-        )
+        if not resume:
+            split = fill_asset_split(spec)
+            if args.asset_mode:
+                split["mode"] = str(args.asset_mode).strip().lower()
+            if args.n_tune is not None:
+                split["n_tune"] = int(args.n_tune)
+            if args.n_holdout is not None:
+                split["n_holdout"] = int(args.n_holdout)
+            if args.seed is not None:
+                split["seed"] = int(args.seed)
+            spec["asset_split"] = split
+        dest_arg = sweep_dir_arg or None
+        if resume and not dest_arg:
+            dest_arg = str(dest)
+        try:
+            run_sweep(
+                spec,
+                include_sma_ema=bool(args.include_sma_ema) if not resume else False,
+                workers=int(args.workers or 0),
+                sweep_dir=dest_arg,
+                dry_run=bool(args.dry_run),
+                cell_id=str(args.cell or ""),
+                spec_path=spec_path,
+                reshuffle=bool(args.reshuffle) if not resume else False,
+                batch_size=0 if resume else int(args.batch_size or 0),
+                resume=resume,
+            )
+        except GridPaused:
+            return
     except GridError as e:
         raise SystemExit(str(e)) from e
 
