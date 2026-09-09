@@ -20,7 +20,7 @@ import traceback
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, as_completed, wait
 from multiprocessing import get_context
 from pathlib import Path
-from queue import Empty
+from queue import Empty, Full
 from typing import Any, Callable, Iterable
 
 HERE = Path(__file__).resolve().parent
@@ -86,11 +86,12 @@ from asset_split import (  # noqa: E402
 )
 from market_csv import compact_day, peek_daily_csv_meta  # noqa: E402
 from book_backtest import book_log_name, book_stocks_hash, run_book_backtest  # noqa: E402
-from run import _as_trail_tiers, run_init_probe  # noqa: E402
+from run import _as_trail_tiers, clear_market_store_cache, run_init_probe  # noqa: E402
 from trades_csv import trades_csv_path  # noqa: E402
 
 WARN_CELL_SOFT = 8
 WARN_JOBS_SOFT = 12
+WALK_PROGRESS_QUEUE_MAX = 256
 RE_STOP = re.compile(r"\bstop=\s*([0-9.eE+-]+)")
 RE_TFB = re.compile(r"\btime_force_bars=\s*(-?\d+)")
 RE_TFM = re.compile(r"\btime_force_min_ret=\s*([0-9.eE+-]+)")
@@ -834,33 +835,36 @@ def run_one_book_walk(
     out_dir.mkdir(parents=True, exist_ok=True)
     log_name = str(payload.get("log_name") or "")
     try:
-        lp, meta = run_book_backtest(
-            payload.get("book_stocks") or {},
-            str(payload["start"]),
-            str(payload["end"]),
-            payload.get("csv_root") or DEFAULT_CSV_ROOT,
-            out_dir,
-            log_name=log_name,
-            quiet=True,
-            overrides=payload.get("overrides") or {},
-            on_progress=on_bar_progress,
-        )
-        return {
-            "ok": True,
-            "basket_id": basket_id,
-            "log_path": str(lp),
-            "trades_path": str(trades_csv_path(lp)),
-            "meta": meta,
-            "sample": payload.get("sample"),
-        }
-    except Exception as e:
-        return {
-            "ok": False,
-            "basket_id": basket_id,
-            "error": str(e),
-            "traceback": traceback.format_exc(),
-            "sample": payload.get("sample"),
-        }
+        try:
+            lp, meta = run_book_backtest(
+                payload.get("book_stocks") or {},
+                str(payload["start"]),
+                str(payload["end"]),
+                payload.get("csv_root") or DEFAULT_CSV_ROOT,
+                out_dir,
+                log_name=log_name,
+                quiet=True,
+                overrides=payload.get("overrides") or {},
+                on_progress=on_bar_progress,
+            )
+            return {
+                "ok": True,
+                "basket_id": basket_id,
+                "log_path": str(lp),
+                "trades_path": str(trades_csv_path(lp)),
+                "meta": meta,
+                "sample": payload.get("sample"),
+            }
+        except Exception as e:
+            return {
+                "ok": False,
+                "basket_id": basket_id,
+                "error": str(e),
+                "traceback": traceback.format_exc(),
+                "sample": payload.get("sample"),
+            }
+    finally:
+        clear_market_store_cache()
 
 
 def init_walk_pool(local_bt_dir: str = "", progress_queue: Any = None) -> None:
@@ -884,7 +888,11 @@ def _queue_put(
     if q is None:
         return
     try:
-        q.put((str(kind), str(cid), str(job_key), int(walk_done or 0), int(walk_total or 0), str(label)))
+        q.put_nowait(
+            (str(kind), str(cid), str(job_key), int(walk_done or 0), int(walk_total or 0), str(label))
+        )
+    except Full:
+        pass
     except Exception:
         pass
 
@@ -1106,7 +1114,7 @@ def _run_walks_in_pool(
         cid = str(p.get("cell_id") or "")
         remaining[cid] = remaining.get(cid, 0) + 1
     ctx = get_context("spawn")
-    q = ctx.Queue()
+    q = ctx.Queue(maxsize=WALK_PROGRESS_QUEUE_MAX)
     last_cid, last_jk, last_label = "", "", ""
     with ProcessPoolExecutor(
         max_workers=int(pool_workers),

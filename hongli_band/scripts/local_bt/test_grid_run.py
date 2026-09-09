@@ -9,9 +9,9 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from queue import Empty
+from queue import Empty, Full
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
@@ -19,8 +19,10 @@ if str(HERE) not in sys.path:
 
 from grid_run import (  # noqa: E402
     GridError,
+    WALK_PROGRESS_QUEUE_MAX,
     WalkProgress,
     _drain_walk_queue,
+    _queue_put,
     _run_walks_in_pool,
     assemble_jobs,
     book_jobs,
@@ -37,6 +39,7 @@ from grid_run import (  # noqa: E402
     reset_cell_sample_dirs,
     resolve_pool_workers,
     run_cell,
+    run_one_book_walk,
     run_sweep,
     run_walk_job,
     validate_spec,
@@ -952,6 +955,83 @@ class GridWalkPoolTest(unittest.TestCase):
         self.assertFalse(out[0].get("ok"))
         self.assertIn("无 job", str(out[0].get("error") or ""))
         self.assertNotIn("Queue objects should only be shared", str(out[0]))
+
+
+class QueuePutAndCacheClearTest(unittest.TestCase):
+    def test_walk_progress_queue_max_is_256(self) -> None:
+        self.assertEqual(WALK_PROGRESS_QUEUE_MAX, 256)
+
+    def test_queue_put_full_is_dropped(self) -> None:
+        import grid_run as gr
+
+        q = MagicMock()
+        q.put_nowait.side_effect = Full
+        q.put = MagicMock(side_effect=AssertionError("must not block put"))
+        prev = gr._WALK_PROGRESS_Q
+        gr._WALK_PROGRESS_Q = q
+        try:
+            _queue_put("bar", "c1", "c1|book|tune", 1, 10, "lab")
+        finally:
+            gr._WALK_PROGRESS_Q = prev
+        q.put_nowait.assert_called_once()
+        q.put.assert_not_called()
+
+    def test_run_walks_pool_creates_bounded_queue(self) -> None:
+        payloads = [
+            {"cell_id": "c1", "sample": "book", "basket_id": "tune", "out_dir": "x"},
+        ]
+        state = WalkProgress(1)
+        recorded: list[int] = []
+
+        class _Ctx:
+            def Queue(self, maxsize=0):
+                recorded.append(int(maxsize))
+                return _ListQ([])
+
+        with patch("grid_run.get_context", return_value=_Ctx()):
+            with patch("grid_run.ProcessPoolExecutor", _FakePool):
+                with patch("grid_run.wait", _fake_wait):
+                    _run_walks_in_pool(payloads, 1, 1, state)
+        self.assertEqual(recorded, [WALK_PROGRESS_QUEUE_MAX])
+
+    def test_run_one_book_walk_clears_cache_on_success(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            payload = {
+                "basket_id": "tune",
+                "out_dir": td,
+                "log_name": "t.txt",
+                "book_stocks": {"600000.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"}},
+                "start": "20200101",
+                "end": "20200131",
+                "sample": "book",
+            }
+            with patch(
+                "grid_run.run_book_backtest",
+                return_value=(Path(td) / "t.txt", {"n_bars": 1}),
+            ):
+                with patch("grid_run.clear_market_store_cache") as clear:
+                    with patch("grid_run.trades_csv_path", return_value=str(Path(td) / "t.csv")):
+                        row = run_one_book_walk(payload)
+            self.assertTrue(row.get("ok"))
+            clear.assert_called_once()
+
+    def test_run_one_book_walk_clears_cache_on_error(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            payload = {
+                "basket_id": "tune",
+                "out_dir": td,
+                "log_name": "t.txt",
+                "book_stocks": {},
+                "start": "20200101",
+                "end": "20200131",
+                "sample": "book",
+            }
+            with patch("grid_run.run_book_backtest", side_effect=RuntimeError("boom")):
+                with patch("grid_run.clear_market_store_cache") as clear:
+                    row = run_one_book_walk(payload)
+            self.assertFalse(row.get("ok"))
+            self.assertIn("boom", str(row.get("error") or ""))
+            clear.assert_called_once()
 
 
 if __name__ == "__main__":
