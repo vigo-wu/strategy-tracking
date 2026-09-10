@@ -1,0 +1,263 @@
+{
+  "theme": "hongli_band",
+  "sweep": "entry_excellent",
+  "compare_div": "front_ratio",
+  "cells": [
+    {
+      "id": "mt25_vpr90_vpc2_wb08_dmm20_dms60",
+      "label": "★现行 · 回踩容差 2.5% · 缩量回踩比例 90% · 缩量确认日 2 · 周线高位禁开 8% · 日线中均线 20 · 日线慢均线 60",
+      "kind": "other",
+      "overrides": {},
+      "is_current": true,
+      "n_diffs": 0
+    },
+    {
+      "id": "mt15_vpr90_vpc1_wb05_dmm10_dms30",
+      "label": "回踩容差 1.5% · 缩量回踩比例 90% · 缩量确认日 1 · 周线高位禁开 5% · 日线中均线 10 · 日线慢均线 30",
+      "kind": "other",
+      "overrides": {
+        "MA_TOUCH_TOL": 0.015,
+        "VOL_PULLBACK_RATIO": 0.9,
+        "VOL_PULLBACK_CONFIRM_DAYS": 1,
+        "W_BIAS_HARD": 0.05,
+        "D_MA_MID": 10,
+        "D_MA_SLOW": 30
+      },
+      "is_current": false,
+      "n_diffs": 5
+    },
+    {
+      "id": "mt15_vpr90_vpc2_wb05_dmm0_dms60",
+      "label": "回踩容差 1.5% · 缩量回踩比例 90% · 缩量确认日 2 · 周线高位禁开 5% · 日线中均线关闭 · 日线慢均线 60",
+      "kind": "other",
+      "overrides": {
+        "MA_TOUCH_TOL": 0.015,
+        "VOL_PULLBACK_RATIO": 0.9,
+        "VOL_PULLBACK_CONFIRM_DAYS": 2,
+        "W_BIAS_HARD": 0.05,
+        "D_MA_MID": 0,
+        "D_MA_SLOW": 60
+      },
+      "is_current": false,
+      "n_diffs": 3
+    },
+    {
+      "id": "mt15_vpr90_vpc2_wb08_dmm0_dms60",
+      "label": "回踩容差 1.5% · 缩量回踩比例 90% · 缩量确认日 2 · 周线高位禁开 8% · 日线中均线关闭 · 日线慢均线 60",
+      "kind": "other",
+      "overrides": {
+        "MA_TOUCH_TOL": 0.015,
+        "VOL_PULLBACK_RATIO": 0.9,
+        "VOL_PULLBACK_CONFIRM_DAYS": 2,
+        "W_BIAS_HARD": 0.08,
+        "D_MA_MID": 0,
+        "D_MA_SLOW": 60
+      },
+      "is_current": false,
+      "n_diffs": 2
+    },
+    {
+      "id": "mt15_vpr90_vpc2_wb12_dmm0_dms60",
+      "label": "回踩容差 1.5% · 缩量回踩比例 90% · 缩量确认日 2 · 周线高位禁开 12% · 日线中均线关闭 · 日线慢均线 60",
+      "kind": "other",
+      "overrides": {
+        "MA_TOUCH_TOL": 0.015,
+        "VOL_PULLBACK_RATIO": 0.9,
+        "VOL_PULLBACK_CONFIRM_DAYS": 2,
+        "W_BIAS_HARD": 0.12,
+        "D_MA_MID": 0,
+        "D_MA_SLOW": 60
+      },
+      "is_current": false,
+      "n_diffs": 3
+    },
+    {
+      "id": "mt04_vpr75_vpc1_wb08_dmm0_dms60",
+      "label": "回踩容差 4% · 缩量回踩比例 75% · 缩量确认日 1 · 周线高位禁开 8% · 日线中均线关闭 · 日线慢均线 60",
+      "kind": "other",
+      "overrides": {
+        "MA_TOUCH_TOL": 0.04,
+        "VOL_PULLBACK_RATIO": 0.75,
+        "VOL_PULLBACK_CONFIRM_DAYS": 1,
+        "W_BIAS_HARD": 0.08,
+        "D_MA_MID": 0,
+        "D_MA_SLOW": 60
+      },
+      "is_current": false,
+      "n_diffs": 4
+    },
+    {
+      "id": "mt04_vpr75_vpc1_wb12_dmm0_dms60",
+      "label": "回踩容差 4% · 缩量回踩比例 75% · 缩量确认日 1 · 周线高位禁开 12% · 日线中均线关闭 · 日线慢均线 60",
+      "kind": "other",
+      "overrides": {
+        "MA_TOUCH_TOL": 0.04,
+        "VOL_PULLBACK_RATIO": 0.75,
+        "VOL_PULLBACK_CONFIRM_DAYS": 1,
+        "W_BIAS_HARD": 0.12,
+        "D_MA_MID": 0,
+        "D_MA_SLOW": 60
+      },
+      "is_current": false,
+      "n_diffs": 5
+    },
+    {
+      "id": "mt15_vpr90_vpc2_wb12_dmm20_dms0",
+      "label": "回踩容差 1.5% · 缩量回踩比例 90% · 缩量确认日 2 · 周线高位禁开 12% · 日线中均线 20 · 日线慢均线关闭",
+      "kind": "other",
+      "overrides": {
+        "MA_TOUCH_TOL": 0.015,
+        "VOL_PULLBACK_RATIO": 0.9,
+        "VOL_PULLBACK_CONFIRM_DAYS": 2,
+        "W_BIAS_HARD": 0.12,
+        "D_MA_MID": 20,
+        "D_MA_SLOW": 0
+      },
+      "is_current": false,
+      "n_diffs": 3
+    },
+    {
+      "id": "mt15_vpr75_vpc1_wb05_dmm0_dms30",
+      "label": "回踩容差 1.5% · 缩量回踩比例 75% · 缩量确认日 1 · 周线高位禁开 5% · 日线中均线关闭 · 日线慢均线 30",
+      "kind": "other",
+      "overrides": {
+        "MA_TOUCH_TOL": 0.015,
+        "VOL_PULLBACK_RATIO": 0.75,
+        "VOL_PULLBACK_CONFIRM_DAYS": 1,
+        "W_BIAS_HARD": 0.05,
+        "D_MA_MID": 0,
+        "D_MA_SLOW": 30
+      },
+      "is_current": false,
+      "n_diffs": 6
+    },
+    {
+      "id": "mt15_vpr90_vpc2_wb08_dmm0_dms30",
+      "label": "回踩容差 1.5% · 缩量回踩比例 90% · 缩量确认日 2 · 周线高位禁开 8% · 日线中均线关闭 · 日线慢均线 30",
+      "kind": "other",
+      "overrides": {
+        "MA_TOUCH_TOL": 0.015,
+        "VOL_PULLBACK_RATIO": 0.9,
+        "VOL_PULLBACK_CONFIRM_DAYS": 2,
+        "W_BIAS_HARD": 0.08,
+        "D_MA_MID": 0,
+        "D_MA_SLOW": 30
+      },
+      "is_current": false,
+      "n_diffs": 3
+    },
+    {
+      "id": "mt15_vpr90_vpc2_wb12_dmm0_dms30",
+      "label": "回踩容差 1.5% · 缩量回踩比例 90% · 缩量确认日 2 · 周线高位禁开 12% · 日线中均线关闭 · 日线慢均线 30",
+      "kind": "other",
+      "overrides": {
+        "MA_TOUCH_TOL": 0.015,
+        "VOL_PULLBACK_RATIO": 0.9,
+        "VOL_PULLBACK_CONFIRM_DAYS": 2,
+        "W_BIAS_HARD": 0.12,
+        "D_MA_MID": 0,
+        "D_MA_SLOW": 30
+      },
+      "is_current": false,
+      "n_diffs": 4
+    },
+    {
+      "id": "mt04_vpr90_vpc2_wb08_dmm0_dms60",
+      "label": "回踩容差 4% · 缩量回踩比例 90% · 缩量确认日 2 · 周线高位禁开 8% · 日线中均线关闭 · 日线慢均线 60",
+      "kind": "other",
+      "overrides": {
+        "MA_TOUCH_TOL": 0.04,
+        "VOL_PULLBACK_RATIO": 0.9,
+        "VOL_PULLBACK_CONFIRM_DAYS": 2,
+        "W_BIAS_HARD": 0.08,
+        "D_MA_MID": 0,
+        "D_MA_SLOW": 60
+      },
+      "is_current": false,
+      "n_diffs": 2
+    },
+    {
+      "id": "mt04_vpr90_vpc2_wb12_dmm0_dms60",
+      "label": "回踩容差 4% · 缩量回踩比例 90% · 缩量确认日 2 · 周线高位禁开 12% · 日线中均线关闭 · 日线慢均线 60",
+      "kind": "other",
+      "overrides": {
+        "MA_TOUCH_TOL": 0.04,
+        "VOL_PULLBACK_RATIO": 0.9,
+        "VOL_PULLBACK_CONFIRM_DAYS": 2,
+        "W_BIAS_HARD": 0.12,
+        "D_MA_MID": 0,
+        "D_MA_SLOW": 60
+      },
+      "is_current": false,
+      "n_diffs": 3
+    }
+  ],
+  "year_start": 2019,
+  "year_end": 2026,
+  "tune_start": 2019,
+  "tune_end": 2022,
+  "check_start": 2023,
+  "check_end": 2026,
+  "asset_split": {
+    "mode": "random_from_csv",
+    "universe_dir": "tools/csv/none",
+    "n_tune": 8,
+    "n_holdout": 8,
+    "seed": null,
+    "ma_type": "EMA",
+    "dividend_type": "front_ratio",
+    "exclude": [],
+    "full_span": true,
+    "tune_stocks": [
+      "002415.SZ",
+      "300014.SZ",
+      "600188.SH",
+      "600600.SH",
+      "600900.SH",
+      "601398.SH",
+      "601877.SH",
+      "603288.SH"
+    ],
+    "holdout_stocks": [
+      "000100.SZ",
+      "000166.SZ",
+      "002756.SZ",
+      "600019.SH",
+      "601166.SH",
+      "601211.SH",
+      "603486.SH",
+      "603899.SH"
+    ],
+    "eligible_n": 262,
+    "n": 8
+  },
+  "gate": {
+    "relative_to_base": false,
+    "calmar_same_sign": false,
+    "calmar": {
+      "enabled": true,
+      "min": 0.7
+    },
+    "max_dd": {
+      "enabled": true,
+      "floor": -0.13
+    },
+    "oos_sharpe": {
+      "enabled": true,
+      "min": 0.7
+    },
+    "n_trades": {
+      "enabled": false,
+      "min": 1,
+      "vs_base_ratio": 0.5
+    },
+    "win_rate": {
+      "enabled": true,
+      "min": 45.0
+    },
+    "profit_factor": {
+      "enabled": true,
+      "min": 1.3
+    }
+  }
+}
