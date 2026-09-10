@@ -1,14 +1,14 @@
 # coding: utf-8
-"""将 kldump/*.py + scripts/qmt_common 拼成国金 QMT 模型 GBK 文件。"""
+"""将本目录片段 + scripts/qmt_common 拼成国金 QMT 模型 GBK 文件。"""
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-STRAT = HERE / "kldump"
+STRAT = HERE
 PREVIEW = HERE / "qmt_terminal_kldump.py"
-REPO = HERE.parents[2]
+REPO = HERE.parents[1]
 sys.path.insert(0, str(REPO / "scripts"))
 
 from qmt_common._deploy_lib import (  # noqa: E402
@@ -44,7 +44,7 @@ def main() -> None:
     print("DUMP_DIVID_FACTORS 时另写 OUT_DIR/divid_factors/{CODE}_{MKT}.json（PIT 原料）")
     print("PIT 所需票须进 DUMP_STOCKS（并保留 DIVIDEND_TYPES 含 none）；缺 JSON 时 local_bt 硬失败")
     print("导出区间跟随主图回测起止（C.start/C.end）；读不到时才用 HIST_START/BAR_COUNT")
-    print("编辑 kldump/*.py 后重新本脚本部署，终端再编译")
+    print("编辑本目录片段后重新本脚本部署，终端再编译")
 
 
 if __name__ == "__main__":

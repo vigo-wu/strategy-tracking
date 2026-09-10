@@ -52,10 +52,10 @@
 3. 没有 CSV 时，在国金里跑 **KlineDump / 行情导出**（改完片段须先 deploy）：
 
    ```bash
-   python tools/scripts/qmt/_deploy_qmt_gbk.py
+   python tools/qmt_terminal_kldump/_deploy_qmt_gbk.py
    ```
 
-   导出名单、起始日、复权种类见 [`tools/scripts/qmt/kldump/config.py`](../tools/scripts/qmt/kldump/config.py)（`DUMP_STOCKS`、`HIST_START`、`DIVIDEND_TYPES`、`DUMP_DIVID_FACTORS`、`OUT_DIR`）。`FOLLOW_CHART_RANGE=False` 时从 `HIST_START` 起导，给周线暖机留长度。
+   导出名单、起始日、复权种类见 [`tools/qmt_terminal_kldump/config.py`](../tools/qmt_terminal_kldump/config.py)（`DUMP_STOCKS`、`HIST_START`、`DIVIDEND_TYPES`、`DUMP_DIVID_FACTORS`、`OUT_DIR`）。`FOLLOW_CHART_RANGE=False` 时从 `HIST_START` 起导，给周线暖机留长度。
 
 ## 启动界面
 

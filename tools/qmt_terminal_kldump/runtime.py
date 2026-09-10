@@ -1,4 +1,4 @@
-# === kldump/runtime.py ===
+# === runtime.py ===
 def init(C):
     try:
         _dump_init(C)

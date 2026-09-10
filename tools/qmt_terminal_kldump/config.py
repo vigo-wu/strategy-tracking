@@ -1,4 +1,4 @@
-# === kldump/config.py ===
+# === config.py ===
 # 主图行情导出 CSV。周期跟随当前主图；改完后跑 _deploy_qmt_gbk.py
 # QMT 模型无 __file__，OUT_DIR 必须是绝对路径
 
