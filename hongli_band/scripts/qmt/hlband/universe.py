@@ -496,6 +496,10 @@ def _handle_universe(C):
                 _run_one(code, "eval")
             _log_book_checkin_missing(ctx.get("now_s"))
             for code in stocks:
+                if getattr(A, "is_backtest", False):
+                    rec = _per_stock_map().get(code) or {}
+                    if not rec.get("_has_pend"):
+                        continue
                 _run_one(code, "exec")
             if live_work == "signal":
                 all_ok = True

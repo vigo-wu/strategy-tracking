@@ -64,6 +64,80 @@ class BookBacktestUnitTests(unittest.TestCase):
             self.assertEqual(attribute_portfolio_kpi(p), {})
 
 
+class UniverseExecSkipTests(unittest.TestCase):
+    def _gate(self, *, bt: bool) -> dict:
+        now = datetime(2020, 1, 10, 15, 0, 0)
+        return {
+            "bt": bt,
+            "now": now,
+            "now_s": "150000",
+            "day": "20200110",
+            "tag": "20200110150000",
+            "hhmm": "1500",
+            "live_cc": False,
+            "phase": "bt" if bt else "session",
+            "live_work": "",
+            "bar_dt": now,
+            "prev_closed": "20200109",
+        }
+
+    def _run_universe(self, *, bt: bool, pend_code: str):
+        from run import _exec_bundle
+
+        ns = _exec_bundle()
+        a = ns["A"]
+        a.is_backtest = bt
+        a.watch = ["600350.SH", "601939.SH"]
+        a.chart_stock = "600350.SH"
+        a.stock = ""
+        a._per_stock = {}
+        ns["_save_state"] = lambda: None
+        ns["_log_book_checkin_missing"] = lambda *_a, **_k: None
+        ns["_ensure_clock_prev_closed"] = lambda *_a, **_k: "20200109"
+        ns["_handle_clock_gate"] = lambda _c, from_timer=False: self._gate(bt=bt)
+        calls: list[tuple[str, str]] = []
+
+        def _handle_stock(_c, _ctx):
+            stock = str(getattr(a, "stock", "") or "")
+            upass = str(getattr(a, "_universe_pass", "") or "")
+            calls.append((stock, upass))
+            if stock == pend_code:
+                a.pending_entry = {"signal_day": "20200110"}
+                a.pending_exit = None
+                a.pending = None
+            else:
+                a.pending_entry = None
+                a.pending_exit = None
+                a.pending = None
+
+        ns["_handle_stock"] = _handle_stock
+        ns["_handle_universe"](object())
+        return calls
+
+    def test_backtest_exec_skips_stock_without_pending(self):
+        calls = self._run_universe(bt=True, pend_code="600350.SH")
+        evals = [c for c in calls if c[1] == "eval"]
+        execs = [c for c in calls if c[1] == "exec"]
+        self.assertEqual(
+            [c[0] for c in evals],
+            ["600350.SH", "601939.SH"],
+        )
+        self.assertEqual([c[0] for c in execs], ["600350.SH"])
+
+    def test_live_exec_still_runs_all_stocks(self):
+        calls = self._run_universe(bt=False, pend_code="600350.SH")
+        evals = [c for c in calls if c[1] == "eval"]
+        execs = [c for c in calls if c[1] == "exec"]
+        self.assertEqual(
+            [c[0] for c in evals],
+            ["600350.SH", "601939.SH"],
+        )
+        self.assertEqual(
+            [c[0] for c in execs],
+            ["600350.SH", "601939.SH"],
+        )
+
+
 class WalkProgressHelperTest(unittest.TestCase):
     def test_year_change_and_step(self) -> None:
         from book_backtest import should_emit_walk_progress, walk_progress_step

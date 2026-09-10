@@ -1884,18 +1884,67 @@ class FastOhlcvPatchTests(unittest.TestCase):
         self.assertIsNotNone(orig_d)
         self.assertIsNotNone(orig_w)
         _patch_fast_ohlcv(ns)
-        ns["A"]._ohlcv_cache = {"sentinel": True}
+        ns["A"]._ohlcv_cache = {}
         fast_d = ns["_get_ohlcv_1d"](ctx, "600350.SH")
         fast_w = ns["_get_ohlcv_1w"](ctx, "600350.SH")
-        self.assertEqual(ns["A"]._ohlcv_cache, {"sentinel": True})
         self.assertIsNotNone(fast_d)
         self.assertIsNotNone(fast_w)
+        self.assertGreaterEqual(len(ns["A"]._ohlcv_cache), 2)
         self.assertEqual(len(fast_d[3]), len(orig_d[3]))
         self.assertEqual(len(fast_w[3]), len(orig_w[3]))
         self.assertTrue(np.allclose(np.asarray(fast_d[3], dtype=float), np.asarray(orig_d[3], dtype=float)))
         self.assertTrue(np.allclose(np.asarray(fast_w[3], dtype=float), np.asarray(orig_w[3], dtype=float)))
         self.assertAlmostEqual(float(fast_d[3][-1]), float(orig_d[3][-1]))
         self.assertAlmostEqual(float(fast_w[3][-1]), float(orig_w[3][-1]))
+
+    def test_patched_ohlcv_cache_hit_period_and_end(self):
+        from mock_qmt import MockContext, _as_tag
+        from run import _exec_bundle, _patch_fast_ohlcv
+
+        d = datetime(2018, 1, 2)
+        bars = []
+        while len(bars) < 400:
+            if d.weekday() < 5:
+                px = 10.0 + 0.01 * len(bars)
+                bars.append(_bar(d.strftime("%Y%m%d"), px))
+            d += timedelta(days=1)
+        store = MarketStore(bars, "600350.SH")
+        walk = bars[-30:]
+        ctx = MockContext(store, [_as_tag(b.dt) for b in walk], "600350.SH")
+        ctx.barpos = len(walk) - 1
+        ns = _exec_bundle()
+        ns["A"].period = "1d"
+        ns["A"].stock = "600350.SH"
+        ns["A"].is_backtest = True
+        _patch_fast_ohlcv(ns)
+        ns["A"]._ohlcv_cache = {}
+        n = {"calls": 0}
+        orig = store.ohlcv_with_days
+
+        def wrapped(period, end, count):
+            n["calls"] += 1
+            return orig(period, end, count)
+
+        store.ohlcv_with_days = wrapped
+        d1 = ns["_get_ohlcv_1d"](ctx, "600350.SH")
+        d2 = ns["_get_ohlcv_1d"](ctx, "600350.SH")
+        w1 = ns["_get_ohlcv_1w"](ctx, "600350.SH")
+        w2 = ns["_get_ohlcv_1w"](ctx, "600350.SH")
+        self.assertIsNotNone(d1)
+        self.assertIsNotNone(w1)
+        self.assertIs(d1, d2)
+        self.assertIs(w1, w2)
+        self.assertNotEqual(len(d1[3]), len(w1[3]))
+        self.assertEqual(n["calls"], 2)
+        keys = list(ns["A"]._ohlcv_cache)
+        periods = {k[1] for k in keys if isinstance(k, tuple) and len(k) >= 2}
+        self.assertIn("1d", periods)
+        self.assertIn("1w", periods)
+        ctx.barpos = 0
+        d3 = ns["_get_ohlcv_1d"](ctx, "600350.SH")
+        self.assertIsNotNone(d3)
+        self.assertGreater(n["calls"], 2)
+        self.assertIsNot(d3, d1)
 
 
 class LocalBtUniverseHandlebarTests(unittest.TestCase):

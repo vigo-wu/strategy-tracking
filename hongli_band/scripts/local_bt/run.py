@@ -419,11 +419,41 @@ def _patch_fast_ohlcv(ns: dict) -> None:
             return open_, high, low, close, volume
         return o2, h2, l2, c2, volume
 
+    def _cache_map():
+        A = ns.get("A")
+        if A is None:
+            return None
+        d = getattr(A, "_ohlcv_cache", None)
+        if isinstance(d, dict):
+            return d
+        d = {}
+        A._ohlcv_cache = d
+        return d
+
+    def _cache_key(stock, period, count, end, logical):
+        fn = ns.get("_ohlcv_cache_key")
+        if callable(fn):
+            return fn(stock, period, count, end, logical)
+        return (
+            str(stock or ""),
+            str(period or ""),
+            int(count),
+            str(end or ""),
+            str(logical or ""),
+        )
+
     def _ohlcv_from_ctx(C, period, count, need, diag_key, stock=None):
         end_fn = getattr(C, "walk_end_day", None)
         end = end_fn() if callable(end_fn) else ""
         if not end:
             return None
+        logical = _logical_div(stock)
+        cache = _cache_map()
+        key = _cache_key(stock, period, count, end, logical)
+        if cache is not None:
+            hit = cache.get(key)
+            if hit is not None and hit[3] is not None and len(hit[3]) >= int(need):
+                return hit
         store = None
         store_for = getattr(C, "_store_for", None)
         if callable(store_for) and stock:
@@ -447,7 +477,6 @@ def _patch_fast_ohlcv(ns: dict) -> None:
         open_, high, low, close, volume = tup
         if close is None or len(close) < int(need):
             return None
-        logical = _logical_div(stock)
         open_, high, low, close, volume = _apply_pit_local(
             C, stock, open_, high, low, close, volume, days, end, logical
         )
@@ -493,6 +522,8 @@ def _patch_fast_ohlcv(ns: dict) -> None:
                 "stock=",
                 str(stock or "-"),
             )
+        if cache is not None:
+            cache[key] = tup
         return tup
 
     def _get_ohlcv_1d(C, stock):
