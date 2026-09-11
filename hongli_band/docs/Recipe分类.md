@@ -1,6 +1,6 @@
 # Recipe 分类与布尔式
 
-配套：[架构优化.md](./架构优化.md)、[草图.png](./草图.png)。
+配套：[架构.md](./架构.md)（当前实现）、[架构优化.md](./架构优化.md)、[草图.png](./草图.png)。
 
 策略四个结构槽各自持有一棵布尔表达式（Recipe）。因子无立场，只作为叶子被引用。
 
@@ -69,6 +69,8 @@ hit(["not", x])  = not hit(x)
 - 新写法：整棵入场式里写 `["not","chase"]`、`["not","vol_dry"]` 等
 
 因子仍是中性的（如 `chase` = 当日追高为真）；立场由所在槽的表达式赋予。
+
+已挂出的 `pending_entry` **只复评**该槽里的 `["not", leaf]`（开仓=`RECIPE_ENTRY`，加仓=`RECIPE_SCALE_IN`），不要求信号叶子次日仍为真。不要对整棵式 `_hit` 来撤单。详见 [架构.md](./架构.md)「pending：粘性委托」。
 
 ---
 
@@ -157,4 +159,4 @@ scale_out:
 网格优先扫「命名表达式变体」，再扫已启用因子的数值；避免全因子开关笛卡尔积。
 组合轴 = 命名格子改 `RECIPE_*`（JSON）；`RECIPE_SCALE_OUT=[]` 关闭减仓。
 
-**已落地**（引擎 + 默认 Recipe 对齐 + 网格 overrides + 减仓槽默认关）：`hlband/factors/lib/` 一原子一文件，四槽只引用 id；`_resolve_intent`、`expr` dtype、`recipe=` 探针。
+**已落地**（引擎 + 默认 Recipe 对齐 + 网格 overrides + 减仓槽默认关）：见 [架构.md](./架构.md)。`hlband/factors/lib/` 一原子一文件，四槽只引用 id；`_resolve_intent`、`expr` dtype、`recipe=` 探针。
