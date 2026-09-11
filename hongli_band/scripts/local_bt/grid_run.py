@@ -449,6 +449,21 @@ def expected_fingerprint(
     }
     if "TRAIL_TIERS" in ov:
         out["trail_tiers"] = json_ready(merged["TRAIL_TIERS"])
+    recipe_keys = (
+        "RECIPE_ENTRY",
+        "RECIPE_EXITS",
+        "RECIPE_SCALE_IN",
+        "RECIPE_SCALE_OUT",
+        "RECIPE_EXIT_WEEKLY_BEAR",
+    )
+    if any(k in ov for k in recipe_keys):
+        out["recipe"] = {
+            "entry": json_ready(merged.get("RECIPE_ENTRY")),
+            "exits": json_ready(merged.get("RECIPE_EXITS")),
+            "scale_in": json_ready(merged.get("RECIPE_SCALE_IN")),
+            "scale_out": json_ready(merged.get("RECIPE_SCALE_OUT")),
+            "exit_w_bear": bool(merged.get("RECIPE_EXIT_WEEKLY_BEAR", True)),
+        }
     return out
 
 
@@ -480,6 +495,7 @@ def parse_fingerprint(text: str) -> dict[str, Any]:
     else:
         arm = float(arm_m.group(1))
     tiers, has_tiers = _extract_tagged_json(text, "trail_tiers=")
+    recipe, has_recipe = _extract_tagged_json(text, "recipe=")
     return {
         "stop": None if stop_m is None else float(stop_m.group(1)),
         "time_force_bars": None if tfb_m is None else int(tfb_m.group(1)),
@@ -490,6 +506,8 @@ def parse_fingerprint(text: str) -> dict[str, Any]:
         "has_trail_tiers": has_tiers,
         "has_stop": stop_m is not None,
         "has_tfb": tfb_m is not None,
+        "recipe": recipe,
+        "has_recipe": has_recipe,
     }
 
 
@@ -539,6 +557,12 @@ def assert_fingerprint_text(
             raise GridError(
                 "指纹 trail_tiers 不符 log=%s got=%s expected=%s"
                 % (label, got.get("trail_tiers"), expected.get("trail_tiers"))
+            )
+    if "recipe" in expected:
+        if not got.get("has_recipe") or not struct_eq(got.get("recipe"), expected.get("recipe")):
+            raise GridError(
+                "指纹 recipe 不符 log=%s got=%s expected=%s"
+                % (label, got.get("recipe"), expected.get("recipe"))
             )
 
 

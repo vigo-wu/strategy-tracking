@@ -146,6 +146,31 @@ SCALE_PLAT_MAX_RANGE = 0.10          # 0.10 = 平台振幅不超过 10%
 # 周线 MACD：本周或上周 DIF 上穿 DEA；上周金叉则本周红柱须比上周放大此倍数
 SCALE_W_HIST_EXPAND_RATIO = 1.2
 
+# ---- Recipe（四槽布尔式；空列表=该槽关闭）----
+# 叶子=复合原子 id。and/or/not 嵌套；出场 RECIPE_EXITS 为有序列表（按笔，首个命中）。
+RECIPE_ENTRY = [
+    "and",
+    ["not", "chase"],
+    ["not", "vol_dry"],
+    ["not", "w_bias"],
+    ["not", "w_slope"],
+    ["not", "weekly_bear"],
+    "pullback_vol",
+]
+RECIPE_EXITS = ["stop_loss", "trail_stop", "time_force"]
+RECIPE_SCALE_IN = [
+    "and",
+    ["not", "weekly_bear"],
+    ["not", "w_bias"],
+    ["not", "w_slope"],
+    ["not", "vol_dry"],
+    ["or", "pullback_vol", "plat_break", "w_macd_golden"],
+]
+RECIPE_SCALE_OUT = []
+RECIPE_EXIT_WEEKLY_BEAR = True
+# 减仓选笔：last=最近一笔 / first=最早一笔；仅 RECIPE_SCALE_OUT 非空且 >=2 笔时生效
+SCALE_OUT_LOT = "last"
+
 # 策略交易面板 bind → 模块常量。编辑器/回测无注入时用上面默认值。
 # 只上屏：开关 / 资金基数 / 固定金额 / 可部署比例 / 硬风控。买点窗口、时间成本、加仓细节、SCALE_LOTS、
 # TRAIL_TIERS、均线周期、BOOK_STOCKS 子配置（ma_type / dividend_type）、
@@ -230,7 +255,7 @@ LOG_DIR = r"D:\HlBandV7\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBandV7"
-STRATEGY_VER = "v1.68"
+STRATEGY_VER = "v1.69"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）

@@ -25,6 +25,7 @@ from grid_run import (  # noqa: E402
     _queue_put,
     _run_walks_in_pool,
     assemble_jobs,
+    assert_fingerprint_text,
     book_jobs,
     book_stock_entries,
     expected_fingerprint,
@@ -466,6 +467,32 @@ class GridInitProbeTest(unittest.TestCase):
         expected = expected_fingerprint(defaults, {"STOP_LOSS": 0.06})
         self.assertAlmostEqual(float(got["stop"]), expected["stop"])
         self.assertEqual(got["time_force_bars"], expected["time_force_bars"])
+        self.assertNotIn("recipe", expected)
+
+    def test_recipe_fingerprint_only_when_overridden(self) -> None:
+        defaults = {
+            "STOP_LOSS": 0.08,
+            "TIME_FORCE_BARS": 30,
+            "TRAIL_TIERS": ((0.03, 0.06, 0.015, None),),
+            "RECIPE_ENTRY": ["pullback_vol"],
+            "RECIPE_EXITS": ["stop_loss"],
+            "RECIPE_SCALE_IN": [],
+            "RECIPE_SCALE_OUT": [],
+            "RECIPE_EXIT_WEEKLY_BEAR": True,
+        }
+        self.assertNotIn("recipe", expected_fingerprint(defaults, {"STOP_LOSS": 0.06}))
+        exp = expected_fingerprint(defaults, {"RECIPE_SCALE_OUT": ["trail_stop"]})
+        self.assertEqual(exp["recipe"]["scale_out"], ["trail_stop"])
+        text = (
+            "HlBand init stop=0.08 time_force_bars=30 time_force_min_ret=0.03 "
+            "trail_arm=0.03 recipe="
+            '{"entry":["pullback_vol"],"exits":["stop_loss"],'
+            '"scale_in":[],"scale_out":["trail_stop"],"exit_w_bear":true}'
+        )
+        got = parse_fingerprint(text)
+        self.assertTrue(got["has_recipe"])
+        self.assertEqual(got["recipe"]["scale_out"], ["trail_stop"])
+        assert_fingerprint_text(text, exp, need_trail=False)
 
     def test_run_cell_probe_then_all_walks(self) -> None:
         defaults = {

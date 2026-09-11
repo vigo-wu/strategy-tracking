@@ -19,7 +19,7 @@ JOB_CONFIRM_THRESHOLD = 400
 _HERE = Path(__file__).resolve().parent
 _HLBAND_CONFIG = _HERE.parent / "qmt" / "hlband" / "config.py"
 
-GROUP_ORDER = ("入场", "出场", "加仓", "资金", "结构")
+GROUP_ORDER = ("入场", "出场", "加仓", "资金", "结构", "配方")
 KIND_EXIT_IDS = frozenset(
     {"STOP_LOSS", "TRAIL_TIERS", "TIME_FORCE_BARS"}
 )
@@ -100,9 +100,17 @@ SKIP_NAMES = frozenset(
         "LOG_IN_BACKTEST",
         "STRATEGY_NAME",
         "STRATEGY_VER",
+        "SCALE_OUT_LOT",
     }
 )
-NONE_TOKENS = frozenset({"none", "null", "-", "—", "无", "nan"})
+EXPR_KEYS = frozenset(
+    {
+        "RECIPE_ENTRY",
+        "RECIPE_EXITS",
+        "RECIPE_SCALE_IN",
+        "RECIPE_SCALE_OUT",
+    }
+)
 
 PARAM_LABELS = {
     "STOP_LOSS": "止损",
@@ -140,6 +148,11 @@ PARAM_LABELS = {
     "MACD_FAST": "MACD 快线",
     "MACD_SLOW": "MACD 慢线",
     "MACD_SIGNAL": "MACD 信号",
+    "RECIPE_ENTRY": "入场配方",
+    "RECIPE_EXITS": "出场配方",
+    "RECIPE_SCALE_IN": "加仓配方",
+    "RECIPE_SCALE_OUT": "减仓配方",
+    "RECIPE_EXIT_WEEKLY_BEAR": "周空全平",
 }
 ABBREV_FIXED = {
     "STOP_LOSS": "sl",
@@ -177,6 +190,11 @@ ABBREV_FIXED = {
     "MACD_FAST": "mcf",
     "MACD_SLOW": "mcs",
     "MACD_SIGNAL": "mcg",
+    "RECIPE_ENTRY": "ren",
+    "RECIPE_EXITS": "rex",
+    "RECIPE_SCALE_IN": "rsi",
+    "RECIPE_SCALE_OUT": "rso",
+    "RECIPE_EXIT_WEEKLY_BEAR": "rew",
 }
 DEFAULT_SCAN = {
     "STOP_LOSS": "6,10",
@@ -365,6 +383,10 @@ def _scan_config_names(ns: Mapping[str, Any]) -> list[str]:
             continue
         if isinstance(val, bool) or isinstance(val, int) or isinstance(val, float):
             names.append(str(name))
+        elif str(name) in EXPR_KEYS or (
+            str(name).startswith("RECIPE_") and isinstance(val, (list, tuple))
+        ):
+            names.append(str(name))
         elif _is_numeric_tuple(val):
             names.append(str(name))
     return names
@@ -400,6 +422,8 @@ def _is_none_raw(raw: Any) -> bool:
 
 
 def _group_for(name: str) -> str:
+    if name.startswith("RECIPE_"):
+        return "配方"
     if name in ENTRY_KEYS:
         return "入场"
     if name in EXIT_KEYS:
@@ -416,6 +440,8 @@ def _group_for(name: str) -> str:
 
 
 def _dtype_for(name: str, sample: Any) -> str:
+    if name in EXPR_KEYS:
+        return "expr"
     if name in PERCENT_KEYS:
         return "percent"
     if _is_numeric_tuple(sample):
@@ -538,6 +564,8 @@ def current_value(family: str, defaults: Mapping[str, Any]) -> Any:
     if key not in defaults:
         raise GridSpecError("defaults 缺少 %s" % key)
     val = defaults[key]
+    if spec.dtype == "expr":
+        return json_ready(val)
     if spec.dtype == "tuple":
         if family == "TRAIL_TIERS":
             return validate_trail_tiers(val)
@@ -562,6 +590,18 @@ def coerce_bool(raw: Any) -> bool:
 
 def coerce_level(family: str, raw: Any) -> Any:
     spec = require_param(family)
+    if spec.dtype == "expr":
+        if isinstance(raw, str):
+            text = raw.strip()
+            if not text:
+                return []
+            try:
+                raw = json.loads(text)
+            except json.JSONDecodeError as exc:
+                raise GridSpecError("无法解析 %s JSON" % spec.label) from exc
+        if raw is None or raw is False:
+            return []
+        return json_ready(raw)
     if spec.dtype == "tuple":
         if isinstance(raw, str):
             try:
@@ -661,8 +701,35 @@ def _parse_tuple_scan(family: str, text: str) -> list[Any]:
     return out
 
 
+def _parse_expr_scan(family: str, text: str) -> list[Any]:
+    raw = str(text or "").strip()
+    if not raw:
+        return []
+    pieces: list[Any] = []
+    try:
+        pieces.append(json.loads(raw))
+    except json.JSONDecodeError:
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                pieces.append(json.loads(line))
+            except json.JSONDecodeError as exc:
+                raise GridSpecError("无法解析 %s JSON" % family) from exc
+    out: list[Any] = []
+    for piece in pieces:
+        val = coerce_level(family, piece)
+        if any(struct_eq(val, x) for x in out):
+            continue
+        out.append(val)
+    return out
+
+
 def parse_scan_values(family: str, text: str) -> list[Any]:
     spec = require_param(family)
+    if spec.dtype == "expr":
+        return _parse_expr_scan(family, text)
     if spec.dtype == "tuple":
         return _parse_tuple_scan(family, text)
     raw = (
@@ -729,7 +796,7 @@ def _pct_token(value: float) -> str:
 
 def family_token(family: str, value: Any) -> str:
     spec = require_param(family)
-    if spec.dtype == "tuple":
+    if spec.dtype in ("tuple", "expr"):
         blob = json.dumps(json_ready(value), ensure_ascii=True, separators=(",", ":"))
         token = hashlib.sha1(blob.encode("ascii")).hexdigest()[:6]
     elif value is None:
@@ -875,6 +942,8 @@ def format_current(family: str, defaults: Mapping[str, Any]) -> str:
         return "无"
     if spec.dtype == "tuple":
         return trail_table_summary(val)
+    if spec.dtype == "expr":
+        return json.dumps(json_ready(val), ensure_ascii=False, separators=(",", ":"))
     if _is_percent_dtype(spec.dtype):
         return _format_pct(float(val))
     if spec.dtype == "bool":
@@ -886,7 +955,7 @@ def format_current(family: str, defaults: Mapping[str, Any]) -> str:
 
 def _format_scan_token(family: str, value: Any) -> str:
     spec = require_param(family)
-    if spec.dtype == "tuple":
+    if spec.dtype in ("tuple", "expr"):
         return json.dumps(json_ready(value), ensure_ascii=False, separators=(",", ":"))
     if value is None:
         return "none"
@@ -904,7 +973,7 @@ def _format_scan_token(family: str, value: Any) -> str:
 
 def format_scan_values(family: str, values: Iterable[Any]) -> str:
     spec = require_param(family)
-    if spec.dtype == "tuple":
+    if spec.dtype in ("tuple", "expr"):
         return "\n".join(_format_scan_token(family, v) for v in values)
     return ",".join(_format_scan_token(family, v) for v in values)
 
@@ -914,6 +983,15 @@ def family_value_label(family: str, value: Any) -> str:
         return "止损 %s" % _format_pct(float(value))
     if family == "TRAIL_TIERS":
         return "阶梯止盈 %s" % trail_table_summary(value)
+    spec = get_param(family)
+    if spec and spec.dtype == "expr":
+        blob = json.dumps(json_ready(value), ensure_ascii=False, separators=(",", ":"))
+        if family == "RECIPE_SCALE_OUT" and (not value):
+            return "减仓配方关闭"
+        label = spec.label if spec else family
+        if len(blob) > 48:
+            blob = blob[:45] + "..."
+        return "%s %s" % (label, blob)
     if family == "TIME_FORCE_BARS":
         iv = int(value)
         if iv <= 0:
@@ -981,7 +1059,7 @@ def overrides_for_combo(
     ov: dict[str, Any] = {}
     for fam, val in combo.items():
         spec = require_param(fam)
-        if spec.dtype == "tuple":
+        if spec.dtype in ("tuple", "expr"):
             ov[spec.key] = json_ready(val)
         elif spec.dtype == "int":
             ov[spec.key] = int(val)

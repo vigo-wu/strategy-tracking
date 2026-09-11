@@ -217,6 +217,15 @@ class GridSpecTest(unittest.TestCase):
         self.assertEqual(spec.dtype, "tuple")
         self.assertEqual(spec.abbrev, "tt")
         self.assertEqual(spec.kind_mode, "exit")
+        recipe = next(p for p in param_catalog() if p.id == "RECIPE_ENTRY")
+        self.assertEqual(recipe.dtype, "expr")
+        self.assertEqual(recipe.group, "配方")
+
+    def test_recipe_expr_scan(self) -> None:
+        self.assertEqual(parse_scan_values("RECIPE_SCALE_OUT", "[]"), [[]])
+        expr = ["or", "pullback_vol", "plat_break"]
+        got = coerce_level("RECIPE_SCALE_IN", json.dumps(expr))
+        self.assertEqual(got, expr)
 
     def test_parse_percent_and_int(self) -> None:
         self.assertAlmostEqual(parse_scan_token("STOP_LOSS", "6"), 0.06)

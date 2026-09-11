@@ -722,6 +722,7 @@ def render_grid_mode() -> None:
     st.caption(
         "主样本默认=跟踪池 BOOK_STOCKS × 回测年；开启空间隔离后=csv/none 抽取名单。"
         "选参看调参标的验收期，且须与调参期同向；盲测盈亏只否决。"
+        "组合轴=命名格子改 RECIPE_*（JSON）；不要对全因子做 2^n。"
         "默认不改 config.py / 不 deploy。"
     )
     _poll_grid_worker()
@@ -791,7 +792,7 @@ def _render_param_table(defaults: dict[str, Any], busy: bool) -> None:
                 "选用": st.column_config.CheckboxColumn("选用", default=False),
                 "扫描取值": st.column_config.TextColumn(
                     "扫描取值",
-                    help="标量：逗号或空格分隔，如 6,10。百分数可写 6%、6 或 0.06。TRAIL_TIERS 写 JSON 整表，多组换行。",
+                    help="标量：逗号或空格分隔，如 6,10。百分数可写 6%、6 或 0.06。TRAIL_TIERS / RECIPE_* 写 JSON；配方每格一行或一块 JSON，不要按逗号切 float。",
                 ),
             },
             key="grid_param_editor",

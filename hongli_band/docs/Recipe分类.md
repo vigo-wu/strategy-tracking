@@ -93,8 +93,10 @@ entry:
   ¬chase & ¬vol_dry & ¬w_bias & ¬w_slope & ¬weekly_bear & pullback_vol
 
 scale_in:
-  （仓位门槛在仓位层）
-  pullback_vol | plat_break | w_macd_golden
+  （仓位门槛 SCALE_ARM / once / 满槽 在仓位层）
+  ¬weekly_bear & ¬w_bias & ¬w_slope & ¬vol_dry
+  & (pullback_vol | plat_break | w_macd_golden)
+  # chase 不挡 plat_break / 金叉
 
 exit:
   暂可用有序列表模拟：
@@ -105,7 +107,7 @@ exit:
   或后续收成单棵/多棵布尔式 + 稳定 reason 排序
 
 scale_out:
-  false   # 现网无独立减仓槽
+  []   # 现网默认关闭；非空且 >=2 笔时按 SCALE_OUT_LOT 平 1 笔
 ```
 
 ---
@@ -153,3 +155,6 @@ scale_out:
 
 一份参数组 = 四槽表达式 + `factor_params` + `structure` + `sizing`。  
 网格优先扫「命名表达式变体」，再扫已启用因子的数值；避免全因子开关笛卡尔积。
+组合轴 = 命名格子改 `RECIPE_*`（JSON）；`RECIPE_SCALE_OUT=[]` 关闭减仓。
+
+**已落地**（引擎 + 默认 Recipe 对齐 + 网格 overrides + 减仓槽默认关）：`hlband/factors/lib/` 一原子一文件，四槽只引用 id；`_resolve_intent`、`expr` dtype、`recipe=` 探针。

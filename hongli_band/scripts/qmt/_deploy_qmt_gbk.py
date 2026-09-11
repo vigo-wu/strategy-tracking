@@ -24,7 +24,20 @@ TARGETS = [
     QMT_DIR / "红利波段.py",
 ]
 
-MODULE_ORDER = [
+
+def _factor_lib_order():
+    lib = HLBAND / "factors" / "lib"
+    names = sorted(
+        p.name
+        for p in lib.glob("*.py")
+        if p.is_file() and not p.name.startswith("_")
+    )
+    if not names:
+        raise SystemExit("factors/lib 为空")
+    return ["factors/lib/%s" % n for n in names]
+
+
+_MODULE_HEAD = [
     "config.py",
     "common:ctx.py",
     "common:live_log.py",
@@ -47,10 +60,18 @@ MODULE_ORDER = [
     "common:orders_pending.py",
     "common:single/orders.py",
     "budget.py",
-        "strategy.py",
-        "universe.py",
-        "runtime.py",
+    "factors/registry.py",
+    "factors/expr.py",
+    "factors/ctx.py",
 ]
+_MODULE_TAIL = [
+    "factors/slots.py",
+    "factors/intent.py",
+    "strategy.py",
+    "universe.py",
+    "runtime.py",
+]
+MODULE_ORDER = _MODULE_HEAD + _factor_lib_order() + _MODULE_TAIL
 
 
 def main() -> None:

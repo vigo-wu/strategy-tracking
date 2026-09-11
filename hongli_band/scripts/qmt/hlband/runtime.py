@@ -350,6 +350,8 @@ def _init_impl(C):
         TIME_FORCE_BARS,
         "time_force_min_ret=",
         _time_force_min_ret(),
+        "recipe=",
+        _recipe_json(),
         "close_exec=",
         "%s-%s" % (
             globals().get("PENDING_EXEC_START", "145600"),
@@ -390,6 +392,7 @@ def _init_impl(C):
         trail_arm=_trail_arm(),
         time_force_bars=TIME_FORCE_BARS,
         time_force_min_ret=_time_force_min_ret(),
+        recipe=_recipe_json(),
         close_exec="%s-%s"
         % (
             globals().get("PENDING_EXEC_START", "145600"),
