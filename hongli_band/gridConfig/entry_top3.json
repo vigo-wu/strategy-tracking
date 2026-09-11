@@ -4,14 +4,6 @@
   "compare_div": "front_ratio",
   "cells": [
     {
-      "id": "mt25_vpr90_vpc2_wb08_dmm20_dms60",
-      "label": "★现行 · 回踩容差 2.5% · 缩量回踩比例 90% · 缩量确认日 2 · 周线高位禁开 8% · 日线中均线 20 · 日线慢均线 60",
-      "kind": "other",
-      "overrides": {},
-      "is_current": true,
-      "n_diffs": 0
-    },
-    {
       "id": "mt15_vpr90_vpc2_wb08_dmm0_dms60",
       "label": "回踩容差 1.5% · 缩量回踩比例 90% · 缩量确认日 2 · 周线高位禁开 8% · 日线中均线关闭 · 日线慢均线 60",
       "kind": "other",
