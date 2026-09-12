@@ -62,6 +62,23 @@ class SelectAnalysisTests(unittest.TestCase):
             back = editor_rows_to_book_stocks(rows)
             self.assertIn("600350.SH", back)
 
+    def test_load_book_stocks_full_from_set_config(self):
+        with tempfile.TemporaryDirectory() as td:
+            cfg = Path(td) / "config.py"
+            cfg.write_text(
+                "BOOK_STOCKS = {\n"
+                '  "600350.SH",\n'
+                '  "601988.SH",\n'
+                "}\n"
+                'MA_TYPE = "EMA"\n'
+                'DIVIDEND_TYPE = "front_ratio"\n',
+                encoding="utf-8",
+            )
+            book = load_book_stocks_full(str(cfg))
+            self.assertEqual(book["600350.SH"]["ma_type"], "EMA")
+            self.assertEqual(book["600350.SH"]["dividend_type"], "front_ratio")
+            self.assertEqual(set(book), {"600350.SH", "601988.SH"})
+
     def test_run_fixed_book_passes_basket_and_compound(self):
         basket = {
             "600350.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"},

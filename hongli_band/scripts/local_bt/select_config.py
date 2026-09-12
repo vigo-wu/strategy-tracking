@@ -325,7 +325,7 @@ def load_book_stocks_full(config_path: str | None = None) -> dict[str, dict[str,
     )
     if isinstance(raw, dict):
         items = list(raw.items())
-    elif isinstance(raw, (list, tuple)):
+    elif isinstance(raw, (list, tuple, set, frozenset)):
         items = [(str(x), {}) for x in raw]
     else:
         return {}

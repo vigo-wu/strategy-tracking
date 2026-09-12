@@ -82,7 +82,7 @@ def _book_dividend_map() -> dict[str, str]:
                 items: list[tuple[Any, Any]] = []
                 if isinstance(raw, dict):
                     items = list(raw.items())
-                elif isinstance(raw, (list, tuple)):
+                elif isinstance(raw, (list, tuple, set, frozenset)):
                     items = [(str(x), {}) for x in raw]
                 for k, v in items:
                     code = str(k or "").strip().upper()
@@ -1085,7 +1085,7 @@ def load_chart_ma_config(
                 items = []
                 if isinstance(raw, dict):
                     items = list(raw.items())
-                elif isinstance(raw, (list, tuple)):
+                elif isinstance(raw, (list, tuple, set, frozenset)):
                     items = [(str(x), {}) for x in raw]
                 for k, v in items:
                     code = str(k or "").strip().upper()

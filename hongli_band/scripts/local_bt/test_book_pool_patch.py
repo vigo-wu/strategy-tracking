@@ -1,4 +1,4 @@
-·   # coding: utf-8
+# coding: utf-8
 import unittest
 from types import SimpleNamespace
 
@@ -54,6 +54,20 @@ class BookPoolPatchTests(unittest.TestCase):
         rows = collect_bt_book_lot_rows(ns)
         frac = chart_next_frac_from_rows(ns, rows, opening=True)
         self.assertAlmostEqual(frac, 0.3)
+
+    def test_collect_accepts_set_book_stocks(self):
+        ns = _mock_ns()
+        ns["BOOK_STOCKS"] = {"601988.SH", "600350.SH"}
+        rows = collect_bt_book_lot_rows(ns)
+        self.assertIn("601988.SH", rows)
+        self.assertEqual(len(rows["601988.SH"]), 1)
+
+    def test_collect_prefers_book_stock_map(self):
+        ns = _mock_ns()
+        ns["BOOK_STOCKS"] = {"601988.SH", "600350.SH"}
+        ns["_book_stock_map"] = lambda: {"601988.SH": {}, "600350.SH": {}}
+        rows = collect_bt_book_lot_rows(ns)
+        self.assertIn("601988.SH", rows)
 
 
 if __name__ == "__main__":

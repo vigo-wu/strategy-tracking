@@ -67,11 +67,31 @@ def _rows_for_stock(ns: dict[str, Any], stock: str) -> list[dict]:
     return _lot_rows_from_position(ns, rec.get("_hot_position"))
 
 
+def _book_codes(ns: dict[str, Any]) -> list[Any]:
+    """BOOK_STOCKS 代码。兼容 dict / set / list；优先策略侧 _book_stock_map。"""
+    map_fn = ns.get("_book_stock_map")
+    if callable(map_fn):
+        try:
+            mp = map_fn() or {}
+        except Exception:
+            mp = {}
+        if isinstance(mp, dict):
+            return list(mp.keys())
+    book = ns.get("BOOK_STOCKS")
+    if isinstance(book, dict):
+        return list(book.keys())
+    if book is None or isinstance(book, (str, bytes)):
+        return []
+    try:
+        return list(book)
+    except TypeError:
+        return []
+
+
 def collect_bt_book_lot_rows(ns: dict[str, Any]) -> dict[str, list[dict]]:
     """回测：BOOK_STOCKS + 当前图 + universe hot → {stock: [lot_row]}。"""
-    book = ns.get("BOOK_STOCKS") or {}
     codes: set[str] = set()
-    for raw in book.keys():
+    for raw in _book_codes(ns):
         st = _norm_code(ns, raw)
         if st:
             codes.add(st)
