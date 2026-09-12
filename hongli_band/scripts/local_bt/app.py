@@ -7,7 +7,6 @@
 """
 from __future__ import annotations
 
-import json
 import sys
 import traceback
 from datetime import date
@@ -91,7 +90,6 @@ from select_config import (  # noqa: E402
     DEFAULT_FILTERS,
     FILTER_WIDGETS,
     SELECT_SIDEBAR,
-    SELECT_WF_SIDEBAR,
     WEIGHTS,
     WEIGHT_WIDGETS,
     basket_from_import_text,
@@ -99,15 +97,8 @@ from select_config import (  # noqa: E402
     cast_filter_value,
     clamp_top_n,
     editor_rows_to_book_stocks,
-    fill_select_windows,
     load_book_defaults,
     load_book_stocks_full,
-    named_filter_cells,
-    research_default_end_year,
-    hold_eval_years,
-    select_check_years,
-    select_precheck_years,
-    select_train_years,
     widget_kwargs,
     year_max_for_window,
 )
@@ -118,12 +109,6 @@ from select_analysis import (  # noqa: E402
     run_walk_forward,
     write_analysis_csv,
     write_fixed_book_csv,
-)
-from select_wf import (  # noqa: E402
-    SelectProgressClock,
-    run_filter_lab,
-    run_select_gate,
-    select_progress_units,
 )
 from book_backtest import analyze_book_detail  # noqa: E402
 from position_daily import (  # noqa: E402
@@ -2154,7 +2139,7 @@ if not _IS_MP_WORKER:
 
 
     def _bind_wf_progress(bar: Any, status: Any):
-        """st.progress + status.info，接 walk-forward / 滚动验收 on_progress。"""
+        """st.progress + status.info，接 walk-forward on_progress。"""
 
         def on_progress(ev: dict) -> None:
             try:
@@ -2174,128 +2159,6 @@ if not _IS_MP_WORKER:
                 pass
 
         return on_progress
-
-
-    def _render_select_gate_panel(scanned: dict | None) -> None:
-        cfg = SELECT_WF_SIDEBAR
-        st.subheader(str(cfg["gate_section"]))
-        st.caption(str(cfg["universe_caption"]))
-        st.caption(str(cfg.get("gate_caption") or ""))
-        win = fill_select_windows(None)
-        train_hold = select_train_years(win)
-        st.caption(
-            "选股训练窗持有 %s · 预验收 %s · 验收期 %s · 回看 %s 年（不是网格「调参期」）。"
-            % (
-                "、".join(train_hold) or "—",
-                "、".join(select_precheck_years(win)) or "—",
-                "、".join(select_check_years(win)) or "—",
-                win["lookback"],
-            )
-        )
-        if len(train_hold) <= 1:
-            st.caption(
-                "训练窗持有年实际只有 %s，同向门样本很短。"
-                % ("、".join(train_hold) or "—")
-            )
-        c1, c2 = st.columns(2)
-        run_gate = c1.button(str(cfg["gate_button"]), key="select_wf_gate_btn")
-        run_lab = c2.button(str(cfg["lab_button"]), key="select_wf_lab_btn")
-        if run_lab:
-            bar = st.progress(0.0)
-            status = st.empty()
-            status.info("准备过滤实验室…")
-            on_progress = _bind_wf_progress(bar, status)
-            lab_years = tuple(y for y in hold_eval_years(win) if int(y) <= int(win["precheck_year"]))
-            eval_years = hold_eval_years(win)
-            n_cells = len(named_filter_cells())
-            clock = SelectProgressClock(
-                on_progress,
-                n_cells * select_progress_units(len(lab_years))
-                + select_progress_units(len(eval_years)),
-            )
-            try:
-                lab = run_filter_lab(
-                    scanned or {},
-                    report_dir=str(DEFAULT_REPORT_ROOT),
-                    csv_root=str(DEFAULT_CSV_ROOT),
-                    book_params=load_book_defaults(),
-                    progress=clock,
-                )
-                st.session_state["select_wf_lab"] = lab
-                gate = run_select_gate(
-                    scanned or {},
-                    filter_overrides=lab.get("overrides"),
-                    report_dir=str(DEFAULT_REPORT_ROOT),
-                    csv_root=str(DEFAULT_CSV_ROOT),
-                    book_params=load_book_defaults(),
-                    n_filter_cells=n_cells,
-                    progress=clock,
-                )
-                st.session_state["select_wf_gate"] = gate
-                bar.progress(1.0)
-                status.success("过滤实验室完成")
-            except Exception:
-                st.error("过滤实验室失败")
-                st.code(traceback.format_exc())
-                return
-        elif run_gate:
-            bar = st.progress(0.0)
-            status = st.empty()
-            status.info("准备滚动验收…")
-            on_progress = _bind_wf_progress(bar, status)
-            try:
-                base = next((c for c in named_filter_cells() if c["id"] == "base"), named_filter_cells()[0])
-                gate = run_select_gate(
-                    scanned or {},
-                    filter_overrides=base.get("overrides"),
-                    report_dir=str(DEFAULT_REPORT_ROOT),
-                    csv_root=str(DEFAULT_CSV_ROOT),
-                    book_params=load_book_defaults(),
-                    on_progress=on_progress,
-                )
-                st.session_state["select_wf_gate"] = gate
-                bar.progress(1.0)
-                status.success("滚动验收完成")
-            except Exception:
-                st.error("滚动验收失败")
-                st.code(traceback.format_exc())
-                return
-        lab = st.session_state.get("select_wf_lab")
-        if isinstance(lab, dict) and lab.get("id"):
-            st.info("冻结过滤组 **%s** · %s" % (lab.get("id"), lab.get("reason") or ""))
-        gate = st.session_state.get("select_wf_gate")
-        if not isinstance(gate, dict) or not gate.get("gate"):
-            return
-        g = gate.get("gate") or {}
-        verdict = str(g.get("verdict") or "")
-        if verdict == "PASS":
-            st.success("%s · %s" % (verdict, g.get("reason") or ""))
-        elif verdict == "KEEP_CURRENT":
-            st.warning("%s · %s" % (verdict, g.get("reason") or ""))
-        else:
-            st.error("%s · %s" % (verdict, g.get("reason") or ""))
-        elig = [int(p.get("n_eligible") or 0) for p in (gate.get("periods") or [])]
-        if elig:
-            st.caption("各持有年资格只数：%s" % "、".join(str(n) for n in elig))
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("训练窗 Δ", g.get("d_train"))
-        m2.metric("预验收 Δ", g.get("d_precheck"))
-        m3.metric("验收期 Δ", g.get("d_check"))
-        m4.metric("复利", "关（硬门）")
-        st.caption(str(gate.get("next_basket_note") or ""))
-        for w in gate.get("warnings") or []:
-            st.caption("预警：%s" % w)
-        ov = gate.get("overfit") or {}
-        if ov:
-            st.caption("统计预警：%s · %s" % (ov.get("status") or "skip", ov.get("reason") or ""))
-        if verdict == "PASS" and gate.get("picks"):
-            st.code(json.dumps(gate.get("picks"), ensure_ascii=False, indent=2), language="json")
-            st.caption("不自动改 `BOOK_STOCKS` / 不 deploy。路径：`%s`" % (gate.get("picks_path") or "picks.json"))
-        elif verdict == "PASS":
-            st.caption("无 picks。")
-        else:
-            skip = str(gate.get("picks_skipped") or "非 PASS 不写 picks.json")
-            st.caption(skip)
 
 
     def _render_select(
@@ -2318,8 +2181,7 @@ if not _IS_MP_WORKER:
                 st.code(traceback.format_exc())
                 return
 
-        st.caption(str(SELECT_WF_SIDEBAR["research_caption"]))
-        _render_select_gate_panel(scanned)
+        st.caption(str(SELECT_SIDEBAR["research_caption"]))
 
         scored = score_universe(scanned, filters=filters, score_years=score_years)
         df = scored["df"]
@@ -2327,9 +2189,6 @@ if not _IS_MP_WORKER:
         rec = scored["recommend"]
         cov = scored.get("coverage") or {}
         years = tuple(scored.get("score_years") or SCORE_YEARS)
-        check_hold = set(select_check_years(fill_select_windows(None)))
-        if any(str(y) in check_hold for y in years):
-            st.warning("研究台打分窗含验收年，表格与草稿都不是选股结论。")
         out_path = Path(report_dir) / "local_bt_stock_select.csv"
         try:
             write_select_csv(df, out_path)
@@ -2349,7 +2208,7 @@ if not _IS_MP_WORKER:
         c3.metric("推荐池", n_rec)
         cut = scored.get("vol_cut")
         c4.metric("波动上限", "-" if cut is None else "%.1f%%" % (float(cut) * 100.0))
-        st.subheader("研究台（非结论）")
+        st.subheader("打分结果")
         st.caption("产物：`%s` · 扫描全部复权子目录 · 不自动改 `BOOK_STOCKS`" % out_path)
 
         st.subheader("现白名单对照")
@@ -2366,8 +2225,8 @@ if not _IS_MP_WORKER:
             if n_rec < top_n:
                 st.caption("过线仅 %s 只，不足侧栏推荐池 N=%s。" % (n_rec, top_n))
             st.dataframe(_select_display_df(rec, score_years=years), use_container_width=True, hide_index=True)
-            st.caption("建议均线/复权按侧栏选定年重算。研究台草稿，不是滚动验收结论。不自动改 `BOOK_STOCKS`。")
-            with st.expander(str(SELECT_WF_SIDEBAR.get("snippet_expander") or "研究台草稿"), expanded=False):
+            st.caption("建议均线/复权按侧栏选定年重算。不自动改 `BOOK_STOCKS`。")
+            with st.expander(str(SELECT_SIDEBAR.get("snippet_expander") or "BOOK_STOCKS 草稿"), expanded=False):
                 st.code(format_book_snippet(rec), language="python")
 
         st.subheader("打分总表")
@@ -2498,11 +2357,11 @@ if not _IS_MP_WORKER:
             persist_state="session",
         )
         end_opts = [y for y in avail if str(y) >= str(start)] or avail_list
-        research_end = research_default_end_year(end_opts)
+        default_end = end_opts[-1]
         if end_key in st.session_state:
-            st.session_state[end_key] = clamp_choice(st.session_state[end_key], end_opts, research_end)
+            st.session_state[end_key] = clamp_choice(st.session_state[end_key], end_opts, default_end)
         else:
-            st.session_state[end_key] = research_end if research_end in end_opts else end_opts[-1]
+            st.session_state[end_key] = default_end
         end = st.selectbox(
             str(cfg["year_end_label"]),
             end_opts,

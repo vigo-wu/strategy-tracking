@@ -18,10 +18,8 @@ from select_config import (
     basket_from_import_text,
     clamp_top_n,
     coerce_book_stocks_dict,
-    fill_select_windows,
     is_year_keyed_baskets,
     parse_book_stocks_text,
-    research_default_end_year,
     widget_kwargs,
     year_max_for_window,
 )
@@ -78,14 +76,6 @@ class SelectConfigTest(unittest.TestCase):
             set(WEIGHTS),
             {"pnl", "win_rate", "stability", "profit_factor", "quality"},
         )
-
-    def test_research_default_end_before_precheck(self) -> None:
-        win = fill_select_windows({})
-        self.assertEqual(
-            research_default_end_year(["2018", "2019", "2020", "2021", "2022", "2026"], win),
-            "2021",
-        )
-        self.assertEqual(research_default_end_year(["2024", "2025", "2026"], win), "2024")
 
 
 SAMPLE_BOOK = """

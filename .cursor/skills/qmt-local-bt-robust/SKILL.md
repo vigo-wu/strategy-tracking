@@ -15,7 +15,7 @@ description: >-
 | 需求 | 走哪个 |
 | :--- | :--- |
 | 选 STOP_LOSS / TRAIL 等参数 | `qmt-local-bt-grid` |
-| 打分选票 / walk-forward | 选股方案 / `select_wf` |
+| 打分选票 / walk-forward | 选股方案打分 / 数据分析 walk-forward |
 | 终端 log 画图 | `qmt-backtest-report` |
 | DSR / PBO | `skill-backtest-overfit` |
 
