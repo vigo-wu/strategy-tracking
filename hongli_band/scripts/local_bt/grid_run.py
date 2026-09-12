@@ -51,6 +51,7 @@ from grid_spec import (  # noqa: E402
     apply_year_windows,
     fill_year_windows,
     json_ready,
+    recipe_fingerprint,
     reject_retired_min_ret,
     struct_eq,
 )
@@ -96,6 +97,7 @@ RE_STOP = re.compile(r"\bstop=\s*([0-9.eE+-]+)")
 RE_TFB = re.compile(r"\btime_force_bars=\s*(-?\d+)")
 RE_TFM = re.compile(r"\btime_force_min_ret=\s*([0-9.eE+-]+)")
 RE_ARM = re.compile(r"\btrail_arm=\s*([0-9.eE+-]+|None)")
+RE_RECIPE = re.compile(r"recipe=\s*([0-9a-fA-F]+)")
 
 _CSV_INDEX: dict[tuple[str, str], Path] = {}
 _CSV_SPAN: dict[str, tuple[str, str] | None] = {}
@@ -449,6 +451,7 @@ def expected_fingerprint(
     }
     if "TRAIL_TIERS" in ov:
         out["trail_tiers"] = json_ready(merged["TRAIL_TIERS"])
+    out["recipe"] = recipe_fingerprint(overrides=ov)
     return out
 
 
@@ -480,12 +483,16 @@ def parse_fingerprint(text: str) -> dict[str, Any]:
     else:
         arm = float(arm_m.group(1))
     tiers, has_tiers = _extract_tagged_json(text, "trail_tiers=")
+    rec_hits = RE_RECIPE.findall(text)
+    recipe = rec_hits[-1] if rec_hits else None
     return {
         "stop": None if stop_m is None else float(stop_m.group(1)),
         "time_force_bars": None if tfb_m is None else int(tfb_m.group(1)),
         "time_force_min_ret": None if tfm_m is None else float(tfm_m.group(1)),
         "trail_arm": arm,
         "trail_tiers": tiers,
+        "recipe": recipe,
+        "has_recipe": bool(rec_hits),
         "has_trail_arm": arm_m is not None,
         "has_trail_tiers": has_tiers,
         "has_stop": stop_m is not None,
@@ -539,6 +546,12 @@ def assert_fingerprint_text(
             raise GridError(
                 "指纹 trail_tiers 不符 log=%s got=%s expected=%s"
                 % (label, got.get("trail_tiers"), expected.get("trail_tiers"))
+            )
+    if expected.get("recipe") and got.get("has_recipe"):
+        if got.get("recipe") != expected.get("recipe"):
+            raise GridError(
+                "指纹 recipe 不符 log=%s got=%s expected=%s"
+                % (label, got.get("recipe"), expected.get("recipe"))
             )
 
 

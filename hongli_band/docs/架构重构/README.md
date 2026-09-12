@@ -8,3 +8,7 @@
 配套：
 
 - [Recipe分类.md](Recipe分类.md) — 四槽布尔式 / AST
+- 落地目录导航（改代码先看这里）：
+  - [indicators/NAV.md](../../scripts/qmt/hlband/indicators/NAV.md)
+  - [factors/NAV.md](../../scripts/qmt/hlband/factors/NAV.md)
+  - [factors/lib/NAV.md](../../scripts/qmt/hlband/factors/lib/NAV.md)

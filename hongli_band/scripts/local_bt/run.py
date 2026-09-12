@@ -250,6 +250,9 @@ def run_init_probe(
         keys = ",".join(sorted(str(k) for k in dict(overrides or {}))) or "-"
         print("probe_init keys=%s" % keys)
         ns["init"](ctx)
+        fp = ns.get("_recipe_fingerprint")
+        if callable(fp):
+            print("recipe=", fp(overrides))
         try:
             sink.flush()
         except Exception:

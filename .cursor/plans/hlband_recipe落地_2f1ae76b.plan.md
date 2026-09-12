@@ -4,19 +4,19 @@ overview: 按架构文档五步把 HlBand 从 strategy.py 一条龙拆成指标�
 todos:
   - id: p1-indicators
     content: 拆 indicators.py 为 indicators/<名>.py，改 MODULE_ORDER，deploy + local_bt 单测
-    status: pending
+    status: completed
   - id: p2-factors-recipe
     content: 抽 factors/ctx·lib·expr·slots；默认 Recipe 按现网加减仓不对称闸门写；第 2 步前冻结回放基线
-    status: pending
+    status: completed
   - id: p3-intent
     content: intent 仲裁收口；strategy 只消费 Intent 挂 pending，budget/委托不动
-    status: pending
+    status: completed
   - id: p4-recipe-config
     content: 网格/探针打 recipe= 指纹；RECIPE 在第 2 步已写入 config，本步不重做一份
-    status: pending
+    status: completed
   - id: p5-scale-out-iface
     content: scale_out 在第 2 步已恒 false；本步仅确认 Intent 含 reduce 且无减仓成交
-    status: pending
+    status: completed
 isProject: false
 ---
 

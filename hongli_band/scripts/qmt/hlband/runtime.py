@@ -350,6 +350,8 @@ def _init_impl(C):
         TIME_FORCE_BARS,
         "time_force_min_ret=",
         _time_force_min_ret(),
+        "recipe=",
+        _recipe_fingerprint(),
         "close_exec=",
         "%s-%s" % (
             globals().get("PENDING_EXEC_START", "145600"),

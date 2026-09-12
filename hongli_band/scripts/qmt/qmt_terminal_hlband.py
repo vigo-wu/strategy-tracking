@@ -132,7 +132,7 @@ STOP_LOSS = 0.08
 #   禁开 / 撤买入 pending 仍按「当日」空头即时生效，不要求满 N 日
 W_BEAR_CONFIRM_DAYS = 2
 
-# （另有 weekly_bear：周线空头判定见 _eval_weekly；清仓见上）
+# （另有 weekly_bear：周线空头判定见 factors/lib/weekly_bear；确认清仓见 weekly_bear_confirm）
 
 # 盈利后加仓（回踩加仓 + 破平台推仓，任一即可）：
 #   门槛：峰值浮盈 >= SCALE_ARM，且该笔已持仓 >= SCALE_ARM_BARS 日
@@ -155,6 +155,41 @@ SCALE_PLAT_LOOKBACK = 20
 SCALE_PLAT_MAX_RANGE = 0.10          # 0.10 = 平台振幅不超过 10%
 # 周线 MACD：本周或上周 DIF 上穿 DEA；上周金叉则本周红柱须比上周放大此倍数
 SCALE_W_HIST_EXPAND_RATIO = 1.2
+
+# 默认 Recipe：四槽布尔式，数字仍读上面的全局阈值，不写死在叶子里。
+# scale_out 恒 false：减仓槽未启用；Intent 预留 reduce，strategy 忽略。
+RECIPE = {
+    "entry": [
+        "and",
+        ["not", "chase"],
+        ["not", "vol_dry"],
+        ["not", "w_bias"],
+        ["not", "w_slope"],
+        ["not", "weekly_bear"],
+        "pullback_vol",
+    ],
+    "scale_in": [
+        "and",
+        ["not", "vol_dry"],
+        ["not", "w_bias"],
+        ["not", "w_slope"],
+        ["not", "weekly_bear"],
+        [
+            "or",
+            ["and", "pullback_vol", ["not", "chase"]],
+            "plat_break",
+            "w_macd_golden",
+        ],
+    ],
+    "exit": [
+        "weekly_bear_confirm",
+        "stop_loss",
+        "trail_stop",
+        "time_force",
+    ],
+    "scale_out": False,
+    "factor_params": {},
+}
 
 # 策略交易面板 bind → 模块常量。编辑器/回测无注入时用上面默认值。
 # 只上屏：开关 / 资金基数 / 固定金额 / 可部署比例 / 硬风控。买点窗口、时间成本、加仓细节、SCALE_LOTS、
@@ -2008,7 +2043,28 @@ def _bt_recover_position(now=None, last=None):
         fn()
     return True
 
-# === hlband/indicators.py ===
+# === hlband/indicators/util.py ===
+def _last_valid(arr, i=-1):
+    if arr is None:
+        return None
+    v = arr[i]
+    if v != v:
+        return None
+    return float(v)
+
+
+def _cross_down(a_prev, b_prev, a_now, b_now):
+    if None in (a_prev, b_prev, a_now, b_now):
+        return False
+    return (a_prev >= b_prev) and (a_now < b_now)
+
+
+def _cross_up(a_prev, b_prev, a_now, b_now):
+    if None in (a_prev, b_prev, a_now, b_now):
+        return False
+    return (a_prev <= b_prev) and (a_now > b_now)
+
+# === hlband/indicators/sma.py ===
 def _sma(closes, n):
     """简单均线；成交量均量固定走此函数。"""
     c = np.asarray(closes, dtype=float)
@@ -2022,7 +2078,7 @@ def _sma(closes, n):
         out[n:] = (cs[n:] - cs[:-n]) / float(n)
     return out
 
-
+# === hlband/indicators/ema.py ===
 def _ema(closes, n):
     c = np.asarray(closes, dtype=float)
     n = int(n)
@@ -2035,7 +2091,33 @@ def _ema(closes, n):
         out[i] = alpha * c[i] + (1.0 - alpha) * out[i - 1]
     return out
 
+# === hlband/indicators/macd.py ===
+def _calc_macd(closes, fast=None, slow=None, signal=None):
+    """返回 (dif, dea, hist) 或 None。hist = dif - dea。"""
+    fast = int(fast if fast is not None else MACD_FAST)
+    slow = int(slow if slow is not None else MACD_SLOW)
+    signal = int(signal if signal is not None else MACD_SIGNAL)
+    c = np.asarray(closes, dtype=float)
+    if len(c) < slow + signal:
+        return None
+    ema_f = _ema(c, fast)
+    ema_s = _ema(c, slow)
+    if ema_f is None or ema_s is None:
+        return None
+    dif = ema_f - ema_s
+    start = slow - 1
+    dif_valid = dif[start:]
+    if len(dif_valid) < signal:
+        return None
+    dea_tail = _ema(dif_valid, signal)
+    if dea_tail is None:
+        return None
+    dea = np.full(len(c), np.nan, dtype=float)
+    dea[start:] = dea_tail
+    hist = dif - dea
+    return dif, dea, hist
 
+# === hlband/indicators/price_ma.py ===
 def _ma_kind():
     """价格均线类型：优先 BOOK_STOCKS[A.stock].ma_type，否则 MA_TYPE；非法回落 EMA。"""
     raw = None
@@ -2069,70 +2151,6 @@ def _price_ma(closes, n):
     if _ma_kind() == "SMA":
         return _sma(closes, n)
     return _ema(closes, n)
-
-
-def _calc_macd(closes, fast=None, slow=None, signal=None):
-    """返回 (dif, dea, hist) 或 None。hist = dif - dea。"""
-    fast = int(fast if fast is not None else MACD_FAST)
-    slow = int(slow if slow is not None else MACD_SLOW)
-    signal = int(signal if signal is not None else MACD_SIGNAL)
-    c = np.asarray(closes, dtype=float)
-    if len(c) < slow + signal:
-        return None
-    ema_f = _ema(c, fast)
-    ema_s = _ema(c, slow)
-    if ema_f is None or ema_s is None:
-        return None
-    dif = ema_f - ema_s
-    start = slow - 1
-    dif_valid = dif[start:]
-    if len(dif_valid) < signal:
-        return None
-    dea_tail = _ema(dif_valid, signal)
-    if dea_tail is None:
-        return None
-    dea = np.full(len(c), np.nan, dtype=float)
-    dea[start:] = dea_tail
-    hist = dif - dea
-    return dif, dea, hist
-
-
-def _last_valid(arr, i=-1):
-    if arr is None:
-        return None
-    v = arr[i]
-    if v != v:
-        return None
-    return float(v)
-
-
-def _near_ma(price, ma, tol=None):
-    tol = float(tol if tol is not None else MA_TOUCH_TOL)
-    if price is None or ma is None or ma <= 0:
-        return False
-    return abs(float(price) - float(ma)) / float(ma) <= tol
-
-
-def _plat_window(highs, lows, lookback, end_i=None):
-    """不含 end_i 的回看窗口平台高低点；(plat_high, plat_low) 或 None。"""
-    if highs is None or lows is None:
-        return None
-    n = min(len(highs), len(lows))
-    lookback = int(lookback)
-    if lookback < 2 or n < lookback + 1:
-        return None
-    i = n - 1 if end_i is None else int(end_i)
-    if i < lookback:
-        return None
-    win_h = [float(x) for x in highs[i - lookback:i]]
-    win_l = [float(x) for x in lows[i - lookback:i]]
-    if not win_h or not win_l:
-        return None
-    plat_high = max(win_h)
-    plat_low = min(win_l)
-    if plat_high <= 0 or plat_low <= 0:
-        return None
-    return plat_high, plat_low
 
 # === qmt_common/market_util.py ===
 # 作用: 行情辅助：诊断、序列解析、补历史、心跳
@@ -3237,6 +3255,898 @@ def _get_ohlcv_1w(C, stock):
         need,
         _ohlcv_diag_key("w1", stock),
     )
+
+# === hlband/factors/ctx.py ===
+def _vol_pullback_confirm_need():
+    """最少 1：当天缩量即可；勿用 `x or 2`（0 会被当成缺省翻成 2）。"""
+    raw = globals().get("VOL_PULLBACK_CONFIRM_DAYS", 2)
+    try:
+        n = int(2 if raw is None else raw)
+    except Exception:
+        n = 2
+    return max(1, n)
+
+
+def _weekly_market_features(closes_w):
+    """周线 MA/MACD 进 ctx.market；不判多空。"""
+    detail = {
+        "ma5": None,
+        "ma10": None,
+        "ma30": None,
+        "dif": None,
+        "dea": None,
+        "hist": None,
+        "close": None,
+    }
+    ma5 = _price_ma(closes_w, W_MA_FAST)
+    ma10 = _price_ma(closes_w, 13)
+    ma30 = _price_ma(closes_w, W_MA_LIFE)
+    macd = _calc_macd(closes_w)
+    if ma5 is None or ma10 is None or ma30 is None or macd is None:
+        return detail
+    dif, dea, hist = macd
+    i = len(closes_w) - 1
+    if i < 1:
+        return detail
+    c = float(closes_w[i])
+    m5 = _last_valid(ma5, i)
+    m10 = _last_valid(ma10, i)
+    m30 = _last_valid(ma30, i)
+    m30_prev = _last_valid(ma30, i - 1)
+    d0 = _last_valid(dif, i)
+    e0 = _last_valid(dea, i)
+    h0 = _last_valid(hist, i)
+    h1 = _last_valid(hist, i - 1)
+    d1 = _last_valid(dif, i - 1)
+    e1 = _last_valid(dea, i - 1)
+    d2 = _last_valid(dif, i - 2) if i >= 2 else None
+    e2 = _last_valid(dea, i - 2) if i >= 2 else None
+    golden_now = _cross_up(d1, e1, d0, e0)
+    golden_prev = _cross_up(d2, e2, d1, e1) if i >= 2 else False
+    slope_weeks = int(globals().get("W_MA30_SLOPE_WEEKS", 2) or 2)
+    slope_up_n = False
+    if slope_weeks > 0 and i >= slope_weeks:
+        slope_up_n = True
+        for k in range(slope_weeks):
+            a = _last_valid(ma30, i - k)
+            b = _last_valid(ma30, i - k - 1)
+            if a is None or b is None or not (a > b):
+                slope_up_n = False
+                break
+    detail.update(
+        {
+            "ma5": m5,
+            "ma10": m10,
+            "ma30": m30,
+            "ma30_prev": m30_prev,
+            "ma30_slope_up2": slope_up_n,
+            "dif": d0,
+            "dea": e0,
+            "dif_prev": d1,
+            "dea_prev": e1,
+            "hist": h0,
+            "hist_prev": h1,
+            "macd_golden_now": golden_now,
+            "macd_golden_prev": golden_prev,
+            "close": c,
+        }
+    )
+    return detail
+
+
+def _weekly_bull_from_detail(detail):
+    """仅日志；不成因子。"""
+    if not detail:
+        return False
+    m5 = detail.get("ma5")
+    m10 = detail.get("ma10")
+    m30 = detail.get("ma30")
+    m30_prev = detail.get("ma30_prev")
+    d0 = detail.get("dif")
+    h0 = detail.get("hist")
+    if None in (m5, m10, m30, d0, h0):
+        return False
+    ma30_ok = (m30_prev is None) or (m30 >= m30_prev * 0.998)
+    return (m5 > m10) and (d0 > 0) and (h0 > 0) and ma30_ok
+
+
+def _factor_daily_features(closes, volumes):
+    detail = {
+        "ma20": None,
+        "ma60": None,
+        "vol10": None,
+        "vol20": None,
+        "vol_need": 1,
+        "vol_streak": 0,
+        "mid_n": 0,
+        "slow_n": 0,
+        "i": -1,
+        "price": None,
+        "vol": None,
+        "v10": None,
+        "v20": None,
+    }
+    if closes is None or volumes is None:
+        return False, detail
+    try:
+        mid_n = int(D_MA_MID or 0)
+    except (TypeError, ValueError):
+        mid_n = 0
+    try:
+        slow_n = int(D_MA_SLOW or 0)
+    except (TypeError, ValueError):
+        slow_n = 0
+    detail["mid_n"] = mid_n
+    detail["slow_n"] = slow_n
+    ma20 = _price_ma(closes, mid_n) if mid_n > 0 else None
+    ma60 = _price_ma(closes, slow_n) if slow_n > 0 else None
+    vol10 = _sma(volumes, VOL_PULLBACK_N)
+    vol20 = _sma(volumes, VOL_DRY_N)
+    if vol10 is None or vol20 is None:
+        return False, detail
+    i = len(closes) - 1
+    vol_need = _vol_pullback_confirm_need()
+    detail["vol_need"] = vol_need
+    detail["i"] = i
+    if i < max(2, vol_need):
+        return False, detail
+    price = float(closes[i])
+    vol = float(volumes[i])
+    m20 = _last_valid(ma20, i) if ma20 is not None else None
+    m60 = _last_valid(ma60, i) if ma60 is not None else None
+    v10 = _last_valid(vol10, i)
+    v20 = _last_valid(vol20, i)
+    detail.update(
+        {
+            "ma20": m20,
+            "ma60": m60,
+            "vol10": vol10,
+            "vol20": vol20,
+            "price": price,
+            "vol": vol,
+            "v10": v10,
+            "v20": v20,
+            "closes": closes,
+            "volumes": volumes,
+        }
+    )
+    return True, detail
+
+
+def _build_factor_ctx(
+    closes=None,
+    volumes=None,
+    highs=None,
+    lows=None,
+    w_detail=None,
+    price=None,
+    state=None,
+    clock=None,
+):
+    ready, daily = _factor_daily_features(closes, volumes)
+    if price is None:
+        price = daily.get("price")
+    market = {
+        "close": price,
+        "closes": closes,
+        "volumes": volumes,
+        "highs": highs,
+        "lows": lows,
+        "w_detail": w_detail or {},
+        "daily_ready": ready,
+        "daily_detail": daily,
+        "ma20": daily.get("ma20"),
+        "ma60": daily.get("ma60"),
+        "vol10": daily.get("vol10"),
+        "vol20": daily.get("vol20"),
+        "mid_n": daily.get("mid_n"),
+        "slow_n": daily.get("slow_n"),
+        "i": daily.get("i"),
+        "vol": daily.get("vol"),
+        "v10": daily.get("v10"),
+        "v20": daily.get("v20"),
+        "vol_need": daily.get("vol_need"),
+    }
+    return {
+        "market": market,
+        "state": dict(state or {}),
+        "clock": dict(clock or {}),
+    }
+
+
+def _factor_ctx_bind_state(ctx, **fields):
+    st = dict((ctx or {}).get("state") or {})
+    st.update(fields)
+    out = dict(ctx or {})
+    out["state"] = st
+    return out
+
+# === hlband/factors/lib/pullback_vol.py ===
+def _near_ma(price, ma, tol=None):
+    tol = float(tol if tol is not None else MA_TOUCH_TOL)
+    if price is None or ma is None or ma <= 0:
+        return False
+    return abs(float(price) - float(ma)) / float(ma) <= tol
+
+
+def _factor_eval_pullback_vol(ctx):
+    market = (ctx or {}).get("market") or {}
+    if not market.get("daily_ready"):
+        return False, {"vol_streak": 0}
+    mid_n = int(market.get("mid_n") or 0)
+    slow_n = int(market.get("slow_n") or 0)
+    price = market.get("close")
+    if price is None:
+        price = market.get("daily_detail", {}).get("price")
+    m20 = market.get("ma20")
+    m60 = market.get("ma60")
+    vol10 = market.get("vol10")
+    volumes = market.get("volumes")
+    i = int(market.get("i") or 0)
+    vol_need = int(market.get("vol_need") or _vol_pullback_confirm_need())
+    near = False
+    if mid_n > 0:
+        near = near or _near_ma(price, m20)
+    if slow_n > 0:
+        near = near or _near_ma(price, m60)
+    ratio = float(VOL_PULLBACK_RATIO)
+    vol_streak = 0
+    if volumes is None or vol10 is None:
+        return False, {"vol_streak": 0, "near": near}
+    for k in range(vol_need):
+        j = i - k
+        vma = _last_valid(vol10, j)
+        vj = float(volumes[j])
+        if vma is None or vma <= 0 or vj >= vma * ratio:
+            break
+        vol_streak += 1
+    hit = bool(near and vol_streak >= vol_need)
+    return hit, {"vol_streak": vol_streak, "near": near}
+
+# === hlband/factors/lib/chase.py ===
+def _factor_eval_chase(ctx):
+    market = (ctx or {}).get("market") or {}
+    if not market.get("daily_ready"):
+        return False, {}
+    closes = market.get("closes")
+    i = int(market.get("i") or 0)
+    if closes is None or i < 1:
+        return False, {}
+    price = float(market.get("close") if market.get("close") is not None else closes[i])
+    prev = float(closes[i - 1]) if closes[i - 1] else 0.0
+    if prev <= 0:
+        return False, {"prev": prev}
+    chg = (price - prev) / prev
+    return chg >= float(CHASE_MAX_PCT), {"chg": chg}
+
+# === hlband/factors/lib/vol_dry.py ===
+def _factor_eval_vol_dry(ctx):
+    market = (ctx or {}).get("market") or {}
+    if not market.get("daily_ready"):
+        return False, {}
+    mid_n = int(market.get("mid_n") or 0)
+    m20 = market.get("ma20")
+    price = market.get("close")
+    v20 = market.get("v20")
+    vol = market.get("vol")
+    dry_below = (
+        mid_n > 0
+        and m20 is not None
+        and price is not None
+        and price < m20
+        and v20 is not None
+        and v20 > 0
+        and vol is not None
+        and vol < v20 * float(VOL_DRY_RATIO)
+    )
+    return bool(dry_below), {"dry_below": bool(dry_below)}
+
+# === hlband/factors/lib/w_bias.py ===
+def _factor_eval_w_bias(ctx):
+    w_detail = ((ctx or {}).get("market") or {}).get("w_detail") or {}
+    m5 = w_detail.get("ma5")
+    m30 = w_detail.get("ma30")
+    if m5 is None or m30 is None or m30 <= 0:
+        return False, {"bias": None}
+    bias = (float(m5) - float(m30)) / float(m30)
+    return bias >= float(W_BIAS_HARD), {"bias": bias}
+
+# === hlband/factors/lib/w_slope.py ===
+def _factor_eval_w_slope(ctx):
+    w_detail = ((ctx or {}).get("market") or {}).get("w_detail") or {}
+    m5 = w_detail.get("ma5")
+    m30 = w_detail.get("ma30")
+    if m5 is None or m30 is None or m30 <= 0:
+        return False, {"bias": None}
+    bias = (float(m5) - float(m30)) / float(m30)
+    if bias >= float(W_BIAS_LOW):
+        return False, {"bias": bias}
+    slope_ok = bool(w_detail.get("ma30_slope_up2"))
+    return (not slope_ok), {"bias": bias, "slope_ok": slope_ok}
+
+# === hlband/factors/lib/weekly_bear.py ===
+def _factor_eval_weekly_bear(ctx):
+    """当天空头（禁开/撤买）。确认清仓走 weekly_bear_confirm。"""
+    w_detail = ((ctx or {}).get("market") or {}).get("w_detail") or {}
+    c = w_detail.get("close")
+    m30 = w_detail.get("ma30")
+    d0 = w_detail.get("dif")
+    e0 = w_detail.get("dea")
+    d1 = w_detail.get("dif_prev")
+    e1 = w_detail.get("dea_prev")
+    if None in (c, m30, d0, e0):
+        return False, {}
+    death_below = _cross_down(d1, e1, d0, e0) and (d0 < 0) and (e0 < 0)
+    bear = (c < m30) or death_below
+    return bool(bear), {"death_below": bool(death_below)}
+
+# === hlband/factors/lib/weekly_bear_confirm.py ===
+def _w_bear_confirm_need():
+    """最少 1：当天空头即可挂清仓；勿用 `x or 2`（0 会被当成缺省翻成 2）。"""
+    raw = globals().get("W_BEAR_CONFIRM_DAYS", 2)
+    try:
+        n = int(2 if raw is None else raw)
+    except Exception:
+        n = 2
+    return max(1, n)
+
+
+def _factor_eval_weekly_bear_confirm(ctx):
+    """连续 N 个信号日仍空头才确认清仓；读 streak，不改计数。"""
+    state = (ctx or {}).get("state") or {}
+    if "w_bear_confirmed" in state:
+        return bool(state.get("w_bear_confirmed")), {"streak": state.get("w_bear_streak")}
+    streak = int(state.get("w_bear_streak") or 0)
+    need = _w_bear_confirm_need()
+    return streak >= need, {"streak": streak, "need": need}
+
+# === hlband/factors/lib/plat_break.py ===
+def _plat_window(highs, lows, lookback, end_i=None):
+    """不含 end_i 的回看窗口平台高低点；(plat_high, plat_low) 或 None。"""
+    if highs is None or lows is None:
+        return None
+    n = min(len(highs), len(lows))
+    lookback = int(lookback)
+    if lookback < 2 or n < lookback + 1:
+        return None
+    i = n - 1 if end_i is None else int(end_i)
+    if i < lookback:
+        return None
+    win_h = [float(x) for x in highs[i - lookback:i]]
+    win_l = [float(x) for x in lows[i - lookback:i]]
+    if not win_h or not win_l:
+        return None
+    plat_high = max(win_h)
+    plat_low = min(win_l)
+    if plat_high <= 0 or plat_low <= 0:
+        return None
+    return plat_high, plat_low
+
+
+def _factor_eval_plat_break(ctx):
+    market = (ctx or {}).get("market") or {}
+    closes = market.get("closes")
+    highs = market.get("highs")
+    lows = market.get("lows")
+    lookback = int(globals().get("SCALE_PLAT_LOOKBACK") or 20)
+    max_range = float(globals().get("SCALE_PLAT_MAX_RANGE") or 0.10)
+    buf = float(globals().get("SCALE_PLAT_BREAK_BUF") or 0.0)
+    if lookback < 5 or max_range <= 0:
+        return False, {}
+    if closes is None or highs is None or lows is None:
+        return False, {}
+    n = len(closes)
+    if n < lookback + 1 or len(highs) != n or len(lows) != n:
+        return False, {}
+    if n < 2:
+        return False, {}
+    plat = _plat_window(highs, lows, lookback)
+    if plat is None:
+        return False, {}
+    plat_high, plat_low = plat
+    rng = (float(plat_high) - float(plat_low)) / float(plat_low)
+    if rng > max_range:
+        return False, {"range": rng}
+    hurdle = float(plat_high) * (1.0 + buf)
+    px = float(closes[-1])
+    prev = float(closes[-2])
+    if px <= hurdle:
+        return False, {"hurdle": hurdle}
+    if prev > hurdle:
+        return False, {"hurdle": hurdle, "prev": prev}
+    return True, {"plat_high": plat_high, "plat_low": plat_low}
+
+# === hlband/factors/lib/w_macd_golden.py ===
+def _factor_eval_w_macd_golden(ctx):
+    w_detail = ((ctx or {}).get("market") or {}).get("w_detail") or {}
+    if not w_detail:
+        return False, {}
+    h0 = w_detail.get("hist")
+    h1 = w_detail.get("hist_prev")
+    if h0 is None or h1 is None:
+        return False, {}
+    hist = float(h0)
+    hist_prev = float(h1)
+    if hist <= 0 or hist <= hist_prev:
+        return False, {}
+    golden_now = bool(w_detail.get("macd_golden_now"))
+    golden_prev = bool(w_detail.get("macd_golden_prev"))
+    if not (golden_now or golden_prev):
+        return False, {}
+    if golden_now and (not golden_prev):
+        return True, {"golden_now": True}
+    ratio = float(globals().get("SCALE_W_HIST_EXPAND_RATIO") or 1.0)
+    if ratio <= 1.0:
+        return True, {"ratio": ratio}
+    base = abs(hist_prev) if abs(hist_prev) > 1e-12 else hist
+    hit = hist >= base * ratio
+    return bool(hit), {"hist": hist, "hist_prev": hist_prev}
+
+# === hlband/factors/lib/stop_loss.py ===
+def _factor_eval_stop_loss(ctx):
+    market = (ctx or {}).get("market") or {}
+    state = (ctx or {}).get("state") or {}
+    lot = state.get("lot") or {}
+    cost = lot.get("price")
+    if cost is None:
+        cost = state.get("cost")
+    price = market.get("close")
+    try:
+        cost = float(cost or 0)
+    except (TypeError, ValueError):
+        cost = 0.0
+    if cost <= 0 or price is None:
+        return False, {}
+    hit = float(price) <= cost * (1.0 - float(STOP_LOSS))
+    return bool(hit), {"cost": cost, "price": float(price)}
+
+# === hlband/factors/lib/trail_stop.py ===
+def _trail_tier_params(max_profit):
+    """按峰值浮盈选档，返回 (giveback, profit_floor)；未达起步档则 (None, None)。"""
+    mp = float(max_profit)
+    for lo, hi, giveback, floor in TRAIL_TIERS:
+        if mp < float(lo):
+            continue
+        if hi is not None and mp >= float(hi):
+            continue
+        fl = None if floor is None else float(floor)
+        return float(giveback), fl
+    return None, None
+
+
+def _trail_stop_hit(price, cost, peak=None):
+    """阶梯移动止盈：峰值浮盈落档后，回撤超容忍 或 跌破利润底线。"""
+    if cost is None or cost <= 0:
+        return False
+    if peak is None:
+        peak = getattr(A, "hold_peak", None)
+    if peak is None or peak <= 0:
+        return False
+    max_profit = (float(peak) - float(cost)) / float(cost)
+    giveback_lim, profit_floor = _trail_tier_params(max_profit)
+    if giveback_lim is None:
+        return False
+    giveback = (float(peak) - float(price)) / float(peak)
+    if giveback > giveback_lim:
+        return True
+    if profit_floor is not None:
+        cur_profit = (float(price) - float(cost)) / float(cost)
+        if cur_profit < profit_floor:
+            return True
+    return False
+
+
+def _factor_eval_trail_stop(ctx):
+    market = (ctx or {}).get("market") or {}
+    state = (ctx or {}).get("state") or {}
+    lot = state.get("lot") or {}
+    cost = lot.get("price")
+    if cost is None:
+        cost = state.get("cost")
+    peak = lot.get("hold_peak")
+    if peak is None:
+        peak = state.get("hold_peak")
+    price = market.get("close")
+    try:
+        cost = float(cost or 0)
+    except (TypeError, ValueError):
+        cost = 0.0
+    if price is None:
+        return False, {}
+    return bool(_trail_stop_hit(price, cost, peak=peak)), {"cost": cost, "peak": peak}
+
+# === hlband/factors/lib/time_force.py ===
+def _trail_arm():
+    """档 1 起步 peak_lo；time_force 让路与网格 init 指纹共用。"""
+    tiers = globals().get("TRAIL_TIERS") or ()
+    try:
+        return float(tiers[0][0])
+    except (IndexError, TypeError, ValueError):
+        return None
+
+
+def _time_force_min_ret():
+    arm = _trail_arm()
+    if arm is None:
+        return 0.0
+    try:
+        return float(arm)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _time_force_peak_ret(lot):
+    if lot is None:
+        mx = float(getattr(A, "hold_max_ret", 0) or 0)
+        peak = getattr(A, "hold_peak", None)
+        cost = _pos_cost_price()
+    else:
+        try:
+            mx = float(lot.get("hold_max_ret") or 0)
+        except Exception:
+            mx = 0.0
+        peak = lot.get("hold_peak")
+        cost = float(lot.get("price") or 0)
+    if peak and cost and float(cost) > 0:
+        mx = max(mx, (float(peak) - float(cost)) / float(cost))
+    return mx
+
+
+def _time_force_already_skip(lot):
+    if lot is None:
+        return bool(getattr(A, "time_force_trend_skip", False))
+    return bool(lot.get("time_force_trend_skip"))
+
+
+def _time_force_mark_skip(lot, peak_ret, hold_bars, m60):
+    if lot is None:
+        A.time_force_trend_skip = True
+        lid = None
+    else:
+        lot["time_force_trend_skip"] = True
+        lid = lot.get("id")
+    print(
+        "%s time_force skip trend peak=%.2f%% ma60=%.4f hold=%s lot=%s"
+        % (STRATEGY_NAME, float(peak_ret) * 100.0, m60, hold_bars, lid)
+    )
+    _event_log(
+        "time_force_skip_trend",
+        peak_ret=peak_ret,
+        ma60=m60,
+        hold_bars=hold_bars,
+        lot_id=lid,
+    )
+    _save_state()
+
+
+def _time_force_hit(price, closes, hold_bars, lot=None):
+    """智能时间成本：持仓 > TIME_FORCE_BARS 后评估出场。
+    BARS<=0 关闭整条规则。
+    D_MA_SLOW<=0 时慢线地板不存在，同样不触发（BARS 仍独立）。
+    收盘破日线慢均线 → 立即强制平仓。
+    仍站上慢线时：峰值已达 TRAIL 档1 peak_lo 则不按日历强平；
+    从未武装的死钱仓立即强平。"""
+    try:
+        bars_lim = int(TIME_FORCE_BARS)
+    except (TypeError, ValueError):
+        bars_lim = 0
+    if bars_lim <= 0:
+        return False
+    try:
+        slow_n = int(D_MA_SLOW or 0)
+    except (TypeError, ValueError):
+        slow_n = 0
+    if slow_n <= 0:
+        return False
+    if hold_bars is None or int(hold_bars) <= bars_lim:
+        return False
+    ma60_arr = _price_ma(closes, slow_n)
+    if ma60_arr is None:
+        return False
+    i = len(closes) - 1
+    ma60 = _last_valid(ma60_arr, i)
+    if ma60 is None or price is None:
+        return False
+    px = float(price)
+    m60 = float(ma60)
+
+    if px < m60:
+        return True
+
+    min_ret = _time_force_min_ret()
+    peak_ret = _time_force_peak_ret(lot)
+    already = _time_force_already_skip(lot)
+    if min_ret > 0 and (already or peak_ret >= min_ret):
+        if not already:
+            _time_force_mark_skip(lot, peak_ret, hold_bars, m60)
+        return False
+
+    return True
+
+
+def _factor_eval_time_force(ctx):
+    market = (ctx or {}).get("market") or {}
+    state = (ctx or {}).get("state") or {}
+    lot = state.get("lot")
+    closes = market.get("closes")
+    price = market.get("close")
+    if lot is None:
+        hold_bars = state.get("hold_bars")
+        if hold_bars is None:
+            hold_bars = getattr(A, "hold_bars", 0)
+    else:
+        hold_bars = lot.get("hold_bars", 0)
+    return bool(_time_force_hit(price, closes, hold_bars, lot=lot)), {}
+
+# === hlband/factors/registry.py ===
+def _factor_registry():
+    return {
+        "pullback_vol": _factor_eval_pullback_vol,
+        "chase": _factor_eval_chase,
+        "vol_dry": _factor_eval_vol_dry,
+        "w_bias": _factor_eval_w_bias,
+        "w_slope": _factor_eval_w_slope,
+        "weekly_bear": _factor_eval_weekly_bear,
+        "weekly_bear_confirm": _factor_eval_weekly_bear_confirm,
+        "plat_break": _factor_eval_plat_break,
+        "w_macd_golden": _factor_eval_w_macd_golden,
+        "stop_loss": _factor_eval_stop_loss,
+        "trail_stop": _factor_eval_trail_stop,
+        "time_force": _factor_eval_time_force,
+    }
+
+
+def _factor_eval(fid, ctx):
+    fn = _factor_registry().get(str(fid or ""))
+    if fn is None:
+        return False, {}
+    ok, detail = fn(ctx)
+    return bool(ok), detail or {}
+
+
+def _factor_hit(fid, ctx):
+    ok, _detail = _factor_eval(fid, ctx)
+    return bool(ok)
+
+# === hlband/factors/expr.py ===
+def _recipe_hit(expr, ctx):
+    """hit(and/or/not)；叶子 = 因子 id。False/None = 恒假。"""
+    if expr is False or expr is None:
+        return False, []
+    if expr is True:
+        return True, []
+    if isinstance(expr, str):
+        ok, _detail = _factor_eval(expr, ctx)
+        return bool(ok), [expr] if ok else []
+    if not isinstance(expr, (list, tuple)) or not expr:
+        return False, []
+    op = expr[0]
+    if op == "not":
+        if len(expr) < 2:
+            return False, []
+        ok, _rs = _recipe_hit(expr[1], ctx)
+        return (not ok), []
+    if op == "and":
+        reasons = []
+        for node in expr[1:]:
+            ok, rs = _recipe_hit(node, ctx)
+            if not ok:
+                return False, []
+            reasons.extend(rs)
+        return True, reasons
+    if op == "or":
+        for node in expr[1:]:
+            ok, rs = _recipe_hit(node, ctx)
+            if ok:
+                return True, rs
+        return False, []
+    ok, _detail = _factor_eval(op, ctx)
+    return bool(ok), [op] if ok else []
+
+# === hlband/factors/slots.py ===
+_RECIPE_THRESHOLD_KEYS = (
+    "CHASE_MAX_PCT",
+    "VOL_DRY_RATIO",
+    "VOL_DRY_N",
+    "MA_TOUCH_TOL",
+    "VOL_PULLBACK_RATIO",
+    "VOL_PULLBACK_N",
+    "VOL_PULLBACK_CONFIRM_DAYS",
+    "W_BIAS_HARD",
+    "W_BIAS_LOW",
+    "W_MA30_SLOPE_WEEKS",
+    "STOP_LOSS",
+    "TRAIL_TIERS",
+    "TIME_FORCE_BARS",
+    "W_BEAR_CONFIRM_DAYS",
+    "SCALE_PLAT_LOOKBACK",
+    "SCALE_PLAT_MAX_RANGE",
+    "SCALE_W_HIST_EXPAND_RATIO",
+    "D_MA_MID",
+    "D_MA_SLOW",
+    "W_MA_FAST",
+    "W_MA_LIFE",
+    "MACD_FAST",
+    "MACD_SLOW",
+    "MACD_SIGNAL",
+)
+
+
+def _recipe_fingerprint(overrides=None, recipe=None):
+    """表达式 + 被覆盖的阈值键；不扫全因子开关。"""
+    rec = recipe if recipe is not None else (globals().get("RECIPE") or {})
+    ov = dict(overrides or {})
+    covered = {}
+    allow = set(_RECIPE_THRESHOLD_KEYS)
+    for k in sorted(ov):
+        if k in allow:
+            covered[k] = ov[k]
+    payload = {
+        "entry": rec.get("entry"),
+        "exit": rec.get("exit"),
+        "factor_params": rec.get("factor_params") or {},
+        "overrides": covered,
+        "scale_in": rec.get("scale_in"),
+        "scale_out": rec.get("scale_out"),
+    }
+    text = json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":")
+    )
+    h = 2166136261
+    for ch in text:
+        h ^= ord(ch)
+        h = (h * 16777619) & 0xFFFFFFFF
+    return "%08x" % h
+
+
+def _slot_result(hit, reasons=None, detail=None, extra=None):
+    out = {"hit": bool(hit), "reasons": list(reasons or []), "detail": detail or {}}
+    if extra:
+        out.update(extra)
+    return out
+
+
+def _entry_log_reasons(ctx):
+    """对齐现网 _handle_stock：周线闸门 elif 链 + _eval_daily_buy 提前 return。"""
+    daily = []
+    if _factor_hit("chase", ctx):
+        daily = ["chase_skip"]
+    elif _factor_hit("vol_dry", ctx):
+        daily = ["vol_dry_skip"]
+    elif _factor_hit("pullback_vol", ctx):
+        daily = ["pullback_vol"]
+    if _factor_hit("weekly_bear", ctx):
+        return ["weekly_bear"] + [r for r in daily if r != "weekly_bear"]
+    if _factor_hit("w_bias", ctx):
+        return ["w_bias_skip"] + [r for r in daily if r != "w_bias_skip"]
+    if _factor_hit("w_slope", ctx):
+        return ["w_slope_skip"] + [r for r in daily if r != "w_slope_skip"]
+    return list(daily)
+
+
+def _scale_trigger_reasons(ctx):
+    reasons = []
+    if _factor_hit("pullback_vol", ctx) and (not _factor_hit("chase", ctx)):
+        reasons.append("pullback_vol")
+    if _factor_hit("plat_break", ctx):
+        reasons.append("plat_break")
+    if _factor_hit("w_macd_golden", ctx):
+        reasons.append("w_macd_golden")
+    return reasons
+
+
+def _eval_entry_slot(ctx, expr=None):
+    recipe = globals().get("RECIPE") or {}
+    tree = expr if expr is not None else recipe.get("entry")
+    hit, reasons = _recipe_hit(tree, ctx)
+    logs = _entry_log_reasons(ctx)
+    return _slot_result(hit, logs if logs else reasons)
+
+
+def _eval_scale_in_slot(ctx, expr=None):
+    recipe = globals().get("RECIPE") or {}
+    tree = expr if expr is not None else recipe.get("scale_in")
+    hit, _reasons = _recipe_hit(tree, ctx)
+    triggers = _scale_trigger_reasons(ctx)
+    return _slot_result(hit, triggers, extra={"triggers": triggers})
+
+
+def _eval_exit_slot(ctx, expr=None):
+    recipe = globals().get("RECIPE") or {}
+    ordered = expr if expr is not None else recipe.get("exit")
+    if ordered is False or ordered is None:
+        return _slot_result(False)
+    if isinstance(ordered, (list, tuple)) and ordered and ordered[0] in ("and", "or", "not"):
+        hit, reasons = _recipe_hit(ordered, ctx)
+        return _slot_result(hit, reasons)
+    for fid in list(ordered or ()):
+        if str(fid) == "weekly_bear_confirm":
+            if _factor_hit("weekly_bear_confirm", ctx):
+                return _slot_result(True, ["weekly_bear"])
+            continue
+        if _factor_hit(fid, ctx):
+            return _slot_result(True, [fid])
+    return _slot_result(False)
+
+
+def _eval_scale_out_slot(ctx, expr=None):
+    recipe = globals().get("RECIPE") or {}
+    tree = expr if expr is not None else recipe.get("scale_out")
+    if tree is False or tree is None:
+        return _slot_result(False)
+    hit, reasons = _recipe_hit(tree, ctx)
+    return _slot_result(hit, reasons)
+
+
+def _eval_recipe_slots(ctx):
+    recipe = globals().get("RECIPE") or {}
+    return {
+        "entry": _eval_entry_slot(ctx, recipe.get("entry")),
+        "scale_in": _eval_scale_in_slot(ctx, recipe.get("scale_in")),
+        "exit": _eval_exit_slot(ctx, recipe.get("exit")),
+        "scale_out": _eval_scale_out_slot(ctx, recipe.get("scale_out")),
+    }
+
+# === hlband/factors/intent.py ===
+def _intent_blank():
+    return {
+        "side": None,
+        "target": None,
+        "lot_ids": None,
+        "frac": None,
+        "reasons": [],
+        "shares": 0,
+    }
+
+
+def _intent_pack(side, target, reasons=None, lot_ids=None, frac=None, shares=0):
+    return {
+        "side": side,
+        "target": target,
+        "lot_ids": list(lot_ids) if lot_ids else None,
+        "frac": frac,
+        "reasons": list(reasons or []),
+        "shares": int(shares or 0),
+    }
+
+
+def _arbitrate_intent(
+    entry=None,
+    scale_in=None,
+    exit_slot=None,
+    scale_out=None,
+    scale_gate_ok=False,
+    holding=False,
+    lot_ids=None,
+    shares=0,
+):
+    """仓位仲裁。优先级写死：flat > reduce > add > open。"""
+    entry = entry or {}
+    scale_in = scale_in or {}
+    exit_slot = exit_slot or {}
+    scale_out = scale_out or {}
+    if holding and exit_slot.get("hit"):
+        return _intent_pack(
+            "sell",
+            "flat",
+            exit_slot.get("reasons"),
+            lot_ids,
+            shares=shares,
+        )
+    if holding and scale_out.get("hit"):
+        return _intent_pack(
+            "sell",
+            "reduce",
+            scale_out.get("reasons"),
+            lot_ids,
+            frac=scale_out.get("frac"),
+            shares=shares,
+        )
+    if holding and scale_in.get("hit") and scale_gate_ok:
+        return _intent_pack("buy", "add", scale_in.get("reasons") or scale_in.get("triggers"))
+    if (not holding) and entry.get("hit"):
+        return _intent_pack("buy", "open", entry.get("reasons"))
+    return _intent_blank()
 
 # === qmt_common/mode.py ===
 # 作用: 回测/实盘模式、暖机切换、K 线时间
@@ -5934,112 +6844,12 @@ def _bar_tag(dt):
     return dt.strftime("%Y%m%d%H%M%S")
 
 
-def _cross_down(a_prev, b_prev, a_now, b_now):
-    if None in (a_prev, b_prev, a_now, b_now):
-        return False
-    return (a_prev >= b_prev) and (a_now < b_now)
-
-
-def _cross_up(a_prev, b_prev, a_now, b_now):
-    if None in (a_prev, b_prev, a_now, b_now):
-        return False
-    return (a_prev <= b_prev) and (a_now > b_now)
-
-
 def _eval_weekly(closes_w):
-    """返回 (bull, bear, detail)。
-    多头(仅日志): MA5>MA13 且 DIF>0 且红柱 且生命线未明显走平。
-    空头: 收盘破 MA34（W_MA_LIFE）或 DIF/DEA 零轴下死叉。"""
-    detail = {
-        "ma5": None,
-        "ma10": None,
-        "ma30": None,
-        "dif": None,
-        "dea": None,
-        "hist": None,
-        "close": None,
-    }
-    ma5 = _price_ma(closes_w, W_MA_FAST)
-    ma10 = _price_ma(closes_w, 13)
-    ma30 = _price_ma(closes_w, W_MA_LIFE)
-    macd = _calc_macd(closes_w)
-    if ma5 is None or ma10 is None or ma30 is None or macd is None:
-        return False, False, detail
-    dif, dea, hist = macd
-    i = len(closes_w) - 1
-    if i < 1:
-        return False, False, detail
-    c = float(closes_w[i])
-    m5 = _last_valid(ma5, i)
-    m10 = _last_valid(ma10, i)
-    m30 = _last_valid(ma30, i)
-    m30_prev = _last_valid(ma30, i - 1)
-    d0 = _last_valid(dif, i)
-    e0 = _last_valid(dea, i)
-    h0 = _last_valid(hist, i)
-    h1 = _last_valid(hist, i - 1)
-    d1 = _last_valid(dif, i - 1)
-    e1 = _last_valid(dea, i - 1)
-    d2 = _last_valid(dif, i - 2) if i >= 2 else None
-    e2 = _last_valid(dea, i - 2) if i >= 2 else None
-    golden_now = _cross_up(d1, e1, d0, e0)
-    golden_prev = _cross_up(d2, e2, d1, e1) if i >= 2 else False
-    slope_weeks = int(globals().get("W_MA30_SLOPE_WEEKS", 2) or 2)
-    slope_up_n = False
-    if slope_weeks > 0 and i >= slope_weeks:
-        slope_up_n = True
-        for k in range(slope_weeks):
-            a = _last_valid(ma30, i - k)
-            b = _last_valid(ma30, i - k - 1)
-            if a is None or b is None or not (a > b):
-                slope_up_n = False
-                break
-    detail.update(
-        {
-            "ma5": m5,
-            "ma10": m10,
-            "ma30": m30,
-            "ma30_prev": m30_prev,
-            "ma30_slope_up2": slope_up_n,
-            "dif": d0,
-            "dea": e0,
-            "dif_prev": d1,
-            "dea_prev": e1,
-            "hist": h0,
-            "hist_prev": h1,
-            "macd_golden_now": golden_now,
-            "macd_golden_prev": golden_prev,
-            "close": c,
-        }
-    )
-    if None in (m5, m10, m30, d0, e0, h0):
-        return False, False, detail
-
-    ma30_ok = (m30_prev is None) or (m30 >= m30_prev * 0.998)
-    bull = (m5 > m10) and (d0 > 0) and (h0 > 0) and ma30_ok
-    death_below = _cross_down(d1, e1, d0, e0) and (d0 < 0) and (e0 < 0)
-    bear = (c < m30) or death_below
+    """返回 (bull, bear, detail)。bull 仅日志；bear = 当天空头叶子。"""
+    detail = _weekly_market_features(closes_w)
+    bull = _weekly_bull_from_detail(detail)
+    bear = _factor_hit("weekly_bear", {"market": {"w_detail": detail}})
     return bull, bear, detail
-
-
-def _w_bear_confirm_need():
-    """最少 1：当天空头即可挂清仓；勿用 `x or 2`（0 会被当成缺省翻成 2）。"""
-    raw = globals().get("W_BEAR_CONFIRM_DAYS", 2)
-    try:
-        n = int(2 if raw is None else raw)
-    except Exception:
-        n = 2
-    return max(1, n)
-
-
-def _vol_pullback_confirm_need():
-    """最少 1：当天缩量即可；勿用 `x or 2`（0 会被当成缺省翻成 2）。"""
-    raw = globals().get("VOL_PULLBACK_CONFIRM_DAYS", 2)
-    try:
-        n = int(2 if raw is None else raw)
-    except Exception:
-        n = 2
-    return max(1, n)
 
 
 def _update_w_bear_streak(weekly_bear, sig_day, track):
@@ -6112,100 +6922,30 @@ def _update_w_bear_streak(weekly_bear, sig_day, track):
 
 def _eval_daily_buy(closes, volumes):
     """买点：缩量回踩中/慢均线。D_MA_*<=0 关闭该条。"""
-    reasons = []
-    try:
-        mid_n = int(D_MA_MID or 0)
-    except (TypeError, ValueError):
-        mid_n = 0
-    try:
-        slow_n = int(D_MA_SLOW or 0)
-    except (TypeError, ValueError):
-        slow_n = 0
-    ma20 = _price_ma(closes, mid_n) if mid_n > 0 else None
-    ma60 = _price_ma(closes, slow_n) if slow_n > 0 else None
-    vol10 = _sma(volumes, VOL_PULLBACK_N)
-    vol20 = _sma(volumes, VOL_DRY_N)
-    if vol10 is None or vol20 is None:
-        return False, reasons, {}
-    i = len(closes) - 1
-    vol_need = _vol_pullback_confirm_need()
-    if i < max(2, vol_need):
-        return False, reasons, {}
-    price = float(closes[i])
-    vol = float(volumes[i])
-    m20 = _last_valid(ma20, i) if ma20 is not None else None
-    m60 = _last_valid(ma60, i) if ma60 is not None else None
-    v10 = _last_valid(vol10, i)
-    v20 = _last_valid(vol20, i)
-    detail = {
-        "ma20": m20,
-        "ma60": m60,
-        "vol10": v10,
-        "vol20": v20,
-        "vol_need": vol_need,
-        "vol_streak": 0,
-    }
-
-    prev = float(closes[i - 1]) if closes[i - 1] else 0.0
-    if prev > 0 and (price - prev) / prev >= float(CHASE_MAX_PCT):
+    ctx = _build_factor_ctx(closes, volumes, None, None, {}, None)
+    detail = dict(ctx["market"].get("daily_detail") or {})
+    if not ctx["market"].get("daily_ready"):
+        return False, [], detail
+    if _factor_hit("chase", ctx):
         return False, ["chase_skip"], detail
-
-    # 无量阴跌不言底：跌破中均线且量 < 均量 * VOL_DRY_RATIO → 全局禁开
-    # 中线关闭则本过滤关闭
-    dry_below = (
-        mid_n > 0
-        and m20 is not None
-        and price < m20
-        and v20 is not None
-        and v20 > 0
-        and vol < v20 * float(VOL_DRY_RATIO)
-    )
-    if dry_below:
+    if _factor_hit("vol_dry", ctx):
         return False, ["vol_dry_skip"], detail
-
-    # 缩量回踩中/慢均线（已关闭的条不参与）+ 连续 N 日量 < 当日均量 * VOL_PULLBACK_RATIO
-    near = False
-    if mid_n > 0:
-        near = near or _near_ma(price, m20)
-    if slow_n > 0:
-        near = near or _near_ma(price, m60)
-    ratio = float(VOL_PULLBACK_RATIO)
-    vol_streak = 0
-    for k in range(vol_need):
-        j = i - k
-        vma = _last_valid(vol10, j)
-        vj = float(volumes[j])
-        if vma is None or vma <= 0 or vj >= vma * ratio:
-            break
-        vol_streak += 1
-    detail["vol_streak"] = vol_streak
-    if near and vol_streak >= vol_need:
-        reasons.append("pullback_vol")
-
+    ok, extra = _factor_eval("pullback_vol", ctx)
+    detail.update(extra or {})
+    reasons = ["pullback_vol"] if ok else []
     return bool(reasons), reasons, detail
 
 
 def _weekly_bias_guard(w_detail):
     """周线 (MA5-MA34)/MA34 >= W_BIAS_HARD → 禁开。"""
-    m5 = w_detail.get("ma5")
-    m30 = w_detail.get("ma30")
-    if m5 is None or m30 is None or m30 <= 0:
-        return False, None
-    bias = (float(m5) - float(m30)) / float(m30)
-    return bias >= float(W_BIAS_HARD), bias
+    ok, det = _factor_eval("w_bias", {"market": {"w_detail": w_detail or {}}})
+    return ok, det.get("bias")
 
 
 def _weekly_low_slope_guard(w_detail):
     """低位 (MA5-MA34)/MA34 < W_BIAS_LOW 且生命线 MA34 未连续向上 → 禁开。"""
-    m5 = w_detail.get("ma5")
-    m30 = w_detail.get("ma30")
-    if m5 is None or m30 is None or m30 <= 0:
-        return False, None
-    bias = (float(m5) - float(m30)) / float(m30)
-    if bias >= float(W_BIAS_LOW):
-        return False, bias
-    slope_ok = bool(w_detail.get("ma30_slope_up2"))
-    return (not slope_ok), bias
+    ok, det = _factor_eval("w_slope", {"market": {"w_detail": w_detail or {}}})
+    return ok, det.get("bias")
 
 
 def _update_hold_peak(high_px, cost):
@@ -6228,149 +6968,6 @@ def _update_hold_peak(high_px, cost):
             A.hold_max_ret = mx
             changed = True
     return changed
-
-
-def _trail_tier_params(max_profit):
-    """按峰值浮盈选档，返回 (giveback, profit_floor)；未达起步档则 (None, None)。"""
-    mp = float(max_profit)
-    for lo, hi, giveback, floor in TRAIL_TIERS:
-        if mp < float(lo):
-            continue
-        if hi is not None and mp >= float(hi):
-            continue
-        fl = None if floor is None else float(floor)
-        return float(giveback), fl
-    return None, None
-
-
-def _trail_stop_hit(price, cost, peak=None):
-    """阶梯移动止盈：峰值浮盈落档后，回撤超容忍 或 跌破利润底线。"""
-    if cost is None or cost <= 0:
-        return False
-    if peak is None:
-        peak = getattr(A, "hold_peak", None)
-    if peak is None or peak <= 0:
-        return False
-    max_profit = (float(peak) - float(cost)) / float(cost)
-    giveback_lim, profit_floor = _trail_tier_params(max_profit)
-    if giveback_lim is None:
-        return False
-    giveback = (float(peak) - float(price)) / float(peak)
-    if giveback > giveback_lim:
-        return True
-    if profit_floor is not None:
-        cur_profit = (float(price) - float(cost)) / float(cost)
-        if cur_profit < profit_floor:
-            return True
-    return False
-
-
-def _trail_arm():
-    """档 1 起步 peak_lo；time_force 让路与网格 init 指纹共用。"""
-    tiers = globals().get("TRAIL_TIERS") or ()
-    try:
-        return float(tiers[0][0])
-    except (IndexError, TypeError, ValueError):
-        return None
-
-
-def _time_force_min_ret():
-    arm = _trail_arm()
-    if arm is None:
-        return 0.0
-    try:
-        return float(arm)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def _time_force_peak_ret(lot):
-    if lot is None:
-        mx = float(getattr(A, "hold_max_ret", 0) or 0)
-        peak = getattr(A, "hold_peak", None)
-        cost = _pos_cost_price()
-    else:
-        try:
-            mx = float(lot.get("hold_max_ret") or 0)
-        except Exception:
-            mx = 0.0
-        peak = lot.get("hold_peak")
-        cost = float(lot.get("price") or 0)
-    if peak and cost and float(cost) > 0:
-        mx = max(mx, (float(peak) - float(cost)) / float(cost))
-    return mx
-
-
-def _time_force_already_skip(lot):
-    if lot is None:
-        return bool(getattr(A, "time_force_trend_skip", False))
-    return bool(lot.get("time_force_trend_skip"))
-
-
-def _time_force_mark_skip(lot, peak_ret, hold_bars, m60):
-    if lot is None:
-        A.time_force_trend_skip = True
-        lid = None
-    else:
-        lot["time_force_trend_skip"] = True
-        lid = lot.get("id")
-    print(
-        "%s time_force skip trend peak=%.2f%% ma60=%.4f hold=%s lot=%s"
-        % (STRATEGY_NAME, float(peak_ret) * 100.0, m60, hold_bars, lid)
-    )
-    _event_log(
-        "time_force_skip_trend",
-        peak_ret=peak_ret,
-        ma60=m60,
-        hold_bars=hold_bars,
-        lot_id=lid,
-    )
-    _save_state()
-
-
-def _time_force_hit(price, closes, hold_bars, lot=None):
-    """智能时间成本：持仓 > TIME_FORCE_BARS 后评估出场。
-    BARS<=0 关闭整条规则。
-    D_MA_SLOW<=0 时慢线地板不存在，同样不触发（BARS 仍独立）。
-    收盘破日线慢均线 → 立即强制平仓。
-    仍站上慢线时：峰值已达 TRAIL 档1 peak_lo 则不按日历强平；
-    从未武装的死钱仓立即强平。"""
-    try:
-        bars_lim = int(TIME_FORCE_BARS)
-    except (TypeError, ValueError):
-        bars_lim = 0
-    if bars_lim <= 0:
-        return False
-    try:
-        slow_n = int(D_MA_SLOW or 0)
-    except (TypeError, ValueError):
-        slow_n = 0
-    if slow_n <= 0:
-        return False
-    if hold_bars is None or int(hold_bars) <= bars_lim:
-        return False
-    ma60_arr = _price_ma(closes, slow_n)
-    if ma60_arr is None:
-        return False
-    i = len(closes) - 1
-    ma60 = _last_valid(ma60_arr, i)
-    if ma60 is None or price is None:
-        return False
-    px = float(price)
-    m60 = float(ma60)
-
-    if px < m60:
-        return True
-
-    min_ret = _time_force_min_ret()
-    peak_ret = _time_force_peak_ret(lot)
-    already = _time_force_already_skip(lot)
-    if min_ret > 0 and (already or peak_ret >= min_ret):
-        if not already:
-            _time_force_mark_skip(lot, peak_ret, hold_bars, m60)
-        return False
-
-    return True
 
 
 def _lot_from_agg():
@@ -6531,85 +7128,40 @@ def _scale_ready(w_detail=None):
 
 def _daily_plat_break(closes, highs, lows):
     """日线收盘确认突破前期平台：回看窗口振幅够窄，今日收盘站上窗口最高价，昨收仍在平台内。"""
-    lookback = int(globals().get("SCALE_PLAT_LOOKBACK") or 20)
-    max_range = float(globals().get("SCALE_PLAT_MAX_RANGE") or 0.10)
-    buf = float(globals().get("SCALE_PLAT_BREAK_BUF") or 0.0)
-    if lookback < 5 or max_range <= 0:
-        return False
-    if closes is None or highs is None or lows is None:
-        return False
-    n = len(closes)
-    if n < lookback + 1 or len(highs) != n or len(lows) != n:
-        return False
-    if n < 2:
-        return False
-    plat = _plat_window(highs, lows, lookback)
-    if plat is None:
-        return False
-    plat_high, plat_low = plat
-    rng = (float(plat_high) - float(plat_low)) / float(plat_low)
-    if rng > max_range:
-        return False
-    hurdle = float(plat_high) * (1.0 + buf)
-    px = float(closes[-1])
-    prev = float(closes[-2])
-    if px <= hurdle:
-        return False
-    if prev > hurdle:
-        return False
-    return True
+    ctx = _build_factor_ctx(closes, None, highs, lows, {}, None)
+    return _factor_hit("plat_break", ctx)
 
 
 def _weekly_macd_golden_expand(w_detail):
     """近两周周线 MACD 金叉，且当前红柱比上周放大。"""
-    if not w_detail:
-        return False
-    h0 = w_detail.get("hist")
-    h1 = w_detail.get("hist_prev")
-    if h0 is None or h1 is None:
-        return False
-    hist = float(h0)
-    hist_prev = float(h1)
-    if hist <= 0 or hist <= hist_prev:
-        return False
-    golden_now = bool(w_detail.get("macd_golden_now"))
-    golden_prev = bool(w_detail.get("macd_golden_prev"))
-    if not (golden_now or golden_prev):
-        return False
-    if golden_now and (not golden_prev):
-        return True
-    ratio = float(globals().get("SCALE_W_HIST_EXPAND_RATIO") or 1.0)
-    if ratio <= 1.0:
-        return True
-    base = abs(hist_prev) if abs(hist_prev) > 1e-12 else hist
-    return hist >= base * ratio
+    return _factor_hit("w_macd_golden", {"market": {"w_detail": w_detail or {}}})
 
 
 def _eval_scale_push(closes, highs, lows, w_detail, pullback=False):
     """加仓触发：缩量回踩 或 日线破平台 或 周线 MACD 金叉柱放大。"""
+    ctx = _build_factor_ctx(closes, None, highs, lows, w_detail, None)
     reasons = []
     if pullback:
         reasons.append("pullback_vol")
-    if _daily_plat_break(closes, highs, lows):
+    if _factor_hit("plat_break", ctx):
         reasons.append("plat_break")
-    if _weekly_macd_golden_expand(w_detail):
+    if _factor_hit("w_macd_golden", ctx):
         reasons.append("w_macd_golden")
     return bool(reasons), reasons
 
 
 def _eval_lot_sell(price, closes, lot):
-    reasons = []
-    cost = float(lot.get("price") or 0)
-    if cost > 0 and price <= cost * (1.0 - float(STOP_LOSS)):
-        reasons.append("stop_loss")
-        return True, reasons
-    if _trail_stop_hit(price, cost, peak=lot.get("hold_peak")):
-        reasons.append("trail_stop")
-        return True, reasons
-    if _time_force_hit(price, closes, lot.get("hold_bars", 0), lot=lot):
-        reasons.append("time_force")
-        return True, reasons
-    return False, reasons
+    ctx = _build_factor_ctx(
+        closes,
+        None,
+        None,
+        None,
+        {},
+        price,
+        state={"lot": lot, "cost": lot.get("price")},
+    )
+    slot = _eval_exit_slot(ctx, ["stop_loss", "trail_stop", "time_force"])
+    return bool(slot.get("hit")), list(slot.get("reasons") or [])
 
 
 def _collect_lot_exits(price, closes, force_empty):
@@ -7757,30 +8309,36 @@ def _handle_stock(C, ctx):
     if bt:
         _bt_recover_position(now=now, last=float(closes_d[-1]))
 
-    weekly_bull, weekly_bear, w_detail = _eval_weekly(closes_ws)
+    w_detail = _weekly_market_features(closes_ws)
+    weekly_bull = _weekly_bull_from_detail(w_detail)
+    fctx = _build_factor_ctx(
+        closes_s,
+        vols_s,
+        highs_s,
+        lows_s,
+        w_detail,
+        price,
+        clock={"sig_day": sig_day_daily, "track_bear": False},
+    )
+    weekly_bear = _factor_hit("weekly_bear", fctx)
     # 清仓二次确认只在 bt / confirm / 开盘兜底累计；盘中 exec 不改 streak
     track_bear = (not live_cc) or (phase == "confirm") or bool(need_fallback)
     force_empty, w_bear_n = _update_w_bear_streak(
         weekly_bear, sig_day_weekly, track=track_bear
     )
-    w_bias_block, w_bias = _weekly_bias_guard(w_detail)
-    w_slope_block, _w_bias_low = _weekly_low_slope_guard(w_detail)
-    buy_ok, buy_reasons, b_detail = _eval_daily_buy(closes_s, vols_s)
-    if weekly_bear:
-        buy_ok = False
-        buy_reasons = ["weekly_bear"] + [
-            r for r in buy_reasons if r not in ("weekly_bear",)
-        ]
-    elif w_bias_block:
-        buy_ok = False
-        buy_reasons = ["w_bias_skip"] + [
-            r for r in buy_reasons if r not in ("w_bias_skip",)
-        ]
-    elif w_slope_block:
-        buy_ok = False
-        buy_reasons = ["w_slope_skip"] + [
-            r for r in buy_reasons if r not in ("w_slope_skip",)
-        ]
+    fctx = _factor_ctx_bind_state(
+        fctx,
+        w_bear_streak=w_bear_n,
+        w_bear_confirmed=force_empty,
+        cost=_pos_cost_price(),
+    )
+    force_empty = _factor_hit("weekly_bear_confirm", fctx)
+    w_bias_block = _factor_hit("w_bias", fctx)
+    w_slope_block = _factor_hit("w_slope", fctx)
+    w_bias = (_factor_eval("w_bias", fctx)[1] or {}).get("bias")
+    entry_slot = _eval_entry_slot(fctx)
+    buy_reasons = list(entry_slot.get("reasons") or [])
+    buy_ok = bool(entry_slot.get("hit"))
     sell_ok = False
     sell_reasons = []
 
@@ -7852,24 +8410,21 @@ def _handle_stock(C, ctx):
         trail_hit = "trail_stop" in sell_reasons
         time_force_hit = "time_force" in sell_reasons
     else:
-        if holding and cost > 0 and price <= cost * (1.0 - float(STOP_LOSS)):
-            stop_hit = True
-            sell_reasons = list(sell_reasons) + ["stop_loss"]
-            sell_ok = True
-
-        if holding and (not stop_hit) and _trail_stop_hit(price, cost):
-            trail_hit = True
-            sell_reasons = list(sell_reasons) + ["trail_stop"]
-            sell_ok = True
-
         skip_before = bool(getattr(A, "time_force_trend_skip", False))
-        if holding and (not stop_hit) and (not trail_hit) and _time_force_hit(
-            price, closes_s, getattr(A, "hold_bars", 0)
-        ):
-            time_force_hit = True
-            sell_reasons = list(sell_reasons) + ["time_force"]
-            sell_ok = True
-        elif holding and (not skip_before) and bool(getattr(A, "time_force_trend_skip", False)):
+        if holding:
+            fctx_x = _factor_ctx_bind_state(
+                fctx,
+                cost=cost,
+                hold_peak=getattr(A, "hold_peak", None),
+                hold_bars=getattr(A, "hold_bars", 0),
+            )
+            slot_x = _eval_exit_slot(fctx_x, ["stop_loss", "trail_stop", "time_force"])
+            sell_ok = bool(slot_x.get("hit"))
+            sell_reasons = list(slot_x.get("reasons") or [])
+            stop_hit = "stop_loss" in sell_reasons
+            trail_hit = "trail_stop" in sell_reasons
+            time_force_hit = "time_force" in sell_reasons
+        if holding and (not skip_before) and bool(getattr(A, "time_force_trend_skip", False)):
             _save_state()
 
     ret_pct = None
@@ -7884,29 +8439,25 @@ def _handle_stock(C, ctx):
         "weekly_bear",
     )
     real_buys = [r for r in buy_reasons if r not in skip_codes]
-    buy_sig = bool(
-        (not weekly_bear)
-        and (not w_bias_block)
-        and (not w_slope_block)
-        and buy_ok
-        and real_buys
-    )
-    vol_dry_block = "vol_dry_skip" in buy_reasons
-    scale_push_ok, scale_push_reasons = _eval_scale_push(
-        closes_s,
-        highs_s,
-        lows_s,
-        w_detail,
-        pullback=("pullback_vol" in real_buys),
-    )
+    buy_sig = bool(entry_slot.get("hit"))
+    vol_dry_block = _factor_hit("vol_dry", fctx)
+    scale_slot = _eval_scale_in_slot(fctx)
+    scale_push_reasons = list(scale_slot.get("triggers") or [])
     scale_ok, scale_why = _scale_gate(w_detail, price=price)
-    scale_sig = bool(
-        scale_ok
-        and scale_push_ok
-        and (not weekly_bear)
-        and (not w_bias_block)
-        and (not w_slope_block)
-        and (not vol_dry_block)
+    scale_sig = bool(scale_ok and scale_slot.get("hit"))
+    exit_for_intent = {
+        "hit": bool(force_empty_act or sell_ok),
+        "reasons": (["weekly_bear"] if force_empty_act else []) + list(sell_reasons),
+    }
+    intent = _arbitrate_intent(
+        entry=entry_slot,
+        scale_in=scale_slot,
+        exit_slot=exit_for_intent,
+        scale_out=_eval_scale_out_slot(fctx),
+        scale_gate_ok=scale_ok,
+        holding=holding,
+        lot_ids=exit_ids,
+        shares=exit_shares,
     )
 
     if not bt and upass != "exec":
@@ -8053,9 +8604,10 @@ def _handle_stock(C, ctx):
     if not allow_new and not force_eval:
         return
 
+    intent_target = intent.get("target")
     if holding:
         cur_ex = getattr(A, "pending_exit", None)
-        if force_empty_act or sell_ok or stop_hit or trail_hit or time_force_hit:
+        if intent_target == "flat":
             if isinstance(cur_ex, dict):
                 if live_cc:
                     _mark_signal_eval_done(day, is_confirm)
@@ -8125,7 +8677,11 @@ def _handle_stock(C, ctx):
                 shares=exit_shares or None,
             )
             _try_exec_pending_exit(C, now, now_s, day, tag, exec_open_px, exec_last_px, holding)
-        elif scale_sig:
+        elif intent_target == "reduce":
+            if live_cc:
+                _mark_signal_eval_done(day, is_confirm)
+            return
+        elif intent_target == "add":
             if isinstance(getattr(A, "pending_entry", None), dict):
                 if live_cc:
                     _mark_signal_eval_done(day, is_confirm)
@@ -8191,7 +8747,7 @@ def _handle_stock(C, ctx):
             _mark_signal_eval_done(day, is_confirm)
         return
 
-    if buy_sig and ("BUY" not in getattr(A, "acted", set())):
+    if intent_target == "open" and ("BUY" not in getattr(A, "acted", set())):
         if _book_n_held_live() >= _cfg_book_lot_max():
             if live_cc:
                 _mark_signal_eval_done(day, is_confirm)
@@ -9198,6 +9754,8 @@ def _init_impl(C):
         TIME_FORCE_BARS,
         "time_force_min_ret=",
         _time_force_min_ret(),
+        "recipe=",
+        _recipe_fingerprint(),
         "close_exec=",
         "%s-%s" % (
             globals().get("PENDING_EXEC_START", "145600"),

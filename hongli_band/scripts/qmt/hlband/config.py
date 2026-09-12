@@ -122,7 +122,7 @@ STOP_LOSS = 0.08
 #   禁开 / 撤买入 pending 仍按「当日」空头即时生效，不要求满 N 日
 W_BEAR_CONFIRM_DAYS = 2
 
-# （另有 weekly_bear：周线空头判定见 _eval_weekly；清仓见上）
+# （另有 weekly_bear：周线空头判定见 factors/lib/weekly_bear；确认清仓见 weekly_bear_confirm）
 
 # 盈利后加仓（回踩加仓 + 破平台推仓，任一即可）：
 #   门槛：峰值浮盈 >= SCALE_ARM，且该笔已持仓 >= SCALE_ARM_BARS 日
@@ -145,6 +145,41 @@ SCALE_PLAT_LOOKBACK = 20
 SCALE_PLAT_MAX_RANGE = 0.10          # 0.10 = 平台振幅不超过 10%
 # 周线 MACD：本周或上周 DIF 上穿 DEA；上周金叉则本周红柱须比上周放大此倍数
 SCALE_W_HIST_EXPAND_RATIO = 1.2
+
+# 默认 Recipe：四槽布尔式，数字仍读上面的全局阈值，不写死在叶子里。
+# scale_out 恒 false：减仓槽未启用；Intent 预留 reduce，strategy 忽略。
+RECIPE = {
+    "entry": [
+        "and",
+        ["not", "chase"],
+        ["not", "vol_dry"],
+        ["not", "w_bias"],
+        ["not", "w_slope"],
+        ["not", "weekly_bear"],
+        "pullback_vol",
+    ],
+    "scale_in": [
+        "and",
+        ["not", "vol_dry"],
+        ["not", "w_bias"],
+        ["not", "w_slope"],
+        ["not", "weekly_bear"],
+        [
+            "or",
+            ["and", "pullback_vol", ["not", "chase"]],
+            "plat_break",
+            "w_macd_golden",
+        ],
+    ],
+    "exit": [
+        "weekly_bear_confirm",
+        "stop_loss",
+        "trail_stop",
+        "time_force",
+    ],
+    "scale_out": False,
+    "factor_params": {},
+}
 
 # 策略交易面板 bind → 模块常量。编辑器/回测无注入时用上面默认值。
 # 只上屏：开关 / 资金基数 / 固定金额 / 可部署比例 / 硬风控。买点窗口、时间成本、加仓细节、SCALE_LOTS、

@@ -100,9 +100,38 @@ SKIP_NAMES = frozenset(
         "LOG_IN_BACKTEST",
         "STRATEGY_NAME",
         "STRATEGY_VER",
+        "RECIPE",
     }
 )
 NONE_TOKENS = frozenset({"none", "null", "-", "—", "无", "nan"})
+RECIPE_THRESHOLD_KEYS = frozenset(
+    {
+        "CHASE_MAX_PCT",
+        "VOL_DRY_RATIO",
+        "VOL_DRY_N",
+        "MA_TOUCH_TOL",
+        "VOL_PULLBACK_RATIO",
+        "VOL_PULLBACK_N",
+        "VOL_PULLBACK_CONFIRM_DAYS",
+        "W_BIAS_HARD",
+        "W_BIAS_LOW",
+        "W_MA30_SLOPE_WEEKS",
+        "STOP_LOSS",
+        "TRAIL_TIERS",
+        "TIME_FORCE_BARS",
+        "W_BEAR_CONFIRM_DAYS",
+        "SCALE_PLAT_LOOKBACK",
+        "SCALE_PLAT_MAX_RANGE",
+        "SCALE_W_HIST_EXPAND_RATIO",
+        "D_MA_MID",
+        "D_MA_SLOW",
+        "W_MA_FAST",
+        "W_MA_LIFE",
+        "MACD_FAST",
+        "MACD_SLOW",
+        "MACD_SIGNAL",
+    }
+)
 
 PARAM_LABELS = {
     "STOP_LOSS": "止损",
@@ -271,6 +300,31 @@ def struct_eq(a: Any, b: Any, eps: float = EPS) -> bool:
             return False
         return all(struct_eq(left[k], right[k], eps) for k in left)
     return num_eq(left, right, eps)
+
+
+def recipe_fingerprint(recipe: Mapping[str, Any] | None = None, overrides: Mapping[str, Any] | None = None) -> str:
+    """表达式 + 被覆盖的阈值键。与 hlband/factors/slots._recipe_fingerprint 同一算法。"""
+    rec = dict(recipe or {})
+    if not rec:
+        rec = dict(_load_config_ns().get("RECIPE") or {})
+    ov = dict(overrides or {})
+    covered = {k: ov[k] for k in sorted(ov) if k in RECIPE_THRESHOLD_KEYS}
+    payload = {
+        "entry": rec.get("entry"),
+        "exit": rec.get("exit"),
+        "factor_params": rec.get("factor_params") or {},
+        "overrides": covered,
+        "scale_in": rec.get("scale_in"),
+        "scale_out": rec.get("scale_out"),
+    }
+    text = json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":")
+    )
+    h = 2166136261
+    for ch in text:
+        h ^= ord(ch)
+        h = (h * 16777619) & 0xFFFFFFFF
+    return "%08x" % h
 
 
 def json_ready(obj: Any) -> Any:
@@ -1044,6 +1098,7 @@ def build_cells(
     levels = [unique_levels(fam, axes[fam], defaults) for fam in fams]
     used_ids: set[str] = set()
     cells: list[dict[str, Any]] = []
+    recipe = _load_config_ns().get("RECIPE")
     for prod in itertools.product(*levels):
         combo = {fam: prod[i] for i, fam in enumerate(fams)}
         ov = overrides_for_combo(combo, defaults)
@@ -1062,6 +1117,7 @@ def build_cells(
             "overrides": json_ready(ov),
             "is_current": is_cur,
             "n_diffs": combo_n_diffs(combo, defaults),
+            "recipe": recipe_fingerprint(recipe, ov),
         }
         cells.append(_apply_keep(cell, keep))
     cells.sort(key=lambda c: 0 if cell_is_current(c) else 1)

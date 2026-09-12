@@ -10,22 +10,22 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 HLBAND = HERE.parent / "qmt" / "hlband"
-INDICATORS_PATH = HLBAND / "indicators.py"
-STRATEGY_PATH = HLBAND / "strategy.py"
+INDICATORS_DIR = HLBAND / "indicators"
+TRAIL_PATH = HLBAND / "factors" / "lib" / "trail_stop.py"
+TIME_FORCE_PATH = HLBAND / "factors" / "lib" / "time_force.py"
+_INDICATOR_FILES = (
+    "util.py",
+    "sma.py",
+    "ema.py",
+    "macd.py",
+    "price_ma.py",
+)
 
 TIERS = (
     (0.03, 0.06, 0.015, None),
     (0.06, 0.10, 0.03, 0.03),
     (0.10, None, 0.04, None),
 )
-
-
-def _slice_defs(src: str, start: str, end: str) -> str:
-    i = src.find(start)
-    j = src.find(end)
-    if i < 0 or j < 0 or j <= i:
-        raise RuntimeError("strategy.py 找不到 %s .. %s" % (start, end))
-    return src[i:j]
 
 
 def _load_tf_ns(**overrides):
@@ -52,11 +52,13 @@ def _load_tf_ns(**overrides):
         "_pos_cost_price": lambda: 100.0,
     }
     ns.update(overrides)
-    ind = INDICATORS_PATH.read_text(encoding="utf-8")
-    exec(compile(ind, str(INDICATORS_PATH), "exec"), ns, ns)
-    strat = STRATEGY_PATH.read_text(encoding="utf-8")
-    chunk = _slice_defs(strat, "def _trail_arm():", "def _lot_from_agg():")
-    exec(compile(chunk, str(STRATEGY_PATH), "exec"), ns, ns)
+    for name in _INDICATOR_FILES:
+        path = INDICATORS_DIR / name
+        src = path.read_text(encoding="utf-8")
+        exec(compile(src, str(path), "exec"), ns, ns)
+    for path in (TRAIL_PATH, TIME_FORCE_PATH):
+        src = path.read_text(encoding="utf-8")
+        exec(compile(src, str(path), "exec"), ns, ns)
     ns["_logs"] = logs
     ns["A"] = A
     return ns

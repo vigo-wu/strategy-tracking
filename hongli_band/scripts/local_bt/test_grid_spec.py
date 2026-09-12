@@ -89,6 +89,8 @@ class GridSpecTest(unittest.TestCase):
         by = {c["id"]: c for c in cells}
         self.assertTrue(by["sl08"]["is_current"])
         self.assertEqual(by["sl08"]["n_diffs"], 0)
+        self.assertTrue(by["sl06"]["recipe"])
+        self.assertNotEqual(by["sl06"]["recipe"], by["sl08"]["recipe"])
         self.assertAlmostEqual(by["sl08"]["overrides"]["STOP_LOSS"], 0.08)
         self.assertIn("★现行", by["sl08"]["label"])
         self.assertFalse(by["sl06"]["is_current"])

@@ -1,0 +1,72 @@
+{
+  "n_trades": 0,
+  "trades": [],
+  "reasons": [],
+  "end_pos": 0,
+  "eval_cases": [
+    {
+      "id": "trend_up",
+      "weekly_bull": false,
+      "weekly_bear": false,
+      "buy_ok": false,
+      "buy_reasons": [],
+      "w_bias": false,
+      "w_slope": false
+    },
+    {
+      "id": "chase",
+      "buy_ok": false,
+      "buy_reasons": [
+        "chase_skip"
+      ]
+    },
+    {
+      "id": "vol_dry",
+      "buy_ok": false,
+      "buy_reasons": [
+        "vol_dry_skip"
+      ]
+    },
+    {
+      "id": "stop_loss",
+      "sell_ok": true,
+      "sell_reasons": [
+        "stop_loss"
+      ]
+    },
+    {
+      "id": "trailish",
+      "sell_ok": true,
+      "sell_reasons": [
+        "trail_stop"
+      ]
+    },
+    {
+      "id": "pullback",
+      "buy_ok": true,
+      "buy_reasons": [
+        "pullback_vol"
+      ]
+    },
+    {
+      "id": "weekly_bear_day",
+      "weekly_bull": false,
+      "weekly_bear": true,
+      "w_bias": false,
+      "w_slope": true
+    },
+    {
+      "id": "plat_break",
+      "plat": true,
+      "scale_ok": true,
+      "scale_reasons": [
+        "plat_break"
+      ]
+    }
+  ],
+  "walk": {
+    "start": "20180601",
+    "end": "20181130",
+    "n_bars": 220
+  }
+}
