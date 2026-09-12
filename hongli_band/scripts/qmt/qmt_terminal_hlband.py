@@ -81,20 +81,22 @@ W_MA30_SLOPE_WEEKS = 2
 #   关中线：回踩只看慢线（若开着）；vol_dry_skip 关掉
 #   关慢线：回踩只看中线；time_force 破慢线地板关掉（BARS 仍独立，网格只改慢线不自动改 BARS）
 #   两条都关：无 pullback_vol 新开；加仓仍可走 plat_break / w_macd_golden
-D_MA_MID = 20
+D_MA_MID = 0
 D_MA_SLOW = 60
 
 # 买点 pullback_vol：缩量回踩强支撑
-#   价格贴近 MA20 或 MA60（|价-均线|/均线 <= 容差）且连续 N 日量 < 当日均量 * 比例
+#   价格贴近中/慢均线（|价-均线|/均线 <= 容差）且连续 N 日量 < 当日均量 * 比例
 #   贴均线只看当天；缩量按 VOL_PULLBACK_CONFIRM_DAYS 连续确认
-MA_TOUCH_TOL = 0.025          # 0.025 = 距均线 ±2.5% 内算「回踩到位」
+#   中线关闭时只贴慢线（当前 D_MA_MID=0，只贴 MA60）
+MA_TOUCH_TOL = 0.015          # 0.015 = 距均线 ±1.5% 内算「回踩到位」
 VOL_PULLBACK_N = 10           # 缩量比较的均量窗口（日，始终 SMA）
 VOL_PULLBACK_RATIO = 0.9      # 量 < 均量*0.9 视为缩量
 # 缩量连续确认日：<=0 或 1=当天缩量即可；2=今昨都缩量才算 pullback_vol
 VOL_PULLBACK_CONFIRM_DAYS = 2
 
 # 全局禁开 vol_dry_skip（无量阴跌不言底）：
-#   收盘跌破 MA20 且量 < N 日均量 * 比例 → 当天任何买点失效
+#   收盘跌破中线且量 < N 日均量 * 比例 → 当天任何买点失效
+#   中线关闭时本条关掉（当前 D_MA_MID=0）
 VOL_DRY_N = 20
 VOL_DRY_RATIO = 0.60          # 量 < 20 日均量的 60% 视为无量阴跌
 
@@ -103,30 +105,28 @@ VOL_DRY_RATIO = 0.60          # 量 < 20 日均量的 60% 视为无量阴跌
 #     自峰值回撤 > giveback，或（若设了 profit_floor）当前浮盈 < 底线
 #   元组：(peak_lo, peak_hi, giveback, profit_floor)
 #     peak_hi=None 无上限；profit_floor=None 不设硬底线
-#   档1 起步保护 [3%,6%)：回撤>1.5%（同旧版，防破本）
+#   档1 起步保护 [4%,6%)：回撤>1.5%
 #   档2 落袋为安 [6%,10%)：回撤>3% 或 利润跌破 3%
 #   档3 放鹰吃肉 >=10%：回撤>4%（利润垫扛日线洗盘）
 #   档1 peak_lo 同时是 time_force 让路阈值（_trail_arm）；加仓门槛 SCALE_ARM 仍独立
-#   参数网格中配置示例：[[0.03,0.06,0.015,null],[0.06,0.10,0.03,0.03],[0.10,null,0.04,null]]
 TRAIL_TIERS = (
-    (0.03, 0.06, 0.015, None),
+    (0.04, 0.06, 0.015, None),
     (0.06, 0.10, 0.03, 0.03),
     (0.10, None, 0.04, None),
 )
 # 卖② time_force：智能时间成本（防长期磨人，不砍还在趋势里的仓）
-#   BARS = 日线慢均线一半
 #   BARS<=0：关闭整条 time_force
 #   收盘破日线 MA60 → 立即强制平仓
 #   仍站上 MA60 且峰值浮盈 < 档1 peak_lo → 立即强制平仓（未武装仓满 BARS 即日历强平）
 #   仍站上 MA60 且峰值 >= 档1 peak_lo → 不按日历强平，交给 trail / 破 MA60 / 周线空
 #   已武装仓才把 MA60 当出场地板、不是最长持仓
-TIME_FORCE_BARS = D_MA_SLOW // 2
+TIME_FORCE_BARS = 0
 
 # 兜底风控（优先级高）
 # chase_skip：当日涨幅 (收-昨收)/昨收 >= 此值 → 禁开（防追高）
 CHASE_MAX_PCT = 0.05
 # stop_loss：收盘价 <= 成本 * (1 - 此值) → 硬止损清仓
-STOP_LOSS = 0.08
+STOP_LOSS = 0.10
 # weekly_bear 强制清仓：连续 N 个信号日（日 K）仍为空头才挂 pending_exit
 #   N<=0 或 1：当天空头即挂（与改前一致）；N=2：连续两日仍空才挂
 #   禁开 / 撤买入 pending 仍按「当日」空头即时生效，不要求满 N 日
@@ -240,7 +240,7 @@ LOG_DIR = r"D:\HlBandV7\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBandV7"
-STRATEGY_VER = "v1.68"
+STRATEGY_VER = "v1.69"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）

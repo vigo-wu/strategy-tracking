@@ -1,6 +1,6 @@
 # 红利板块波段策略：周线定方向，日线找买卖点
 
-**主题目录**：`hongli_band/`｜**版本**：v1.68｜**形态**：单仓骨架 / 分笔多仓｜**运行**：国金 QMT 终端模型（见 §5）；本地 CSV 回放（见 §6）  
+**主题目录**：`hongli_band/`｜**版本**：v1.69｜**形态**：单仓骨架 / 分笔多仓｜**运行**：国金 QMT 终端模型（见 §5）；本地 CSV 回放（见 §6）  
 **参数默认值**：`hongli_band/scripts/qmt/hlband/config.py`（文档以该文件为准）。实盘在「模型交易 → 新建/编辑策略交易」面板只覆盖开关 / 资金基数 / 固定金额 / 可部署比例 / 硬风控（`hlband/panel.xml`）；编辑器回测无注入时用 config。买点窗口、时间成本、加仓细节、`SCALE_LOTS`、阶梯止盈 `TRAIL_TIERS`、均线周期、`BOOK_STOCKS` 子配置 / `MA_TYPE`、路径仍只在 config。
 
 ---
@@ -34,7 +34,7 @@
 
 ### 买点 缩量回踩强支撑（`pullback_vol`）
 
-- 收盘靠近 `MA20` 或 `MA60`（容差 `MA_TOUCH_TOL`，当前 ±2.5%；算法见标的 `ma_type` / `MA_TYPE`）
+- 收盘靠近日线中/慢均线（容差 `MA_TOUCH_TOL`，当前 ±1.5%；算法见标的 `ma_type` / `MA_TYPE`）。当前 `D_MA_MID=0`，只贴 `MA60`
 - **连续** `VOL_PULLBACK_CONFIRM_DAYS` 日（当前 `2`）成交量 `<` 该日 `MAVOL10 × VOL_PULLBACK_RATIO`（当前 `0.9`）；贴均线只看当天
 
 空仓时开第一笔（`pullback_vol`）。已持仓且门槛+触发都满足、且本轮尚未加过仓时挂 `pending_entry add=True`，尾盘按**分档金额**成交（第二笔 30% cap；全池最后一槽吃剩余；错过则次日开盘补）。加仓仍受下方全局拦截（破平台/金叉不受 `chase_skip`）；另有 `scale_once` / `scale_bars` / `scale_w_hist` / `scale_sell_block` / `scale_cap` / `book_lot_cap`。周线空头 / 乖离 / 斜率 / 无量阴跌会取消加仓 pending。
@@ -43,7 +43,7 @@
 
 | 触发 | 条件 | 日志码 |
 | :--- | :--- | :--- |
-| 缩量回踩 | 与第一笔相同：近 MA20/60 且连续 N 日缩量；受 `chase_skip` | `pullback_vol` |
+| 缩量回踩 | 与第一笔相同：近慢线（中线已关）且连续 N 日缩量；受 `chase_skip` | `pullback_vol` |
 | 日线破平台 | 回看 `SCALE_PLAT_LOOKBACK` 日（当前 20，不含当日）高低点振幅 `(高-低)/低 <= SCALE_PLAT_MAX_RANGE`（当前 10%）；收盘严格站上该窗口最高价；昨收仍在平台内 | `plat_break` |
 | 周线 MACD 金叉放大 | 本周 DIF 上穿 DEA 且红柱比上周增长；或上周已金叉、本周红柱达到上周柱绝对值 × `SCALE_W_HIST_EXPAND_RATIO`（当前 1.2） | `w_macd_golden` |
 
@@ -53,7 +53,7 @@
 | :--- | :--- |
 | 周线空头 | `weekly_bear` |
 | 当日涨幅 ≥ `CHASE_MAX_PCT`（当前 `0.05`） | `chase_skip` |
-| 收盘 < MA20 且量 < MAVOL20 × `VOL_DRY_RATIO`（当前 `0.60`） | `vol_dry_skip` |
+| 收盘 < 日线中线且量 < MAVOL20 × `VOL_DRY_RATIO`（当前 `0.60`）；中线关闭时本条关掉 | `vol_dry_skip` |
 | 周线高位乖离 / 低位斜率不达标 | `w_bias_skip` / `w_slope_skip` |
 | 账户或单标的额度已满 / 全池满 3 笔 | `buy_cap` / `scale_cap` / `book_lot_cap` |
 
@@ -125,14 +125,14 @@
 | 卖点 | 条件 | 日志码 |
 | :--- | :--- | :--- |
 | ① 阶梯移动止盈 | 按**该笔**峰值浮盈选档（见下表）；回撤超容忍或跌破利润底线 | `trail_stop` |
-| ② 智能时间 | **该笔**持仓 **> `TIME_FORCE_BARS`**（当前 = 日线 MA60/2 = 30）日：破日线 MA60 → 强制平仓；仍站上 MA60 且峰值浮盈 **< TRAIL 档1 `peak_lo`**（当前 3%）→ **立即强制平仓**；峰值已达门槛 → **不按日历强平**，交给移动止盈 / 破 MA60 / 周线转空 | `time_force` |
-| 兜底 | 收盘 ≤ **该笔**成本 × (1 − `STOP_LOSS`)（当前 `0.08`）/ 周线转空且连续 `W_BEAR_CONFIRM_DAYS` 日 | `stop_loss` / `weekly_bear` |
+| ② 智能时间 | **该笔**持仓 **> `TIME_FORCE_BARS`**（当前 `0`=关闭整条）日：破日线 MA60 → 强制平仓；仍站上 MA60 且峰值浮盈 **< TRAIL 档1 `peak_lo`**（当前 4%）→ **立即强制平仓**；峰值已达门槛 → **不按日历强平**，交给移动止盈 / 破 MA60 / 周线转空 | `time_force` |
+| 兜底 | 收盘 ≤ **该笔**成本 × (1 − `STOP_LOSS`)（当前 `0.10`）/ 周线转空且连续 `W_BEAR_CONFIRM_DAYS` 日 | `stop_loss` / `weekly_bear` |
 
 阶梯档位 `TRAIL_TIERS`（峰值浮盈 = `(hold_peak − cost) / cost`）：
 
 | 档 | 峰值浮盈 | 回撤容忍 | 利润底线 |
 | :--- | :--- | :--- | :--- |
-| 起步保护 | [3%, 6%) | 1.5% | — |
+| 起步保护 | [4%, 6%) | 1.5% | — |
 | 落袋为安 | [6%, 10%) | 3% | 至少带走 3% |
 | 放鹰吃肉 | ≥ 10% | 4% | — |
 
@@ -150,13 +150,13 @@
 | :--- | :--- | :--- |
 | 周线过滤 | MA5/MA34 | `(wMA5-wMA34)/wMA34 < 0.08` 才可开 |
 | 低位斜率 | MA34 | 乖离 < 2% 时须连续 2 周向上 |
-| 日线低吸 | 位置+连续缩量 | 近 MA20/60 且连续 2 日 `vol < 当日MAVOL10×0.9` |
+| 日线低吸 | 位置+连续缩量 | 近 MA60（中线已关）且连续 2 日 `vol < 当日MAVOL10×0.9`，容差 ±1.5% |
 | 顺势加仓 | 回踩 / 日线平台 / 周线 MACD | 再缩量回踩，或收盘站上 20 日平台高，或近两周金叉且柱放大 |
-| 无量阴跌 | MA20+20日量 | 收盘 < MA20 且 `vol < MAVOL20×0.60` → 禁开 |
+| 无量阴跌 | 中线+20日量 | 中线已关（`D_MA_MID=0`），`vol_dry_skip` 不生效 |
 | 填满仓位 | 全池最多 3 笔 50/30/剩余 | 前两笔 50%/30%；第三笔吃剩余可部署资金；满 3 笔 `book_lot_cap` |
-| 动态防御 | 阶梯峰值回撤 | 3%/6%/10% 档 → 回撤 1.5%/3%/4%（6% 档另有 3% 底线） |
-| 智能时间 | MA60 地板 | `>MA60/2` 日：破 MA60 强平；站上且峰值<3% 立即强平；峰值≥3% 不按日历强平 |
-| 硬止损 | 成本 | `close ≤ cost×0.92` |
+| 动态防御 | 阶梯峰值回撤 | 4%/6%/10% 档 → 回撤 1.5%/3%/4%（6% 档另有 3% 底线） |
+| 智能时间 | MA60 地板 | 当前 `TIME_FORCE_BARS=0` 关闭；打开后：破 MA60 强平；站上且峰值<档1 立即强平 |
+| 硬止损 | 成本 | `close ≤ cost×0.90` |
 
 ---
 
@@ -190,13 +190,13 @@
 | `W_BIAS_LOW` | `0.02` | 低位区阈值（配合斜率；仅 config） |
 | `W_MA30_SLOPE_WEEKS` | `2` | 低位区生命线 MA34 连续向上周数（仅 config） |
 | `W_BEAR_CONFIRM_DAYS` | `2` | 周线空头清仓须连续信号日数（仅 config） |
-| `D_MA_MID/SLOW` | `20` / `60` | 日线中/慢均线；`<=0` 关闭该条（关中线同时关无量阴跌禁开；关慢线则 time_force 破线地板关掉；仅 config） |
-| `MA_TOUCH_TOL` | `0.025` | 回踩均线容差（仅 config） |
+| `D_MA_MID/SLOW` | `0` / `60` | 日线中/慢均线；`<=0` 关闭该条（关中线同时关无量阴跌禁开；关慢线则 time_force 破线地板关掉；仅 config） |
+| `MA_TOUCH_TOL` | `0.015` | 回踩均线容差（仅 config） |
 | `VOL_PULLBACK_N/RATIO` | `10` / `0.9` | 买点均量窗口与缩量比例（仅 config） |
 | `VOL_PULLBACK_CONFIRM_DAYS` | `2` | 缩量连续确认日；`<=0`/`1`=当天即可（仅 config） |
 | `VOL_DRY_N/RATIO` | `20` / `0.60` | 无量阴跌禁开（仅 config） |
 | `TRAIL_TIERS` | 见 §3 | 阶梯移动止盈（档3 回撤 4%） |
-| `TIME_FORCE_BARS` | `D_MA_SLOW//2`（30） | 时间成本起始持仓日；未武装仓满此日即日历强平，已武装仓才把 MA60 当出场地板（仅 config） |
+| `TIME_FORCE_BARS` | `0` | 时间成本起始持仓日；`<=0` 关闭整条；未武装仓满此日即日历强平，已武装仓才把 MA60 当出场地板（仅 config） |
 | `SCALE_ENABLE` | `True` | 盈利后满足持仓日/周线柱，再缩量回踩或破平台或周线 MACD 金叉放大则加第二笔 |
 | `SCALE_LOTS` | `True` | 分笔独立止盈止损；关则均价合并整仓出（仅 config，实盘勿改） |
 | `SCALE_ONCE_PER_ROUND` | `True` | 同一轮只加一次；加过仓后该只须全平才能再开（仅 config） |
@@ -206,7 +206,7 @@
 | `SCALE_PLAT_LOOKBACK` | `20` | 日线平台回看日（不含当日；仅 config） |
 | `SCALE_PLAT_MAX_RANGE` | `0.10` | 平台振幅上限 10%；更宽则不算平台（仅 config） |
 | `SCALE_W_HIST_EXPAND_RATIO` | `1.2` | 上周金叉时本周红柱须放大至 1.2 倍（仅 config） |
-| `STOP_LOSS` | `0.08` | 硬止损（相对该笔成本） |
+| `STOP_LOSS` | `0.10` | 硬止损（相对该笔成本） |
 | `CHASE_MAX_PCT` | `0.05` | 追高禁开 |
 | `LIVE_CLOSE_CONFIRM` | `True` | 收盘确认 + 开盘兜底 |
 | `SIGNAL_CONFIRM_START/END` | `145630` / `150000` | 用当日近似完整 K 确认信号；须早于尾盘成交 |
@@ -215,7 +215,7 @@
 | `STATE_FILE` | `D:\HlBandV7\hlband_{stock}.json` | 实盘状态；宇宙循环按票分文件 |
 | `LOG_DIR` | `D:\HlBandV7\logs` | 实盘结构化日志根目录 |
 
-日志确认 `HlBand v1.68 init` 且 `UNIVERSE n=` 与 `book_stocks=` 一致、`chart=` 不在池内（建议指数）、`drive=timer`、`ohlcv_policy= window`、`DIVIDEND= per-stock`、`budget_base= equity`（或 `fixed`）、`cash_ratio= 0.9`、`BOOK_N=` 与名单只数一致后再挂实盘。策略交易下应另有 `panel applied ...` 与 `run_time _universe_on_timer` 行。只开**一个**实例写 `BOOK_FILE`；无信号也要打卡。切 live 后 `state loaded path=` 应为 `hlband_600350_SH.json` 等池内票，**不应**出现时钟指数后缀。10:00 心跳 `work=pending drive=timer`，无全池 `n1d=`；14:56 后每只 `phase=confirm`；15:00 后仍应有定时心跳直到确认结束。实盘买入应看到 `fill ... frac= n_held= vacant= lot= why=split base=`（持股查询失败备用为 `src=local`）；未冻结为 `why=wait`。空池第一笔 `frac=0.50`（equity 且 20 万账户约 9 万；fixed 且 10 万约 4.5 万），第二笔 `frac=0.30`，第三笔 `frac` 仍是空档 0.50/0.30/0.20、`lot` 接近 `cap - book_mv`。满 3 笔 `book_lot_cap`。本轮已加过仓后再出买点应 `scale_once`，无第 3 笔。验收：回测先见 `diag: ok`（主图挂池内一只）；买卖日志为 `@close=`（同日）或残留 `@open=`；买卖闭合、无孤儿仓。第一笔仍为 `pullback_vol`；加仓应为 `pullback_vol` / `plat_break` / `w_macd_golden`（状态行 `scale= True`），成交附近有 `lots now n=2`、`book_frac` 与 `skip sell eval after add fill`。加仓当日状态行 `sellR` 应含 `skip_add_bar`，且不应新挂卖点。本轮已加过仓后再出第一笔时，不应再出现 `BUY add`（可见 `scale_once` 或 `pending_entry cancel scale_once`）。执行日已触发卖点时应看到 `pending_entry cancel scale_sell_block` 且不出现 `BUY add`。只出一笔时应看到 `SELL ... lots=[1]` 且另一笔仍持有。卖出前应有 `SELL lot-can_use`；若 `BUY add` 后同日仍出现 `SELL lots=[2]`，看 `risk=True` 的 WARN（券商成交未必是第二笔）。T+1 部分成交应看到 `pending_exit keep after partial fill`。趋势仓满 30 日且峰值≥3%、仍站上 EMA60 时应看到 `time_force skip trend`，之后由 `trail_stop` / `weekly_bear` / 破 EMA60 出场；磨人仓满 30 日即使仍站上 EMA60 也应看到 `time_force`（不再有 `time_force grace`）。
+日志确认 `HlBand v1.69 init` 且 `UNIVERSE n=` 与 `book_stocks=` 一致、`chart=` 不在池内（建议指数）、`drive=timer`、`ohlcv_policy= window`、`DIVIDEND= per-stock`、`budget_base= equity`（或 `fixed`）、`cash_ratio= 0.9`、`BOOK_N=` 与名单只数一致后再挂实盘。策略交易下应另有 `panel applied ...` 与 `run_time _universe_on_timer` 行。只开**一个**实例写 `BOOK_FILE`；无信号也要打卡。切 live 后 `state loaded path=` 应为 `hlband_600350_SH.json` 等池内票，**不应**出现时钟指数后缀。10:00 心跳 `work=pending drive=timer`，无全池 `n1d=`；14:56 后每只 `phase=confirm`；15:00 后仍应有定时心跳直到确认结束。实盘买入应看到 `fill ... frac= n_held= vacant= lot= why=split base=`（持股查询失败备用为 `src=local`）；未冻结为 `why=wait`。空池第一笔 `frac=0.50`（equity 且 20 万账户约 9 万；fixed 且 10 万约 4.5 万），第二笔 `frac=0.30`，第三笔 `frac` 仍是空档 0.50/0.30/0.20、`lot` 接近 `cap - book_mv`。满 3 笔 `book_lot_cap`。本轮已加过仓后再出买点应 `scale_once`，无第 3 笔。验收：回测先见 `diag: ok`（主图挂池内一只）；买卖日志为 `@close=`（同日）或残留 `@open=`；买卖闭合、无孤儿仓。第一笔仍为 `pullback_vol`；加仓应为 `pullback_vol` / `plat_break` / `w_macd_golden`（状态行 `scale= True`），成交附近有 `lots now n=2`、`book_frac` 与 `skip sell eval after add fill`。加仓当日状态行 `sellR` 应含 `skip_add_bar`，且不应新挂卖点。本轮已加过仓后再出第一笔时，不应再出现 `BUY add`（可见 `scale_once` 或 `pending_entry cancel scale_once`）。执行日已触发卖点时应看到 `pending_entry cancel scale_sell_block` 且不出现 `BUY add`。只出一笔时应看到 `SELL ... lots=[1]` 且另一笔仍持有。卖出前应有 `SELL lot-can_use`；若 `BUY add` 后同日仍出现 `SELL lots=[2]`，看 `risk=True` 的 WARN（券商成交未必是第二笔）。T+1 部分成交应看到 `pending_exit keep after partial fill`。当前 `TIME_FORCE_BARS=0`，不应再出现 `time_force` / `time_force skip trend`；出场交给 `trail_stop` / `stop_loss` / `weekly_bear` / 破 EMA60（time_force 破线地板在 BARS=0 时一并关掉）。
 
 ### 上线后确认事项（C1–C12）
 

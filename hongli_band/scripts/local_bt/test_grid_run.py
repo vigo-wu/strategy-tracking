@@ -340,7 +340,11 @@ class GridRunApiTest(unittest.TestCase):
         self.assertEqual(int(defaults["VOL_PULLBACK_CONFIRM_DAYS"]), 2)
         self.assertNotIn("STATE_FILE", defaults)
         self.assertAlmostEqual(float(defaults["CHASE_MAX_PCT"]), 0.05)
-        self.assertAlmostEqual(float(defaults["STOP_LOSS"]), 0.08)
+        self.assertAlmostEqual(float(defaults["STOP_LOSS"]), 0.10)
+        self.assertEqual(int(defaults["D_MA_MID"]), 0)
+        self.assertAlmostEqual(float(defaults["MA_TOUCH_TOL"]), 0.015)
+        self.assertEqual(int(defaults["TIME_FORCE_BARS"]), 0)
+        self.assertAlmostEqual(float(defaults["TRAIL_TIERS"][0][0]), 0.04)
 
     def test_parse_fingerprint_trail_tiers_distinguishes_giveback(self) -> None:
         current = [

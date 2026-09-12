@@ -18,6 +18,7 @@ from local_bt_log import (  # noqa: E402
     _year_of,
     parse_local_bt_log,
 )
+from analyze import parse_budget_from_log  # noqa: E402
 
 
 class LocalBtLogTest(unittest.TestCase):
@@ -54,6 +55,15 @@ class LocalBtLogTest(unittest.TestCase):
             self.assertEqual(banner.get("stock"), "600350.SH")
             self.assertEqual(len(trades), 1)
             self.assertEqual(trades[0]["sell_signal"], "trail_stop")
+
+    def test_parse_budget_from_log_defaults_to_trade_budget(self) -> None:
+        self.assertEqual(parse_budget_from_log(None), 100000.0)
+        with tempfile.TemporaryDirectory() as td:
+            missing = Path(td) / "nope.txt"
+            self.assertEqual(parse_budget_from_log(missing), 100000.0)
+            path = Path(td) / "local_bt.txt"
+            path.write_text("HlBand v1.69 init budget= 90000.0 cash_ratio= 0.9\n", encoding="utf-8")
+            self.assertEqual(parse_budget_from_log(path), 90000.0)
 
 
 if __name__ == "__main__":

@@ -1653,7 +1653,7 @@ def mark_add_lots(trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-def parse_budget_from_log(log_path: str | Path | None, default: float = 50000.0) -> float:
+def parse_budget_from_log(log_path: str | Path | None, default: float = 100000.0) -> float:
     if not log_path:
         return float(default)
     p = Path(log_path)
@@ -2416,7 +2416,7 @@ def prepare_detail_raw_display(
 
 def analyze_detail(
     detail_path: str | Path,
-    budget: float = 50000.0,
+    budget: float = 100000.0,
     meta: dict | None = None,
     log_path: str | Path | None = None,
     csv_root: str | Path | None = None,
@@ -2535,7 +2535,7 @@ def trades_to_dataframe(trades: list[dict]) -> pd.DataFrame:
 
 def summarize_detail(
     detail_path: str | Path,
-    budget: float = 50000.0,
+    budget: float = 100000.0,
     stock: str = "",
 ) -> dict[str, Any]:
     """操作明细 → 汇总表一行用的 KPI。"""
@@ -2594,7 +2594,7 @@ def summarize_batch_row(row: dict[str, Any]) -> dict[str, Any]:
     try:
         kpi = summarize_detail(
             detail,
-            budget=float(out.get("budget") or 50000.0),
+            budget=float(out.get("budget") or 100000.0),
             stock=str(out.get("stock") or ""),
         )
         out.update(kpi)

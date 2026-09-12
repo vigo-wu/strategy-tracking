@@ -1116,6 +1116,9 @@ if not _IS_MP_WORKER:
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
+        year_key = ("%s_%s" % (title_prefix or "", detail_path.stem)).replace(" ", "_")[:64] or "an"
+        _render_year_performance_section(trades, budget, key_suffix=year_key)
+
         if ohlc_csv and ohlc_csv.is_file():
             period_label = st.radio(
                 "K线周期",
@@ -1372,8 +1375,10 @@ if not _IS_MP_WORKER:
             st.info("无成交轮次，无法按年汇总。")
             return
         st.caption(
-            "年化盈亏% = 相对期初权益的简单年收益；盈亏按卖出年；开仓按买入年；"
-            "最大回撤/夏普基于该年日度权益阶梯。下方下拉切换年份查看日度权益曲线。"
+            "年化盈亏% = 相对该年期初权益的简单收益（未把不足一年的区间折算成年化）；"
+            "当年盈亏按卖出日计入；开仓按买入年；最大回撤/夏普基于该年日度权益阶梯"
+            "（预算 + 已实现盈亏，与上方总盈亏同一口径）。"
+            "下方下拉切换年份查看日度权益曲线。"
         )
         display = _year_perf_display_df(tbl)
         st.dataframe(display, use_container_width=True, hide_index=True)
@@ -1633,7 +1638,7 @@ if not _IS_MP_WORKER:
 
         sma_path = Path(sma_pack["detail"])
         ema_path = Path(ema_pack["detail"])
-        budget = float(sma_pack.get("budget") or ema_pack.get("budget") or 50000.0)
+        budget = float(sma_pack.get("budget") or ema_pack.get("budget") or 100000.0)
         a_sma = analyze_detail(sma_path, budget=budget)
         a_ema = analyze_detail(ema_path, budget=budget)
         ss, es = a_sma["stats"] or {}, a_ema["stats"] or {}
@@ -1749,7 +1754,7 @@ if not _IS_MP_WORKER:
         detail = pack.get("detail") or ""
         if not detail:
             return {"ok": False}
-        budget = float(pack.get("budget") or 50000.0)
+        budget = float(pack.get("budget") or 100000.0)
         analyzed = analyze_detail(Path(detail), budget=budget)
         stats = analyzed["stats"] or {}
         return {
@@ -1790,7 +1795,7 @@ if not _IS_MP_WORKER:
             return
         _render_analysis(
             Path(pack["detail"]),
-            budget=float(pack.get("budget") or 50000.0),
+            budget=float(pack.get("budget") or 100000.0),
             ohlc_csv=ohlc_ok,
             range_start=start,
             range_end=end,
@@ -1816,7 +1821,7 @@ if not _IS_MP_WORKER:
         if len(divs_ok) >= 2:
             kpis: dict[str, dict] = {}
             series: list[tuple[Any, str, str]] = []
-            budget = 50000.0
+            budget = 100000.0
             for div in divs_ok:
                 pack = _div_pack_for_compare(by_div[div], compare_ma)
                 info = _kpi_from_pack(pack)
@@ -1890,7 +1895,7 @@ if not _IS_MP_WORKER:
             )
             pack = {
                 "detail": r.get("detail") or "",
-                "budget": r.get("budget") or 50000.0,
+                "budget": r.get("budget") or 100000.0,
                 "log": r.get("log") or "",
             }
             ma = normalize_ma_type(r.get("ma_type"))
@@ -2251,11 +2256,11 @@ if not _IS_MP_WORKER:
             ohlc = Path(pair.get("sma_csv") or pair.get("ema_csv") or "")
             sma_pack = {
                 "detail": pair.get("sma_detail") or "",
-                "budget": pair.get("budget") or 50000.0,
+                "budget": pair.get("budget") or 100000.0,
             }
             ema_pack = {
                 "detail": pair.get("ema_detail") or "",
-                "budget": pair.get("budget") or 50000.0,
+                "budget": pair.get("budget") or 100000.0,
             }
             if not sma_pack["detail"] or not ema_pack["detail"]:
                 st.warning("对照两侧明细不齐。")
@@ -2299,7 +2304,7 @@ if not _IS_MP_WORKER:
         ohlc = Path(row["csv"]) if row.get("csv") else None
         _render_analysis(
             Path(row["detail"]),
-            budget=float(row.get("budget") or 50000.0),
+            budget=float(row.get("budget") or 100000.0),
             ohlc_csv=ohlc if ohlc and ohlc.is_file() else None,
             range_start=start_s,
             range_end=end_s,
@@ -3921,7 +3926,7 @@ if not _IS_MP_WORKER:
                 start_s = end_s = ""
                 st.caption("无法推断明细时间范围，将分析全部记录")
 
-            budget = st.number_input("预算（元）", min_value=1000.0, value=50000.0, step=1000.0)
+            budget = st.number_input("预算（元）", min_value=1000.0, value=100000.0, step=1000.0)
             if st.button("加载分析", type="primary"):
                 st.session_state["analyze_only"] = {
                     "detail": str(detail_path),

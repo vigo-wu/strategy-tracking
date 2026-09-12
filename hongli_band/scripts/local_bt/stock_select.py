@@ -266,7 +266,7 @@ def _profit_factor(gross_profit: float, gross_loss: float) -> float | None:
 
 
 def kpi_from_detail(detail: Path, log: Path | None, stock: str) -> dict[str, Any]:
-    budget = parse_budget_from_log(log, default=50000.0) if log else 50000.0
+    budget = parse_budget_from_log(log, default=100000.0) if log else 100000.0
     result = analyze_detail(
         detail,
         budget=budget,
