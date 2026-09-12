@@ -94,7 +94,7 @@ def _update_w_bear_streak(weekly_bear, sig_day, track):
 
 
 def _eval_daily_buy(closes, volumes):
-    """买点：缩量回踩中/慢均线。D_MA_*<=0 关闭该条。"""
+    """买点：缩量回踩中/慢均线。d_ma.mid/slow<=0 关闭该条。"""
     ctx = _build_factor_ctx(closes, volumes, None, None, {}, None)
     detail = dict(ctx["market"].get("daily_detail") or {})
     if not ctx["market"].get("daily_ready"):

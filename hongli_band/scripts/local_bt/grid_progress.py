@@ -588,7 +588,6 @@ def grid_worker_argv(
     workers: int = 0,
     batch_size: int = 0,
     resume: bool = False,
-    include_sma_ema: bool = False,
     script: str | Path | None = None,
 ) -> list[str]:
     py = python_executable()
@@ -608,6 +607,4 @@ def grid_worker_argv(
         return cmd
     if int(batch_size or 0) > 0:
         cmd.extend(["--batch-size", str(int(batch_size))])
-    if include_sma_ema:
-        cmd.append("--include-sma-ema")
     return cmd

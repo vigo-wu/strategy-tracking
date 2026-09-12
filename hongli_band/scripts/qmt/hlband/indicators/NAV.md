@@ -15,8 +15,8 @@
 | [util.py](util.py) | `_last_valid` `_cross_up` `_cross_down` | 否 | 取末值、金叉死叉；给 MACD / 因子用 |
 | [sma.py](sma.py) | `_sma` | 是 | 简单均线；**成交量均量固定走这里** |
 | [ema.py](ema.py) | `_ema` | 是 | 指数均线 |
-| [macd.py](macd.py) | `_calc_macd` | 是 | 只用已拼入的 `_ema`（必须在 ema 之后） |
-| [price_ma.py](price_ma.py) | `_ma_kind` `_price_ma` | 否 | 按 `BOOK_STOCKS[code].ma_type` / `MA_TYPE` 选 SMA 或 EMA |
+| [macd.py](macd.py) | `_calc_macd` | 是 | 只用已拼入的 `_ema`（必须在 ema 之后）；`fast/slow/signal` **必传**，不读 `RECIPE` / `MACD_*` |
+| [price_ma.py](price_ma.py) | `_ma_kind` `_price_ma` | 否 | `_price_ma(closes, n, kind=None)`；`n` 由调用方从 `RECIPE.structure` 传入；`kind` 缺省走 `_ma_kind()`（算法，不是窗） |
 
 本目录**没有** `atr.py`（草图有、现网未用）。需要再加。
 

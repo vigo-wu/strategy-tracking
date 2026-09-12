@@ -43,7 +43,6 @@ from analyze import (  # noqa: E402
     normalize_ma_type,
     parse_budget_from_log,
     pick_div_winner,
-    pick_ma_winner,
     resolve_typed_dir,
     typed_dir_root,
     typed_sibling_dirs,
@@ -393,59 +392,23 @@ def _resolve_stock_ma(
     rec: dict[str, Any],
     years_keep: tuple[str, ...] | list[str] | set[str] | None = None,
 ) -> None:
-    """按成对分年对照选定建议均线，并把 years/recent 换成胜出一侧。
+    """建议均线锁 config / 池内 ma_type；KPI 用无后缀桶，否则用建议均线同名桶。
 
-    years_keep 非空时只在这些年内择优，不回写 by_ma 原始分年 KPI。
+    磁盘上就算还有成对 _SMA/_EMA 分年文件，也不按盈亏择优。
     """
+    suggest = run_default_ma_div(str(rec.get("stock") or ""))[0]
     by_ma = rec.get("by_ma") or {}
-    sma_years = _clip_year_map((by_ma.get("SMA") or {}).get("years"), years_keep)
-    ema_years = _clip_year_map((by_ma.get("EMA") or {}).get("years"), years_keep)
-    plain_years = _clip_year_map((by_ma.get("") or {}).get("years"), years_keep)
-    paired = sorted(set(sma_years) & set(ema_years), key=str)
-
-    rec["ma_type_suggest"] = ""
-    rec["ma_type_why"] = "no_compare"
+    plain = by_ma.get("") or {}
+    named = by_ma.get(suggest) or {}
+    src = plain if (plain.get("years") or plain.get("recent")) else named
+    rec["years"] = _clip_year_map(src.get("years"), years_keep)
+    rec["recent"] = src.get("recent")
+    rec["ma_type_suggest"] = suggest
+    rec["ma_type_why"] = "default"
     rec["ma_pnl_sma"] = None
     rec["ma_pnl_ema"] = None
     rec["ma_pnl_delta"] = None
-    rec["ma_label"] = ""
-
-    if paired:
-        pick = pick_ma_winner(agg_kpi_pnl([sma_years[y] for y in paired]), agg_kpi_pnl([ema_years[y] for y in paired]))
-        winner = str(pick.get("winner") or "")
-        src = by_ma.get(winner) or {}
-        rec["years"] = _clip_year_map(src.get("years"), years_keep)
-        rec["recent"] = src.get("recent") or (by_ma.get("") or {}).get("recent")
-        rec["ma_type_suggest"] = winner
-        rec["ma_type_why"] = pick.get("why") or "compare"
-        rec["ma_pnl_sma"] = pick.get("pnl_sma")
-        rec["ma_pnl_ema"] = pick.get("pnl_ema")
-        rec["ma_pnl_delta"] = pick.get("pnl_delta")
-        rec["ma_label"] = pick.get("label") or ""
-        return
-
-    has_sma = bool(sma_years)
-    has_ema = bool(ema_years)
-    if has_sma and not has_ema:
-        rec["years"] = sma_years
-        rec["recent"] = (by_ma.get("SMA") or {}).get("recent") or (by_ma.get("") or {}).get("recent")
-        rec["ma_type_suggest"] = "SMA"
-        rec["ma_type_why"] = "single_ma"
-        rec["ma_pnl_sma"] = float(agg_kpi_pnl(list(sma_years.values())).get("sum_pnl") or 0)
-        rec["ma_label"] = "SMA"
-        return
-    if has_ema and not has_sma:
-        rec["years"] = ema_years
-        rec["recent"] = (by_ma.get("EMA") or {}).get("recent") or (by_ma.get("") or {}).get("recent")
-        rec["ma_type_suggest"] = "EMA"
-        rec["ma_type_why"] = "single_ma"
-        rec["ma_pnl_ema"] = float(agg_kpi_pnl(list(ema_years.values())).get("sum_pnl") or 0)
-        rec["ma_label"] = "EMA"
-        return
-
-    rec["years"] = plain_years
-    rec["recent"] = (by_ma.get("") or {}).get("recent")
-    rec["ma_type_why"] = "no_compare"
+    rec["ma_label"] = suggest
 
 
 def _copy_div_to_rec(
@@ -518,6 +481,12 @@ def _apply_year_window(rec: dict[str, Any], score_years: tuple[str, ...]) -> dic
         work = dict(rec)
         years = rec.get("years") or {}
         work["years"] = {str(y): years[y] for y in keep if y in years}
+        suggest = run_default_ma_div(str(work.get("stock") or rec.get("stock") or ""))[0]
+        work["ma_type_suggest"] = suggest
+        work["ma_type_why"] = "default"
+        work["ma_pnl_sma"] = None
+        work["ma_pnl_ema"] = None
+        work["ma_pnl_delta"] = None
         return work
     work: dict[str, Any] = {
         "stock": rec.get("stock"),
@@ -533,6 +502,7 @@ def _apply_year_window(rec: dict[str, Any], score_years: tuple[str, ...]) -> dic
         by_div_work: dict[str, Any] = {}
         for div, drec in by_div.items():
             dcopy = {
+                "stock": rec.get("stock"),
                 "by_ma": drec.get("by_ma") or {},
                 "years": {},
                 "recent": drec.get("recent"),
@@ -769,20 +739,10 @@ def _coverage_from_stocks(
     score_years: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     cov: dict[str, Any] = {}
-    n_compare = 0
-    n_no_compare = 0
-    n_single = 0
     n_div_compare = 0
     n_div_single = 0
     n_div_miss = 0
     for rec in stocks.values():
-        why = str(rec.get("ma_type_why") or "")
-        if why in ("compare", "compare_close"):
-            n_compare += 1
-        elif why == "single_ma":
-            n_single += 1
-        else:
-            n_no_compare += 1
         dwhy = str(rec.get("div_type_why") or "")
         if dwhy in ("compare", "compare_close"):
             n_div_compare += 1
@@ -800,9 +760,6 @@ def _coverage_from_stocks(
     cov.update(
         {
             "n_stock": len(stocks),
-            "n_compare": n_compare,
-            "n_no_compare": n_no_compare,
-            "n_single_ma": n_single,
             "n_div_compare": n_div_compare,
             "n_div_single": n_div_single,
             "n_div_no_compare": n_div_miss,
@@ -1032,7 +989,9 @@ def score_universe(
 
     resolved: dict[str, Any] = {}
     for stock, rec in raw_stocks.items():
-        resolved[stock] = _apply_year_window(rec, score_years)
+        row = dict(rec)
+        row.setdefault("stock", stock)
+        resolved[stock] = _apply_year_window(row, score_years)
     if kpi_src == "portfolio" and portfolio_kpi:
         _overlay_portfolio_kpi(resolved, portfolio_kpi, score_years)
     n_detail = (scanned.get("coverage") or {}).get("n_detail")
@@ -1097,7 +1056,7 @@ def score_universe(
         if vol_cut is not None and vol is not None and float(vol) > vol_cut:
             reasons.append("波动过高")
         ma_type = str(rec.get("ma_type_suggest") or "")
-        ma_why = str(rec.get("ma_type_why") or "no_compare")
+        ma_why = str(rec.get("ma_type_why") or "default")
         recent_n = agg.get("recent_n_buy")
         recent_pnl = agg.get("recent_pnl")
         recent_flag = "无近期"
@@ -1115,9 +1074,6 @@ def score_universe(
             "in_book": stock in book,
             "ma_type_suggest": ma_type,
             "ma_type_why": ma_why,
-            "ma_pnl_sma": rec.get("ma_pnl_sma"),
-            "ma_pnl_ema": rec.get("ma_pnl_ema"),
-            "ma_pnl_delta": rec.get("ma_pnl_delta"),
             "div_type_suggest": rec.get("div_type_suggest") or "",
             "div_type_why": rec.get("div_type_why") or "no_compare",
             "n_buy": agg["n_buy"],
@@ -1330,18 +1286,9 @@ def coverage_notes(coverage: dict[str, Any], scanned: dict[str, Any] | None = No
         if int(coverage.get(prev) or 0) and int(coverage.get(last) or 0) < int(0.9 * int(coverage.get(prev) or 0)):
             notes.append("%s 年批明显少于 %s，覆盖不齐。" % (last, prev))
     notes.append(
-        "建议均线/复权按选定年 **%s** 重算（成对年份总盈亏择优）；白名单不覆盖建议。"
+        "建议均线锁 `BOOK_STOCKS` / `MA_TYPE`；建议复权按选定年 **%s** 成对盈亏择优。白名单不覆盖建议。"
         % "、".join(str(y) for y in score_years)
     )
-    n_cmp = int(coverage.get("n_compare") or 0)
-    n_miss = int(coverage.get("n_no_compare") or 0)
-    n_single = int(coverage.get("n_single_ma") or 0)
-    notes.append(
-        "均线对照：成对 **%s** 只 · 单边 %s 只 · 缺对照 %s 只。"
-        % (n_cmp, n_single, n_miss)
-    )
-    if n_cmp == 0:
-        notes.append("没有成对均线对照文件。请先跑「批量 + 按自然年分段 + SMA/EMA 对照」。")
     n_dc = int(coverage.get("n_div_compare") or 0)
     n_ds = int(coverage.get("n_div_single") or 0)
     n_dm = int(coverage.get("n_div_no_compare") or 0)
@@ -1350,9 +1297,7 @@ def coverage_notes(coverage: dict[str, Any], scanned: dict[str, Any] | None = No
         % (n_dc, n_ds, n_dm)
     )
     if n_dc == 0:
-        notes.append(
-            "没有多种复权的分年对照。请先多选复权跑「批量 + 按自然年分段」（建议同时勾 SMA/EMA 对照）。"
-        )
+        notes.append("没有多种复权的分年对照。请先多选复权跑「批量 + 按自然年分段」。")
     notes.append("选股扫描 `report/` 下全部复权子目录，不限于侧栏勾选。")
     notes.append("在全池里取 Top N 有多重选择偏差，不要把得分当分真实夏普。")
     book = (scanned or {}).get("book") or {}
@@ -1372,9 +1317,6 @@ def select_csv_columns(score_years: tuple[str, ...] | None = None) -> list[str]:
         "in_book",
         "ma_type_suggest",
         "ma_type_why",
-        "ma_pnl_sma",
-        "ma_pnl_ema",
-        "ma_pnl_delta",
         "div_type_suggest",
         "div_type_why",
         "n_buy",

@@ -53,6 +53,59 @@ def _factor_params_apply_global(params):
             cur["tiers"] = _factor_tiers_as_lists(cur.get("tiers"))
 
 
+def _structure_int(block, key, default):
+    raw = (block or {}).get(key)
+    try:
+        return int(default if raw is None else raw)
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def _structure_windows():
+    """只读 RECIPE.structure。缺键用数字字面量。"""
+    rec = (globals().get("RECIPE") or {}).get("structure") or {}
+    d_ma = rec.get("d_ma") or {}
+    w_ma = rec.get("w_ma") or {}
+    macd = rec.get("macd") or {}
+    return {
+        "d_ma": {
+            "mid": _structure_int(d_ma, "mid", 20),
+            "slow": _structure_int(d_ma, "slow", 60),
+        },
+        "w_ma": {
+            "fast": _structure_int(w_ma, "fast", 5),
+            "mid": _structure_int(w_ma, "mid", 13),
+            "life": _structure_int(w_ma, "life", 34),
+        },
+        "macd": {
+            "fast": _structure_int(macd, "fast", 12),
+            "slow": _structure_int(macd, "slow", 26),
+            "signal": _structure_int(macd, "signal", 9),
+        },
+    }
+
+
+def _structure_apply_global(params):
+    """只合进 RECIPE.structure，按段再按 key 合并。"""
+    if not isinstance(params, dict):
+        return
+    rec = globals().get("RECIPE")
+    if not isinstance(rec, dict):
+        return
+    st = rec.get("structure")
+    if not isinstance(st, dict):
+        rec["structure"] = {}
+        st = rec["structure"]
+    for fid, incoming in params.items():
+        if not isinstance(incoming, dict):
+            continue
+        cur = st.get(fid)
+        if not isinstance(cur, dict):
+            st[fid] = {}
+            cur = st[fid]
+        cur.update(incoming)
+
+
 def _vol_pullback_confirm_need():
     """最少 1：当天缩量即可；勿用 `x or 2`（0 会被当成缺省翻成 2）。"""
     raw = _factor_param(None, "pullback_vol", "confirm_days")
@@ -74,10 +127,13 @@ def _weekly_market_features(closes_w):
         "hist": None,
         "close": None,
     }
-    ma5 = _price_ma(closes_w, W_MA_FAST)
-    ma10 = _price_ma(closes_w, 13)
-    ma30 = _price_ma(closes_w, W_MA_LIFE)
-    macd = _calc_macd(closes_w)
+    win = _structure_windows()
+    w_ma = win["w_ma"]
+    mc = win["macd"]
+    ma5 = _price_ma(closes_w, w_ma["fast"])
+    ma10 = _price_ma(closes_w, w_ma["mid"])
+    ma30 = _price_ma(closes_w, w_ma["life"])
+    macd = _calc_macd(closes_w, mc["fast"], mc["slow"], mc["signal"])
     if ma5 is None or ma10 is None or ma30 is None or macd is None:
         return detail
     dif, dea, hist = macd
@@ -170,12 +226,13 @@ def _factor_daily_features(closes, volumes):
     }
     if closes is None or volumes is None:
         return False, detail
+    d_ma = _structure_windows()["d_ma"]
     try:
-        mid_n = int(D_MA_MID or 0)
+        mid_n = int(d_ma.get("mid") or 0)
     except (TypeError, ValueError):
         mid_n = 0
     try:
-        slow_n = int(D_MA_SLOW or 0)
+        slow_n = int(d_ma.get("slow") or 0)
     except (TypeError, ValueError):
         slow_n = 0
     detail["mid_n"] = mid_n

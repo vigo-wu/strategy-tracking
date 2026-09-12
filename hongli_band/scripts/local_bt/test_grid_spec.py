@@ -145,14 +145,15 @@ class GridSpecTest(unittest.TestCase):
         self.assertEqual(by["tfb0"]["overrides"]["factor_params"]["time_force"]["bars"], 0)
 
     def test_dma_mid_zero_label(self) -> None:
-        self.assertEqual(family_value_label("D_MA_MID", 0), "日线中均线关闭")
-        self.assertEqual(family_value_label("D_MA_SLOW", 0), "日线慢均线关闭")
+        self.assertEqual(family_value_label("d_ma.mid", 0), "日线中均线关闭")
+        self.assertEqual(family_value_label("d_ma.slow", 0), "日线慢均线关闭")
         defs = dict(DEFAULTS)
-        defs["D_MA_MID"] = 20
-        cells = build_cells({"D_MA_MID": [0]}, defs)
+        defs["d_ma.mid"] = 20
+        cells = build_cells({"d_ma.mid": [0]}, defs)
         by = {c["id"]: c for c in cells}
         self.assertEqual(by["dmm0"]["kind"], "other")
         self.assertEqual(by["dmm0"]["label"], "日线中均线关闭")
+        self.assertEqual(by["dmm0"]["overrides"]["structure"]["d_ma"]["mid"], 0)
 
     def test_trail_tiers_rejects_hi_le_lo(self) -> None:
         bad = [
@@ -397,6 +398,9 @@ class GridSpecTest(unittest.TestCase):
         self.assertNotIn("SCALE_MAX", ids)
         self.assertNotIn("W_MA_MID", ids)
         self.assertNotIn("W_MA_SLOW", ids)
+        self.assertNotIn("D_MA_MID", ids)
+        self.assertIn("d_ma.mid", ids)
+        self.assertIn("w_ma.mid", ids)
         self.assertIn("SCALE_ARM", ids)
         self.assertIn("time_force.bars", ids)
 
@@ -450,6 +454,29 @@ class GridSpecTest(unittest.TestCase):
             )
         self.assertIn("stop_loss.pct", str(ctx.exception))
         self.assertIn("factor_params", str(ctx.exception))
+
+    def test_reject_old_structure_key(self) -> None:
+        with self.assertRaises(GridSpecError) as ctx:
+            reject_retired_min_ret(
+                {
+                    "cells": [
+                        {"id": "dmm15", "overrides": {"D_MA_MID": 15}},
+                    ]
+                }
+            )
+        self.assertIn("D_MA_MID", str(ctx.exception))
+
+    def test_reject_flat_structure_path(self) -> None:
+        with self.assertRaises(GridSpecError) as ctx:
+            reject_retired_min_ret(
+                {
+                    "cells": [
+                        {"id": "dmm15", "overrides": {"d_ma.mid": 15}},
+                    ]
+                }
+            )
+        self.assertIn("d_ma.mid", str(ctx.exception))
+        self.assertIn("structure", str(ctx.exception))
 
 
 if __name__ == "__main__":

@@ -179,32 +179,43 @@ _DELETED_FACTOR_KEYS = frozenset(
         "SCALE_PLAT_MAX_RANGE",
         "SCALE_W_HIST_EXPAND_RATIO",
         "SCALE_PLAT_BREAK_BUF",
+        "D_MA_MID",
+        "D_MA_SLOW",
+        "W_MA_FAST",
+        "W_MA_LIFE",
+        "W_MA_MID",
+        "MACD_FAST",
+        "MACD_SLOW",
+        "MACD_SIGNAL",
     }
 )
 
 
 def apply_config_overrides(ns: dict[str, Any], overrides: Mapping[str, Any] | None) -> None:
-    """合 factor_params 进表；D_MA_* / 资金等仍写 ns。顶层旧键 / 点路径立刻报错。"""
+    """合 factor_params / structure 进表；资金等仍写 ns。顶层旧键 / 点路径立刻报错。"""
     if not overrides:
         return
-    sync = ns.get("_factor_params_apply_global")
+    sync_fp = ns.get("_factor_params_apply_global")
+    sync_st = ns.get("_structure_apply_global")
     for raw_k, val in overrides.items():
         key = str(raw_k)
         if key in _DELETED_FACTOR_KEYS:
             raise ValueError(
-                "已删除的顶层因子键 %s：请写 overrides.factor_params"
-                "（如 {\"stop_loss\": {\"pct\": 0.06}}）"
+                "已删除的顶层键 %s：请写 overrides.factor_params 或 overrides.structure"
                 % key
             )
         if "." in key:
             raise ValueError(
-                "顶层点路径 %s 不会进表：请写 overrides.factor_params"
-                "（如 stop_loss.pct → factor_params.stop_loss.pct）"
+                "顶层点路径 %s 不会进表：请写 overrides.factor_params 或 overrides.structure"
                 % key
             )
         if key == "factor_params":
-            if callable(sync):
-                sync(val)
+            if callable(sync_fp):
+                sync_fp(val)
+            continue
+        if key == "structure":
+            if callable(sync_st):
+                sync_st(val)
             continue
         ns[key] = val
 
@@ -546,16 +557,25 @@ def _patch_fast_ohlcv(ns: dict) -> None:
         return tup
 
     def _get_ohlcv_1d(C, stock):
-        fp = ((ns.get("RECIPE") or {}).get("factor_params") or {})
+        rec = ns.get("RECIPE") or {}
+        fp = rec.get("factor_params") or {}
+        st = rec.get("structure") or {}
         plat = fp.get("plat_break") or {}
         pull = fp.get("pullback_vol") or {}
         dry = fp.get("vol_dry") or {}
+        d_ma = st.get("d_ma") or {}
         try:
             plat_n = int(plat.get("lookback") or 20)
         except (TypeError, ValueError):
             plat_n = 20
-        mid_n = int(ns.get("D_MA_MID") or 0)
-        slow_n = int(ns.get("D_MA_SLOW") or 0)
+        try:
+            mid_n = int(d_ma.get("mid") or 0)
+        except (TypeError, ValueError):
+            mid_n = 0
+        try:
+            slow_n = int(d_ma.get("slow") or 0)
+        except (TypeError, ValueError):
+            slow_n = 0
         try:
             confirm_n = int(pull.get("confirm_days") or 1)
         except (TypeError, ValueError):
@@ -583,11 +603,18 @@ def _patch_fast_ohlcv(ns: dict) -> None:
 
     def _get_ohlcv_1w(C, stock):
         # 55 = 原 W_MA_SLOW 暖机地板，不是均线周期
-        need = max(
-            int(ns.get("W_MA_LIFE") or 0),
-            int(ns.get("MACD_SLOW") or 0) + int(ns.get("MACD_SIGNAL") or 0),
-            55,
-        ) + 5
+        st = ((ns.get("RECIPE") or {}).get("structure") or {})
+        w_ma = st.get("w_ma") or {}
+        macd = st.get("macd") or {}
+        try:
+            life = int(w_ma.get("life") or 0)
+        except (TypeError, ValueError):
+            life = 0
+        try:
+            macd_need = int(macd.get("slow") or 0) + int(macd.get("signal") or 0)
+        except (TypeError, ValueError):
+            macd_need = 0
+        need = max(life, macd_need, 55) + 5
         return _ohlcv_from_ctx(
             C, "1w", int(ns.get("WEEKLY_OHLC_COUNT") or 120), need, "w1", stock=stock
         )
@@ -1060,20 +1087,14 @@ def _expand_ma_payloads(
     payloads: list[dict[str, Any]],
     *,
     ma_type: str = "",
-    compare_ma: bool = False,
 ) -> list[dict[str, Any]]:
-    kinds: list[str]
-    if compare_ma:
-        kinds = list(MA_TYPES)
-    else:
-        ma = normalize_ma_type(ma_type)
-        kinds = [ma] if ma else [""]
+    ma = normalize_ma_type(ma_type)
+    kind = ma if ma else ""
     out: list[dict[str, Any]] = []
     for p in payloads:
-        for k in kinds:
-            q = dict(p)
-            q["ma_type"] = k
-            out.append(q)
+        q = dict(p)
+        q["ma_type"] = kind
+        out.append(q)
     return out
 
 
@@ -1088,7 +1109,6 @@ def run_batch(
     split: str = "range",
     metas: Sequence[dict[str, Any]] | None = None,
     ma_type: str = "",
-    compare_ma: bool = False,
     dividend_type: str = "",
 ) -> list[dict[str, Any]]:
     """独立回测多标的；单只失败不中断。workers<=0 为自动。split=year 时按自然年分段。"""
@@ -1103,7 +1123,6 @@ def run_batch(
         split=split,
         metas=metas,
         ma_type=ma_type,
-        compare_ma=compare_ma,
         dividend_type=dividend_type,
     )
     return _run_payloads(payloads, dest, on_progress, workers)
@@ -1118,7 +1137,6 @@ def build_batch_payloads(
     split: str = "range",
     metas: Sequence[dict[str, Any]] | None = None,
     ma_type: str = "",
-    compare_ma: bool = False,
     dividend_type: str = "",
 ) -> list[dict[str, Any]]:
     dest = Path(out_dir) if out_dir else THEME / "report"
@@ -1169,7 +1187,7 @@ def build_batch_payloads(
             }
             for j in jobs
         ]
-        return _expand_ma_payloads(payloads, ma_type=ma_type, compare_ma=compare_ma)
+        return _expand_ma_payloads(payloads, ma_type=ma_type)
 
     payloads = [
         {
@@ -1186,22 +1204,18 @@ def build_batch_payloads(
         }
         for p in paths
     ]
-    return _expand_ma_payloads(payloads, ma_type=ma_type, compare_ma=compare_ma)
+    return _expand_ma_payloads(payloads, ma_type=ma_type)
 
 
 def write_typed_summaries(
     rows: list[dict[str, Any]],
     *,
     split: str = "range",
-    compare_ma: bool = False,
 ) -> list[Path]:
-    """按 out_dir / 复权拆开写 batch summary 与对照 CSV。"""
+    """按 out_dir / 复权拆开写 batch summary。"""
     from analyze import (  # noqa: WPS433
-        pair_ma_batch_rows,
         write_batch_summary_csv,
         write_batch_year_summary_csv,
-        write_ma_compare_csv,
-        write_ma_compare_year_csv,
     )
 
     by_dest: dict[str, list[dict[str, Any]]] = {}
@@ -1225,14 +1239,7 @@ def write_typed_summaries(
         out_dir.mkdir(parents=True, exist_ok=True)
         summary = write_batch_summary_csv(chunk, out_dir / "local_bt_batch_summary.csv")
         written.append(summary)
-        if compare_ma:
-            pairs = pair_ma_batch_rows(chunk)
-            written.append(write_ma_compare_csv(pairs, out_dir / "local_bt_ma_compare.csv"))
-            if mode == "year":
-                written.append(
-                    write_ma_compare_year_csv(pairs, out_dir / "local_bt_ma_compare_year.csv")
-                )
-        elif mode == "year":
+        if mode == "year":
             written.append(
                 write_batch_year_summary_csv(chunk, out_dir / "local_bt_batch_year_summary.csv")
             )
@@ -1313,11 +1320,6 @@ def main(argv: list[str] | None = None) -> None:
         metavar="SMA|EMA",
         help="强制价格均线 SMA/EMA（盖过 BOOK_STOCKS）；缺省用 config",
     )
-    ap.add_argument(
-        "--compare-ma",
-        action="store_true",
-        help="同一任务各跑 SMA 与 EMA，写 local_bt_ma_compare.csv",
-    )
     args = ap.parse_args(argv)
     from analyze import (  # noqa: WPS433
         DEFAULT_CSV_ROOT,
@@ -1326,14 +1328,11 @@ def main(argv: list[str] | None = None) -> None:
         csv_source_dividend_type,
         daily_csv_for_stock,
         daily_csvs_by_stock,
-        pair_ma_batch_rows,
-        parse_budget_from_log,
         parse_dividend_types,
         resolve_typed_dir,
         summarize_batch_row,
         typed_dir_root,
         uses_pit_front,
-        write_ma_compare_csv,
     )
 
     quiet = not bool(args.verbose)
@@ -1341,7 +1340,6 @@ def main(argv: list[str] | None = None) -> None:
     ma_type = normalize_ma_type(raw_ma)
     if raw_ma and not ma_type:
         raise SystemExit("--ma-type must be SMA or EMA")
-    compare_ma = bool(args.compare_ma)
     div_raw = str(args.dividend_type or "").strip()
     divs = parse_dividend_types(div_raw)
     if div_raw:
@@ -1392,7 +1390,6 @@ def main(argv: list[str] | None = None) -> None:
                     split=args.split,
                     metas=metas,
                     ma_type=ma_type,
-                    compare_ma=compare_ma,
                     dividend_type=div,
                 )
             )
@@ -1404,7 +1401,7 @@ def main(argv: list[str] | None = None) -> None:
 
         raw = _run_payloads(all_payloads, Path(out_root), _prog, args.workers)
         rows = [summarize_batch_row(r) for r in raw]
-        for p in write_typed_summaries(rows, split=args.split, compare_ma=compare_ma):
+        for p in write_typed_summaries(rows, split=args.split):
             print("wrote", p)
         for r in rows:
             print(
@@ -1447,57 +1444,20 @@ def main(argv: list[str] | None = None) -> None:
 
             load_divid_factors_json(src_root, stock or peek_daily_csv_meta(csv_one).get("stock"))
         out_dir = str(resolve_typed_dir(out_root, div))
-        if compare_ma:
-            rows = []
-            store = get_market_store(csv_one, stock=stock or args.stock, weekly_csv=args.weekly_csv or None)
-            for kind in MA_TYPES:
-                log_path = run_backtest(
-                    csv_one,
-                    start=args.start,
-                    end=args.end,
-                    stock=stock or args.stock,
-                    out_dir=out_dir,
-                    log_name="",
-                    weekly_csv=args.weekly_csv or None,
-                    quiet=quiet,
-                    ma_type=kind,
-                    store=store,
-                    dividend_type=div,
-                    csv_root=src_root,
-                )
-                last_log = log_path
-                last_out = out_dir
-                row = {
-                    "stock": stock or Path(csv_one).stem,
-                    "year": "",
-                    "ma_type": kind,
-                    "ok": True,
-                    "log": str(log_path),
-                    "detail": str(trades_csv_path(log_path)),
-                    "csv": str(csv_one),
-                    "dividend_type": div,
-                    "out_dir": out_dir,
-                }
-                row["budget"] = parse_budget_from_log(log_path)
-                rows.append(summarize_batch_row(row))
-            pairs = pair_ma_batch_rows(rows)
-            cmp_path = write_ma_compare_csv(pairs, Path(out_dir) / "local_bt_ma_compare.csv")
-            print("wrote ma compare", cmp_path)
-        else:
-            last_log = run_backtest(
-                csv_one,
-                start=args.start,
-                end=args.end,
-                stock=stock or args.stock,
-                out_dir=out_dir,
-                log_name=args.log_name if len(divs) == 1 else "",
-                weekly_csv=args.weekly_csv or None,
-                quiet=quiet,
-                ma_type=ma_type,
-                dividend_type=div,
-                csv_root=src_root,
-            )
-            last_out = out_dir
+        last_log = run_backtest(
+            csv_one,
+            start=args.start,
+            end=args.end,
+            stock=stock or args.stock,
+            out_dir=out_dir,
+            log_name=args.log_name if len(divs) == 1 else "",
+            weekly_csv=args.weekly_csv or None,
+            quiet=quiet,
+            ma_type=ma_type,
+            dividend_type=div,
+            csv_root=src_root,
+        )
+        last_out = out_dir
     if args.report and last_log and last_out:
         _run_report(Path(last_log), Path(last_out))
 

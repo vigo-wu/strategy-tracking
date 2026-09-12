@@ -1,0 +1,38 @@
+---
+description: 改 HlBand 契约（RECIPE / 覆盖形态 / 读窗）时同一回合同步现网文档，禁止旧全局名残留
+alwaysApply: true
+---
+
+# HlBand 契约改完必须同步文档
+
+改 `hongli_band` 的**参数真源、覆盖形态、读窗/读阈值 API、买卖语义**时，**同一回合**改现网文档。不要等用户再说「补文档」。只改注释或 `report/` 档案则不必。
+
+## 触发（任一即做）
+
+- `config.py` 的 `RECIPE` / `PANEL_BINDS` / 留下的全局（`MA_TYPE`、`SCALE_*`、资金）
+- `_factor_param` / `_structure_windows` / `_structure_apply_global` / `_factor_params_apply_global`
+- 网格轴 id、`overrides.factor_params` / `overrides.structure`、顶层旧键硬切
+- `recipe=` 指纹 payload、init 日志字段（`dMA=` / `stop=`）
+- 叶子阈值从哪读、指标函数签名（如 `_calc_macd` 必传窗）
+
+## 改哪里（只改现网，名与代码一致）
+
+| 变更 | 必改 |
+| :--- | :--- |
+| 因子阈值 / 四槽 AST | `docs/架构重构/Recipe分类.md` §8、`factors/NAV.md`、`factors/lib/NAV.md` |
+| 均线/MACD 窗 | 同上 + `indicators/NAV.md` + `model.md` 参数表 |
+| 分层契约 / 覆盖硬切 | `docs/架构重构/架构.md` |
+| 用户可见周期/默认值 | `hongli_band/model.md` |
+| 网格轴 / overrides 形态 | `.cursor/skills/qmt-local-bt-grid/SKILL.md` 与 `reference-contract.md` |
+
+写现行键：`d_ma.mid`、`stop_loss.pct`、`overrides.structure`。禁止把已删名写成真源（`D_MA_MID`、`STOP_LOSS`），除非标明「已删、顶层写入即报错」。
+
+## 不要改
+
+`.cursor/plans/`、`optimize/` 方案笔记、`docs/归档/`、`report/grid/` 历史档案。
+
+## 收工
+
+1. 文档数字与 `config.py` 字面量一致
+2. `rg` 现网 md：不应再把已删全局当现行配置（`model.md` / `架构.md` / `Recipe分类.md` / 三个 `NAV.md` / 网格 skill）
+3. 不单独为「同步文档」deploy

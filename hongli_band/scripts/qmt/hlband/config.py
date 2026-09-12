@@ -45,25 +45,9 @@ TRADE_BUDGET = 100000.0
 # 价格均线缺省：EMA 或 SMA（大小写不敏感）。BOOK_STOCKS[code].ma_type 优先；
 # 缺省/非法回落本常量。只作用于周/日价格均线；成交量均量始终 SMA；MACD 仍用 EMA。
 MA_TYPE = "EMA"
-# 周线均线：快/生命线（斐波那契 5/34）；算法见标的 ma_type / MA_TYPE
-#   MA5 vs MA13 + MACD → 多头判定（仅日志，中线周期写死 13；开仓不强制 weekly_bull）
-#   MA34 → 生命线（收盘跌破即周线空，强制清仓）；乖离/斜率过滤也用它
-# 周线取数 need 另钳原 MA55 暖机地板（见 market._ohlcv_need_1w）
-W_MA_FAST = 5
-W_MA_LIFE = 34
-# 周线 MACD 参数（DIF/DEA/柱）；多头要求 DIF>0 且柱>0；死叉且双线在零轴下 → 空
-MACD_FAST = 12
-MACD_SLOW = 26
-MACD_SIGNAL = 9
-
-# ---- 日线买卖（均线周期是 structure，阈值在 RECIPE.factor_params）----
-# 日线均线（算法见标的 ma_type / MA_TYPE）：中线→回踩/无量阴跌；慢线→回踩支撑 + 时间成本地板
-#   <=0 关闭该条（与 time_force.bars 相同约定）
-#   关中线：回踩只看慢线（若开着）；vol_dry 关掉
-#   关慢线：回踩只看中线；time_force 破慢线地板关掉（bars 仍独立）
-#   两条都关：无 pullback_vol 新开；加仓仍可走 plat_break / w_macd_golden
-D_MA_MID = 20
-D_MA_SLOW = 60
+# 周/日均线周期与 MACD 窗在 RECIPE.structure（字面量）。
+# 日线：中线→回踩/无量阴跌；慢线→回踩支撑 + 时间成本地板。<=0 关该条。
+# 周线：快/生命线（5/34）；mid=13 仅日志多头。取数 need 另钳原 MA55 暖机地板。
 
 # 盈利后加仓门槛（仓位层，不进 factor_params）：
 #   峰值浮盈 >= SCALE_ARM，且该笔已持仓 >= SCALE_ARM_BARS 日
@@ -79,9 +63,8 @@ SCALE_ARM_BARS = 8
 SCALE_W_HIST_MIN = -0.01
 SCALE_LOTS = True
 
-# 默认 Recipe：四槽布尔式。数字真源是 factor_params 字面量。
-# D_MA_* / W_MA_* / MACD_* 是 structure。SCALE_ARM 等仓位门槛不进表。
-# scale_out 恒 false：减仓未启用。
+# 默认 Recipe：四槽布尔式。阈值真源 factor_params；均线/MACD 窗真源 structure。
+# SCALE_ARM 等仓位门槛不进表。scale_out 恒 false：减仓未启用。
 RECIPE = {
     "entry": [
         "and",
@@ -150,6 +133,14 @@ RECIPE = {
         },
         # time_force：持仓 > bars 后评估；<=0 关整条
         "time_force": {"bars": 30},
+    },
+    "structure": {
+        # 日线中/慢均线；<=0 关该条
+        "d_ma": {"mid": 20, "slow": 60},
+        # 周线快/中/生命线；mid 仅日志 weekly_bull
+        "w_ma": {"fast": 5, "mid": 13, "life": 34},
+        # MACD DIF/DEA/柱
+        "macd": {"fast": 12, "slow": 26, "signal": 9},
     },
 }
 

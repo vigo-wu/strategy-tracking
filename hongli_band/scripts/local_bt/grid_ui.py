@@ -201,7 +201,6 @@ def _ensure_state() -> None:
     ss.setdefault("grid_sweep", "")
     ss.setdefault("grid_compare_div", DEFAULT_DIVIDEND_TYPE)
     ss.setdefault("grid_workers", 0)
-    ss.setdefault("grid_sma_ema", False)
     for key, default in YEAR_WINDOW_DEFAULTS.items():
         ss.setdefault("grid_%s" % key, int(default))
     if "grid_param_sel" not in ss:
@@ -368,7 +367,6 @@ def render_grid_sidebar() -> None:
     if st.session_state.get("grid_asset_split"):
         st.caption(
             "主样本=csv/none 抽取名单（调参∪盲测）；均线/复权锁 compare_div。"
-            "开 SMA/EMA 对照 jobs 约 ×3。"
         )
     else:
         st.caption("主样本=跟踪池 BOOK_STOCKS（config 锁定均线/复权），不可勾选。")
@@ -578,7 +576,6 @@ def render_grid_sidebar() -> None:
         except ValueError as e:
             st.error(str(e))
 
-    st.checkbox("额外全 SMA / EMA 对照", key="grid_sma_ema", disabled=busy, persist_state="session")
     st.number_input(
         "并行进程数（0=自动=min(walk 数, CPU)；格间与格内共用）",
         min_value=0,
@@ -599,8 +596,6 @@ def render_grid_sidebar() -> None:
     )
     n_preview = len(st.session_state.get("grid_cells") or [])
     jobs_per = 2 if st.session_state.get("grid_asset_split") else 1
-    if st.session_state.get("grid_sma_ema"):
-        jobs_per *= 3
     n_walks = max(0, n_preview * jobs_per)
     pool_n = resolve_pool_workers(int(st.session_state.get("grid_workers") or 0), n_walks)
     bs = int(st.session_state.get("grid_batch_size") or 10)
@@ -1166,10 +1161,7 @@ def _handle_actions(defaults: dict[str, Any]) -> None:
             st.session_state["grid_holdout_stocks"] = list(drawn.get("holdout_stocks") or [])
             st.session_state["grid_eligible_n"] = int(drawn.get("eligible_n") or 0)
     try:
-        assemble_jobs(
-            spec,
-            include_sma_ema=bool(st.session_state.get("grid_sma_ema")),
-        )
+        assemble_jobs(spec)
     except GridError as e:
         st.error(str(e))
         st.session_state.pop("grid_action", None)
@@ -1196,7 +1188,6 @@ def _spawn_grid_worker(
         workers=int(st.session_state.get("grid_workers") or 0),
         batch_size=int(st.session_state.get("grid_batch_size") or 10),
         resume=bool(resume),
-        include_sma_ema=bool(st.session_state.get("grid_sma_ema")),
     )
     log_path = dest / "worker.log"
     log_f = open(log_path, "ab")

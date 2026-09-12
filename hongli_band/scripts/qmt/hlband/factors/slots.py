@@ -1,17 +1,30 @@
 # === hlband/factors/slots.py ===
-_RECIPE_THRESHOLD_KEYS = (
-    "D_MA_MID",
-    "D_MA_SLOW",
-    "W_MA_FAST",
-    "W_MA_LIFE",
-    "MACD_FAST",
-    "MACD_SLOW",
-    "MACD_SIGNAL",
-)
+def _copy_nested_table(src):
+    out = {}
+    for fid, block in (src or {}).items():
+        if isinstance(block, dict):
+            out[str(fid)] = dict(block)
+        else:
+            out[str(fid)] = block
+    return out
 
 
-def _fold_factor_params_for_fingerprint(fp_src, overrides, param_keys=None):
-    """深合并 overrides.factor_params；袋里只留 D_MA_* / W_MA_* / MACD_*。"""
+def _merge_nested_table(dst, incoming):
+    if not isinstance(incoming, dict):
+        return dst
+    for fid, block in incoming.items():
+        if not isinstance(block, dict):
+            continue
+        cur = dst.get(str(fid))
+        if not isinstance(cur, dict):
+            cur = {}
+            dst[str(fid)] = cur
+        cur.update(block)
+    return dst
+
+
+def _fold_tables_for_fingerprint(fp_src, st_src, overrides):
+    """深合并 overrides.factor_params / structure。overrides 袋保持空（apply 后再算指纹）。"""
     fp = {}
     for fid, block in (fp_src or {}).items():
         if isinstance(block, dict):
@@ -21,8 +34,7 @@ def _fold_factor_params_for_fingerprint(fp_src, overrides, param_keys=None):
             fp[str(fid)] = copied
         else:
             fp[str(fid)] = block
-    leftover = {}
-    allow = set(_RECIPE_THRESHOLD_KEYS)
+    st = _copy_nested_table(st_src)
     ov = dict(overrides or {})
     incoming = ov.get("factor_params")
     if isinstance(incoming, dict):
@@ -36,25 +48,22 @@ def _fold_factor_params_for_fingerprint(fp_src, overrides, param_keys=None):
             cur.update(block)
             if str(fid) == "trail_stop" and "tiers" in cur:
                 cur["tiers"] = _factor_tiers_as_lists(cur.get("tiers"))
-    for k in sorted(ov):
-        ks = str(k)
-        if ks == "factor_params":
-            continue
-        if ks in allow:
-            leftover[ks] = ov[k]
-    return fp, leftover
+    _merge_nested_table(st, ov.get("structure") if isinstance(ov.get("structure"), dict) else {})
+    leftover = {}
+    return fp, st, leftover
 
 
 def _recipe_fingerprint(overrides=None, recipe=None):
-    """表达式 + 折进表的阈值；不扫全因子开关。"""
+    """表达式 + 折进表的阈值 + structure；不扫全因子开关。"""
     rec = recipe if recipe is not None else (globals().get("RECIPE") or {})
-    fp, leftover = _fold_factor_params_for_fingerprint(
-        rec.get("factor_params") or {}, overrides
+    fp, st, leftover = _fold_tables_for_fingerprint(
+        rec.get("factor_params") or {}, rec.get("structure") or {}, overrides
     )
     payload = {
         "entry": rec.get("entry"),
         "exit": rec.get("exit"),
         "factor_params": fp,
+        "structure": st,
         "overrides": leftover,
         "scale_in": rec.get("scale_in"),
         "scale_out": rec.get("scale_out"),

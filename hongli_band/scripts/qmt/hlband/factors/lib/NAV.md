@@ -11,18 +11,18 @@
 
 | id | 文件 | 现逻辑 | 主要读 | 阈值（`factor_params`） |
 | :--- | :--- | :--- | :--- | :--- |
-| `pullback_vol` | [pullback_vol.py](pullback_vol.py) | 贴中/慢均线 + 连续缩量 | 日线价量 | `pullback_vol.*`；中/慢线周期仍是 `D_MA_*` |
+| `pullback_vol` | [pullback_vol.py](pullback_vol.py) | 贴中/慢均线 + 连续缩量 | 日线价量 | `pullback_vol.*`；中/慢线周期是 `structure.d_ma.*` |
 | `chase` | [chase.py](chase.py) | 当日涨幅过大 | 日线收盘 | `chase.max_pct` |
-| `vol_dry` | [vol_dry.py](vol_dry.py) | 跌破中线且无量 | 日线价量 | `vol_dry.ratio` / `n`；中线周期仍是 `D_MA_MID` |
+| `vol_dry` | [vol_dry.py](vol_dry.py) | 跌破中线且无量 | 日线价量 | `vol_dry.ratio` / `n`；中线周期是 `structure.d_ma.mid` |
 | `w_bias` | [w_bias.py](w_bias.py) | 周线高位乖离 | `w_detail` | `w_bias.hard` |
 | `w_slope` | [w_slope.py](w_slope.py) | 低位生命线未连升 | `w_detail` | `w_slope.low` / `slope_weeks` |
-| `weekly_bear` | [weekly_bear.py](weekly_bear.py) | **当天空头**（破生命线 / 零轴下死叉） | `w_detail` | 无叶子阈值；周期在 structure |
+| `weekly_bear` | [weekly_bear.py](weekly_bear.py) | **当天空头**（破生命线 / 零轴下死叉） | `w_detail` | 无叶子阈值；周期在 `RECIPE.structure` |
 | `weekly_bear_confirm` | [weekly_bear_confirm.py](weekly_bear_confirm.py) | **确认清仓**：streak ≥ N | `state.w_bear_streak` | `weekly_bear_confirm.days` |
 | `plat_break` | [plat_break.py](plat_break.py) | 日线收盘破窄幅平台 | 高低收 | `plat_break.lookback` / `max_range` / `break_buf` |
 | `w_macd_golden` | [w_macd_golden.py](w_macd_golden.py) | 近两周金叉且红柱放大 | `w_detail` | `w_macd_golden.hist_expand` |
 | `stop_loss` | [stop_loss.py](stop_loss.py) | 收盘相对成本 | `state.lot` / `cost` | `stop_loss.pct` |
 | `trail_stop` | [trail_stop.py](trail_stop.py) | 阶梯回撤 / 利润底 | `hold_peak` | `trail_stop.tiers` |
-| `time_force` | [time_force.py](time_force.py) | 持仓日 + 慢线地板 + 武装让路 | `hold_bars` / peak | `time_force.bars`；慢线周期仍是 `D_MA_SLOW` |
+| `time_force` | [time_force.py](time_force.py) | 持仓日 + 慢线地板 + 武装让路 | `hold_bars` / peak | `time_force.bars`；慢线周期是 `structure.d_ma.slow` |
 
 叶子 id 用 `chase`；日志码 `chase_skip` 由 `slots` / strategy 映射（`vol_dry`→`vol_dry_skip`，`w_bias`→`w_bias_skip`，`w_slope`→`w_slope_skip`）。确认清仓对外 reason 仍是 `weekly_bear`。
 

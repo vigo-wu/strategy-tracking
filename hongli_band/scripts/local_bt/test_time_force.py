@@ -45,7 +45,6 @@ def _load_tf_ns(**overrides):
         "STRATEGY_NAME": "HlBand",
         "MA_TYPE": "SMA",
         "BOOK_STOCKS": {},
-        "D_MA_SLOW": 60,
         "_save_state": lambda: logs.append("save"),
         "_event_log": lambda event, **fields: logs.append((event, fields)),
         "_pos_cost_price": lambda: 100.0,
@@ -53,7 +52,12 @@ def _load_tf_ns(**overrides):
             "factor_params": {
                 "time_force": {"bars": 30},
                 "trail_stop": {"tiers": [list(row) for row in TIERS]},
-            }
+            },
+            "structure": {
+                "d_ma": {"mid": 20, "slow": 60},
+                "w_ma": {"fast": 5, "mid": 13, "life": 34},
+                "macd": {"fast": 12, "slow": 26, "signal": 9},
+            },
         },
     }
     ns.update(overrides)
@@ -125,7 +129,8 @@ class TimeForceHitTest(unittest.TestCase):
         ns0 = _load_tf_ns()
         ns0["RECIPE"]["factor_params"]["time_force"]["bars"] = 0
         self.assertFalse(ns0["_time_force_hit"](9.5, _closes(), 99, lot=_lot()))
-        ns_s = _load_tf_ns(D_MA_SLOW=0)
+        ns_s = _load_tf_ns()
+        ns_s["RECIPE"]["structure"]["d_ma"]["slow"] = 0
         self.assertFalse(ns_s["_time_force_hit"](9.5, _closes(), 99, lot=_lot()))
 
 

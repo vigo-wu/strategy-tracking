@@ -1,7 +1,7 @@
 # 红利板块波段策略：周线定方向，日线找买卖点
 
 **主题目录**：`hongli_band/`｜**版本**：v1.68｜**形态**：单仓骨架 / 分笔多仓｜**运行**：国金 QMT 终端模型（见 §5）；本地 CSV 回放（见 §6）  
-**参数默认值**：`hongli_band/scripts/qmt/hlband/config.py`（文档以该文件为准）。因子数字真源是 `RECIPE.factor_params`。实盘在「模型交易 → 新建/编辑策略交易」面板只覆盖开关 / 资金基数 / 固定金额 / 可部署比例 / 加仓开关（`hlband/panel.xml`）；编辑器回测无注入时用 config。买点窗口、时间成本、加仓细节、`SCALE_LOTS`、阶梯止盈 `trail_stop.tiers`、均线周期、`BOOK_STOCKS` 子配置 / `MA_TYPE`、路径仍只在 config。
+**参数默认值**：`hongli_band/scripts/qmt/hlband/config.py`（文档以该文件为准）。因子数字真源是 `RECIPE.factor_params`；均线/MACD 窗真源是 `RECIPE.structure`。实盘在「模型交易 → 新建/编辑策略交易」面板只覆盖开关 / 资金基数 / 固定金额 / 可部署比例 / 加仓开关（`hlband/panel.xml`）；编辑器回测无注入时用 config。买点窗口、时间成本、加仓细节、`SCALE_LOTS`、阶梯止盈 `trail_stop.tiers`、结构窗、`BOOK_STOCKS` 子配置 / `MA_TYPE`、路径仍只在 config（因子阈值和结构窗不上屏）。
 
 ---
 
@@ -20,7 +20,7 @@
 
 ## 一、周线过滤
 
-周线均线为斐波那契 **MA5 / MA13（日志多头，周期写死）/ MA34（生命线 `W_MA_LIFE`）**；周线取数 need 另钳原 MA55 暖机地板。价格均线算法优先取 `BOOK_STOCKS[code].ma_type`，缺省回落全局 `MA_TYPE`（`EMA` 或 `SMA`，默认 EMA）；成交量均量始终 SMA。文档与日志里的 `w_ma30` 字段实际是生命线 MA34。实盘与回测都只用**上一根已收盘周 K**（丢掉今天所在自然周，周五尾盘也看上周），对齐 QMT 回测 0000 原生 `1w`。
+周线均线为斐波那契 **MA5 / MA13 / MA34**（`RECIPE.structure.w_ma` 的 `fast` / `mid` / `life`，当前 5 / 13 / 34；`mid` 只给日志多头 `weekly_bull`）。周线取数 need 另钳原 MA55 暖机地板。价格均线**算法**优先取 `BOOK_STOCKS[code].ma_type`，缺省回落全局 `MA_TYPE`（`EMA` 或 `SMA`，默认 EMA）；成交量均量始终 SMA。文档与日志里的 `w_ma30` 字段实际是生命线 MA34。实盘与回测都只用**上一根已收盘周 K**（丢掉今天所在自然周，周五尾盘也看上周），对齐 QMT 回测 0000 原生 `1w`。
 
 1. `(MA5_W - MA34_W) / MA34_W >= w_bias.hard`（当前 `0.08`）→ 禁开（`w_bias_skip`）。
 2. **低位斜率**：当周线乖离 `< w_slope.low`（当前 `0.02`）时，要求 **MA34 连续 `w_slope.slope_weeks` 周向上**（当前 `2`），否则禁开（`w_slope_skip`）；执行日也会取消 pending。
@@ -184,13 +184,14 @@
 | `BOOK_LOT_MAX` | `3` | 全池同时最多 3 笔（仅 config） |
 | `LOT_OPEN_FRAC` | `0.50` | 开仓：大仓空则 50%；大仓已在且非最后一槽则 30%（仅 config） |
 | `LOT_ADD_FRAC` | `0.30` | 第二笔 30%；全池最后一槽不锁此值，改吃剩余约 20% cap（仅 config） |
-| `MA_TYPE` | `"EMA"` | 价格均线缺省：`EMA`/`SMA`；`BOOK_STOCKS[code].ma_type` 优先（仅 config；量均始终 SMA，MACD 仍 EMA） |
-| `W_MA_FAST/LIFE` | `5` / `34` | 周线快线/生命线；日志多头中线写死 13（仅 config） |
+| `MA_TYPE` | `"EMA"` | 价格均线**算法**缺省：`EMA`/`SMA`；`BOOK_STOCKS[code].ma_type` 优先（仅 config；不是窗。量均始终 SMA，MACD 仍 EMA） |
+| `d_ma.mid` / `d_ma.slow` | `20` / `60` | 日线中/慢均线（`RECIPE.structure`）；`<=0` 关该条（关中线同时关无量阴跌禁开；关慢线则 time_force 破线地板关掉） |
+| `w_ma.fast` / `w_ma.mid` / `w_ma.life` | `5` / `13` / `34` | 周线快/中/生命线（`RECIPE.structure`）；`mid` 仅日志多头 |
+| `macd.fast` / `macd.slow` / `macd.signal` | `12` / `26` / `9` | 周线 MACD 三窗（`RECIPE.structure`） |
 | `w_bias.hard` | `0.08` | 周线高位乖离禁开（相对 MA34；`RECIPE.factor_params`） |
 | `w_slope.low` | `0.02` | 低位区阈值（配合斜率；`factor_params`） |
 | `w_slope.slope_weeks` | `2` | 低位区生命线 MA34 连续向上周数（`factor_params`） |
 | `weekly_bear_confirm.days` | `2` | 周线空头清仓须连续信号日数（`factor_params`） |
-| `D_MA_MID/SLOW` | `20` / `60` | 日线中/慢均线；`<=0` 关闭该条（关中线同时关无量阴跌禁开；关慢线则 time_force 破线地板关掉；仅 config） |
 | `pullback_vol.tol` | `0.025` | 回踩均线容差（`factor_params`） |
 | `pullback_vol.vol_n` / `ratio` | `10` / `0.9` | 买点均量窗口与缩量比例（`factor_params`） |
 | `pullback_vol.confirm_days` | `2` | 缩量连续确认日；`<=0`/`1`=当天即可（`factor_params`） |
@@ -242,4 +243,4 @@
 
 不经过国金编辑器，用 KlineDump 日线回放同一套拼接脚本。行情在 `tools/csv/<复权>/`，产物在 `hongli_band/report/<复权>/`。**`front`/`front_ratio` 任务读 `csv/none` + `csv/divid_factors/*.json` 做时点前复权（PIT）**（`mode=diff` / `mode=ratio`），报告目录名仍为逻辑复权；日志指纹含 `pit=1 mode=…`。缺 none CSV 或因子 JSON 会硬失败——须先跑 KlineDump（`DUMP_STOCKS` 覆盖要测的票，`DIVIDEND_TYPES` 含 `none`，`DUMP_DIVID_FACTORS=True`）。启动：`python hongli_band/local_bt_ui.py`。
 
-目录、复权多选、按年批量、SMA/EMA 对照、选股择优见 **[`local_bt.md`](./local_bt.md)**。买卖规则仍以本文 §1–§4 与 `config.py` 为准。
+目录、复权多选、按年批量、选股择优见 **[`local_bt.md`](./local_bt.md)**。买卖规则仍以本文 §1–§4 与 `config.py` 为准。

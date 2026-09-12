@@ -28,7 +28,8 @@ def _ma_kind():
     return "EMA"
 
 
-def _price_ma(closes, n):
-    if _ma_kind() == "SMA":
+def _price_ma(closes, n, kind=None):
+    use = str(kind or _ma_kind()).strip().upper()
+    if use == "SMA":
         return _sma(closes, n)
     return _ema(closes, n)

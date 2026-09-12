@@ -55,25 +55,9 @@ TRADE_BUDGET = 100000.0
 # 价格均线缺省：EMA 或 SMA（大小写不敏感）。BOOK_STOCKS[code].ma_type 优先；
 # 缺省/非法回落本常量。只作用于周/日价格均线；成交量均量始终 SMA；MACD 仍用 EMA。
 MA_TYPE = "EMA"
-# 周线均线：快/生命线（斐波那契 5/34）；算法见标的 ma_type / MA_TYPE
-#   MA5 vs MA13 + MACD → 多头判定（仅日志，中线周期写死 13；开仓不强制 weekly_bull）
-#   MA34 → 生命线（收盘跌破即周线空，强制清仓）；乖离/斜率过滤也用它
-# 周线取数 need 另钳原 MA55 暖机地板（见 market._ohlcv_need_1w）
-W_MA_FAST = 5
-W_MA_LIFE = 34
-# 周线 MACD 参数（DIF/DEA/柱）；多头要求 DIF>0 且柱>0；死叉且双线在零轴下 → 空
-MACD_FAST = 12
-MACD_SLOW = 26
-MACD_SIGNAL = 9
-
-# ---- 日线买卖（均线周期是 structure，阈值在 RECIPE.factor_params）----
-# 日线均线（算法见标的 ma_type / MA_TYPE）：中线→回踩/无量阴跌；慢线→回踩支撑 + 时间成本地板
-#   <=0 关闭该条（与 time_force.bars 相同约定）
-#   关中线：回踩只看慢线（若开着）；vol_dry 关掉
-#   关慢线：回踩只看中线；time_force 破慢线地板关掉（bars 仍独立）
-#   两条都关：无 pullback_vol 新开；加仓仍可走 plat_break / w_macd_golden
-D_MA_MID = 20
-D_MA_SLOW = 60
+# 周/日均线周期与 MACD 窗在 RECIPE.structure（字面量）。
+# 日线：中线→回踩/无量阴跌；慢线→回踩支撑 + 时间成本地板。<=0 关该条。
+# 周线：快/生命线（5/34）；mid=13 仅日志多头。取数 need 另钳原 MA55 暖机地板。
 
 # 盈利后加仓门槛（仓位层，不进 factor_params）：
 #   峰值浮盈 >= SCALE_ARM，且该笔已持仓 >= SCALE_ARM_BARS 日
@@ -89,9 +73,8 @@ SCALE_ARM_BARS = 8
 SCALE_W_HIST_MIN = -0.01
 SCALE_LOTS = True
 
-# 默认 Recipe：四槽布尔式。数字真源是 factor_params 字面量。
-# D_MA_* / W_MA_* / MACD_* 是 structure。SCALE_ARM 等仓位门槛不进表。
-# scale_out 恒 false：减仓未启用。
+# 默认 Recipe：四槽布尔式。阈值真源 factor_params；均线/MACD 窗真源 structure。
+# SCALE_ARM 等仓位门槛不进表。scale_out 恒 false：减仓未启用。
 RECIPE = {
     "entry": [
         "and",
@@ -160,6 +143,14 @@ RECIPE = {
         },
         # time_force：持仓 > bars 后评估；<=0 关整条
         "time_force": {"bars": 30},
+    },
+    "structure": {
+        # 日线中/慢均线；<=0 关该条
+        "d_ma": {"mid": 20, "slow": 60},
+        # 周线快/中/生命线；mid 仅日志 weekly_bull
+        "w_ma": {"fast": 5, "mid": 13, "life": 34},
+        # MACD DIF/DEA/柱
+        "macd": {"fast": 12, "slow": 26, "signal": 9},
     },
 }
 
@@ -2059,11 +2050,11 @@ def _ema(closes, n):
     return out
 
 # === hlband/indicators/macd.py ===
-def _calc_macd(closes, fast=None, slow=None, signal=None):
-    """返回 (dif, dea, hist) 或 None。hist = dif - dea。"""
-    fast = int(fast if fast is not None else MACD_FAST)
-    slow = int(slow if slow is not None else MACD_SLOW)
-    signal = int(signal if signal is not None else MACD_SIGNAL)
+def _calc_macd(closes, fast, slow, signal):
+    """返回 (dif, dea, hist) 或 None。hist = dif - dea。三窗必传。"""
+    fast = int(fast)
+    slow = int(slow)
+    signal = int(signal)
     c = np.asarray(closes, dtype=float)
     if len(c) < slow + signal:
         return None
@@ -2114,8 +2105,9 @@ def _ma_kind():
     return "EMA"
 
 
-def _price_ma(closes, n):
-    if _ma_kind() == "SMA":
+def _price_ma(closes, n, kind=None):
+    use = str(kind or _ma_kind()).strip().upper()
+    if use == "SMA":
         return _sma(closes, n)
     return _ema(closes, n)
 
@@ -3085,12 +3077,13 @@ def _ohlcv_need_1d():
         plat_n = int(20 if raw_plat is None else raw_plat)
     except (TypeError, ValueError):
         plat_n = 20
+    d_ma = _structure_windows()["d_ma"]
     try:
-        mid_n = int(D_MA_MID or 0)
+        mid_n = int(d_ma.get("mid") or 0)
     except (TypeError, ValueError):
         mid_n = 0
     try:
-        slow_n = int(D_MA_SLOW or 0)
+        slow_n = int(d_ma.get("slow") or 0)
     except (TypeError, ValueError):
         slow_n = 0
     confirm_n = _vol_pullback_confirm_need()
@@ -3116,7 +3109,8 @@ def _ohlcv_need_1d():
 
 def _ohlcv_need_1w():
     # 55 = 原 W_MA_SLOW 暖机地板，不是均线周期
-    return max(int(W_MA_LIFE), int(MACD_SLOW) + int(MACD_SIGNAL), 55) + 5
+    win = _structure_windows()
+    return max(int(win["w_ma"]["life"]), int(win["macd"]["slow"]) + int(win["macd"]["signal"]), 55) + 5
 
 
 def _prefetch_watch_ohlcv(C, stocks):
@@ -3289,6 +3283,59 @@ def _factor_params_apply_global(params):
             cur["tiers"] = _factor_tiers_as_lists(cur.get("tiers"))
 
 
+def _structure_int(block, key, default):
+    raw = (block or {}).get(key)
+    try:
+        return int(default if raw is None else raw)
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def _structure_windows():
+    """只读 RECIPE.structure。缺键用数字字面量。"""
+    rec = (globals().get("RECIPE") or {}).get("structure") or {}
+    d_ma = rec.get("d_ma") or {}
+    w_ma = rec.get("w_ma") or {}
+    macd = rec.get("macd") or {}
+    return {
+        "d_ma": {
+            "mid": _structure_int(d_ma, "mid", 20),
+            "slow": _structure_int(d_ma, "slow", 60),
+        },
+        "w_ma": {
+            "fast": _structure_int(w_ma, "fast", 5),
+            "mid": _structure_int(w_ma, "mid", 13),
+            "life": _structure_int(w_ma, "life", 34),
+        },
+        "macd": {
+            "fast": _structure_int(macd, "fast", 12),
+            "slow": _structure_int(macd, "slow", 26),
+            "signal": _structure_int(macd, "signal", 9),
+        },
+    }
+
+
+def _structure_apply_global(params):
+    """只合进 RECIPE.structure，按段再按 key 合并。"""
+    if not isinstance(params, dict):
+        return
+    rec = globals().get("RECIPE")
+    if not isinstance(rec, dict):
+        return
+    st = rec.get("structure")
+    if not isinstance(st, dict):
+        rec["structure"] = {}
+        st = rec["structure"]
+    for fid, incoming in params.items():
+        if not isinstance(incoming, dict):
+            continue
+        cur = st.get(fid)
+        if not isinstance(cur, dict):
+            st[fid] = {}
+            cur = st[fid]
+        cur.update(incoming)
+
+
 def _vol_pullback_confirm_need():
     """最少 1：当天缩量即可；勿用 `x or 2`（0 会被当成缺省翻成 2）。"""
     raw = _factor_param(None, "pullback_vol", "confirm_days")
@@ -3310,10 +3357,13 @@ def _weekly_market_features(closes_w):
         "hist": None,
         "close": None,
     }
-    ma5 = _price_ma(closes_w, W_MA_FAST)
-    ma10 = _price_ma(closes_w, 13)
-    ma30 = _price_ma(closes_w, W_MA_LIFE)
-    macd = _calc_macd(closes_w)
+    win = _structure_windows()
+    w_ma = win["w_ma"]
+    mc = win["macd"]
+    ma5 = _price_ma(closes_w, w_ma["fast"])
+    ma10 = _price_ma(closes_w, w_ma["mid"])
+    ma30 = _price_ma(closes_w, w_ma["life"])
+    macd = _calc_macd(closes_w, mc["fast"], mc["slow"], mc["signal"])
     if ma5 is None or ma10 is None or ma30 is None or macd is None:
         return detail
     dif, dea, hist = macd
@@ -3406,12 +3456,13 @@ def _factor_daily_features(closes, volumes):
     }
     if closes is None or volumes is None:
         return False, detail
+    d_ma = _structure_windows()["d_ma"]
     try:
-        mid_n = int(D_MA_MID or 0)
+        mid_n = int(d_ma.get("mid") or 0)
     except (TypeError, ValueError):
         mid_n = 0
     try:
-        slow_n = int(D_MA_SLOW or 0)
+        slow_n = int(d_ma.get("slow") or 0)
     except (TypeError, ValueError):
         slow_n = 0
     detail["mid_n"] = mid_n
@@ -3894,7 +3945,7 @@ def _time_force_mark_skip(lot, peak_ret, hold_bars, m60):
 def _time_force_hit(price, closes, hold_bars, lot=None, ctx=None):
     """智能时间成本：持仓 > time_force.bars 后评估出场。
     bars<=0 关闭整条规则。
-    D_MA_SLOW<=0 时慢线地板不存在，同样不触发（BARS 仍独立）。
+    d_ma.slow<=0 时慢线地板不存在，同样不触发（BARS 仍独立）。
     收盘破日线慢均线 → 立即强制平仓。
     仍站上慢线时：峰值已达 TRAIL 档1 peak_lo 则不按日历强平；
     从未武装的死钱仓立即强平。"""
@@ -3906,7 +3957,7 @@ def _time_force_hit(price, closes, hold_bars, lot=None, ctx=None):
     if bars_lim <= 0:
         return False
     try:
-        slow_n = int(D_MA_SLOW or 0)
+        slow_n = int(_structure_windows()["d_ma"]["slow"] or 0)
     except (TypeError, ValueError):
         slow_n = 0
     if slow_n <= 0:
@@ -4017,19 +4068,32 @@ def _recipe_hit(expr, ctx):
     return bool(ok), [op] if ok else []
 
 # === hlband/factors/slots.py ===
-_RECIPE_THRESHOLD_KEYS = (
-    "D_MA_MID",
-    "D_MA_SLOW",
-    "W_MA_FAST",
-    "W_MA_LIFE",
-    "MACD_FAST",
-    "MACD_SLOW",
-    "MACD_SIGNAL",
-)
+def _copy_nested_table(src):
+    out = {}
+    for fid, block in (src or {}).items():
+        if isinstance(block, dict):
+            out[str(fid)] = dict(block)
+        else:
+            out[str(fid)] = block
+    return out
 
 
-def _fold_factor_params_for_fingerprint(fp_src, overrides, param_keys=None):
-    """深合并 overrides.factor_params；袋里只留 D_MA_* / W_MA_* / MACD_*。"""
+def _merge_nested_table(dst, incoming):
+    if not isinstance(incoming, dict):
+        return dst
+    for fid, block in incoming.items():
+        if not isinstance(block, dict):
+            continue
+        cur = dst.get(str(fid))
+        if not isinstance(cur, dict):
+            cur = {}
+            dst[str(fid)] = cur
+        cur.update(block)
+    return dst
+
+
+def _fold_tables_for_fingerprint(fp_src, st_src, overrides):
+    """深合并 overrides.factor_params / structure；袋里只留万一还在的非表键。"""
     fp = {}
     for fid, block in (fp_src or {}).items():
         if isinstance(block, dict):
@@ -4039,8 +4103,7 @@ def _fold_factor_params_for_fingerprint(fp_src, overrides, param_keys=None):
             fp[str(fid)] = copied
         else:
             fp[str(fid)] = block
-    leftover = {}
-    allow = set(_RECIPE_THRESHOLD_KEYS)
+    st = _copy_nested_table(st_src)
     ov = dict(overrides or {})
     incoming = ov.get("factor_params")
     if isinstance(incoming, dict):
@@ -4054,25 +4117,22 @@ def _fold_factor_params_for_fingerprint(fp_src, overrides, param_keys=None):
             cur.update(block)
             if str(fid) == "trail_stop" and "tiers" in cur:
                 cur["tiers"] = _factor_tiers_as_lists(cur.get("tiers"))
-    for k in sorted(ov):
-        ks = str(k)
-        if ks == "factor_params":
-            continue
-        if ks in allow:
-            leftover[ks] = ov[k]
-    return fp, leftover
+    _merge_nested_table(st, ov.get("structure") if isinstance(ov.get("structure"), dict) else {})
+    leftover = {}
+    return fp, st, leftover
 
 
 def _recipe_fingerprint(overrides=None, recipe=None):
-    """表达式 + 折进表的阈值；不扫全因子开关。"""
+    """表达式 + 折进表的阈值 + structure；不扫全因子开关。"""
     rec = recipe if recipe is not None else (globals().get("RECIPE") or {})
-    fp, leftover = _fold_factor_params_for_fingerprint(
-        rec.get("factor_params") or {}, overrides
+    fp, st, leftover = _fold_tables_for_fingerprint(
+        rec.get("factor_params") or {}, rec.get("structure") or {}, overrides
     )
     payload = {
         "entry": rec.get("entry"),
         "exit": rec.get("exit"),
         "factor_params": fp,
+        "structure": st,
         "overrides": leftover,
         "scale_in": rec.get("scale_in"),
         "scale_out": rec.get("scale_out"),
@@ -7009,7 +7069,7 @@ def _update_w_bear_streak(weekly_bear, sig_day, track):
 
 
 def _eval_daily_buy(closes, volumes):
-    """买点：缩量回踩中/慢均线。D_MA_*<=0 关闭该条。"""
+    """买点：缩量回踩中/慢均线。d_ma.mid/slow<=0 关闭该条。"""
     ctx = _build_factor_ctx(closes, volumes, None, None, {}, None)
     detail = dict(ctx["market"].get("daily_detail") or {})
     if not ctx["market"].get("daily_ready"):
@@ -9772,6 +9832,7 @@ def _init_impl(C):
         )
     )
 
+    _win = _structure_windows()
     print(
         "%s %s init" % (STRATEGY_NAME, STRATEGY_VER),
         "chart=",
@@ -9811,9 +9872,9 @@ def _init_impl(C):
         "book_freeze=",
         "%s/%s" % (BOOK_FREEZE_CLOSE, BOOK_FREEZE_OPEN),
         "wMA=",
-        "%d/%d" % (W_MA_FAST, W_MA_LIFE),
+        "%d/%d" % (_win["w_ma"]["fast"], _win["w_ma"]["life"]),
         "dMA=",
-        "%d/%d" % (D_MA_MID, D_MA_SLOW),
+        "%d/%d" % (_win["d_ma"]["mid"], _win["d_ma"]["slow"]),
         "ma_type=",
         _ma_kind(),
         "stop=",

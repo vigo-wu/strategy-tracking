@@ -224,6 +224,46 @@ class TestRobustSpec(unittest.TestCase):
             )
         self.assertIn("stop_loss.pct", str(ctx.exception))
 
+    def test_load_spec_rejects_old_dma_mid(self) -> None:
+        with self.assertRaises(RobustSpecError) as ctx:
+            load_spec(
+                {
+                    "run_id": "t1",
+                    "overrides": {"D_MA_MID": 15},
+                    "year_start": 2018,
+                    "year_end": 2026,
+                    "tune_start": 2018,
+                    "tune_end": 2021,
+                    "check_start": 2022,
+                    "check_end": 2023,
+                    "deploy_start": 2024,
+                    "deploy_end": 2026,
+                    "n_baskets": 2,
+                    "basket_size": 3,
+                }
+            )
+        self.assertIn("D_MA_MID", str(ctx.exception))
+
+    def test_load_spec_rejects_flat_dma_mid(self) -> None:
+        with self.assertRaises(RobustSpecError) as ctx:
+            load_spec(
+                {
+                    "run_id": "t1",
+                    "overrides": {"d_ma.mid": 15},
+                    "year_start": 2018,
+                    "year_end": 2026,
+                    "tune_start": 2018,
+                    "tune_end": 2021,
+                    "check_start": 2022,
+                    "check_end": 2023,
+                    "deploy_start": 2024,
+                    "deploy_end": 2026,
+                    "n_baskets": 2,
+                    "basket_size": 3,
+                }
+            )
+        self.assertIn("d_ma.mid", str(ctx.exception))
+
 
 class TestRobustSample(unittest.TestCase):
     def test_draw_reproducible(self) -> None:

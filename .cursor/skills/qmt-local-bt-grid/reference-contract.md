@@ -8,16 +8,15 @@
    - `_exec_bundle()` 之后注入 `overrides`（写进 exec 得到的 `ns`）。
    - `init()` 之后再注入一次（防止 `_apply_panel` 把资金/开关打回默认）。
    - 建议包装 `_apply_panel`：面板应用完立即再写 `overrides`，这样 init 日志指纹才是格子值。
-   - 因子阈值写 `overrides.factor_params`（如 `stop_loss.pct`）；结构/资金仍写顶层 `D_MA_*` / `CASH_RATIO`。顶层旧因子键直接报错。
+   - 因子阈值写 `overrides.factor_params`（如 `stop_loss.pct`）；结构窗写 `overrides.structure`（如 `d_ma.mid`）；资金仍写顶层 `CASH_RATIO`。顶层旧键 / 顶层点路径直接报错。
    - `out_dir` 由调用方指定；批量 payload 带 `overrides` 透传到子进程。
 2. **隔离产物目录**：`report/grid/<sweep>/<cell>/<sample>/<div>/`。禁止写回基线 `report/<div>/`。
 3. **init 指纹**（写进同一份 log，供 runner 校验）
    - 必有：`stop=`、`time_force_bars=`（若策略有这两项）。
    - 扫阶梯止盈：`trail_arm=` = `trail_stop.tiers` 档 1 的 `peak_lo`；另打 compact `trail_tiers=` JSON，探针按整表相等（起步相同、giveback 不同也要能抓到）。
 4. **主样本 walk**：默认 config `BOOK_STOCKS` 一段 `run_book_backtest`（`year_start0101`–`year_end1231`）。`asset_split.mode=random_from_csv` 时调参 / 盲测 **各一段**（名单写入 `freeze.json` / `spec.json`；CSV 仍用 `csv_for`）。禁止 stock×年独立 10 万账户，禁止 `tune∪holdout` 同一钱包。
-5. **可选对照**：全 SMA / 全 EMA（`include_sma_ema`），不单独当选参器。
-6. **空间隔离（可选）**：`asset_split` 见 skill 示例 `stop_loss_space.json`。选参主 KPI 仅 tune 股；holdout × 验收年复用 `gate` 否决（无覆盖不得过门）。
-7. **过门 `gate`**：绝对合格线（可逐项禁用）+ 可选相对 base + 可选卡玛同向；指标用 `windows.check.*`；排序用验收期卡玛 Δ。写入 spec/freeze/summary；只汇总可 `--gate-json` / 侧栏覆盖。
+5. **空间隔离（可选）**：`asset_split` 见 skill 示例 `stop_loss_space.json`。选参主 KPI 仅 tune 股；holdout × 验收年复用 `gate` 否决（无覆盖不得过门）。
+6. **过门 `gate`**：绝对合格线（可逐项禁用）+ 可选相对 base + 可选卡玛同向；指标用 `windows.check.*`；排序用验收期卡玛 Δ。写入 spec/freeze/summary；只汇总可 `--gate-json` / 侧栏覆盖。
 
 ## 覆盖值形态
 
@@ -35,24 +34,29 @@ JSON 可序列化。元组在 JSON 里用数组；`null` = Python `None`。
         [0.10, null, 0.04, null]
       ]
     }
+  },
+  "structure": {
+    "d_ma": {"mid": 15}
   }
 }
 ```
+
+结构轴 id：`d_ma.mid` `d_ma.slow` `w_ma.fast` `w_ma.mid` `w_ma.life` `macd.fast` `macd.slow` `macd.signal`。短 id 如 `dmm15`。不要写顶层 `D_MA_MID` 或顶层 `d_ma.mid`。
 
 空 `overrides` = `base`（现行片段常量，仍跑一遍以便对照目录与指纹）。
 
 ## 格子之间
 
-- **一层全局 walk 池**：探针在主进程串行；通过后把**当前组**各格 walk 铺平进同一个 `ProcessPool`（最多 6 段/格：分篮 × SMA/EMA）。禁止格间池再套格内池；禁止一次把全部格子丢进同一池。
+- **一层全局 walk 池**：探针在主进程串行；通过后把**当前组**各格 walk 铺平进同一个 `ProcessPool`（最多 2 段/格：tune + holdout）。禁止格间池再套格内池；禁止一次把全部格子丢进同一池。
 - `--workers<=0`：`min(本组 n_cells × n_jobs, CPU)`；`1` 全串行；`>=2` 为池大小（只夹 walk 数，不夹 16）。
-- `--batch-size` / `--resume` / `progress.json`：组级检查点。`done` 跳过；`dirty` 或杀进程留下的 `running` 整组删目录后重跑。暂停须等进程退出再删目录。cmdline 证明已死或 pid 不存在才自动 dirty。`--resume` 不 prune、不按 CLI 默认改写 `freeze.include_sma_ema`。summarize 只收已 done 的 cell id。
+- `--batch-size` / `--resume` / `progress.json`：组级检查点。`done` 跳过；`dirty` 或杀进程留下的 `running` 整组删目录后重跑。暂停须等进程退出再删目录。cmdline 证明已死或 pid 不存在才自动 dirty。`--resume` 不 prune。summarize 只收已 done 的 cell id。
 - 每格写 `cell_meta.json`（`overrides`、kind、walk 数）。
 - 每格先跑 **init 探针**（dummy context，不回放 K 线），指纹不对则**停止整个 sweep**。通过后该格全部 walk 再跑（第一段不再兼探针）。
 - 资金：`compound_backtest=True`，`wallet_cash=TRADE_BUDGET`；`BUDGET_BASE` / `CASH_RATIO` 跟现行 config。
 
 ## summarize 口径
 
-解析组合明细（`window_kpi_from_trades`）。每格、每个样本（`book` / `sma` / `ema`）输出窗 KPI：
+解析组合明细（`window_kpi_from_trades`）。每格主样本 `book` 输出窗 KPI（旧目录残留的 `sma/`/`ema/` 不进 summary）：
 
 - 笔数 / 胜率 / 盈亏比：平仓日落在窗内（已是抢槽后的成交）
 - 回撤 / 夏普 / 卡玛 / 年化：窗内同一条权益；卡玛 = 几何年化 / `|max_dd|`

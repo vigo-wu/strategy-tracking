@@ -65,7 +65,7 @@ def _time_force_mark_skip(lot, peak_ret, hold_bars, m60):
 def _time_force_hit(price, closes, hold_bars, lot=None, ctx=None):
     """智能时间成本：持仓 > time_force.bars 后评估出场。
     bars<=0 关闭整条规则。
-    D_MA_SLOW<=0 时慢线地板不存在，同样不触发（BARS 仍独立）。
+    d_ma.slow<=0 时慢线地板不存在，同样不触发（BARS 仍独立）。
     收盘破日线慢均线 → 立即强制平仓。
     仍站上慢线时：峰值已达 TRAIL 档1 peak_lo 则不按日历强平；
     从未武装的死钱仓立即强平。"""
@@ -77,7 +77,7 @@ def _time_force_hit(price, closes, hold_bars, lot=None, ctx=None):
     if bars_lim <= 0:
         return False
     try:
-        slow_n = int(D_MA_SLOW or 0)
+        slow_n = int(_structure_windows()["d_ma"]["slow"] or 0)
     except (TypeError, ValueError):
         slow_n = 0
     if slow_n <= 0:

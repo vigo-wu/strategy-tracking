@@ -1,9 +1,9 @@
 # === hlband/indicators/macd.py ===
-def _calc_macd(closes, fast=None, slow=None, signal=None):
-    """返回 (dif, dea, hist) 或 None。hist = dif - dea。"""
-    fast = int(fast if fast is not None else MACD_FAST)
-    slow = int(slow if slow is not None else MACD_SLOW)
-    signal = int(signal if signal is not None else MACD_SIGNAL)
+def _calc_macd(closes, fast, slow, signal):
+    """返回 (dif, dea, hist) 或 None。hist = dif - dea。三窗必传。"""
+    fast = int(fast)
+    slow = int(slow)
+    signal = int(signal)
     c = np.asarray(closes, dtype=float)
     if len(c) < slow + signal:
         return None

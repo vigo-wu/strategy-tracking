@@ -4,7 +4,7 @@
 用法（仓库根目录）::
 
   python hongli_band/scripts/local_bt/grid_run.py --spec .cursor/skills/qmt-local-bt-grid/examples/stop_loss.json
-  python hongli_band/scripts/local_bt/grid_run.py --spec path/to/cells.json --include-sma-ema
+  python hongli_band/scripts/local_bt/grid_run.py --spec path/to/cells.json --batch-size 10
 """
 from __future__ import annotations
 
@@ -52,6 +52,8 @@ from grid_spec import (  # noqa: E402
     deep_merge_factor_params,
     fill_year_windows,
     flatten_factor_params,
+    flatten_structure,
+    is_structure_path,
     json_ready,
     nest_factor_path,
     overrides_has_trail_tiers,
@@ -367,6 +369,7 @@ def load_config_defaults() -> dict[str, Any]:
     mod = _load_hlband_config()
     rec = getattr(mod, "RECIPE", None) or {}
     flat = flatten_factor_params(rec.get("factor_params") or {})
+    flat.update(flatten_structure(rec.get("structure") or {}))
     out: dict[str, Any] = {}
     seen: set[str] = set()
     for spec in param_catalog():
@@ -439,7 +442,7 @@ def _fp_table_from_defaults(defaults: Mapping[str, Any] | None) -> dict[str, Any
     table: dict[str, Any] = {}
     for key, val in dict(defaults or {}).items():
         ks = str(key)
-        if "." not in ks:
+        if "." not in ks or is_structure_path(ks):
             continue
         table = deep_merge_factor_params(table, nest_factor_path(ks, val))
     return table
@@ -735,25 +738,6 @@ def book_jobs(spec: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     ]
 
 
-def ma_control_jobs(src_jobs: list[dict[str, Any]], ma: str) -> list[dict[str, Any]]:
-    kind = str(ma).upper()
-    out: list[dict[str, Any]] = []
-    for j in src_jobs:
-        q = dict(j)
-        q["sample"] = kind.lower()
-        q["ma"] = kind
-        forced: dict[str, dict[str, str]] = {}
-        for stock, cfg in (j.get("book_stocks") or {}).items():
-            row = dict(cfg)
-            row["ma_type"] = kind
-            forced[str(stock)] = row
-        q["book_stocks"] = forced
-        q["n_stocks"] = len(forced)
-        q["stocks"] = sorted(forced.keys())
-        out.append(q)
-    return out
-
-
 def _assert_grid_dir(path: Path) -> None:
     parts = [str(x).lower() for x in path.parts]
     if "grid" not in parts:
@@ -773,7 +757,7 @@ def is_cell_dir(path: Path) -> bool:
         return False
     if (path / "cell_meta.json").is_file():
         return True
-    return any((path / name).is_dir() for name in _CELL_SAMPLE_DIRS)
+    return (path / "book").is_dir()
 
 
 def prune_stale_cell_dirs(dest: Path, keep_ids: Iterable[str]) -> list[str]:
@@ -1111,15 +1095,9 @@ def run_cell(
 
 def assemble_jobs(
     spec: dict[str, Any],
-    *,
-    include_sma_ema: bool = False,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     book = book_jobs(spec)
-    jobs: list[dict[str, Any]] = list(book)
-    if include_sma_ema and book:
-        jobs.extend(ma_control_jobs(book, "SMA"))
-        jobs.extend(ma_control_jobs(book, "EMA"))
-    return book, jobs
+    return book, list(book)
 
 
 def _run_walks_in_pool(
@@ -1353,7 +1331,6 @@ def run_cells(
 def run_sweep(
     spec: dict[str, Any],
     *,
-    include_sma_ema: bool = False,
     workers: int = 0,
     sweep_dir: str | Path | None = None,
     progress: Callable[[str, int, int, str], None] | None = None,
@@ -1387,7 +1364,6 @@ def run_sweep(
         except Exception:
             prev_freeze = None
     if resume and prev_freeze:
-        include_sma_ema = bool(prev_freeze.get("include_sma_ema"))
         for key in YEAR_WINDOW_KEYS:
             if prev_freeze.get(key) is not None:
                 spec[key] = int(prev_freeze[key])
@@ -1407,16 +1383,17 @@ def run_sweep(
         raise GridError(str(e)) from e
     spec["gate"] = gate_for_json(gate)
 
-    book, jobs = assemble_jobs(spec, include_sma_ema=include_sma_ema)
+    book, jobs = assemble_jobs(spec)
     if resume and prev_freeze and prev_freeze.get("n_jobs") is not None:
-        if int(prev_freeze.get("n_jobs") or 0) != len(jobs):
+        old_n = int(prev_freeze.get("n_jobs") or 0)
+        if old_n != len(jobs) and not prev_freeze.get("include_sma_ema"):
             raise GridError(
                 "resume freeze n_jobs=%s 与当前 jobs=%s 不一致"
                 % (prev_freeze.get("n_jobs"), len(jobs))
             )
     if len(jobs) > WARN_JOBS_SOFT:
         print(
-            "WARN jobs/cell=%s > %s（空间隔离×SMA/EMA 最多 6 段组合 walk）"
+            "WARN jobs/cell=%s > %s（空间隔离最多 2 段：tune+holdout）"
             % (len(jobs), WARN_JOBS_SOFT),
             flush=True,
         )
@@ -1429,7 +1406,6 @@ def run_sweep(
         "compare_div": str(spec.get("compare_div") or "front_ratio"),
         "n_book": len(book),
         "n_jobs": len(jobs),
-        "include_sma_ema": bool(include_sma_ema),
         "book": [
             {
                 "sample": j.get("sample"),
@@ -1703,7 +1679,6 @@ def summarize_only(
 def main() -> None:
     ap = argparse.ArgumentParser(description="真实 local_bt 命名网格")
     ap.add_argument("--spec", default="", help="命名格子 JSON/YAML")
-    ap.add_argument("--include-sma-ema", action="store_true", help="额外全 SMA / 全 EMA 对照")
     ap.add_argument(
         "--workers",
         type=int,
@@ -1838,7 +1813,6 @@ def main() -> None:
         try:
             run_sweep(
                 spec,
-                include_sma_ema=bool(args.include_sma_ema) if not resume else False,
                 workers=int(args.workers or 0),
                 sweep_dir=dest_arg,
                 dry_run=bool(args.dry_run),

@@ -45,7 +45,7 @@ from grid_gate import (  # noqa: E402
     validate_gate,
 )
 
-SAMPLES = ("book", "sma", "ema")
+SAMPLES = ("book",)
 RE_LEGACY_LOG = re.compile(
     r"^local_bt_(\d{6})_(SZ|SH)_(\d{4})_(SMA|EMA)\.txt$",
     re.I,

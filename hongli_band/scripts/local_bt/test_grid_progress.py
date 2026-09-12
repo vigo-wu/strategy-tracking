@@ -177,14 +177,13 @@ class ResumeSweepTest(unittest.TestCase):
                                     sweep_dir=dest,
                                     batch_size=3,
                                     resume=True,
-                                    include_sma_ema=True,
                                 )
             prune.assert_not_called()
             self.assertTrue(kept.is_dir())
             self.assertEqual(ran[:10], prog["batches"][1]["cell_ids"])
             self.assertFalse(info.get("paused"))
 
-    def test_resume_keeps_freeze_sma(self) -> None:
+    def test_resume_ignores_legacy_include_sma_ema(self) -> None:
         spec = {
             "theme": "hongli_band",
             "sweep": "sma_unit",
@@ -192,7 +191,6 @@ class ResumeSweepTest(unittest.TestCase):
             "cells": self._cells(2),
         }
         book = [_walk()]
-        jobs = book + [_walk(sample="sma"), _walk(sample="ema")]
         with tempfile.TemporaryDirectory() as td:
             dest = Path(td) / "report" / "grid" / "sma_unit"
             dest.mkdir(parents=True)
@@ -216,7 +214,7 @@ class ResumeSweepTest(unittest.TestCase):
             (dest / "freeze.json").write_text(json.dumps(freeze), encoding="utf-8")
             prog = build_progress(["base", "c1"], 10, worker_pid=0)
             save_progress(dest, prog)
-            with patch("grid_run.assemble_jobs", return_value=(book, jobs)) as assemble:
+            with patch("grid_run.assemble_jobs", return_value=(book, book)) as assemble:
                 with patch("grid_run.load_exit_defaults", return_value=_POOL_DEFAULTS):
                     with patch("grid_run._load_summarize", return_value=_FakeSummarize()):
                         with patch("grid_run.run_cells"):
@@ -225,12 +223,11 @@ class ResumeSweepTest(unittest.TestCase):
                                 workers=1,
                                 sweep_dir=dest,
                                 resume=True,
-                                include_sma_ema=False,
                             )
-            self.assertTrue(assemble.call_args.kwargs.get("include_sma_ema"))
+            self.assertNotIn("include_sma_ema", assemble.call_args.kwargs)
             out_f = json.loads((dest / "freeze.json").read_text(encoding="utf-8"))
-            self.assertTrue(out_f["include_sma_ema"])
-            self.assertEqual(out_f["n_jobs"], 3)
+            self.assertNotIn("include_sma_ema", out_f)
+            self.assertEqual(out_f["n_jobs"], 1)
 
     def test_prune_keep_batch_would_drop_done(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -305,14 +302,13 @@ class ResumeSweepTest(unittest.TestCase):
             self.assertEqual(len(seen), 2)
             self.assertEqual(len(seen[-1]), 4)
 
-    def test_worker_argv_resume_omits_batch_and_sma(self) -> None:
+    def test_worker_argv_resume_omits_batch(self) -> None:
         cmd = grid_worker_argv(
             spec_path="s.json",
             sweep_dir="d",
             workers=4,
             batch_size=10,
             resume=True,
-            include_sma_ema=True,
         )
         self.assertIn("--resume", cmd)
         self.assertNotIn("--batch-size", cmd)
@@ -321,11 +317,10 @@ class ResumeSweepTest(unittest.TestCase):
             spec_path="s.json",
             sweep_dir="d",
             batch_size=10,
-            include_sma_ema=True,
         )
         self.assertIn("--batch-size", cmd2)
         self.assertIn("10", cmd2)
-        self.assertIn("--include-sma-ema", cmd2)
+        self.assertNotIn("--include-sma-ema", cmd2)
 
 
 class WorkerLivenessTest(unittest.TestCase):
@@ -512,7 +507,6 @@ class ResumeNoProgressTest(unittest.TestCase):
             dest = Path(td) / "report" / "grid" / "noprog"
             dest.mkdir(parents=True)
             freeze = {
-                "include_sma_ema": False,
                 "n_jobs": 1,
                 "n_book": 1,
                 "batch_size": 2,

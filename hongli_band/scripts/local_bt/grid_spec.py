@@ -1,5 +1,5 @@
 # coding: utf-8
-"""命名格子 / 笛卡尔积生成：factor_params 点路径 + 结构/资金全局。"""
+"""命名格子 / 笛卡尔积生成：factor_params / structure 点路径 + 资金全局。"""
 from __future__ import annotations
 
 import hashlib
@@ -47,6 +47,17 @@ SCALE_FACTOR_KEYS = (
     "plat_break.break_buf",
     "w_macd_golden.hist_expand",
 )
+STRUCTURE_KEYS = (
+    "d_ma.mid",
+    "d_ma.slow",
+    "w_ma.fast",
+    "w_ma.mid",
+    "w_ma.life",
+    "macd.fast",
+    "macd.slow",
+    "macd.signal",
+)
+STRUCTURE_ROOTS = frozenset({"d_ma", "w_ma", "macd"})
 MONEY_KEYS = (
     "CASH_RATIO",
     "BOOK_LOT_MAX",
@@ -90,14 +101,22 @@ DELETED_FACTOR_KEYS = frozenset(
         "SCALE_PLAT_MAX_RANGE",
         "SCALE_W_HIST_EXPAND_RATIO",
         "SCALE_PLAT_BREAK_BUF",
+        "D_MA_MID",
+        "D_MA_SLOW",
+        "W_MA_FAST",
+        "W_MA_LIFE",
+        "W_MA_MID",
+        "MACD_FAST",
+        "MACD_SLOW",
+        "MACD_SIGNAL",
     }
 )
 DELETED_FACTOR_MSG = (
-    "已删除的顶层因子键：请写 overrides.factor_params"
+    "已删除的顶层键：请写 overrides.factor_params 或 overrides.structure"
     "（如 {\"factor_params\": {\"stop_loss\": {\"pct\": 0.06}}}）。"
 )
 FLAT_FACTOR_PATH_MSG = (
-    "顶层点路径不会进表：请写 overrides.factor_params"
+    "顶层点路径不会进表：请写 overrides.factor_params 或 overrides.structure"
     "（如 stop_loss.pct → {\"factor_params\": {\"stop_loss\": {\"pct\": 0.06}}}）。"
 )
 SKIP_NAMES = frozenset(
@@ -140,17 +159,6 @@ SKIP_NAMES = frozenset(
     }
 )
 NONE_TOKENS = frozenset({"none", "null", "-", "—", "无", "nan"})
-RECIPE_THRESHOLD_KEYS = frozenset(
-    {
-        "D_MA_MID",
-        "D_MA_SLOW",
-        "W_MA_FAST",
-        "W_MA_LIFE",
-        "MACD_FAST",
-        "MACD_SLOW",
-        "MACD_SIGNAL",
-    }
-)
 
 PARAM_LABELS = {
     "stop_loss.pct": "止损",
@@ -182,13 +190,14 @@ PARAM_LABELS = {
     "LOT_OPEN_FRAC": "开仓仓位",
     "LOT_ADD_FRAC": "第二笔仓位",
     "TRADE_BUDGET": "固定预算",
-    "D_MA_MID": "日线中均线",
-    "D_MA_SLOW": "日线慢均线",
-    "W_MA_FAST": "周线快均线",
-    "W_MA_LIFE": "周线生命线",
-    "MACD_FAST": "MACD 快线",
-    "MACD_SLOW": "MACD 慢线",
-    "MACD_SIGNAL": "MACD 信号",
+    "d_ma.mid": "日线中均线",
+    "d_ma.slow": "日线慢均线",
+    "w_ma.fast": "周线快均线",
+    "w_ma.mid": "周线中均线",
+    "w_ma.life": "周线生命线",
+    "macd.fast": "MACD 快线",
+    "macd.slow": "MACD 慢线",
+    "macd.signal": "MACD 信号",
 }
 ABBREV_FIXED = {
     "stop_loss.pct": "sl",
@@ -220,13 +229,14 @@ ABBREV_FIXED = {
     "LOT_OPEN_FRAC": "lof",
     "LOT_ADD_FRAC": "laf",
     "TRADE_BUDGET": "tb",
-    "D_MA_MID": "dmm",
-    "D_MA_SLOW": "dms",
-    "W_MA_FAST": "wmf",
-    "W_MA_LIFE": "wml",
-    "MACD_FAST": "mcf",
-    "MACD_SLOW": "mcs",
-    "MACD_SIGNAL": "mcg",
+    "d_ma.mid": "dmm",
+    "d_ma.slow": "dms",
+    "w_ma.fast": "wmf",
+    "w_ma.mid": "wmm",
+    "w_ma.life": "wml",
+    "macd.fast": "mcf",
+    "macd.slow": "mcs",
+    "macd.signal": "mcg",
 }
 DEFAULT_SCAN = {
     "stop_loss.pct": "6,10",
@@ -426,52 +436,63 @@ def overrides_has_trail_tiers(overrides: Mapping[str, Any] | None) -> bool:
     return isinstance(block, dict) and "tiers" in block
 
 
+def flatten_structure(table: Mapping[str, Any] | None) -> dict[str, Any]:
+    """RECIPE.structure → {'d_ma.mid': 20, ...}"""
+    return flatten_factor_params(table)
+
+
+def is_structure_path(path: str) -> bool:
+    return str(path) in STRUCTURE_KEYS or str(path).split(".", 1)[0] in STRUCTURE_ROOTS
+
+
 def flatten_overrides(overrides: Mapping[str, Any] | None) -> dict[str, Any]:
-    """格子 overrides → 点路径 + 结构/资金顶层键。"""
+    """格子 overrides → 点路径 + 资金顶层键。"""
     ov = dict(overrides or {})
     out: dict[str, Any] = {}
     fp = ov.get("factor_params")
     if isinstance(fp, dict):
         out.update(flatten_factor_params(fp))
+    st = ov.get("structure")
+    if isinstance(st, dict):
+        out.update(flatten_structure(st))
     for k, v in ov.items():
-        if str(k) == "factor_params":
+        if str(k) in ("factor_params", "structure"):
             continue
         out[str(k)] = v
     return out
 
 
-def _fold_factor_params_for_fingerprint(
+def _fold_tables_for_fingerprint(
     fp_src: Mapping[str, Any] | None,
+    st_src: Mapping[str, Any] | None,
     overrides: Mapping[str, Any] | None,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """深合并 overrides.factor_params；袋里只留 D_MA_* / W_MA_* / MACD_*。"""
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """深合并 overrides.factor_params / structure。overrides 袋保持空（与 slots 探针同一套）。"""
     ov = dict(overrides or {})
-    incoming = ov.get("factor_params") if isinstance(ov.get("factor_params"), dict) else {}
-    fp = deep_merge_factor_params(fp_src, incoming)
+    incoming_fp = ov.get("factor_params") if isinstance(ov.get("factor_params"), dict) else {}
+    incoming_st = ov.get("structure") if isinstance(ov.get("structure"), dict) else {}
+    fp = deep_merge_factor_params(fp_src, incoming_fp)
+    st = deep_merge_factor_params(st_src, incoming_st)
     leftover: dict[str, Any] = {}
-    for k in sorted(ov):
-        ks = str(k)
-        if ks == "factor_params":
-            continue
-        if ks in RECIPE_THRESHOLD_KEYS:
-            leftover[ks] = ov[k]
-    return fp, leftover
+    return fp, st, leftover
 
 
 def recipe_fingerprint(recipe: Mapping[str, Any] | None = None, overrides: Mapping[str, Any] | None = None) -> str:
-    """表达式 + 折进表的阈值。与 hlband/factors/slots._recipe_fingerprint 同一算法。"""
+    """表达式 + 折进表的阈值 + structure。与 hlband/factors/slots._recipe_fingerprint 同一算法。"""
     ns = _load_config_ns()
     rec = dict(recipe or {})
     if not rec:
         rec = dict(ns.get("RECIPE") or {})
-    fp, leftover = _fold_factor_params_for_fingerprint(
+    fp, st, leftover = _fold_tables_for_fingerprint(
         rec.get("factor_params") or {},
+        rec.get("structure") or {},
         overrides,
     )
     payload = {
         "entry": rec.get("entry"),
         "exit": rec.get("exit"),
         "factor_params": fp,
+        "structure": st,
         "overrides": leftover,
         "scale_in": rec.get("scale_in"),
         "scale_out": rec.get("scale_out"),
@@ -621,7 +642,7 @@ def _group_for(name: str) -> str:
         return "加仓"
     if name in MONEY_KEYS:
         return "资金"
-    if name.startswith(("D_MA_", "MACD_", "W_MA_")):
+    if name in STRUCTURE_KEYS or is_structure_path(name):
         return "结构"
     return "资金"
 
@@ -683,6 +704,7 @@ def _build_catalog() -> tuple[ParamSpec, ...]:
     ns = _load_config_ns()
     rec = ns.get("RECIPE") or {}
     flat = flatten_factor_params(rec.get("factor_params") or {})
+    flat.update(flatten_structure(rec.get("structure") or {}))
     found = list(flat)
     found.extend(_scan_config_names(ns))
     ids = _ordered_ids(found)
@@ -720,7 +742,7 @@ FAMILY_ORDER = _product_order(_CATALOG)
 FAMILY_LABELS = {p.id: p.label for p in _CATALOG}
 OVERRIDE_KEY = {p.id: p.key for p in _CATALOG}
 KNOWN_OVERRIDE_KEYS = frozenset(
-    {"factor_params"} | {p.key for p in _CATALOG if "." not in p.key}
+    {"factor_params", "structure"} | {p.key for p in _CATALOG if "." not in p.key}
 )
 _FAMILY_BY_OVERRIDE = {p.key: p.id for p in _CATALOG}
 
@@ -1130,7 +1152,7 @@ def family_value_label(family: str, value: Any) -> str:
         if iv <= 0:
             return "时间成本关闭"
         return "时间成本 %s 根" % iv
-    if family in ("D_MA_MID", "D_MA_SLOW"):
+    if family in ("d_ma.mid", "d_ma.slow"):
         try:
             iv = int(value)
         except (TypeError, ValueError):
@@ -1190,6 +1212,7 @@ def overrides_for_combo(
     defaults: Mapping[str, Any],
 ) -> dict[str, Any]:
     fp: dict[str, Any] = {}
+    st: dict[str, Any] = {}
     ov: dict[str, Any] = {}
     for fam, val in combo.items():
         spec = require_param(fam)
@@ -1203,13 +1226,18 @@ def overrides_for_combo(
             packed = None
         else:
             packed = float(val)
-        if "." in spec.id:
+        if is_structure_path(spec.id):
+            piece = nest_factor_path(spec.id, packed)
+            st = deep_merge_factor_params(st, piece)
+        elif "." in spec.id:
             piece = nest_factor_path(spec.id, packed)
             fp = deep_merge_factor_params(fp, piece)
         else:
             ov[spec.key] = packed
     if fp:
         ov["factor_params"] = fp
+    if st:
+        ov["structure"] = st
     return ov
 
 

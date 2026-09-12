@@ -50,14 +50,11 @@ from analyze import (  # noqa: E402
     list_detail_csvs,
     load_chart_ma_config,
     load_detail_raw,
-    ma_compare_dataframe,
-    ma_compare_year_dataframe,
     map_day_to_bar,
     match_daily_csv_for_detail,
     normalize_dividend_type,
     normalize_ma_type,
     ohlc_frame_for_chart,
-    pair_ma_batch_rows,
     parse_budget_from_log,
     parse_stock_filter_tokens,
     peek_daily_csv_meta,
@@ -310,40 +307,6 @@ if not _IS_MP_WORKER:
             margin=dict(l=40, r=20, t=50, b=40),
             legend=dict(orientation="h"),
             xaxis=dict(tickformat="%Y/%m/%d"),
-        )
-        return fig
-
-
-    def _plot_ma_delta_bar(pairs: list[dict], *, max_n: int = 40) -> go.Figure:
-        fig = go.Figure()
-        rows = [r for r in pairs if r.get("pnl_delta") is not None]
-        rows = sorted(rows, key=lambda r: abs(float(r.get("pnl_delta") or 0)), reverse=True)[:max_n]
-        if not rows:
-            fig.add_annotation(text="无对照盈亏", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
-            fig.update_layout(height=240, margin=dict(l=40, r=20, t=50, b=40))
-            return fig
-        labels = []
-        for r in rows:
-            year = str(r.get("year") or "").strip()
-            stock = str(r.get("stock") or "")
-            labels.append("%s · %s" % (stock, year) if year else stock)
-        deltas = [float(r.get("pnl_delta") or 0) for r in rows]
-        colors = ["#e65100" if d >= 0 else "#1565c0" for d in deltas]
-        fig.add_trace(
-            go.Bar(
-                x=deltas,
-                y=labels,
-                orientation="h",
-                marker_color=colors,
-                hovertemplate="%{y}<br>EMA−SMA %{x:,.0f} 元<extra></extra>",
-            )
-        )
-        fig.update_layout(
-            title="Δ盈亏（EMA − SMA；|Δ| 最大 %s 条）" % len(rows),
-            xaxis_title="Δ盈亏 (元)",
-            height=max(280, 18 * len(rows) + 80),
-            margin=dict(l=120, r=20, t=50, b=40),
-            yaxis=dict(autorange="reversed"),
         )
         return fig
 
@@ -1407,7 +1370,6 @@ if not _IS_MP_WORKER:
         view_rows: list[dict],
         *,
         split: str,
-        compare_ma: bool,
         picked_div: str,
         n_divs: int,
     ) -> None:
@@ -1431,8 +1393,6 @@ if not _IS_MP_WORKER:
                 key="batch_year_perf_ma",
             )
             ma_type = normalize_ma_type(picked_ma) or "EMA"
-        elif compare_ma and found_ma:
-            ma_type = found_ma[0]
 
         cache = st.session_state.setdefault("_batch_detail_trade_cache", {})
         with st.spinner("汇总分年绩效…"):
@@ -1621,127 +1581,7 @@ if not _IS_MP_WORKER:
         _render_book_detail_panel(Path(row["_detail_path"]), budget, caption=cap)
 
 
-    def _render_ma_compare_panel(
-        sma_pack: dict,
-        ema_pack: dict,
-        ohlc_csv: Path | None,
-        range_start: str,
-        range_end: str,
-        stock: str,
-    ) -> None:
-        from analyze import pick_ma_winner
-
-        sma_path = Path(sma_pack["detail"])
-        ema_path = Path(ema_pack["detail"])
-        budget = float(sma_pack.get("budget") or ema_pack.get("budget") or 50000.0)
-        a_sma = analyze_detail(sma_path, budget=budget)
-        a_ema = analyze_detail(ema_path, budget=budget)
-        ss, es = a_sma["stats"] or {}, a_ema["stats"] or {}
-        pick = pick_ma_winner(
-            {"ok": True, "sum_pnl": ss.get("sum_pnl"), "win_rate": ss.get("win_rate")},
-            {"ok": True, "sum_pnl": es.get("sum_pnl"), "win_rate": es.get("win_rate")},
-        )
-        pair = {
-            "stock": stock,
-            "year": "",
-            "ok_sma": True,
-            "ok_ema": True,
-            "n_buy_sma": ss.get("n_buy"),
-            "n_buy_ema": es.get("n_buy"),
-            "sum_pnl_sma": ss.get("sum_pnl"),
-            "sum_pnl_ema": es.get("sum_pnl"),
-            "win_rate_sma": ss.get("win_rate"),
-            "win_rate_ema": es.get("win_rate"),
-            "avg_ret_sma": ss.get("avg_ret"),
-            "avg_ret_ema": es.get("avg_ret"),
-            "max_win_sma": ss.get("max_win"),
-            "max_win_ema": es.get("max_win"),
-            "max_loss_sma": ss.get("max_loss"),
-            "max_loss_ema": es.get("max_loss"),
-            "pnl_delta": pick.get("pnl_delta"),
-            "winner": pick.get("winner"),
-            "label": pick.get("label"),
-            "why": pick.get("why"),
-        }
-        st.dataframe(ma_compare_dataframe([pair]), use_container_width=True, hide_index=True)
-        st.caption("更优看总盈亏；接近时建议均线按胜率、再平 EMA。metric 为 EMA，delta 相对 SMA。")
-
-        def _num(v: Any, default: float = 0.0) -> float:
-            try:
-                return float(v if v is not None else default)
-            except (TypeError, ValueError):
-                return default
-
-        c1, c2, c3, c4, c5, c6 = st.columns(6)
-        c1.metric("轮次", int(_num(es.get("n_buy"))), delta=int(_num(es.get("n_buy")) - _num(ss.get("n_buy"))))
-        c2.metric(
-            "总盈亏",
-            f"{_num(es.get('sum_pnl')):,.2f}",
-            delta=f"{_num(es.get('sum_pnl')) - _num(ss.get('sum_pnl')):,.2f}",
-        )
-        c3.metric(
-            "胜率",
-            f"{_num(es.get('win_rate')):.1f}%",
-            delta=f"{_num(es.get('win_rate')) - _num(ss.get('win_rate')):.1f}pp",
-        )
-        c4.metric(
-            "平均收益%",
-            f"{_num(es.get('avg_ret')):.2f}",
-            delta=f"{_num(es.get('avg_ret')) - _num(ss.get('avg_ret')):.2f}",
-        )
-        c5.metric(
-            "最大单笔%",
-            f"{_num(es.get('max_win')):.2f}",
-            delta=f"{_num(es.get('max_win')) - _num(ss.get('max_win')):.2f}",
-        )
-        c6.metric(
-            "最大亏损%",
-            f"{_num(es.get('max_loss')):.2f}",
-            delta=f"{_num(es.get('max_loss')) - _num(ss.get('max_loss')):.2f}",
-        )
-
-        st.plotly_chart(
-            _plot_equity_overlay(
-                [
-                    (a_sma["equity"], "SMA", "#1565c0"),
-                    (a_ema["equity"], "EMA", "#e65100"),
-                ],
-                budget,
-                "权益曲线对照（SMA / EMA）",
-            ),
-            width="stretch",
-        )
-
-        tab_sma, tab_ema = st.tabs(["SMA", "EMA"])
-        with tab_sma:
-            _render_analysis(
-                sma_path,
-                budget=budget,
-                ohlc_csv=ohlc_csv,
-                range_start=range_start,
-                range_end=range_end,
-                stock=stock,
-                show_metrics=False,
-                show_equity=False,
-                title_prefix="SMA · ",
-            )
-        with tab_ema:
-            _render_analysis(
-                ema_path,
-                budget=float(ema_pack.get("budget") or budget),
-                ohlc_csv=ohlc_csv,
-                range_start=range_start,
-                range_end=range_end,
-                stock=stock,
-                show_metrics=False,
-                show_equity=False,
-                title_prefix="EMA · ",
-            )
-
-
-    def _div_pack_for_compare(entry: dict, compare_ma: bool) -> dict:
-        if compare_ma:
-            return entry.get("ema") or entry.get("sma") or {}
+    def _div_pack_for_compare(entry: dict) -> dict:
         return entry.get("result") or entry.get("ema") or entry.get("sma") or {}
 
 
@@ -1766,7 +1606,6 @@ if not _IS_MP_WORKER:
     def _render_one_div_detail(
         entry: dict,
         *,
-        compare_ma: bool,
         stock: str,
         start: str,
         end: str,
@@ -1774,17 +1613,7 @@ if not _IS_MP_WORKER:
     ) -> None:
         ohlc = Path(entry["ohlc_csv"]) if entry.get("ohlc_csv") else None
         ohlc_ok = ohlc if ohlc and ohlc.is_file() else None
-        if compare_ma and entry.get("sma") and entry.get("ema"):
-            _render_ma_compare_panel(
-                entry["sma"],
-                entry["ema"],
-                ohlc_ok,
-                range_start=start,
-                range_end=end,
-                stock=stock,
-            )
-            return
-        pack = _div_pack_for_compare(entry, compare_ma)
+        pack = _div_pack_for_compare(entry)
         if not pack.get("detail"):
             st.warning("该复权没有明细")
             return
@@ -1802,7 +1631,6 @@ if not _IS_MP_WORKER:
     def _render_div_results(
         by_div: dict,
         *,
-        compare_ma: bool,
         stock: str,
         start: str,
         end: str,
@@ -1818,7 +1646,7 @@ if not _IS_MP_WORKER:
             series: list[tuple[Any, str, str]] = []
             budget = 50000.0
             for div in divs_ok:
-                pack = _div_pack_for_compare(by_div[div], compare_ma)
+                pack = _div_pack_for_compare(by_div[div])
                 info = _kpi_from_pack(pack)
                 kpis[div] = info
                 if info.get("ok") and info.get("equity") is not None:
@@ -1832,15 +1660,9 @@ if not _IS_MP_WORKER:
                     budget = float(info.get("budget") or budget)
             st.subheader("复权对照")
             st.dataframe(div_compare_dataframe(kpis, stock=stock), width="stretch", hide_index=True)
-            if compare_ma:
-                st.caption(
-                    "对照表与权益叠加用各复权的 EMA；切 tab 看 SMA。"
-                    "更优看总盈亏；接近再比胜率，仍平优先等比前复权。K 线因价格口径不同不叠加。"
-                )
-            else:
-                st.caption(
-                    "更优看总盈亏；接近再比胜率，仍平优先等比前复权。K 线因价格口径不同不叠加。"
-                )
+            st.caption(
+                "更优看总盈亏；接近再比胜率，仍平优先等比前复权。K 线因价格口径不同不叠加。"
+            )
             if series:
                 st.plotly_chart(
                     _plot_equity_overlay(series, budget, "权益曲线对照（复权）"),
@@ -1849,7 +1671,6 @@ if not _IS_MP_WORKER:
         if len(divs_ok) == 1:
             _render_one_div_detail(
                 by_div[divs_ok[0]],
-                compare_ma=compare_ma,
                 stock=stock,
                 start=start,
                 end=end,
@@ -1864,7 +1685,6 @@ if not _IS_MP_WORKER:
                     continue
                 _render_one_div_detail(
                     by_div[div],
-                    compare_ma=compare_ma,
                     stock=stock,
                     start=start,
                     end=end,
@@ -1872,7 +1692,7 @@ if not _IS_MP_WORKER:
                 )
 
 
-    def _batch_div_packs(rows: list[dict], stock: str, year: str, compare_ma: bool) -> dict:
+    def _batch_div_packs(rows: list[dict], stock: str, year: str) -> dict:
         by_div: dict[str, dict] = {}
         for r in rows:
             if str(r.get("stock") or "") != stock:
@@ -1893,15 +1713,9 @@ if not _IS_MP_WORKER:
                 "budget": r.get("budget") or 50000.0,
                 "log": r.get("log") or "",
             }
-            ma = normalize_ma_type(r.get("ma_type"))
             if r.get("csv"):
                 entry["ohlc_csv"] = r["csv"]
-            if compare_ma and ma == "SMA":
-                entry["sma"] = pack
-            elif compare_ma and ma == "EMA":
-                entry["ema"] = pack
-            else:
-                entry["result"] = pack
+            entry["result"] = pack
         return by_div
 
 
@@ -1915,13 +1729,12 @@ if not _IS_MP_WORKER:
                 "stock": cmp.get("stock") or "",
                 "start": cmp.get("start") or "",
                 "end": cmp.get("end") or "",
-                "compare_ma": True,
                 "by_div": {
                     DEFAULT_DIVIDEND_TYPE: {
                         "ohlc_csv": cmp.get("ohlc_csv") or "",
-                        "sma": cmp.get("sma"),
-                        "ema": cmp.get("ema"),
-                        "result": None,
+                        "sma": None,
+                        "ema": None,
+                        "result": cmp.get("ema") or cmp.get("sma") or cmp.get("result"),
                     }
                 },
             }
@@ -1931,7 +1744,6 @@ if not _IS_MP_WORKER:
                 "stock": last.get("stock") or "",
                 "start": last.get("start") or "",
                 "end": last.get("end") or "",
-                "compare_ma": False,
                 "by_div": {
                     DEFAULT_DIVIDEND_TYPE: {
                         "ohlc_csv": last.get("ohlc_csv") or "",
@@ -2040,7 +1852,6 @@ if not _IS_MP_WORKER:
         start_d = end_d = None
         run_btn = False
         split_label = "整段区间"
-        compare_ma = False
         if not picked:
             st.info("请至少选择一只标的")
         else:
@@ -2061,12 +1872,6 @@ if not _IS_MP_WORKER:
             )
             if split_label == "按自然年分段":
                 st.caption("每年独立账户、年初空仓；暖机仍用 walk 之前的历史 K 线。")
-            compare_ma = st.checkbox("SMA/EMA 对照", value=False, key="batch_compare_ma")
-            if compare_ma:
-                st.caption(
-                    "每只（每年）各跑 SMA 与 EMA；再 × 复权数 %s。选股建议均线要用「按自然年分段 + 对照」。"
-                    % len(divs)
-                )
             run_btn = st.button(
                 "开始批量回测",
                 type="primary",
@@ -2081,7 +1886,6 @@ if not _IS_MP_WORKER:
             bar = st.progress(0.0)
             status = st.empty()
             all_rows: list[dict] = []
-            all_pairs: list[dict] = []
             try:
                 payloads: list[dict] = []
                 for div in divs:
@@ -2102,7 +1906,6 @@ if not _IS_MP_WORKER:
                             quiet=bool(quiet),
                             split=split_mode,
                             metas=type_metas,
-                            compare_ma=bool(compare_ma),
                             dividend_type=div,
                         )
                     )
@@ -2135,19 +1938,15 @@ if not _IS_MP_WORKER:
                             status.info("汇总 KPI %s/%s…" % (i + 1, n_raw))
                         rows.append(summarize_batch_row(r))
                     status.info("写入汇总 CSV…")
-                    write_typed_summaries(rows, split=split_mode, compare_ma=bool(compare_ma))
+                    write_typed_summaries(rows, split=split_mode)
                     all_rows = rows
-                    if compare_ma:
-                        all_pairs = pair_ma_batch_rows(rows)
                     bar.progress(1.0)
                     n_ok = sum(1 for r in all_rows if r.get("ok"))
                     st.session_state["batch_result"] = {
                         "start": start_s,
                         "end": end_s,
                         "rows": all_rows,
-                        "pairs": all_pairs,
                         "split": split_mode,
-                        "compare_ma": bool(compare_ma),
                     }
                     st.success(
                         "完成 · 成功 %s · 失败 %s · 各复权目录已写 `local_bt_batch_summary.csv`"
@@ -2161,9 +1960,7 @@ if not _IS_MP_WORKER:
         if not batch:
             return
         split_saved = str(batch.get("split") or "range")
-        compare_saved = bool(batch.get("compare_ma"))
         all_rows = list(batch.get("rows") or [])
-        all_pairs = list(batch.get("pairs") or [])
         divs_in = unique_dividend_types(all_rows)
         picked_div = ""
         if len(divs_in) >= 2:
@@ -2178,19 +1975,10 @@ if not _IS_MP_WORKER:
             if picked_label and picked_label != "全部":
                 picked_div = next((d for d in divs_in if dividend_label(d) == picked_label), "")
         view_rows = all_rows
-        view_pairs = all_pairs
         if picked_div:
             view_rows = [r for r in all_rows if normalize_dividend_type(r.get("dividend_type")) == picked_div]
-            view_pairs = [p for p in all_pairs if normalize_dividend_type(p.get("dividend_type")) == picked_div]
         st.divider()
-        if compare_saved:
-            st.subheader("SMA / EMA 对照")
-            st.caption("Δ盈亏 = EMA − SMA。更优看总盈亏；接近时建议均线按胜率、再平 EMA。")
-            if split_saved == "year":
-                st.dataframe(ma_compare_year_dataframe(view_pairs), width="stretch", hide_index=True)
-            st.dataframe(ma_compare_dataframe(view_pairs), width="stretch", hide_index=True)
-            st.plotly_chart(_plot_ma_delta_bar(view_pairs), width="stretch")
-        elif split_saved == "year":
+        if split_saved == "year":
             st.subheader("按年汇总")
             st.caption("每年独立账户；胜率 / 平均收益% 按轮次加权。合计盈亏不是组合净值。多种复权按年×复权拆开。")
             st.dataframe(
@@ -2204,12 +1992,11 @@ if not _IS_MP_WORKER:
         _render_batch_year_perf_section(
             view_rows,
             split=split_saved,
-            compare_ma=compare_saved,
             picked_div=picked_div,
             n_divs=len(divs_in),
         )
 
-        show_div_in_label = (not picked_div) and len(unique_dividend_types(view_rows if not compare_saved else view_pairs)) >= 2
+        show_div_in_label = (not picked_div) and len(unique_dividend_types(view_rows)) >= 2
 
         def _row_label(r: dict) -> str:
             parts = [str(r.get("stock") or "")]
@@ -2221,54 +2008,6 @@ if not _IS_MP_WORKER:
                 if div:
                     parts.append(dividend_label(div))
             return " · ".join(p for p in parts if p)
-
-        if compare_saved:
-            ok_pairs = [p for p in view_pairs if p.get("sma_detail") or p.get("ema_detail")]
-            if not ok_pairs:
-                st.warning("没有成功的对照，无法查看明细。")
-                return
-            labels = [_row_label(p) for p in ok_pairs]
-            pick = st.selectbox("查看标的对照明细", labels, key="batch_detail_stock")
-            pair = next(p for p in ok_pairs if _row_label(p) == pick)
-            st.divider()
-            st.subheader("明细 · %s · 更优 %s" % (pick, pair.get("label") or pair.get("winner") or "-"))
-            stock = str(pair.get("stock") or "")
-            year = str(pair.get("year") or "")
-            start_s = str(pair.get("walk_start") or batch.get("start") or "")
-            end_s = str(pair.get("walk_end") or batch.get("end") or "")
-            sibling = _batch_div_packs(all_rows, stock, year, True)
-            if not picked_div and len(sibling) >= 2:
-                _render_div_results(
-                    sibling,
-                    compare_ma=True,
-                    stock=stock,
-                    start=start_s,
-                    end=end_s,
-                    tabs_key="batch_div_tabs",
-                    default_div=normalize_dividend_type(pair.get("dividend_type")),
-                )
-                return
-            ohlc = Path(pair.get("sma_csv") or pair.get("ema_csv") or "")
-            sma_pack = {
-                "detail": pair.get("sma_detail") or "",
-                "budget": pair.get("budget") or 50000.0,
-            }
-            ema_pack = {
-                "detail": pair.get("ema_detail") or "",
-                "budget": pair.get("budget") or 50000.0,
-            }
-            if not sma_pack["detail"] or not ema_pack["detail"]:
-                st.warning("对照两侧明细不齐。")
-                return
-            _render_ma_compare_panel(
-                sma_pack,
-                ema_pack,
-                ohlc if ohlc.is_file() else None,
-                range_start=start_s,
-                range_end=end_s,
-                stock=stock,
-            )
-            return
 
         ok_rows = [r for r in view_rows if r.get("ok") and r.get("detail")]
         if not ok_rows:
@@ -2284,11 +2023,10 @@ if not _IS_MP_WORKER:
         year = str(row.get("year") or "")
         start_s = str(row.get("walk_start") or batch.get("start") or "")
         end_s = str(row.get("walk_end") or batch.get("end") or "")
-        sibling = _batch_div_packs(all_rows, stock, year, False)
+        sibling = _batch_div_packs(all_rows, stock, year)
         if not picked_div and len(sibling) >= 2:
             _render_div_results(
                 sibling,
-                compare_ma=False,
                 stock=stock,
                 start=start_s,
                 end=end_s,
@@ -2326,8 +2064,6 @@ if not _IS_MP_WORKER:
             ]
         if "div_type_why" in src.columns:
             out["复权来源"] = src["div_type_why"]
-        if "ma_pnl_delta" in src.columns:
-            out["Δ盈亏"] = src["ma_pnl_delta"]
         out["白名单"] = src["in_book"].map(lambda x: "是" if x else "")
         out["跨年轮次"] = src["n_buy"]
         if "n_buy_year_min" in src.columns:
@@ -3664,7 +3400,6 @@ if not _IS_MP_WORKER:
                 end_d = st.date_input("结束时间", value=d1, min_value=d0, max_value=d1, key="bt_end")
             if start_d > end_d:
                 st.error("开始时间不能晚于结束时间")
-            compare_ma = st.checkbox("SMA/EMA 对照", value=False, key="single_compare_ma")
             run_btn = st.button(
                 "开始回测",
                 type="primary",
@@ -3673,7 +3408,6 @@ if not _IS_MP_WORKER:
         else:
             start_d = end_d = None
             run_btn = False
-            compare_ma = False
 
         if run_btn and meta and start_d and end_d and divs:
             start_s = _fmt_ymd(start_d)
@@ -3697,63 +3431,31 @@ if not _IS_MP_WORKER:
                         skipped.append(div)
                         continue
                     out_dir = Path(resolve_typed_dir(DEFAULT_REPORT_ROOT, div))
-                    if compare_ma:
-                        packs = {}
-                        for kind in ("SMA", "EMA"):
-                            with st.spinner(
-                                "回测 %s · %s %s %s–%s …"
-                                % (dividend_label(div), kind, stock, start_s, end_s)
-                            ):
-                                log_path = run_backtest(
-                                    csv_one,
-                                    start=start_s,
-                                    end=end_s,
-                                    stock=stock,
-                                    out_dir=out_dir,
-                                    quiet=bool(quiet),
-                                    ma_type=kind,
-                                    overrides=bt_ov,
-                                    dividend_type=div,
-                                    csv_root=csv_root,
-                                )
-                            detail = trades_csv_path(log_path)
-                            packs[kind] = {
-                                "log": str(log_path),
-                                "detail": str(detail),
-                                "budget": parse_budget_from_log(log_path),
-                            }
-                        by_div[div] = {
-                            "ohlc_csv": str(csv_one),
-                            "sma": packs["SMA"],
-                            "ema": packs["EMA"],
-                            "result": None,
-                        }
-                    else:
-                        with st.spinner(
-                            "回测 %s · %s %s–%s …" % (dividend_label(div), stock, start_s, end_s)
-                        ):
-                            log_path = run_backtest(
-                                csv_one,
-                                start=start_s,
-                                end=end_s,
-                                stock=stock,
-                                out_dir=out_dir,
-                                quiet=bool(quiet),
-                                overrides=bt_ov,
-                                dividend_type=div,
-                                csv_root=csv_root,
-                            )
-                        detail = trades_csv_path(log_path)
-                        by_div[div] = {
-                            "ohlc_csv": str(csv_one),
-                            "sma": None,
-                            "ema": None,
-                            "result": {
-                                "log": str(log_path),
-                                "detail": str(detail),
-                                "budget": parse_budget_from_log(log_path),
-                            },
-                        }
+                    with st.spinner(
+                        "回测 %s · %s %s–%s …" % (dividend_label(div), stock, start_s, end_s)
+                    ):
+                        log_path = run_backtest(
+                            csv_one,
+                            start=start_s,
+                            end=end_s,
+                            stock=stock,
+                            out_dir=out_dir,
+                            quiet=bool(quiet),
+                            overrides=bt_ov,
+                            dividend_type=div,
+                            csv_root=csv_root,
+                        )
+                    detail = trades_csv_path(log_path)
+                    by_div[div] = {
+                        "ohlc_csv": str(csv_one),
+                        "sma": None,
+                        "ema": None,
+                        "result": {
+                            "log": str(log_path),
+                            "detail": str(detail),
+                            "budget": parse_budget_from_log(log_path),
+                        },
+                    }
                 if skipped:
                     st.warning("缺行情已跳过：%s" % "、".join(dividend_label(x) for x in skipped))
                 if by_div:
@@ -3761,20 +3463,16 @@ if not _IS_MP_WORKER:
                         "stock": stock,
                         "start": start_s,
                         "end": end_s,
-                        "compare_ma": bool(compare_ma),
                         "by_div": by_div,
                     }
                     st.session_state.pop("last_result", None)
                     st.session_state.pop("last_compare", None)
-                    if compare_ma:
-                        st.success("完成对照 · 已写入所选复权目录")
-                    else:
-                        first = next(iter(by_div.values()))
-                        pack = first.get("result") or {}
-                        st.success(
-                            "完成 · %s 种复权 · log `%s`"
-                            % (len(by_div), Path(str(pack.get("log") or "")).name)
-                        )
+                    first = next(iter(by_div.values()))
+                    pack = first.get("result") or {}
+                    st.success(
+                        "完成 · %s 种复权 · log `%s`"
+                        % (len(by_div), Path(str(pack.get("log") or "")).name)
+                    )
                 elif skipped:
                     st.error("所选复权都没有该标的行情")
             except Exception:
@@ -3786,7 +3484,6 @@ if not _IS_MP_WORKER:
             st.divider()
             _render_div_results(
                 saved.get("by_div") or {},
-                compare_ma=bool(saved.get("compare_ma")),
                 stock=str(saved.get("stock") or ""),
                 start=str(saved.get("start") or ""),
                 end=str(saved.get("end") or ""),

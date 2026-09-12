@@ -26,7 +26,7 @@
 
 2. 日线在 `tools/csv/`。资格读 **复权子目录**（优先 `none/`），不要指望根目录扁平 CSV。上市日来自日线第一根有效 K。
 
-3. `hongli_band/report/<复权>/` 里要有 **按自然年分段** 的操作明细（建议同时有 SMA/EMA 对照）。没有分年文件，打分年会空，闸门直接 `FAIL`。
+3. `hongli_band/report/<复权>/` 里要有 **按自然年分段** 的操作明细。没有分年文件，打分年会空，闸门直接 `FAIL`。
 
 4. 现行对比池来自 [`scripts/qmt/hlband/config.py`](./scripts/qmt/hlband/config.py) 的 `BOOK_STOCKS`。
 

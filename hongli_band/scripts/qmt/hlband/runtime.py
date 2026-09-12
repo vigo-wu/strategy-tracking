@@ -280,6 +280,7 @@ def _init_impl(C):
         )
     )
 
+    _win = _structure_windows()
     print(
         "%s %s init" % (STRATEGY_NAME, STRATEGY_VER),
         "chart=",
@@ -319,9 +320,9 @@ def _init_impl(C):
         "book_freeze=",
         "%s/%s" % (BOOK_FREEZE_CLOSE, BOOK_FREEZE_OPEN),
         "wMA=",
-        "%d/%d" % (W_MA_FAST, W_MA_LIFE),
+        "%d/%d" % (_win["w_ma"]["fast"], _win["w_ma"]["life"]),
         "dMA=",
-        "%d/%d" % (D_MA_MID, D_MA_SLOW),
+        "%d/%d" % (_win["d_ma"]["mid"], _win["d_ma"]["slow"]),
         "ma_type=",
         _ma_kind(),
         "stop=",

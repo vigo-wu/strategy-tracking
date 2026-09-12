@@ -145,39 +145,28 @@ class GridRunApiTest(unittest.TestCase):
             self.assertEqual(freeze["book"][0]["start"], "20200101")
 
 
-    def test_assemble_jobs_book_and_sma_ema(self) -> None:
+    def test_assemble_jobs_book_only(self) -> None:
         spec = {"compare_div": "front_ratio", "cells": [{"id": "base", "overrides": {}}]}
         fake_book = [_walk()]
         with patch("grid_run.book_jobs", return_value=fake_book):
             book, jobs = assemble_jobs(spec)
-            self.assertEqual(len(jobs), 1)
-            self.assertEqual(book, fake_book)
-            _, many = assemble_jobs(spec, include_sma_ema=True)
-        self.assertEqual(len(many), 3)
-        self.assertEqual({j["sample"] for j in many}, {"book", "sma", "ema"})
-        sma = next(j for j in many if j["sample"] == "sma")
-        self.assertEqual(sma["book_stocks"]["600350.SH"]["ma_type"], "SMA")
-        self.assertEqual(sma["basket"], "book")
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(book, fake_book)
+        self.assertEqual(jobs[0]["sample"], "book")
 
-    def test_assemble_jobs_space_sma_ema_max_six(self) -> None:
+    def test_assemble_jobs_space_max_two(self) -> None:
         spec = {"compare_div": "front_ratio", "cells": [{"id": "base", "overrides": {}}]}
         fake = [
             _walk(basket="tune", stocks=["AAA111.SH"]),
             _walk(basket="holdout", stocks=["BBB222.SZ"]),
         ]
         with patch("grid_run.book_jobs", return_value=fake):
-            _, many = assemble_jobs(spec, include_sma_ema=True)
-        self.assertEqual(len(many), 6)
+            book, jobs = assemble_jobs(spec)
+        self.assertEqual(book, fake)
+        self.assertEqual(len(jobs), 2)
         self.assertEqual(
-            {(j["sample"], j["basket"]) for j in many},
-            {
-                ("book", "tune"),
-                ("book", "holdout"),
-                ("sma", "tune"),
-                ("sma", "holdout"),
-                ("ema", "tune"),
-                ("ema", "holdout"),
-            },
+            {(j["sample"], j["basket"]) for j in jobs},
+            {("book", "tune"), ("book", "holdout")},
         )
 
     def test_book_jobs_one_walk_not_stock_year(self) -> None:
@@ -341,6 +330,10 @@ class GridRunApiTest(unittest.TestCase):
         self.assertNotIn("STATE_FILE", defaults)
         self.assertAlmostEqual(float(defaults["chase.max_pct"]), 0.05)
         self.assertAlmostEqual(float(defaults["stop_loss.pct"]), 0.08)
+        self.assertEqual(int(defaults["d_ma.mid"]), 20)
+        self.assertEqual(int(defaults["d_ma.slow"]), 60)
+        self.assertEqual(int(defaults["w_ma.mid"]), 13)
+        self.assertNotIn("D_MA_MID", defaults)
 
     def test_parse_fingerprint_trail_tiers_distinguishes_giveback(self) -> None:
         current = [
@@ -488,6 +481,36 @@ class GridRunApiTest(unittest.TestCase):
         with self.assertRaises(GridError):
             validate_spec(spec)
 
+    def test_load_spec_rejects_old_dma_mid(self) -> None:
+        spec = {
+            "cells": [
+                {"id": "dmm15", "kind": "other", "overrides": {"D_MA_MID": 15}},
+            ]
+        }
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "old.json"
+            path.write_text(json.dumps(spec), encoding="utf-8")
+            with self.assertRaises(GridError) as ctx:
+                load_spec(path)
+        self.assertIn("D_MA_MID", str(ctx.exception))
+        with self.assertRaises(GridError):
+            validate_spec(spec)
+
+    def test_load_spec_rejects_flat_dma_mid(self) -> None:
+        spec = {
+            "cells": [
+                {"id": "dmm15", "kind": "other", "overrides": {"d_ma.mid": 15}},
+            ]
+        }
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "flat.json"
+            path.write_text(json.dumps(spec), encoding="utf-8")
+            with self.assertRaises(GridError) as ctx:
+                load_spec(path)
+        self.assertIn("d_ma.mid", str(ctx.exception))
+        with self.assertRaises(GridError):
+            validate_spec(spec)
+
 
 class GridInitProbeTest(unittest.TestCase):
     def test_run_init_probe_rejects_old_stop_loss(self) -> None:
@@ -499,6 +522,26 @@ class GridInitProbeTest(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             run_init_probe({"stop_loss.pct": 0.06})
         self.assertIn("stop_loss.pct", str(ctx.exception))
+
+    def test_run_init_probe_rejects_old_dma_mid(self) -> None:
+        with self.assertRaises(ValueError) as ctx:
+            run_init_probe({"D_MA_MID": 15})
+        self.assertIn("D_MA_MID", str(ctx.exception))
+
+    def test_run_init_probe_rejects_flat_dma_mid(self) -> None:
+        with self.assertRaises(ValueError) as ctx:
+            run_init_probe({"d_ma.mid": 15})
+        self.assertIn("d_ma.mid", str(ctx.exception))
+
+    def test_run_init_probe_applies_structure(self) -> None:
+        ov = {"structure": {"d_ma": {"mid": 15}}}
+        text = run_init_probe(ov)
+        self.assertIn("dMA=", text)
+        self.assertRegex(text, r"dMA=\s*15/")
+        defaults = load_config_defaults()
+        expected = expected_fingerprint(defaults, ov)
+        got = parse_fingerprint(text)
+        self.assertEqual(got["recipe"], expected["recipe"])
 
     def test_run_init_probe_applies_stop_loss(self) -> None:
         text = run_init_probe({"factor_params": {"stop_loss": {"pct": 0.06}}})

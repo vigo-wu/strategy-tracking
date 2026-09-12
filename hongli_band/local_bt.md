@@ -6,7 +6,7 @@
 
 ## 适用场景
 
-- 批量扫票、按自然年切段、对照 SMA/EMA 或多种复权。
+- 批量扫票、按自然年切段、对照多种复权。
 - 已有 `tools/csv/`，不想每次开终端编辑器。
 - 从已跑完的 `report/<type>/` 打分，生成 `BOOK_STOCKS` 草稿（**不会自动改 config**）。
 - **walk-forward 组合分析**：每换仓段手工指定篮子，滚动持有回放（见下文「数据分析」）。
@@ -96,20 +96,18 @@ hongli_band/回测记录/      ← 旧终端导出；「仅分析」会一并列
 
 - 下拉列表是所选复权目录里标的的 **并集**。
 - 同一套起止日期；开跑后对每种复权找该票 `*_1d_*.csv`，缺文件则跳过并提示。
-- 勾选「SMA/EMA 对照」时，每种复权再各跑 SMA 与 EMA。
+- 价格均线锁 `BOOK_STOCKS[code].ma_type`，缺省全局 `MA_TYPE`（当前默认 EMA）。可用 `--ma-type` 强制一种。
 - 上传 CSV 只写入 **第一种** 勾选复权。
-- 跑完后若成功 ≥2 种复权：先出 KPI 对照表与权益曲线叠加，再用 tab 切换查看该复权的 K 线 / 成交（K 线价格口径不同，不叠加）。勾了均线对照时，对照表与权益叠加用各复权的 EMA，tab 内仍是 SMA/EMA 对照。
+- 跑完后若成功 ≥2 种复权：先出 KPI 对照表与权益曲线叠加，再用 tab 切换查看该复权的 K 线 / 成交（K 线价格口径不同，不叠加）。
 
 **批量（按标的汇总）**
 
 - 标的勾选也是并集；某类型没有该票则该类型跳过。
 - 「按自然年分段」：每年独立账户、年初空仓；暖机仍用该年之前的历史 K 线。选股要用的分年对照走这条。
-- 进度按「复权 × 任务」。任务量大约是 **标的 × 年 × 均线 × 复权数**。
-- 汇总 CSV 写在各自 `report/<type>/`（`local_bt_batch_summary.csv`；对照时还有 `local_bt_ma_compare.csv` 等），不把五种揉进一份。
+- 进度按「复权 × 任务」。任务量大约是 **标的 × 年 × 复权数**。
+- 汇总 CSV 写在各自 `report/<type>/`（`local_bt_batch_summary.csv`），不把五种揉进一份。
 - 结果区可按复权筛选。选「全部」时汇总表带复权列，按年汇总按 **年 × 复权** 拆开；明细下拉为 `标的 · 复权`（分年再加年）。点开某标的同年若有多种复权，同样给出对照表、权益叠加和 tab 切换。
 - 结果区另有 **分年绩效（权益口径）**：各票独立账户盈亏按年相加（数据分析的「单票合计」），不是共享钱包组合净值；年化/回撤分母为成功任务数 × 单票预算。真组合走「数据分析 → 固定标的」。
-
-未勾选均线对照时，价格均线仍走 `BOOK_STOCKS[code].ma_type`，缺省全局 `MA_TYPE`（当前默认 EMA）。
 
 ### 仅分析已有明细
 
@@ -123,16 +121,16 @@ hongli_band/回测记录/      ← 旧终端导出；「仅分析」会一并列
 
 流程：
 
-1. 每个复权目录内，在**选定年**上做 SMA/EMA 择优（成对年份总盈亏；接近再比胜率；再平落 EMA）。
+1. 建议均线锁 `BOOK_STOCKS[code].ma_type` / 全局 `MA_TYPE`。磁盘上就算还有成对 `_SMA`/`_EMA` 分年文件，也不按盈亏选。
 2. 再在「窗口内仍有分年 KPI」的复权之间，取 **year 键交集**，比总盈亏；与最高者 `|Δ|≤1` 元视为接近，再比胜率；仍平优先 `front_ratio`。
 3. 用胜出复权的窗口内分年 KPI 打分；股性（年化波动、贴 MA20）读 **该窗口建议复权** 的 `csv/<type>/`。
-4. 过线后按得分取 Top N。页面给出 `BOOK_STOCKS` 草稿：有建议均线/复权用建议值；缺对照回落当前实跑默认（config `MA_TYPE` / `DIVIDEND_TYPE`，已在池内的票用 `BOOK_STOCKS` 子配置）。
+4. 过线后按得分取 Top N。页面给出 `BOOK_STOCKS` 草稿：建议均线写默认算法；建议复权有对照用对照赢家，缺对照回落 `DIVIDEND_TYPE` / 池内子配置。
 
 默认硬过滤、侧栏控件范围与打分权重写在 `hongli_band/scripts/local_bt/select_config.py`，侧栏可改。成交年占比 / 盈利年占比 / 每年轮次按选定窗口计。
 
 打分权重（过线之后百分位加权）也在该文件。**不要把得分当分真实夏普**；全池 Top N 有多重选择偏差。
 
-覆盖提示里「缺对照」时：先多选复权跑「批量 + 按自然年分段」；建议均线还要同时勾 SMA/EMA 对照。
+覆盖提示里「缺对照」时：先多选复权跑「批量 + 按自然年分段」。
 
 产物：`hongli_band/report/local_bt_stock_select.csv`。刷新缓存按钮会清扫描缓存。
 
@@ -333,10 +331,10 @@ python hongli_band/scripts/local_bt/select_analysis.py \
 单标的 / 批量回测：
 
 ```bash
-python hongli_band/scripts/local_bt/run.py --csv-dir tools/csv --start 20210101 --end 20251231 --split year --compare-ma --dividend-type front,front_ratio
+python hongli_band/scripts/local_bt/run.py --csv-dir tools/csv --start 20210101 --end 20251231 --split year --dividend-type front,front_ratio
 ```
 
-`--dividend-type` 逗号分隔；未给默认 `front_ratio`。`--split year` 按自然年；`--compare-ma` 各跑 SMA/EMA。`--workers 0` 为自动进程数。多种复权一次进同一个进程池；同一标的 CSV 的年分段 / SMA·EMA 对照在同一 worker 内顺序跑、复用已加载的行情。
+`--dividend-type` 逗号分隔；未给默认 `front_ratio`。`--split year` 按自然年。`--workers 0` 为自动进程数。多种复权一次进同一个进程池；同一标的 CSV 的年分段在同一 worker 内顺序跑、复用已加载的行情。需要强制一种均线时加 `--ma-type SMA|EMA`。
 
 选股（同样扫兄弟复权目录）：
 

@@ -18,6 +18,7 @@ alwaysApply: true
 | 批量把 OHLCV alpha 做成 QuantSkills 因子 Skill 并验证 | `.cursor/skills/skill-quant-factor-skill-factory/SKILL.md` |
 | 网格回测、最优参数、实跑扫参、STOP_LOSS/TRAIL/TIME_FORCE 确认 | `.cursor/skills/qmt-local-bt-grid/SKILL.md` |
 | 实盘评估、随机组合回放、能否上实盘、稳健门（参数锁定后） | `.cursor/skills/qmt-local-bt-robust/SKILL.md` |
+| 改 RECIPE / 结构窗 / 网格覆盖形态 / 读窗 API | 先改代码，再按 `.cursor/rules/hlband-docs-sync.mdc` 同步现网文档 |
 
 ## 叠加（不是二选一）
 

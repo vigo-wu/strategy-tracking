@@ -560,12 +560,13 @@ def _ohlcv_need_1d():
         plat_n = int(20 if raw_plat is None else raw_plat)
     except (TypeError, ValueError):
         plat_n = 20
+    d_ma = _structure_windows()["d_ma"]
     try:
-        mid_n = int(D_MA_MID or 0)
+        mid_n = int(d_ma.get("mid") or 0)
     except (TypeError, ValueError):
         mid_n = 0
     try:
-        slow_n = int(D_MA_SLOW or 0)
+        slow_n = int(d_ma.get("slow") or 0)
     except (TypeError, ValueError):
         slow_n = 0
     confirm_n = _vol_pullback_confirm_need()
@@ -591,7 +592,8 @@ def _ohlcv_need_1d():
 
 def _ohlcv_need_1w():
     # 55 = 原 W_MA_SLOW 暖机地板，不是均线周期
-    return max(int(W_MA_LIFE), int(MACD_SLOW) + int(MACD_SIGNAL), 55) + 5
+    win = _structure_windows()
+    return max(int(win["w_ma"]["life"]), int(win["macd"]["slow"]) + int(win["macd"]["signal"]), 55) + 5
 
 
 def _prefetch_watch_ohlcv(C, stocks):

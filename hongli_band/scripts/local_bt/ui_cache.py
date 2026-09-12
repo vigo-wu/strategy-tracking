@@ -51,7 +51,6 @@ GRID_KEYS: tuple[str, ...] = (
     "grid_compare_div",
     "grid_workers",
     "grid_batch_size",
-    "grid_sma_ema",
     "grid_year_start",
     "grid_year_end",
     "grid_tune_start",

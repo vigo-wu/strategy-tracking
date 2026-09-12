@@ -598,49 +598,6 @@ class YearSplitTests(unittest.TestCase):
             self.assertIn("ma_type= SMA", text)
 
 
-class MaCompareTests(unittest.TestCase):
-    def test_pick_ma_winner_higher_pnl(self):
-        from analyze import pick_ma_winner
-
-        r = pick_ma_winner(
-            {"ok": True, "sum_pnl": 10.0, "win_rate": 80.0},
-            {"ok": True, "sum_pnl": 20.0, "win_rate": 40.0},
-        )
-        self.assertEqual(r["winner"], "EMA")
-        self.assertEqual(r["label"], "EMA")
-        self.assertEqual(r["why"], "compare")
-        self.assertAlmostEqual(r["pnl_delta"], 10.0)
-
-    def test_pick_ma_winner_close_uses_win_rate(self):
-        from analyze import pick_ma_winner
-
-        r = pick_ma_winner(
-            {"ok": True, "sum_pnl": 10.0, "win_rate": 80.0},
-            {"ok": True, "sum_pnl": 10.4, "win_rate": 20.0},
-        )
-        self.assertEqual(r["label"], "接近")
-        self.assertEqual(r["why"], "compare_close")
-        self.assertEqual(r["winner"], "SMA")
-
-    def test_pick_ma_winner_close_tie_ema(self):
-        from analyze import pick_ma_winner
-
-        r = pick_ma_winner(
-            {"ok": True, "sum_pnl": 10.0, "win_rate": 50.0},
-            {"ok": True, "sum_pnl": 10.0, "win_rate": 50.0},
-        )
-        self.assertEqual(r["label"], "接近")
-        self.assertEqual(r["winner"], "EMA")
-
-    def test_pick_ma_winner_both_fail(self):
-        from analyze import pick_ma_winner
-
-        r = pick_ma_winner({"ok": False, "sum_pnl": None}, {"ok": False})
-        self.assertEqual(r["winner"], "")
-        self.assertEqual(r["label"], "")
-        self.assertEqual(r["why"], "")
-
-
 class DetailReTests(unittest.TestCase):
     def test_parse_year_and_ma(self):
         from stock_select import DETAIL_RE
@@ -670,10 +627,11 @@ class DetailReTests(unittest.TestCase):
 
 
 class ResolveMaTests(unittest.TestCase):
-    def test_compare_winner_not_plain_file(self):
+    def test_paired_files_do_not_pick_winner(self):
         from stock_select import _resolve_stock_ma
 
         rec = {
+            "stock": "600000.SH",
             "by_ma": {
                 "SMA": {
                     "years": {"2024": {"sum_pnl": 100.0, "n_buy": 2, "win_rate": 50.0}},
@@ -690,14 +648,15 @@ class ResolveMaTests(unittest.TestCase):
             }
         }
         _resolve_stock_ma(rec)
-        self.assertEqual(rec["ma_type_suggest"], "SMA")
-        self.assertEqual(rec["ma_type_why"], "compare")
-        self.assertEqual(rec["years"]["2024"]["sum_pnl"], 100.0)
+        self.assertEqual(rec["ma_type_suggest"], "EMA")
+        self.assertEqual(rec["ma_type_why"], "default")
+        self.assertEqual(rec["years"]["2024"]["sum_pnl"], 999.0)
 
-    def test_no_compare_empty_suggest(self):
+    def test_plain_bucket_uses_default_suggest(self):
         from stock_select import _resolve_stock_ma
 
         rec = {
+            "stock": "600000.SH",
             "by_ma": {
                 "": {
                     "years": {"2024": {"sum_pnl": 1.0, "n_buy": 1, "win_rate": 50.0}},
@@ -706,13 +665,15 @@ class ResolveMaTests(unittest.TestCase):
             }
         }
         _resolve_stock_ma(rec)
-        self.assertEqual(rec["ma_type_suggest"], "")
-        self.assertEqual(rec["ma_type_why"], "no_compare")
+        self.assertEqual(rec["ma_type_suggest"], "EMA")
+        self.assertEqual(rec["ma_type_why"], "default")
+        self.assertEqual(rec["years"]["2024"]["sum_pnl"], 1.0)
 
-    def test_window_flips_ma_winner_without_mutating_buckets(self):
+    def test_window_keeps_default_and_does_not_mutate_buckets(self):
         from stock_select import _resolve_stock_ma
 
         rec = {
+            "stock": "600000.SH",
             "by_ma": {
                 "SMA": {
                     "years": {
@@ -734,15 +695,17 @@ class ResolveMaTests(unittest.TestCase):
         }
         raw_sma = dict(rec["by_ma"]["SMA"]["years"])
         _resolve_stock_ma(rec)
-        self.assertEqual(rec["ma_type_suggest"], "SMA")
-        windowed = {"by_ma": rec["by_ma"]}
+        self.assertEqual(rec["ma_type_suggest"], "EMA")
+        self.assertEqual(rec["years"]["2021"]["sum_pnl"], 1.0)
+        windowed = {"stock": "600000.SH", "by_ma": rec["by_ma"]}
         _resolve_stock_ma(windowed, years_keep=("2024", "2025"))
         self.assertEqual(windowed["ma_type_suggest"], "EMA")
         self.assertEqual(set(windowed["years"]), {"2024", "2025"})
+        self.assertEqual(windowed["years"]["2024"]["sum_pnl"], 100.0)
         self.assertEqual(rec["by_ma"]["SMA"]["years"], raw_sma)
         self.assertIn("2021", rec["by_ma"]["EMA"]["years"])
 
-    def test_score_universe_uses_compare_not_book(self):
+    def test_score_universe_suggests_default_not_compare(self):
         from stock_select import score_universe
 
         year_kpi = {
@@ -793,9 +756,9 @@ class ResolveMaTests(unittest.TestCase):
             },
         )
         row = scored["df"].iloc[0]
-        self.assertEqual(row["ma_type_suggest"], "SMA")
-        self.assertEqual(row["ma_type_why"], "compare")
-        self.assertAlmostEqual(float(row["ma_pnl_delta"]), -90.0)
+        self.assertEqual(row["ma_type_suggest"], "EMA")
+        self.assertEqual(row["ma_type_why"], "default")
+        self.assertNotIn("ma_pnl_delta", row.index)
 
 
 class TestScoreYears(unittest.TestCase):
@@ -865,7 +828,7 @@ class ScoreWindowTests(unittest.TestCase):
             "top_n": 6,
         }
 
-    def test_score_universe_window_flips_ma_and_keeps_cache(self):
+    def test_score_universe_window_keeps_default_ma_and_cache(self):
         from stock_select import score_universe
 
         scanned = {
@@ -897,7 +860,7 @@ class ScoreWindowTests(unittest.TestCase):
         }
         full = score_universe(scanned, filters=self._loose(), score_years=("2021", "2024", "2025"))
         late = score_universe(scanned, filters=self._loose(), score_years=("2024", "2025"))
-        self.assertEqual(full["df"].iloc[0]["ma_type_suggest"], "SMA")
+        self.assertEqual(full["df"].iloc[0]["ma_type_suggest"], "EMA")
         self.assertEqual(late["df"].iloc[0]["ma_type_suggest"], "EMA")
         rec = scanned["stocks"]["600000.SH"]
         self.assertNotIn("ma_type_suggest", rec)
@@ -916,15 +879,15 @@ class ScoreWindowTests(unittest.TestCase):
                             "by_ma": {
                                 "SMA": {
                                     "years": {
-                                        "2023": self._kpi(1000.0),
-                                        "2024": self._kpi(10.0),
+                                        "2023": self._kpi(1.0),
+                                        "2024": self._kpi(1.0),
                                     },
                                     "recent": None,
                                 },
                                 "EMA": {
                                     "years": {
-                                        "2023": self._kpi(1.0),
-                                        "2024": self._kpi(1.0),
+                                        "2023": self._kpi(1000.0),
+                                        "2024": self._kpi(10.0),
                                     },
                                     "recent": None,
                                 },
@@ -935,15 +898,15 @@ class ScoreWindowTests(unittest.TestCase):
                             "by_ma": {
                                 "SMA": {
                                     "years": {
-                                        "2023": self._kpi(10.0),
-                                        "2024": self._kpi(100.0),
+                                        "2023": self._kpi(1.0),
+                                        "2024": self._kpi(1.0),
                                     },
                                     "recent": None,
                                 },
                                 "EMA": {
                                     "years": {
-                                        "2023": self._kpi(1.0),
-                                        "2024": self._kpi(1.0),
+                                        "2023": self._kpi(10.0),
+                                        "2024": self._kpi(100.0),
                                     },
                                     "recent": None,
                                 },
@@ -1483,104 +1446,6 @@ class DivCompareViewTests(unittest.TestCase):
         )
         self.assertEqual(list(df["复权"]), ["前复权", "等比前复权"])
         self.assertEqual(list(df["更优"]), ["是", ""])
-
-    def test_pair_ma_keeps_dividend_type(self):
-        from analyze import pair_ma_batch_rows
-
-        rows = [
-            {
-                "stock": "600000.SH",
-                "year": "2024",
-                "dividend_type": "front",
-                "ma_type": "SMA",
-                "ok": True,
-                "n_buy": 1,
-                "sum_pnl": 10.0,
-                "win_rate": 100.0,
-            },
-            {
-                "stock": "600000.SH",
-                "year": "2024",
-                "dividend_type": "front",
-                "ma_type": "EMA",
-                "ok": True,
-                "n_buy": 1,
-                "sum_pnl": 12.0,
-                "win_rate": 100.0,
-            },
-            {
-                "stock": "600000.SH",
-                "year": "2024",
-                "dividend_type": "front_ratio",
-                "ma_type": "SMA",
-                "ok": True,
-                "n_buy": 1,
-                "sum_pnl": 1.0,
-                "win_rate": 0.0,
-            },
-            {
-                "stock": "600000.SH",
-                "year": "2024",
-                "dividend_type": "front_ratio",
-                "ma_type": "EMA",
-                "ok": True,
-                "n_buy": 1,
-                "sum_pnl": 2.0,
-                "win_rate": 0.0,
-            },
-        ]
-        pairs = pair_ma_batch_rows(rows)
-        self.assertEqual(len(pairs), 2)
-        self.assertEqual({p["dividend_type"] for p in pairs}, {"front", "front_ratio"})
-
-    def test_ma_compare_dataframe_adds_div_col(self):
-        from analyze import ma_compare_dataframe, pair_ma_batch_rows
-
-        rows = [
-            {
-                "stock": "A",
-                "year": "",
-                "dividend_type": "front",
-                "ma_type": "SMA",
-                "ok": True,
-                "n_buy": 1,
-                "sum_pnl": 1.0,
-                "win_rate": 50.0,
-            },
-            {
-                "stock": "A",
-                "year": "",
-                "dividend_type": "front",
-                "ma_type": "EMA",
-                "ok": True,
-                "n_buy": 1,
-                "sum_pnl": 2.0,
-                "win_rate": 50.0,
-            },
-            {
-                "stock": "A",
-                "year": "",
-                "dividend_type": "none",
-                "ma_type": "SMA",
-                "ok": True,
-                "n_buy": 1,
-                "sum_pnl": 3.0,
-                "win_rate": 50.0,
-            },
-            {
-                "stock": "A",
-                "year": "",
-                "dividend_type": "none",
-                "ma_type": "EMA",
-                "ok": True,
-                "n_buy": 1,
-                "sum_pnl": 4.0,
-                "win_rate": 50.0,
-            },
-        ]
-        df = ma_compare_dataframe(pair_ma_batch_rows(rows))
-        self.assertIn("复权", df.columns)
-        self.assertEqual(sorted(df["复权"].tolist()), ["不复权", "前复权"])
 
     def test_batch_summary_adds_div_col(self):
         from analyze import batch_summary_dataframe
@@ -2182,7 +2047,8 @@ class OhlcvPrefetchCacheTests(unittest.TestCase):
         ns["A"].stock = "600350.SH"
         self.assertEqual(ns["_dividend_type"](), ns["_dividend_type_for"]("600350.SH"))
         self.assertEqual(ns["_dividend_type_for"]("600350.SH"), "front_ratio")
-        self.assertEqual(ns["_dividend_type_for"]("600028.SH"), "front")
+        # 不在 BOOK_STOCKS、无 dividend_type 子配置 → 全局 DIVIDEND_TYPE
+        self.assertEqual(ns["_dividend_type_for"]("600028.SH"), "front_ratio")
         self.assertEqual(
             ns["_ohlcv_diag_key"]("d1", "600028.SH"),
             "d1_600028_SH",

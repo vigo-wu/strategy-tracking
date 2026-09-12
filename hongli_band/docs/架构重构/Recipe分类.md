@@ -136,7 +136,7 @@ scale_out:
 
 ## 7. 第一期复合原子（现网叶子）
 
-引擎可支持细原子，但默认 Recipe **只引用**下表。每个 id 对应 `hlband/factors/lib/<id>.py`。阈值读 `RECIPE.factor_params`（`_factor_param`），**没有** `STOP_LOSS` / `CHASE_MAX_PCT` 这类模块全局别名。均线周期（`D_MA_*`）仍是结构全局，`<=0` 关条。
+引擎可支持细原子，但默认 Recipe **只引用**下表。每个 id 对应 `hlband/factors/lib/<id>.py`。阈值读 `RECIPE.factor_params`（`_factor_param`），**没有** `STOP_LOSS` / `CHASE_MAX_PCT` 这类模块全局别名。均线/MACD 窗读 `RECIPE.structure`（`_structure_windows`），`<=0` 关条。
 
 | id | 现逻辑 | 阈值（`factor_params`） |
 | :--- | :--- | :--- |
@@ -145,7 +145,7 @@ scale_out:
 | `vol_dry` | 跌破中线且无量 | `vol_dry.ratio` / `n` |
 | `w_bias` | 周线高位乖离 | `w_bias.hard` |
 | `w_slope` | 低位生命线未连升 | `w_slope.low` / `slope_weeks` |
-| `weekly_bear` | **当天空头**（破生命线 / 零轴下死叉） | 无叶子阈值；周期在结构全局 |
+| `weekly_bear` | **当天空头**（破生命线 / 零轴下死叉） | 无叶子阈值；周期在 `RECIPE.structure` |
 | `weekly_bear_confirm` | **确认清仓**：streak ≥ N | `weekly_bear_confirm.days` |
 | `plat_break` | 平台突破 | `plat_break.lookback` / `max_range` / `break_buf` |
 | `w_macd_golden` | 周金叉且柱放大 | `w_macd_golden.hist_expand` |
@@ -161,15 +161,35 @@ scale_out:
 
 ## 8. 参数组
 
-数字真源是 `config.RECIPE.factor_params` 字面量。叶子只读表，不读同名全局。
+数字真源是 `config.RECIPE` 里两张表的字面量。叶子只读表，不读同名全局。没有 `STOP_LOSS` / `D_MA_MID` 别名。
 
 | 住哪 | 例子 | 说明 |
 | :--- | :--- | :--- |
 | `RECIPE` 四槽 AST | `entry` / `scale_in` / `exit` / `scale_out` | 无数字 |
-| `RECIPE.factor_params` | `stop_loss.pct`、`chase.max_pct`、`trail_stop.tiers` | 因子阈值 |
-| 结构全局 | `D_MA_*` / `W_MA_*` / `MACD_*` | 均线周期；不上表 |
+| `RECIPE.factor_params` | `stop_loss.pct`、`chase.max_pct`、`trail_stop.tiers` | 因子阈值；`_factor_param` |
+| `RECIPE.structure` | 见下表 | 均线/MACD **窗**；`_structure_windows` |
+| 算法（不是窗） | `MA_TYPE`、`BOOK_STOCKS[].ma_type` | SMA/EMA；不上 `structure` |
 | 仓位 / 资金全局 | `SCALE_ARM`、`CASH_RATIO`、`TRADE_BUDGET` | 不上表、不上因子面板 |
 
-网格：轴 id 是点路径（`stop_loss.pct`）；格子 `overrides` 必须写成 `{"factor_params": {"stop_loss": {"pct": 0.06}}}`。顶层 `STOP_LOSS` 或顶层 `stop_loss.pct` 都直接报错。面板只上模拟下单 / 资金 / 加仓开关，因子阈值不上屏。
+`RECIPE.structure` 现网字面量（`<=0` 关该条均线；MACD 三窗都应 >0）：
 
-不做 `structure` / `sizing` 分栏，也不做全因子 `2^n` 开关。优先扫命名数值轴，见 `qmt-local-bt-grid`。
+| 段 | 键 | 现网 | 用途 |
+| :--- | :--- | :--- | :--- |
+| `d_ma` | `mid` / `slow` | 20 / 60 | 日线回踩/无量阴跌；慢线还是 time_force 地板 |
+| `w_ma` | `fast` / `mid` / `life` | 5 / 13 / 34 | 周线快/中/生命线；`mid` 仅日志 `weekly_bull` |
+| `macd` | `fast` / `slow` / `signal` | 12 / 26 / 9 | 周线 DIF/DEA/柱 |
+
+读窗：调用方先 `_structure_windows()`，再把 `n` 传给 `_price_ma` / `_calc_macd`（三窗必传）。缺键用上表数字字面量。网格覆盖 `_structure_apply_global`，按段再按 key 合并。QMT 暖机（`market._ohlcv_need_*`）走 `_structure_windows()`；local_bt `run.py` 读裸表，缺键当 0——现网字面量齐全时两者一致。
+
+网格：轴 id 是点路径（`stop_loss.pct` / `d_ma.mid`）；短 id 如 `dmm15`。格子 `overrides` 必须写成：
+
+```text
+{"factor_params": {"stop_loss": {"pct": 0.06}}}
+{"structure": {"d_ma": {"mid": 15}}}
+```
+
+顶层旧键（`STOP_LOSS` / `D_MA_MID`）或顶层点路径（`stop_loss.pct` / `d_ma.mid`）都直接报错。面板只上模拟下单 / 资金 / 加仓开关，因子阈值和结构窗不上屏。
+
+`recipe=` 指纹：表达式 + 折进表的 `factor_params` + `structure`。apply 之后再算，`overrides` 袋为空。默认哈希会随 payload 增 `structure` 而变；探针用 `expected_fingerprint` 重算，不要对历史 `report/grid/` 档案里的旧哈希。两份拷贝：`factors/slots.py` 与 `local_bt/grid_spec.py`。
+
+仓位不做 sizing 分栏，也不做全因子 `2^n` 开关。优先扫命名数值轴，见 `qmt-local-bt-grid`。
