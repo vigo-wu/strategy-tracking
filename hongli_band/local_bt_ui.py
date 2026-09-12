@@ -1,5 +1,5 @@
 # coding: utf-8
-"""启动 HlBand 本地回测可视化界面。
+"""启动 Quant Station。
 
   python hongli_band/local_bt_ui.py
 """

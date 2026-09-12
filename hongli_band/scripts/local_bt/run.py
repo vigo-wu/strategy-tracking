@@ -1261,7 +1261,7 @@ def _run_report(log_path: Path, out_dir: Path) -> None:
         str(report_dir),
         "--no-kline",
         "--title",
-        "HlBand 本地回测",
+        "Quant Station",
     ]
     if terminal.is_file():
         argv.extend(["--terminal-csv", str(terminal)])
@@ -1272,7 +1272,7 @@ def _run_report(log_path: Path, out_dir: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
-    ap = argparse.ArgumentParser(description="HlBand local backtest from KlineDump daily CSV")
+    ap = argparse.ArgumentParser(description="Quant Station: local backtest from KlineDump daily CSV")
     src = ap.add_mutually_exclusive_group(required=True)
     src.add_argument("--csv", default="", help="KlineDump 日线 CSV（单标的）")
     src.add_argument(

@@ -1,6 +1,6 @@
-# 本地回测说明
+# Quant Station
 
-用 **KlineDump 日线 CSV** 回放 **真实拼接的 HlBand 脚本**（`qmt_common` + `hlband` 片段），不经过国金编辑器回测。买卖规则、均线、复权键仍以 [`model.md`](./model.md) 与 [`scripts/qmt/hlband/config.py`](./scripts/qmt/hlband/config.py) 为准。
+**Quant Station** 用 **KlineDump 日线 CSV** 回放 **真实拼接的 HlBand 脚本**（`qmt_common` + `hlband` 片段），不经过国金编辑器回测。买卖规则、均线、复权键仍以 [`model.md`](./model.md) 与 [`scripts/qmt/hlband/config.py`](./scripts/qmt/hlband/config.py) 为准。
 
 本页说明：行情从哪来、产物写到哪、界面三种模式、复权多选、选股择优。策略买卖点本身不在这里重复。
 
@@ -57,7 +57,7 @@
 
    导出名单、起始日、复权种类见 [`tools/qmt_terminal_kldump/config.py`](../tools/qmt_terminal_kldump/config.py)（`DUMP_STOCKS`、`HIST_START`、`DIVIDEND_TYPES`、`DUMP_DIVID_FACTORS`、`OUT_DIR`）。`FOLLOW_CHART_RANGE=False` 时从 `HIST_START` 起导，给周线暖机留长度。
 
-## 启动界面
+## 启动 Quant Station
 
 在仓库根目录：
 

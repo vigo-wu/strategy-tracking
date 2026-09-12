@@ -1,5 +1,5 @@
 # coding: utf-8
-"""HlBand 本地回测可视化（Streamlit）。
+"""Quant Station（Streamlit）。
 
 启动:
   streamlit run hongli_band/scripts/local_bt/app.py
@@ -169,8 +169,8 @@ if not _IS_MP_WORKER:
         pass
 
 
-    st.set_page_config(page_title="HlBand 本地回测", layout="wide")
-    st.title("HlBand 本地回测")
+    st.set_page_config(page_title="Quant Station", page_icon=":material/analytics:", layout="wide")
+    st.title("Quant Station")
 
     DIVIDEND_COLORS = {
         "none": "#616161",
