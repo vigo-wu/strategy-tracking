@@ -123,14 +123,18 @@ class TestRobustSpec(unittest.TestCase):
                 "recommend": {"id": "sl06", "kind": "tighten", "reason": "ok"},
                 "cells": [
                     {"id": "base", "kind": "base", "overrides": {}},
-                    {"id": "sl06", "kind": "tighten", "overrides": {"STOP_LOSS": 0.06}},
+                    {
+                        "id": "sl06",
+                        "kind": "tighten",
+                        "overrides": {"factor_params": {"stop_loss": {"pct": 0.06}}},
+                    },
                 ],
             }
             path = root / "summary.json"
             path.write_text(json.dumps(summary), encoding="utf-8")
             got = resolve_overrides_from_summary(path)
             self.assertEqual(got["id"], "sl06")
-            self.assertEqual(got["overrides"]["STOP_LOSS"], 0.06)
+            self.assertEqual(got["overrides"]["factor_params"]["stop_loss"]["pct"], 0.06)
 
     def test_base_empty_overrides(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -164,7 +168,7 @@ class TestRobustSpec(unittest.TestCase):
         spec = load_spec(
             {
                 "run_id": "t1",
-                "overrides": {"STOP_LOSS": 0.1},
+                "overrides": {"factor_params": {"stop_loss": {"pct": 0.1}}},
                 "year_start": 2018,
                 "year_end": 2026,
                 "tune_start": 2018,
@@ -177,8 +181,48 @@ class TestRobustSpec(unittest.TestCase):
                 "basket_size": 3,
             }
         )
-        self.assertEqual(spec["overrides"]["STOP_LOSS"], 0.1)
+        self.assertEqual(spec["overrides"]["factor_params"]["stop_loss"]["pct"], 0.1)
         self.assertEqual(spec["deploy_start"], 2024)
+
+    def test_load_spec_rejects_old_stop_loss(self) -> None:
+        with self.assertRaises(RobustSpecError) as ctx:
+            load_spec(
+                {
+                    "run_id": "t1",
+                    "overrides": {"STOP_LOSS": 0.1},
+                    "year_start": 2018,
+                    "year_end": 2026,
+                    "tune_start": 2018,
+                    "tune_end": 2021,
+                    "check_start": 2022,
+                    "check_end": 2023,
+                    "deploy_start": 2024,
+                    "deploy_end": 2026,
+                    "n_baskets": 2,
+                    "basket_size": 3,
+                }
+            )
+        self.assertIn("STOP_LOSS", str(ctx.exception))
+
+    def test_load_spec_rejects_flat_stop_loss_pct(self) -> None:
+        with self.assertRaises(RobustSpecError) as ctx:
+            load_spec(
+                {
+                    "run_id": "t1",
+                    "overrides": {"stop_loss.pct": 0.1},
+                    "year_start": 2018,
+                    "year_end": 2026,
+                    "tune_start": 2018,
+                    "tune_end": 2021,
+                    "check_start": 2022,
+                    "check_end": 2023,
+                    "deploy_start": 2024,
+                    "deploy_end": 2026,
+                    "n_baskets": 2,
+                    "basket_size": 3,
+                }
+            )
+        self.assertIn("stop_loss.pct", str(ctx.exception))
 
 
 class TestRobustSample(unittest.TestCase):

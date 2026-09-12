@@ -6,4 +6,4 @@ def _factor_eval_w_bias(ctx):
     if m5 is None or m30 is None or m30 <= 0:
         return False, {"bias": None}
     bias = (float(m5) - float(m30)) / float(m30)
-    return bias >= float(W_BIAS_HARD), {"bias": bias}
+    return bias >= float(_factor_param(ctx, "w_bias", "hard")), {"bias": bias}

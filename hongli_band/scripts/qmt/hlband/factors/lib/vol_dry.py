@@ -16,6 +16,6 @@ def _factor_eval_vol_dry(ctx):
         and v20 is not None
         and v20 > 0
         and vol is not None
-        and vol < v20 * float(VOL_DRY_RATIO)
+        and vol < v20 * float(_factor_param(ctx, "vol_dry", "ratio"))
     )
     return bool(dry_below), {"dry_below": bool(dry_below)}

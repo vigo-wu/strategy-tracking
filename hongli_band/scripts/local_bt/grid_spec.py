@@ -1,5 +1,5 @@
 # coding: utf-8
-"""命名格子 / 笛卡尔积生成：config 参数目录、kind/id、TRAIL_TIERS 整表轴。"""
+"""命名格子 / 笛卡尔积生成：factor_params 点路径 + 结构/资金全局。"""
 from __future__ import annotations
 
 import hashlib
@@ -21,25 +21,31 @@ _HLBAND_CONFIG = _HERE.parent / "qmt" / "hlband" / "config.py"
 
 GROUP_ORDER = ("入场", "出场", "加仓", "资金", "结构")
 KIND_EXIT_IDS = frozenset(
-    {"STOP_LOSS", "TRAIL_TIERS", "TIME_FORCE_BARS"}
+    {"stop_loss.pct", "trail_stop.tiers", "time_force.bars"}
 )
 ENTRY_KEYS = (
-    "MA_TOUCH_TOL",
-    "VOL_PULLBACK_RATIO",
-    "VOL_PULLBACK_N",
-    "VOL_PULLBACK_CONFIRM_DAYS",
-    "VOL_DRY_RATIO",
-    "VOL_DRY_N",
-    "CHASE_MAX_PCT",
-    "W_BIAS_HARD",
-    "W_BIAS_LOW",
-    "W_MA30_SLOPE_WEEKS",
+    "pullback_vol.tol",
+    "pullback_vol.ratio",
+    "pullback_vol.vol_n",
+    "pullback_vol.confirm_days",
+    "vol_dry.ratio",
+    "vol_dry.n",
+    "chase.max_pct",
+    "w_bias.hard",
+    "w_slope.low",
+    "w_slope.slope_weeks",
 )
 EXIT_KEYS = (
-    "STOP_LOSS",
-    "TRAIL_TIERS",
-    "TIME_FORCE_BARS",
-    "W_BEAR_CONFIRM_DAYS",
+    "stop_loss.pct",
+    "trail_stop.tiers",
+    "time_force.bars",
+    "weekly_bear_confirm.days",
+)
+SCALE_FACTOR_KEYS = (
+    "plat_break.lookback",
+    "plat_break.max_range",
+    "plat_break.break_buf",
+    "w_macd_golden.hist_expand",
 )
 MONEY_KEYS = (
     "CASH_RATIO",
@@ -50,19 +56,49 @@ MONEY_KEYS = (
 )
 PERCENT_KEYS = frozenset(
     {
-        "STOP_LOSS",
-        "MA_TOUCH_TOL",
-        "VOL_PULLBACK_RATIO",
-        "VOL_DRY_RATIO",
-        "CHASE_MAX_PCT",
-        "W_BIAS_HARD",
-        "W_BIAS_LOW",
+        "stop_loss.pct",
+        "pullback_vol.tol",
+        "pullback_vol.ratio",
+        "vol_dry.ratio",
+        "chase.max_pct",
+        "w_bias.hard",
+        "w_slope.low",
+        "plat_break.max_range",
         "CASH_RATIO",
         "LOT_OPEN_FRAC",
         "LOT_ADD_FRAC",
         "SCALE_ARM",
-        "SCALE_PLAT_MAX_RANGE",
     }
+)
+DELETED_FACTOR_KEYS = frozenset(
+    {
+        "CHASE_MAX_PCT",
+        "W_BIAS_HARD",
+        "W_BIAS_LOW",
+        "W_MA30_SLOPE_WEEKS",
+        "MA_TOUCH_TOL",
+        "VOL_PULLBACK_N",
+        "VOL_PULLBACK_RATIO",
+        "VOL_PULLBACK_CONFIRM_DAYS",
+        "VOL_DRY_N",
+        "VOL_DRY_RATIO",
+        "TRAIL_TIERS",
+        "TIME_FORCE_BARS",
+        "STOP_LOSS",
+        "W_BEAR_CONFIRM_DAYS",
+        "SCALE_PLAT_LOOKBACK",
+        "SCALE_PLAT_MAX_RANGE",
+        "SCALE_W_HIST_EXPAND_RATIO",
+        "SCALE_PLAT_BREAK_BUF",
+    }
+)
+DELETED_FACTOR_MSG = (
+    "已删除的顶层因子键：请写 overrides.factor_params"
+    "（如 {\"factor_params\": {\"stop_loss\": {\"pct\": 0.06}}}）。"
+)
+FLAT_FACTOR_PATH_MSG = (
+    "顶层点路径不会进表：请写 overrides.factor_params"
+    "（如 stop_loss.pct → {\"factor_params\": {\"stop_loss\": {\"pct\": 0.06}}}）。"
 )
 SKIP_NAMES = frozenset(
     {
@@ -106,23 +142,6 @@ SKIP_NAMES = frozenset(
 NONE_TOKENS = frozenset({"none", "null", "-", "—", "无", "nan"})
 RECIPE_THRESHOLD_KEYS = frozenset(
     {
-        "CHASE_MAX_PCT",
-        "VOL_DRY_RATIO",
-        "VOL_DRY_N",
-        "MA_TOUCH_TOL",
-        "VOL_PULLBACK_RATIO",
-        "VOL_PULLBACK_N",
-        "VOL_PULLBACK_CONFIRM_DAYS",
-        "W_BIAS_HARD",
-        "W_BIAS_LOW",
-        "W_MA30_SLOPE_WEEKS",
-        "STOP_LOSS",
-        "TRAIL_TIERS",
-        "TIME_FORCE_BARS",
-        "W_BEAR_CONFIRM_DAYS",
-        "SCALE_PLAT_LOOKBACK",
-        "SCALE_PLAT_MAX_RANGE",
-        "SCALE_W_HIST_EXPAND_RATIO",
         "D_MA_MID",
         "D_MA_SLOW",
         "W_MA_FAST",
@@ -134,29 +153,30 @@ RECIPE_THRESHOLD_KEYS = frozenset(
 )
 
 PARAM_LABELS = {
-    "STOP_LOSS": "止损",
-    "TRAIL_TIERS": "阶梯止盈",
-    "TIME_FORCE_BARS": "时间成本 BARS",
-    "W_BEAR_CONFIRM_DAYS": "周线空确认日",
-    "MA_TOUCH_TOL": "回踩容差",
-    "VOL_PULLBACK_RATIO": "缩量回踩比例",
-    "VOL_PULLBACK_N": "缩量窗口",
-    "VOL_PULLBACK_CONFIRM_DAYS": "缩量确认日",
-    "VOL_DRY_RATIO": "无量阴跌比例",
-    "VOL_DRY_N": "无量窗口",
-    "CHASE_MAX_PCT": "追高禁开",
-    "W_BIAS_HARD": "周线高位禁开",
-    "W_BIAS_LOW": "低位乖离",
-    "W_MA30_SLOPE_WEEKS": "低位斜率周数",
+    "stop_loss.pct": "止损",
+    "trail_stop.tiers": "阶梯止盈",
+    "time_force.bars": "时间成本 BARS",
+    "weekly_bear_confirm.days": "周线空确认日",
+    "pullback_vol.tol": "回踩容差",
+    "pullback_vol.ratio": "缩量回踩比例",
+    "pullback_vol.vol_n": "缩量窗口",
+    "pullback_vol.confirm_days": "缩量确认日",
+    "vol_dry.ratio": "无量阴跌比例",
+    "vol_dry.n": "无量窗口",
+    "chase.max_pct": "追高禁开",
+    "w_bias.hard": "周线高位禁开",
+    "w_slope.low": "低位乖离",
+    "w_slope.slope_weeks": "低位斜率周数",
+    "plat_break.lookback": "平台回看",
+    "plat_break.max_range": "平台振幅",
+    "plat_break.break_buf": "平台突破缓冲",
+    "w_macd_golden.hist_expand": "金叉柱放大",
     "SCALE_ENABLE": "加仓开关",
     "SCALE_ONCE_PER_ROUND": "每轮只加一次",
     "SCALE_ARM": "加仓门槛",
     "SCALE_ARM_BARS": "加仓持仓日",
     "SCALE_W_HIST_MIN": "加仓周柱下限",
     "SCALE_LOTS": "分笔独立",
-    "SCALE_PLAT_LOOKBACK": "平台回看",
-    "SCALE_PLAT_MAX_RANGE": "平台振幅",
-    "SCALE_W_HIST_EXPAND_RATIO": "金叉柱放大",
     "CASH_RATIO": "可部署比例",
     "BOOK_LOT_MAX": "全池最多笔",
     "LOT_OPEN_FRAC": "开仓仓位",
@@ -171,29 +191,30 @@ PARAM_LABELS = {
     "MACD_SIGNAL": "MACD 信号",
 }
 ABBREV_FIXED = {
-    "STOP_LOSS": "sl",
-    "TRAIL_TIERS": "tt",
-    "TIME_FORCE_BARS": "tfb",
-    "W_BEAR_CONFIRM_DAYS": "wbc",
-    "CHASE_MAX_PCT": "ch",
-    "W_BIAS_HARD": "wb",
-    "W_BIAS_LOW": "wl",
-    "MA_TOUCH_TOL": "mt",
-    "VOL_PULLBACK_RATIO": "vpr",
-    "VOL_PULLBACK_N": "vpn",
-    "VOL_PULLBACK_CONFIRM_DAYS": "vpc",
-    "VOL_DRY_RATIO": "vdr",
-    "VOL_DRY_N": "vdn",
-    "W_MA30_SLOPE_WEEKS": "ws",
+    "stop_loss.pct": "sl",
+    "trail_stop.tiers": "tt",
+    "time_force.bars": "tfb",
+    "weekly_bear_confirm.days": "wbc",
+    "chase.max_pct": "ch",
+    "w_bias.hard": "wb",
+    "w_slope.low": "wl",
+    "w_slope.slope_weeks": "ws",
+    "pullback_vol.tol": "mt",
+    "pullback_vol.ratio": "vpr",
+    "pullback_vol.vol_n": "vpn",
+    "pullback_vol.confirm_days": "vpc",
+    "vol_dry.ratio": "vdr",
+    "vol_dry.n": "vdn",
+    "plat_break.lookback": "spl",
+    "plat_break.max_range": "spr",
+    "plat_break.break_buf": "spb",
+    "w_macd_golden.hist_expand": "she",
     "SCALE_ENABLE": "se",
     "SCALE_ONCE_PER_ROUND": "sor",
     "SCALE_ARM": "sa",
     "SCALE_ARM_BARS": "sab",
     "SCALE_W_HIST_MIN": "swh",
     "SCALE_LOTS": "slt",
-    "SCALE_PLAT_LOOKBACK": "spl",
-    "SCALE_PLAT_MAX_RANGE": "spr",
-    "SCALE_W_HIST_EXPAND_RATIO": "she",
     "CASH_RATIO": "cr",
     "BOOK_LOT_MAX": "blm",
     "LOT_OPEN_FRAC": "lof",
@@ -208,13 +229,13 @@ ABBREV_FIXED = {
     "MACD_SIGNAL": "mcg",
 }
 DEFAULT_SCAN = {
-    "STOP_LOSS": "6,10",
-    "TIME_FORCE_BARS": "0",
+    "stop_loss.pct": "6,10",
+    "time_force.bars": "0",
 }
 DEFAULT_SELECTED = ()
 DEFAULT_EXTRAS = {
-    "STOP_LOSS": (0.06, 0.10),
-    "TIME_FORCE_BARS": (0,),
+    "stop_loss.pct": (0.06, 0.10),
+    "time_force.bars": (0,),
 }
 
 
@@ -237,7 +258,7 @@ class GridSpecError(ValueError):
 
 RETIRED_MIN_RET_MSG = (
     "TIME_FORCE_MIN_RET 已删除：让路阈值跟 TRAIL 档1 peak_lo。"
-    "请去掉该轴后重存 spec；关时间成本请扫 TIME_FORCE_BARS=0。"
+    "请去掉该轴后重存 spec；关时间成本请扫 time_force.bars=0。"
 )
 RETIRED_GRACE_MSG = (
     "TIME_FORCE_GRACE_BARS 已删除：死钱仓满 BARS 后立即强平，不再宽限。"
@@ -269,7 +290,52 @@ def spec_has_retired_grace(spec: Mapping[str, Any] | None) -> bool:
     return _spec_has_retired_key(spec, "TIME_FORCE_GRACE_BARS")
 
 
+def _deleted_factor_keys_in(obj: Mapping[str, Any] | None) -> list[str]:
+    found: list[str] = []
+    for key in DELETED_FACTOR_KEYS:
+        if _spec_has_retired_key(obj, key):
+            found.append(key)
+    return found
+
+
+def _overrides_flat_factor_paths(ov: Mapping[str, Any] | None) -> list[str]:
+    if not isinstance(ov, dict):
+        return []
+    return [str(k) for k in ov if "." in str(k)]
+
+
+def _flat_factor_paths_in(spec: Mapping[str, Any] | None) -> list[str]:
+    """格子 / 顶层 overrides 的点路径。axes / param_selection 仍用点路径当轴 id。"""
+    found: list[str] = []
+    data = dict(spec or {})
+    for key in _overrides_flat_factor_paths(data.get("overrides")):
+        if key not in found:
+            found.append(key)
+    for cell in data.get("cells") or []:
+        if not isinstance(cell, dict):
+            continue
+        for key in _overrides_flat_factor_paths(cell.get("overrides")):
+            if key not in found:
+                found.append(key)
+    return found
+
+
+def reject_deleted_factor_keys(spec: Mapping[str, Any] | None) -> None:
+    found = _deleted_factor_keys_in(spec)
+    ov = (spec or {}).get("overrides") if isinstance(spec, Mapping) else None
+    if isinstance(ov, dict):
+        for key in DELETED_FACTOR_KEYS:
+            if key in ov and key not in found:
+                found.append(str(key))
+    if found:
+        raise GridSpecError("%s 见 %s" % (DELETED_FACTOR_MSG, ", ".join(found)))
+    flat = _flat_factor_paths_in(spec)
+    if flat:
+        raise GridSpecError("%s 见 %s" % (FLAT_FACTOR_PATH_MSG, ", ".join(flat)))
+
+
 def reject_retired_min_ret(spec: Mapping[str, Any] | None) -> None:
+    reject_deleted_factor_keys(spec)
     if spec_has_retired_min_ret(spec):
         raise GridSpecError(RETIRED_MIN_RET_MSG)
     if spec_has_retired_grace(spec):
@@ -302,18 +368,111 @@ def struct_eq(a: Any, b: Any, eps: float = EPS) -> bool:
     return num_eq(left, right, eps)
 
 
+def flatten_factor_params(table: Mapping[str, Any] | None) -> dict[str, Any]:
+    """RECIPE.factor_params → {'stop_loss.pct': 0.08, ...}"""
+    out: dict[str, Any] = {}
+    for fid, block in (table or {}).items():
+        if not isinstance(block, dict):
+            continue
+        for key, val in block.items():
+            out["%s.%s" % (fid, key)] = val
+    return out
+
+
+def nest_factor_path(path: str, value: Any) -> dict[str, Any]:
+    """'stop_loss.pct', 0.06 → {'stop_loss': {'pct': 0.06}}"""
+    if "." not in path:
+        raise GridSpecError("不是因子点路径 %s" % path)
+    fid, key = path.split(".", 1)
+    if not fid or not key:
+        raise GridSpecError("不是因子点路径 %s" % path)
+    return {fid: {key: value}}
+
+
+def deep_merge_factor_params(
+    base: Mapping[str, Any] | None,
+    incoming: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """按 id 再按 key 合并；tiers 一律 list of lists。"""
+    fp: dict[str, Any] = {}
+    for fid, block in (base or {}).items():
+        if isinstance(block, dict):
+            copied = dict(block)
+            if "tiers" in copied:
+                copied["tiers"] = copy_trail_tiers(copied.get("tiers"))
+            fp[str(fid)] = copied
+        else:
+            fp[str(fid)] = block
+    if not isinstance(incoming, Mapping):
+        return fp
+    for fid, block in incoming.items():
+        if not isinstance(block, dict):
+            continue
+        cur = fp.get(str(fid))
+        if not isinstance(cur, dict):
+            cur = {}
+            fp[str(fid)] = cur
+        cur.update(block)
+        if str(fid) == "trail_stop" and "tiers" in cur:
+            cur["tiers"] = copy_trail_tiers(cur.get("tiers"))
+    return fp
+
+
+def overrides_has_trail_tiers(overrides: Mapping[str, Any] | None) -> bool:
+    fp = (overrides or {}).get("factor_params")
+    if not isinstance(fp, dict):
+        return False
+    block = fp.get("trail_stop")
+    return isinstance(block, dict) and "tiers" in block
+
+
+def flatten_overrides(overrides: Mapping[str, Any] | None) -> dict[str, Any]:
+    """格子 overrides → 点路径 + 结构/资金顶层键。"""
+    ov = dict(overrides or {})
+    out: dict[str, Any] = {}
+    fp = ov.get("factor_params")
+    if isinstance(fp, dict):
+        out.update(flatten_factor_params(fp))
+    for k, v in ov.items():
+        if str(k) == "factor_params":
+            continue
+        out[str(k)] = v
+    return out
+
+
+def _fold_factor_params_for_fingerprint(
+    fp_src: Mapping[str, Any] | None,
+    overrides: Mapping[str, Any] | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """深合并 overrides.factor_params；袋里只留 D_MA_* / W_MA_* / MACD_*。"""
+    ov = dict(overrides or {})
+    incoming = ov.get("factor_params") if isinstance(ov.get("factor_params"), dict) else {}
+    fp = deep_merge_factor_params(fp_src, incoming)
+    leftover: dict[str, Any] = {}
+    for k in sorted(ov):
+        ks = str(k)
+        if ks == "factor_params":
+            continue
+        if ks in RECIPE_THRESHOLD_KEYS:
+            leftover[ks] = ov[k]
+    return fp, leftover
+
+
 def recipe_fingerprint(recipe: Mapping[str, Any] | None = None, overrides: Mapping[str, Any] | None = None) -> str:
-    """表达式 + 被覆盖的阈值键。与 hlband/factors/slots._recipe_fingerprint 同一算法。"""
+    """表达式 + 折进表的阈值。与 hlband/factors/slots._recipe_fingerprint 同一算法。"""
+    ns = _load_config_ns()
     rec = dict(recipe or {})
     if not rec:
-        rec = dict(_load_config_ns().get("RECIPE") or {})
-    ov = dict(overrides or {})
-    covered = {k: ov[k] for k in sorted(ov) if k in RECIPE_THRESHOLD_KEYS}
+        rec = dict(ns.get("RECIPE") or {})
+    fp, leftover = _fold_factor_params_for_fingerprint(
+        rec.get("factor_params") or {},
+        overrides,
+    )
     payload = {
         "entry": rec.get("entry"),
         "exit": rec.get("exit"),
-        "factor_params": rec.get("factor_params") or {},
-        "overrides": covered,
+        "factor_params": fp,
+        "overrides": leftover,
         "scale_in": rec.get("scale_in"),
         "scale_out": rec.get("scale_out"),
     }
@@ -379,9 +538,9 @@ def validate_trail_tiers(tiers: Any) -> list[list[Any]]:
     try:
         copied = copy_trail_tiers(tiers)
     except (TypeError, ValueError, IndexError, KeyError) as exc:
-        raise GridSpecError("TRAIL_TIERS 格式无效") from exc
+        raise GridSpecError("trail_stop.tiers 格式无效") from exc
     if not copied:
-        raise GridSpecError("TRAIL_TIERS 为空")
+        raise GridSpecError("trail_stop.tiers 为空")
     for i, row in enumerate(copied):
         validate_trail_row(row, i)
     return copied
@@ -458,13 +617,11 @@ def _group_for(name: str) -> str:
         return "入场"
     if name in EXIT_KEYS:
         return "出场"
-    if name.startswith("SCALE_"):
+    if name in SCALE_FACTOR_KEYS or name.startswith("SCALE_"):
         return "加仓"
     if name in MONEY_KEYS:
         return "资金"
-    if name.startswith(("D_MA_", "MACD_")):
-        return "结构"
-    if name.startswith("W_MA_") and name != "W_MA30_SLOPE_WEEKS":
+    if name.startswith(("D_MA_", "MACD_", "W_MA_")):
         return "结构"
     return "资金"
 
@@ -482,7 +639,7 @@ def _dtype_for(name: str, sample: Any) -> str:
 
 
 def _auto_abbrev(name: str) -> str:
-    parts = [p for p in str(name).split("_") if p]
+    parts = [p for p in str(name).replace(".", "_").split("_") if p]
     if not parts:
         return "p"
     letters = "".join(p[0].lower() for p in parts)
@@ -524,12 +681,15 @@ def _ordered_ids(found: Iterable[str]) -> list[str]:
 
 def _build_catalog() -> tuple[ParamSpec, ...]:
     ns = _load_config_ns()
-    found = _scan_config_names(ns)
+    rec = ns.get("RECIPE") or {}
+    flat = flatten_factor_params(rec.get("factor_params") or {})
+    found = list(flat)
+    found.extend(_scan_config_names(ns))
     ids = _ordered_ids(found)
     used_abbrev: set[str] = set()
     specs: list[ParamSpec] = []
     for name in ids:
-        sample: Any = ns.get(name)
+        sample: Any = flat[name] if name in flat else ns.get(name)
         dtype = _dtype_for(name, sample)
         specs.append(
             ParamSpec(
@@ -559,7 +719,9 @@ _CATALOG_BY_ID = {p.id: p for p in _CATALOG}
 FAMILY_ORDER = _product_order(_CATALOG)
 FAMILY_LABELS = {p.id: p.label for p in _CATALOG}
 OVERRIDE_KEY = {p.id: p.key for p in _CATALOG}
-KNOWN_OVERRIDE_KEYS = frozenset(p.key for p in _CATALOG)
+KNOWN_OVERRIDE_KEYS = frozenset(
+    {"factor_params"} | {p.key for p in _CATALOG if "." not in p.key}
+)
 _FAMILY_BY_OVERRIDE = {p.key: p.id for p in _CATALOG}
 
 
@@ -593,7 +755,7 @@ def current_value(family: str, defaults: Mapping[str, Any]) -> Any:
         raise GridSpecError("defaults 缺少 %s" % key)
     val = defaults[key]
     if spec.dtype == "tuple":
-        if family == "TRAIL_TIERS":
+        if family == "trail_stop.tiers":
             return validate_trail_tiers(val)
         return json_ready(val)
     if spec.dtype == "bool":
@@ -622,7 +784,7 @@ def coerce_level(family: str, raw: Any) -> Any:
                 raw = json.loads(raw)
             except json.JSONDecodeError as exc:
                 raise GridSpecError("无法解析 %s JSON" % spec.label) from exc
-        if family == "TRAIL_TIERS":
+        if family == "trail_stop.tiers":
             return validate_trail_tiers(raw)
         return json_ready(raw)
     if spec.dtype == "opt_percent" and _is_none_raw(raw):
@@ -671,13 +833,13 @@ def parse_scan_token(family: str, token: str) -> Any:
 
 def _tables_from_json_obj(obj: Any) -> list[Any]:
     if not isinstance(obj, (list, tuple)) or not obj:
-        raise GridSpecError("TRAIL_TIERS 扫描须为 JSON 表")
+        raise GridSpecError("trail_stop.tiers 扫描须为 JSON 表")
     first = obj[0]
     if isinstance(first, (list, tuple)) and first and isinstance(first[0], (list, tuple)):
         return list(obj)
     if isinstance(first, (list, tuple)):
         return [list(obj)]
-    raise GridSpecError("TRAIL_TIERS 扫描须为二维或三维 JSON 表")
+    raise GridSpecError("trail_stop.tiers 扫描须为二维或三维 JSON 表")
 
 
 def _parse_tuple_scan(family: str, text: str) -> list[Any]:
@@ -820,7 +982,7 @@ def infer_kind(family: str, value: Any, defaults: Mapping[str, Any]) -> str:
     if spec.dtype == "tuple":
         return _trail_tiers_kind(value, current_value(family, defaults))
     cur = current_value(family, defaults)
-    if family == "TIME_FORCE_BARS":
+    if family == "time_force.bars":
         iv = int(value)
         if iv <= 0:
             return "off"
@@ -872,25 +1034,20 @@ def infer_kind_from_overrides(
     overrides: Mapping[str, Any] | None,
     defaults: Mapping[str, Any],
 ) -> str:
-    ov = dict(overrides or {})
-    keys = [k for k in ov if k in KNOWN_OVERRIDE_KEYS]
+    flat = flatten_overrides(overrides)
+    keys = [k for k in flat if k in _CATALOG_BY_ID]
     if not keys:
         return "other"
     if len(keys) >= 2:
         return "other"
     key = keys[0]
-    if key == "TRAIL_TIERS":
-        return _trail_tiers_kind(ov[key], defaults.get("TRAIL_TIERS"))
-    fam = _family_for_override(key)
-    if fam is None:
-        return "other"
-    spec = get_param(fam)
+    if key == "trail_stop.tiers":
+        return _trail_tiers_kind(flat[key], defaults.get("trail_stop.tiers"))
+    spec = get_param(key)
     if spec is None or spec.kind_mode != "exit":
         return "other"
-    if key == "STOP_LOSS":
-        return infer_kind("STOP_LOSS", ov[key], defaults)
-    if key == "TIME_FORCE_BARS":
-        return infer_kind("TIME_FORCE_BARS", ov[key], defaults)
+    if key in ("stop_loss.pct", "time_force.bars"):
+        return infer_kind(key, flat[key], defaults)
     return "other"
 
 
@@ -964,11 +1121,11 @@ def format_scan_values(family: str, values: Iterable[Any]) -> str:
 
 
 def family_value_label(family: str, value: Any) -> str:
-    if family == "STOP_LOSS":
+    if family == "stop_loss.pct":
         return "止损 %s" % _format_pct(float(value))
-    if family == "TRAIL_TIERS":
+    if family == "trail_stop.tiers":
         return "阶梯止盈 %s" % trail_table_summary(value)
-    if family == "TIME_FORCE_BARS":
+    if family == "time_force.bars":
         iv = int(value)
         if iv <= 0:
             return "时间成本关闭"
@@ -996,12 +1153,12 @@ def family_value_label(family: str, value: Any) -> str:
 
 def base_label(defaults: Mapping[str, Any], families: Iterable[str]) -> str:
     fams = [f for f in FAMILY_ORDER if f in set(families)]
-    if fams == ["STOP_LOSS"]:
-        return "现行 %s" % _format_pct(float(current_value("STOP_LOSS", defaults)))
-    if fams == ["TRAIL_TIERS"]:
-        return "现行阶梯止盈 %s" % trail_table_summary(current_value("TRAIL_TIERS", defaults))
-    if fams == ["TIME_FORCE_BARS"]:
-        return "现行时间成本 %s 根" % int(current_value("TIME_FORCE_BARS", defaults))
+    if fams == ["stop_loss.pct"]:
+        return "现行 %s" % _format_pct(float(current_value("stop_loss.pct", defaults)))
+    if fams == ["trail_stop.tiers"]:
+        return "现行阶梯止盈 %s" % trail_table_summary(current_value("trail_stop.tiers", defaults))
+    if fams == ["time_force.bars"]:
+        return "现行时间成本 %s 根" % int(current_value("time_force.bars", defaults))
     return "现行"
 
 
@@ -1032,19 +1189,27 @@ def overrides_for_combo(
     combo: Mapping[str, Any],
     defaults: Mapping[str, Any],
 ) -> dict[str, Any]:
+    fp: dict[str, Any] = {}
     ov: dict[str, Any] = {}
     for fam, val in combo.items():
         spec = require_param(fam)
         if spec.dtype == "tuple":
-            ov[spec.key] = json_ready(val)
+            packed = json_ready(val)
         elif spec.dtype == "int":
-            ov[spec.key] = int(val)
+            packed = int(val)
         elif spec.dtype == "bool":
-            ov[spec.key] = bool(val)
+            packed = bool(val)
         elif spec.dtype == "opt_percent" and val is None:
-            ov[spec.key] = None
+            packed = None
         else:
-            ov[spec.key] = float(val)
+            packed = float(val)
+        if "." in spec.id:
+            piece = nest_factor_path(spec.id, packed)
+            fp = deep_merge_factor_params(fp, piece)
+        else:
+            ov[spec.key] = packed
+    if fp:
+        ov["factor_params"] = fp
     return ov
 
 
@@ -1070,16 +1235,21 @@ def overrides_summary(overrides: Mapping[str, Any] | None, defaults: Mapping[str
     ov = dict(overrides or {})
     if not ov:
         return "（无覆盖）"
+    flat = flatten_overrides(ov)
     bits: list[str] = []
-    if "STOP_LOSS" in ov:
-        bits.append("STOP_LOSS=%s" % ov["STOP_LOSS"])
-    if "TRAIL_TIERS" in ov:
-        bits.append("TRAIL_TIERS=%s" % trail_table_summary(ov["TRAIL_TIERS"]))
-    if "TIME_FORCE_BARS" in ov:
-        bits.append("TIME_FORCE_BARS=%s" % ov["TIME_FORCE_BARS"])
-    extra = [k for k in ov if k not in ("STOP_LOSS", "TRAIL_TIERS", "TIME_FORCE_BARS")]
+    if "stop_loss.pct" in flat:
+        bits.append("stop_loss.pct=%s" % flat["stop_loss.pct"])
+    if "trail_stop.tiers" in flat:
+        bits.append("trail_stop.tiers=%s" % trail_table_summary(flat["trail_stop.tiers"]))
+    if "time_force.bars" in flat:
+        bits.append("time_force.bars=%s" % flat["time_force.bars"])
+    extra = [
+        k
+        for k in flat
+        if k not in ("stop_loss.pct", "trail_stop.tiers", "time_force.bars")
+    ]
     for k in extra:
-        bits.append("%s=%s" % (k, ov[k]))
+        bits.append("%s=%s" % (k, flat[k]))
     return " · ".join(bits) if bits else "（无覆盖）"
 
 
@@ -1173,7 +1343,7 @@ def axes_from_cells(
     extras: dict[str, list[Any]] = {f: [] for f in FAMILY_ORDER}
     seen: dict[str, list[Any]] = {f: [] for f in FAMILY_ORDER}
     for raw in cells or ():
-        ov = dict(raw.get("overrides") or {})
+        ov = flatten_overrides(raw.get("overrides") or {})
         for key, val in ov.items():
             fam = _family_for_override(key)
             if fam is None:
@@ -1288,9 +1458,9 @@ def correct_cell_kinds(
 
 def chip_presets(family: str, defaults: Mapping[str, Any]) -> list[Any]:
     cur = current_value(family, defaults)
-    if family == "STOP_LOSS":
+    if family == "stop_loss.pct":
         return [0.06, 0.07, 0.08, 0.09, 0.10, 0.12]
-    if family == "TIME_FORCE_BARS":
+    if family == "time_force.bars":
         c = int(cur)
         vals = [0, max(0, c - 10), c, c + 10, 60]
         out: list[Any] = []

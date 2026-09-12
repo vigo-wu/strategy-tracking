@@ -110,7 +110,7 @@ def _eval_daily_buy(closes, volumes):
 
 
 def _weekly_bias_guard(w_detail):
-    """周线 (MA5-MA34)/MA34 >= W_BIAS_HARD → 禁开。"""
+    """周线 (MA5-MA34)/MA34 >= w_bias.hard → 禁开。"""
     ok, det = _factor_eval("w_bias", {"market": {"w_detail": w_detail or {}}})
     return ok, det.get("bias")
 

@@ -6,14 +6,14 @@
 
 1. **拼接回放入口**（如 `<theme>/scripts/local_bt/run.py`）
    - `_exec_bundle()` 之后注入 `overrides`（写进 exec 得到的 `ns`）。
-   - `init()` 之后再注入一次（防止 `_apply_panel` 把面板键如 `STOP_LOSS` 打回默认）。
+   - `init()` 之后再注入一次（防止 `_apply_panel` 把资金/开关打回默认）。
    - 建议包装 `_apply_panel`：面板应用完立即再写 `overrides`，这样 init 日志指纹才是格子值。
-   - 函数体用运行时全局查找 `STOP_LOSS` / `TRAIL_TIERS` / `TIME_FORCE_*` 等，改 `ns` 即可生效。
+   - 因子阈值写 `overrides.factor_params`（如 `stop_loss.pct`）；结构/资金仍写顶层 `D_MA_*` / `CASH_RATIO`。顶层旧因子键直接报错。
    - `out_dir` 由调用方指定；批量 payload 带 `overrides` 透传到子进程。
 2. **隔离产物目录**：`report/grid/<sweep>/<cell>/<sample>/<div>/`。禁止写回基线 `report/<div>/`。
 3. **init 指纹**（写进同一份 log，供 runner 校验）
    - 必有：`stop=`、`time_force_bars=`（若策略有这两项）。
-   - 扫阶梯止盈：`trail_arm=` = `TRAIL_TIERS` 档 1 的 `peak_lo`；另打 compact `trail_tiers=` JSON，探针按整表相等（起步相同、giveback 不同也要能抓到）。
+   - 扫阶梯止盈：`trail_arm=` = `trail_stop.tiers` 档 1 的 `peak_lo`；另打 compact `trail_tiers=` JSON，探针按整表相等（起步相同、giveback 不同也要能抓到）。
 4. **主样本 walk**：默认 config `BOOK_STOCKS` 一段 `run_book_backtest`（`year_start0101`–`year_end1231`）。`asset_split.mode=random_from_csv` 时调参 / 盲测 **各一段**（名单写入 `freeze.json` / `spec.json`；CSV 仍用 `csv_for`）。禁止 stock×年独立 10 万账户，禁止 `tune∪holdout` 同一钱包。
 5. **可选对照**：全 SMA / 全 EMA（`include_sma_ema`），不单独当选参器。
 6. **空间隔离（可选）**：`asset_split` 见 skill 示例 `stop_loss_space.json`。选参主 KPI 仅 tune 股；holdout × 验收年复用 `gate` 否决（无覆盖不得过门）。
@@ -25,13 +25,17 @@ JSON 可序列化。元组在 JSON 里用数组；`null` = Python `None`。
 
 ```json
 {
-  "STOP_LOSS": 0.10,
-  "TIME_FORCE_BARS": 0,
-  "TRAIL_TIERS": [
-    [0.04, 0.06, 0.015, null],
-    [0.06, 0.10, 0.03, 0.03],
-    [0.10, null, 0.04, null]
-  ]
+  "factor_params": {
+    "stop_loss": {"pct": 0.10},
+    "time_force": {"bars": 0},
+    "trail_stop": {
+      "tiers": [
+        [0.04, 0.06, 0.015, null],
+        [0.06, 0.10, 0.03, 0.03],
+        [0.10, null, 0.04, null]
+      ]
+    }
+  }
 }
 ```
 

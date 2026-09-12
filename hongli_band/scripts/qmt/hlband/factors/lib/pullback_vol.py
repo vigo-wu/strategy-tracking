@@ -1,6 +1,8 @@
 # === hlband/factors/lib/pullback_vol.py ===
 def _near_ma(price, ma, tol=None):
-    tol = float(tol if tol is not None else MA_TOUCH_TOL)
+    if tol is None:
+        tol = _factor_param(None, "pullback_vol", "tol")
+    tol = float(tol)
     if price is None or ma is None or ma <= 0:
         return False
     return abs(float(price) - float(ma)) / float(ma) <= tol
@@ -26,7 +28,7 @@ def _factor_eval_pullback_vol(ctx):
         near = near or _near_ma(price, m20)
     if slow_n > 0:
         near = near or _near_ma(price, m60)
-    ratio = float(VOL_PULLBACK_RATIO)
+    ratio = float(_factor_param(ctx, "pullback_vol", "ratio"))
     vol_streak = 0
     if volumes is None or vol10 is None:
         return False, {"vol_streak": 0, "near": near}

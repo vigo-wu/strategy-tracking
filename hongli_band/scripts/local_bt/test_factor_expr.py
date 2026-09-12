@@ -58,7 +58,6 @@ class FactorExprTests(unittest.TestCase):
         self.assertFalse(ns["_factor_hit"]("weekly_bear_confirm", ctx))
         ctx["state"]["w_bear_streak"] = 2
         ctx["state"].pop("w_bear_confirmed")
-        ns["W_BEAR_CONFIRM_DAYS"] = 2
         self.assertTrue(ns["_factor_hit"]("weekly_bear_confirm", ctx))
         ctx_flat = {
             "market": {
@@ -98,6 +97,106 @@ class DefaultRecipeShapeTests(unittest.TestCase):
             recipe["exit"],
             ["weekly_bear_confirm", "stop_loss", "trail_stop", "time_force"],
         )
+        fp = recipe["factor_params"]
+        self.assertAlmostEqual(fp["chase"]["max_pct"], 0.05)
+        self.assertAlmostEqual(fp["stop_loss"]["pct"], 0.08)
+        self.assertEqual(fp["time_force"]["bars"], 30)
+        self.assertEqual(fp["pullback_vol"]["vol_n"], 10)
+
+
+def _chase_ctx(chg):
+    prev = 10.0
+    price = prev * (1.0 + float(chg))
+    return {
+        "market": {
+            "daily_ready": True,
+            "closes": [prev, price],
+            "i": 1,
+            "close": price,
+        },
+        "state": {},
+        "clock": {},
+    }
+
+
+class FactorParamsTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.ns = _exec_bundle()
+
+    def _fp(self, fid, key):
+        return self.ns["RECIPE"]["factor_params"][fid][key]
+
+    def _set_fp(self, fid, key, val):
+        self.ns["RECIPE"]["factor_params"][fid][key] = val
+
+    def test_default_chase_threshold(self) -> None:
+        ns = self.ns
+        self.assertAlmostEqual(self._fp("chase", "max_pct"), 0.05)
+        self.assertFalse(ns["_factor_hit"]("chase", _chase_ctx(0.049)))
+        self.assertTrue(ns["_factor_hit"]("chase", _chase_ctx(0.05)))
+
+    def test_table_only_no_global_alias(self) -> None:
+        ns = self.ns
+        orig = self._fp("chase", "max_pct")
+        try:
+            self._set_fp("chase", "max_pct", 0.03)
+            self.assertNotIn("CHASE_MAX_PCT", ns)
+            self.assertTrue(ns["_factor_hit"]("chase", _chase_ctx(0.04)))
+        finally:
+            self._set_fp("chase", "max_pct", orig)
+
+    def test_apply_nested_merge(self) -> None:
+        ns = self.ns
+        orig = self._fp("chase", "max_pct")
+        try:
+            ns["_factor_params_apply_global"]({"chase": {"max_pct": 0.03}})
+            self.assertAlmostEqual(self._fp("chase", "max_pct"), 0.03)
+            self.assertTrue(ns["_factor_hit"]("chase", _chase_ctx(0.04)))
+        finally:
+            ns["_factor_params_apply_global"]({"chase": {"max_pct": orig}})
+
+    def test_time_force_bars_off(self) -> None:
+        ns = self.ns
+        orig = self._fp("time_force", "bars")
+        try:
+            self._set_fp("time_force", "bars", 0)
+            closes = [10.0] * 80
+            lot = {"id": 1, "price": 100.0, "hold_peak": 102.0, "hold_bars": 99}
+            ctx = {
+                "market": {"close": 9.5, "closes": closes},
+                "state": {"lot": lot},
+            }
+            self.assertFalse(ns["_factor_hit"]("time_force", ctx))
+        finally:
+            self._set_fp("time_force", "bars", orig)
+
+    def test_weekly_bear_confirm_days_one(self) -> None:
+        ns = self.ns
+        orig = self._fp("weekly_bear_confirm", "days")
+        ctx = {"market": {}, "state": {"w_bear_streak": 1}}
+        try:
+            self._set_fp("weekly_bear_confirm", "days", 1)
+            self.assertTrue(ns["_factor_hit"]("weekly_bear_confirm", ctx))
+            self._set_fp("weekly_bear_confirm", "days", 0)
+            self.assertEqual(ns["_w_bear_confirm_need"](), 1)
+            self.assertTrue(ns["_factor_hit"]("weekly_bear_confirm", ctx))
+        finally:
+            self._set_fp("weekly_bear_confirm", "days", orig)
+
+    def test_pullback_vol_n_rebuilds_sma(self) -> None:
+        ns = self.ns
+        orig = self._fp("pullback_vol", "vol_n")
+        closes = [10.0] * 30
+        volumes = [float(i + 1) for i in range(30)]
+        try:
+            self._set_fp("pullback_vol", "vol_n", 5)
+            _ready5, d5 = ns["_factor_daily_features"](closes, volumes)
+            self._set_fp("pullback_vol", "vol_n", 10)
+            _ready10, d10 = ns["_factor_daily_features"](closes, volumes)
+            self.assertNotEqual(d5.get("v10"), d10.get("v10"))
+        finally:
+            self._set_fp("pullback_vol", "vol_n", orig)
 
 
 if __name__ == "__main__":

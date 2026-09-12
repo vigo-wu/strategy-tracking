@@ -11,6 +11,7 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 HLBAND = HERE.parent / "qmt" / "hlband"
 INDICATORS_DIR = HLBAND / "indicators"
+CTX_PATH = HLBAND / "factors" / "ctx.py"
 TRAIL_PATH = HLBAND / "factors" / "lib" / "trail_stop.py"
 TIME_FORCE_PATH = HLBAND / "factors" / "lib" / "time_force.py"
 _INDICATOR_FILES = (
@@ -44,19 +45,23 @@ def _load_tf_ns(**overrides):
         "STRATEGY_NAME": "HlBand",
         "MA_TYPE": "SMA",
         "BOOK_STOCKS": {},
-        "TIME_FORCE_BARS": 30,
         "D_MA_SLOW": 60,
-        "TRAIL_TIERS": TIERS,
         "_save_state": lambda: logs.append("save"),
         "_event_log": lambda event, **fields: logs.append((event, fields)),
         "_pos_cost_price": lambda: 100.0,
+        "RECIPE": {
+            "factor_params": {
+                "time_force": {"bars": 30},
+                "trail_stop": {"tiers": [list(row) for row in TIERS]},
+            }
+        },
     }
     ns.update(overrides)
     for name in _INDICATOR_FILES:
         path = INDICATORS_DIR / name
         src = path.read_text(encoding="utf-8")
         exec(compile(src, str(path), "exec"), ns, ns)
-    for path in (TRAIL_PATH, TIME_FORCE_PATH):
+    for path in (CTX_PATH, TRAIL_PATH, TIME_FORCE_PATH):
         src = path.read_text(encoding="utf-8")
         exec(compile(src, str(path), "exec"), ns, ns)
     ns["_logs"] = logs
@@ -117,7 +122,8 @@ class TimeForceHitTest(unittest.TestCase):
         self.assertTrue(hit)
 
     def test_bars_off_or_slow_off(self) -> None:
-        ns0 = _load_tf_ns(TIME_FORCE_BARS=0)
+        ns0 = _load_tf_ns()
+        ns0["RECIPE"]["factor_params"]["time_force"]["bars"] = 0
         self.assertFalse(ns0["_time_force_hit"](9.5, _closes(), 99, lot=_lot()))
         ns_s = _load_tf_ns(D_MA_SLOW=0)
         self.assertFalse(ns_s["_time_force_hit"](9.5, _closes(), 99, lot=_lot()))

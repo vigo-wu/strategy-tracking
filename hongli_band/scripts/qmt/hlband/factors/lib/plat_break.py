@@ -26,9 +26,21 @@ def _factor_eval_plat_break(ctx):
     closes = market.get("closes")
     highs = market.get("highs")
     lows = market.get("lows")
-    lookback = int(globals().get("SCALE_PLAT_LOOKBACK") or 20)
-    max_range = float(globals().get("SCALE_PLAT_MAX_RANGE") or 0.10)
-    buf = float(globals().get("SCALE_PLAT_BREAK_BUF") or 0.0)
+    raw_lb = _factor_param(ctx, "plat_break", "lookback")
+    raw_rng = _factor_param(ctx, "plat_break", "max_range")
+    raw_buf = _factor_param(ctx, "plat_break", "break_buf")
+    try:
+        lookback = int(20 if raw_lb is None else raw_lb)
+    except (TypeError, ValueError):
+        lookback = 20
+    try:
+        max_range = float(0.10 if raw_rng is None else raw_rng)
+    except (TypeError, ValueError):
+        max_range = 0.10
+    try:
+        buf = float(0.0 if raw_buf is None else raw_buf)
+    except (TypeError, ValueError):
+        buf = 0.0
     if lookback < 5 or max_range <= 0:
         return False, {}
     if closes is None or highs is None or lows is None:

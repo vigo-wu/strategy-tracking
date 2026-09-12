@@ -17,7 +17,11 @@ def _factor_eval_w_macd_golden(ctx):
         return False, {}
     if golden_now and (not golden_prev):
         return True, {"golden_now": True}
-    ratio = float(globals().get("SCALE_W_HIST_EXPAND_RATIO") or 1.0)
+    raw_ratio = _factor_param(ctx, "w_macd_golden", "hist_expand")
+    try:
+        ratio = float(1.0 if raw_ratio is None else raw_ratio)
+    except (TypeError, ValueError):
+        ratio = 1.0
     if ratio <= 1.0:
         return True, {"ratio": ratio}
     base = abs(hist_prev) if abs(hist_prev) > 1e-12 else hist

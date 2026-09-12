@@ -65,99 +65,33 @@ W_MA_LIFE = 34
 MACD_FAST = 12
 MACD_SLOW = 26
 MACD_SIGNAL = 9
-# 高位禁开：周线乖离 (MA5-MA34)/MA34 >= 此值 → 不做新开（追高风险）
-# 例 0.08 = MA5 相对生命线 MA34 高 8% 以上禁开
-W_BIAS_HARD = 0.08
-# 低位斜率过滤：乖离 < 此值视为「低位区」；此时若 MA34 未连续向上则禁开
-# 例 0.02 = 乖离不足 2% 时要求生命线已拐头向上
-W_BIAS_LOW = 0.02
-# 低位区判定「连续向上」的周数：需 life[t]>life[t-1]>life[t-2]（即 2 周斜率）
-# 常量名 W_MA30_SLOPE_WEEKS 为历史兼容；比较对象是 W_MA_LIFE（34）
-W_MA30_SLOPE_WEEKS = 2
 
-# ---- 日线买卖 ----
+# ---- 日线买卖（均线周期是 structure，阈值在 RECIPE.factor_params）----
 # 日线均线（算法见标的 ma_type / MA_TYPE）：中线→回踩/无量阴跌；慢线→回踩支撑 + 时间成本地板
-#   <=0 关闭该条（与 TIME_FORCE_BARS 相同约定）
-#   关中线：回踩只看慢线（若开着）；vol_dry_skip 关掉
-#   关慢线：回踩只看中线；time_force 破慢线地板关掉（BARS 仍独立，网格只改慢线不自动改 BARS）
+#   <=0 关闭该条（与 time_force.bars 相同约定）
+#   关中线：回踩只看慢线（若开着）；vol_dry 关掉
+#   关慢线：回踩只看中线；time_force 破慢线地板关掉（bars 仍独立）
 #   两条都关：无 pullback_vol 新开；加仓仍可走 plat_break / w_macd_golden
 D_MA_MID = 20
 D_MA_SLOW = 60
 
-# 买点 pullback_vol：缩量回踩强支撑
-#   价格贴近 MA20 或 MA60（|价-均线|/均线 <= 容差）且连续 N 日量 < 当日均量 * 比例
-#   贴均线只看当天；缩量按 VOL_PULLBACK_CONFIRM_DAYS 连续确认
-MA_TOUCH_TOL = 0.025          # 0.025 = 距均线 ±2.5% 内算「回踩到位」
-VOL_PULLBACK_N = 10           # 缩量比较的均量窗口（日，始终 SMA）
-VOL_PULLBACK_RATIO = 0.9      # 量 < 均量*0.9 视为缩量
-# 缩量连续确认日：<=0 或 1=当天缩量即可；2=今昨都缩量才算 pullback_vol
-VOL_PULLBACK_CONFIRM_DAYS = 2
-
-# 全局禁开 vol_dry_skip（无量阴跌不言底）：
-#   收盘跌破 MA20 且量 < N 日均量 * 比例 → 当天任何买点失效
-VOL_DRY_N = 20
-VOL_DRY_RATIO = 0.60          # 量 < 20 日均量的 60% 视为无量阴跌
-
-# 卖① trail_stop：阶梯式移动止盈
-#   按历史最高浮盈 (peak-cost)/cost 选档；触发条件：
-#     自峰值回撤 > giveback，或（若设了 profit_floor）当前浮盈 < 底线
-#   元组：(peak_lo, peak_hi, giveback, profit_floor)
-#     peak_hi=None 无上限；profit_floor=None 不设硬底线
-#   档1 起步保护 [3%,6%)：回撤>1.5%（同旧版，防破本）
-#   档2 落袋为安 [6%,10%)：回撤>3% 或 利润跌破 3%
-#   档3 放鹰吃肉 >=10%：回撤>4%（利润垫扛日线洗盘）
-#   档1 peak_lo 同时是 time_force 让路阈值（_trail_arm）；加仓门槛 SCALE_ARM 仍独立
-#   参数网格中配置示例：[[0.03,0.06,0.015,null],[0.06,0.10,0.03,0.03],[0.10,null,0.04,null]]
-TRAIL_TIERS = (
-    (0.03, 0.06, 0.015, None),
-    (0.06, 0.10, 0.03, 0.03),
-    (0.10, None, 0.04, None),
-)
-# 卖② time_force：智能时间成本（防长期磨人，不砍还在趋势里的仓）
-#   BARS = 日线慢均线一半
-#   BARS<=0：关闭整条 time_force
-#   收盘破日线 MA60 → 立即强制平仓
-#   仍站上 MA60 且峰值浮盈 < 档1 peak_lo → 立即强制平仓（未武装仓满 BARS 即日历强平）
-#   仍站上 MA60 且峰值 >= 档1 peak_lo → 不按日历强平，交给 trail / 破 MA60 / 周线空
-#   已武装仓才把 MA60 当出场地板、不是最长持仓
-TIME_FORCE_BARS = D_MA_SLOW // 2
-
-# 兜底风控（优先级高）
-# chase_skip：当日涨幅 (收-昨收)/昨收 >= 此值 → 禁开（防追高）
-CHASE_MAX_PCT = 0.05
-# stop_loss：收盘价 <= 成本 * (1 - 此值) → 硬止损清仓
-STOP_LOSS = 0.08
-# weekly_bear 强制清仓：连续 N 个信号日（日 K）仍为空头才挂 pending_exit
-#   N<=0 或 1：当天空头即挂（与改前一致）；N=2：连续两日仍空才挂
-#   禁开 / 撤买入 pending 仍按「当日」空头即时生效，不要求满 N 日
-W_BEAR_CONFIRM_DAYS = 2
-
-# （另有 weekly_bear：周线空头判定见 factors/lib/weekly_bear；确认清仓见 weekly_bear_confirm）
-
-# 盈利后加仓（回踩加仓 + 破平台推仓，任一即可）：
-#   门槛：峰值浮盈 >= SCALE_ARM，且该笔已持仓 >= SCALE_ARM_BARS 日
-#   触发（任一）：缩量回踩 / 日线收盘突破前期平台 / 近两周周线 MACD 金叉且柱放大
-#   回踩加仓仍受 chase_skip；破平台/金叉不受（突破日允许较大涨幅）
-#   执行日若已触发卖点则取消加仓、让路出场
-# SCALE_ONCE_PER_ROUND：同一轮只加一次。加过仓后该只须全平才能再开，不能把剩余仓当新开
-#   关掉 once 后单票不再有数字顶，只剩 BOOK_LOT_MAX
-# SCALE_W_HIST_MIN：周线 MACD 柱低于此值不加（过滤深空头里的冲高）；None 关闭
-# SCALE_LOTS=True：每笔独立成本/峰值/止盈；False：均价合并后整仓出
-# weekly_bear 仍一次出清剩余各笔；trail_stop / time_force / stop_loss 按笔
+# 盈利后加仓门槛（仓位层，不进 factor_params）：
+#   峰值浮盈 >= SCALE_ARM，且该笔已持仓 >= SCALE_ARM_BARS 日
+#   回踩加仓仍受 chase；破平台/金叉不受
+#   执行日若已触发卖点则取消加仓
+# SCALE_ONCE_PER_ROUND：同一轮只加一次
+# SCALE_W_HIST_MIN：周线 MACD 柱低于此值不加；None 关闭
+# SCALE_LOTS=True：每笔独立成本/峰值/止盈
 SCALE_ENABLE = True
 SCALE_ONCE_PER_ROUND = True
 SCALE_ARM = 0.03
 SCALE_ARM_BARS = 8
 SCALE_W_HIST_MIN = -0.01
 SCALE_LOTS = True
-# 日线平台：回看 N 日（不含当日）高低点；振幅 <= 此值视为平台；收盘严格站上高点且昨收仍在平台内
-SCALE_PLAT_LOOKBACK = 20
-SCALE_PLAT_MAX_RANGE = 0.10          # 0.10 = 平台振幅不超过 10%
-# 周线 MACD：本周或上周 DIF 上穿 DEA；上周金叉则本周红柱须比上周放大此倍数
-SCALE_W_HIST_EXPAND_RATIO = 1.2
 
-# 默认 Recipe：四槽布尔式，数字仍读上面的全局阈值，不写死在叶子里。
-# scale_out 恒 false：减仓槽未启用；Intent 预留 reduce，strategy 忽略。
+# 默认 Recipe：四槽布尔式。数字真源是 factor_params 字面量。
+# D_MA_* / W_MA_* / MACD_* 是 structure。SCALE_ARM 等仓位门槛不进表。
+# scale_out 恒 false：减仓未启用。
 RECIPE = {
     "entry": [
         "and",
@@ -188,21 +122,54 @@ RECIPE = {
         "time_force",
     ],
     "scale_out": False,
-    "factor_params": {},
+    "factor_params": {
+        # chase：当日涨幅 >= max_pct 禁开
+        "chase": {"max_pct": 0.05},
+        # vol_dry：收盘破中线且量 < n 日均量 * ratio
+        "vol_dry": {"ratio": 0.60, "n": 20},
+        # pullback_vol：贴均线 tol + 连续 confirm_days 日量 < vol_n 日均量 * ratio
+        "pullback_vol": {
+            "tol": 0.025,
+            "vol_n": 10,
+            "ratio": 0.9,
+            "confirm_days": 2,
+        },
+        # w_bias：周线 (MA5-MA34)/MA34 >= hard 禁开
+        "w_bias": {"hard": 0.08},
+        # w_slope：乖离 < low 且生命线未连续 slope_weeks 周向上则禁开
+        "w_slope": {"low": 0.02, "slope_weeks": 2},
+        # weekly_bear_confirm：连续 days 个信号日仍空才清仓；<=0/1=当天
+        "weekly_bear_confirm": {"days": 2},
+        # plat_break：回看 lookback 日振幅 <= max_range 且收盘破高
+        "plat_break": {
+            "lookback": 20,
+            "max_range": 0.10,
+            "break_buf": 0.0,
+        },
+        # w_macd_golden：上周金叉则本周红柱须放大 hist_expand 倍
+        "w_macd_golden": {"hist_expand": 1.2},
+        # stop_loss：收盘 <= 成本 * (1 - pct)
+        "stop_loss": {"pct": 0.08},
+        # trail_stop：档 (peak_lo, peak_hi, giveback, profit_floor)；档1 peak_lo 给 time_force 让路
+        "trail_stop": {
+            "tiers": [
+                [0.03, 0.06, 0.015, None],
+                [0.06, 0.10, 0.03, 0.03],
+                [0.10, None, 0.04, None],
+            ]
+        },
+        # time_force：持仓 > bars 后评估；<=0 关整条
+        "time_force": {"bars": 30},
+    },
 }
 
-# 策略交易面板 bind → 模块常量。编辑器/回测无注入时用上面默认值。
-# 只上屏：开关 / 资金基数 / 固定金额 / 可部署比例 / 硬风控。买点窗口、时间成本、加仓细节、SCALE_LOTS、
-# TRAIL_TIERS、均线周期、BOOK_STOCKS 子配置（ma_type / dividend_type）、
-# MA_TYPE、路径、账号仍只在 config（N 以 BOOK_STOCKS 长度为准）。
+# 策略交易面板 bind → 模块常量。因子阈值不上屏（改 RECIPE.factor_params）。
+# 只上屏：开关 / 资金基数 / 固定金额 / 可部署比例 / 加仓开关。
 PANEL_BINDS = (
     ("panel_dry_run", "DRY_RUN", "bool"),
     ("panel_budget_base", "BUDGET_BASE", "str"),
     ("panel_budget", "TRADE_BUDGET", "float"),
     ("panel_cash_ratio", "CASH_RATIO", "float"),
-    ("panel_w_bias_hard", "W_BIAS_HARD", "float"),
-    ("panel_chase_pct", "CHASE_MAX_PCT", "float"),
-    ("panel_stop_loss", "STOP_LOSS", "float"),
     ("panel_scale", "SCALE_ENABLE", "bool"),
 )
 
@@ -3113,7 +3080,11 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
 
 
 def _ohlcv_need_1d():
-    plat_n = int(globals().get("SCALE_PLAT_LOOKBACK") or 20)
+    raw_plat = _factor_param(None, "plat_break", "lookback")
+    try:
+        plat_n = int(20 if raw_plat is None else raw_plat)
+    except (TypeError, ValueError):
+        plat_n = 20
     try:
         mid_n = int(D_MA_MID or 0)
     except (TypeError, ValueError):
@@ -3122,16 +3093,23 @@ def _ohlcv_need_1d():
         slow_n = int(D_MA_SLOW or 0)
     except (TypeError, ValueError):
         slow_n = 0
+    confirm_n = _vol_pullback_confirm_need()
+    raw_vn = _factor_param(None, "pullback_vol", "vol_n")
+    raw_dn = _factor_param(None, "vol_dry", "n")
     try:
-        confirm_n = int(globals().get("VOL_PULLBACK_CONFIRM_DAYS") or 1)
+        vol_n = int(10 if raw_vn is None else raw_vn)
     except (TypeError, ValueError):
-        confirm_n = 1
-    vol_pb_need = int(VOL_PULLBACK_N) + max(0, confirm_n - 1)
+        vol_n = 10
+    try:
+        dry_n = int(20 if raw_dn is None else raw_dn)
+    except (TypeError, ValueError):
+        dry_n = 20
+    vol_pb_need = vol_n + max(0, confirm_n - 1)
     return max(
         mid_n if mid_n > 0 else 0,
         slow_n if slow_n > 0 else 0,
         vol_pb_need,
-        int(VOL_DRY_N),
+        dry_n,
         plat_n + 2,
     ) + 10
 
@@ -3257,9 +3235,63 @@ def _get_ohlcv_1w(C, stock):
     )
 
 # === hlband/factors/ctx.py ===
+def _factor_tiers_as_lists(raw):
+    """trail_stop.tiers → list of lists，避免指纹把 tuple 打成字符串。"""
+    out = []
+    for row in raw or ():
+        seq = list(row)
+        while len(seq) < 4:
+            seq.append(None)
+        lo, hi, gb, fl = seq[0], seq[1], seq[2], seq[3]
+        out.append(
+            [
+                float(lo),
+                None if hi is None else float(hi),
+                float(gb),
+                None if fl is None else float(fl),
+            ]
+        )
+    return out
+
+
+def _factor_param(ctx, fid, key, default=None):
+    """ctx.params > RECIPE.factor_params。缺键用调用方 default（数字字面量）。"""
+    extra = ((ctx or {}).get("params") or {}).get(fid) or {}
+    if key in extra:
+        return extra[key]
+    rec = (globals().get("RECIPE") or {}).get("factor_params") or {}
+    block = rec.get(fid) or {}
+    if key in block:
+        return block[key]
+    return default
+
+
+def _factor_params_apply_global(params):
+    """只合进 RECIPE.factor_params，按 id 再按 key 合并。"""
+    if not isinstance(params, dict):
+        return
+    rec = globals().get("RECIPE")
+    if not isinstance(rec, dict):
+        return
+    fp = rec.get("factor_params")
+    if not isinstance(fp, dict):
+        rec["factor_params"] = {}
+        fp = rec["factor_params"]
+    for fid, incoming in params.items():
+        if not isinstance(incoming, dict):
+            continue
+        cur = fp.get(fid)
+        if not isinstance(cur, dict):
+            fp[fid] = {}
+            cur = fp[fid]
+        cur.update(incoming)
+        if fid == "trail_stop" and "tiers" in cur:
+            cur["tiers"] = _factor_tiers_as_lists(cur.get("tiers"))
+
+
 def _vol_pullback_confirm_need():
     """最少 1：当天缩量即可；勿用 `x or 2`（0 会被当成缺省翻成 2）。"""
-    raw = globals().get("VOL_PULLBACK_CONFIRM_DAYS", 2)
+    raw = _factor_param(None, "pullback_vol", "confirm_days")
     try:
         n = int(2 if raw is None else raw)
     except Exception:
@@ -3303,7 +3335,13 @@ def _weekly_market_features(closes_w):
     e2 = _last_valid(dea, i - 2) if i >= 2 else None
     golden_now = _cross_up(d1, e1, d0, e0)
     golden_prev = _cross_up(d2, e2, d1, e1) if i >= 2 else False
-    slope_weeks = int(globals().get("W_MA30_SLOPE_WEEKS", 2) or 2)
+    raw_slope = _factor_param(None, "w_slope", "slope_weeks")
+    try:
+        slope_weeks = int(raw_slope if raw_slope is not None else 2)
+    except (TypeError, ValueError):
+        slope_weeks = 2
+    if not slope_weeks:
+        slope_weeks = 2
     slope_up_n = False
     if slope_weeks > 0 and i >= slope_weeks:
         slope_up_n = True
@@ -3380,8 +3418,18 @@ def _factor_daily_features(closes, volumes):
     detail["slow_n"] = slow_n
     ma20 = _price_ma(closes, mid_n) if mid_n > 0 else None
     ma60 = _price_ma(closes, slow_n) if slow_n > 0 else None
-    vol10 = _sma(volumes, VOL_PULLBACK_N)
-    vol20 = _sma(volumes, VOL_DRY_N)
+    raw_vn = _factor_param(None, "pullback_vol", "vol_n")
+    raw_dn = _factor_param(None, "vol_dry", "n")
+    try:
+        vol_n = int(10 if raw_vn is None else raw_vn)
+    except (TypeError, ValueError):
+        vol_n = 10
+    try:
+        dry_n = int(20 if raw_dn is None else raw_dn)
+    except (TypeError, ValueError):
+        dry_n = 20
+    vol10 = _sma(volumes, vol_n)
+    vol20 = _sma(volumes, dry_n)
     if vol10 is None or vol20 is None:
         return False, detail
     i = len(closes) - 1
@@ -3463,7 +3511,9 @@ def _factor_ctx_bind_state(ctx, **fields):
 
 # === hlband/factors/lib/pullback_vol.py ===
 def _near_ma(price, ma, tol=None):
-    tol = float(tol if tol is not None else MA_TOUCH_TOL)
+    if tol is None:
+        tol = _factor_param(None, "pullback_vol", "tol")
+    tol = float(tol)
     if price is None or ma is None or ma <= 0:
         return False
     return abs(float(price) - float(ma)) / float(ma) <= tol
@@ -3489,7 +3539,7 @@ def _factor_eval_pullback_vol(ctx):
         near = near or _near_ma(price, m20)
     if slow_n > 0:
         near = near or _near_ma(price, m60)
-    ratio = float(VOL_PULLBACK_RATIO)
+    ratio = float(_factor_param(ctx, "pullback_vol", "ratio"))
     vol_streak = 0
     if volumes is None or vol10 is None:
         return False, {"vol_streak": 0, "near": near}
@@ -3517,7 +3567,7 @@ def _factor_eval_chase(ctx):
     if prev <= 0:
         return False, {"prev": prev}
     chg = (price - prev) / prev
-    return chg >= float(CHASE_MAX_PCT), {"chg": chg}
+    return chg >= float(_factor_param(ctx, "chase", "max_pct")), {"chg": chg}
 
 # === hlband/factors/lib/vol_dry.py ===
 def _factor_eval_vol_dry(ctx):
@@ -3537,7 +3587,7 @@ def _factor_eval_vol_dry(ctx):
         and v20 is not None
         and v20 > 0
         and vol is not None
-        and vol < v20 * float(VOL_DRY_RATIO)
+        and vol < v20 * float(_factor_param(ctx, "vol_dry", "ratio"))
     )
     return bool(dry_below), {"dry_below": bool(dry_below)}
 
@@ -3549,7 +3599,7 @@ def _factor_eval_w_bias(ctx):
     if m5 is None or m30 is None or m30 <= 0:
         return False, {"bias": None}
     bias = (float(m5) - float(m30)) / float(m30)
-    return bias >= float(W_BIAS_HARD), {"bias": bias}
+    return bias >= float(_factor_param(ctx, "w_bias", "hard")), {"bias": bias}
 
 # === hlband/factors/lib/w_slope.py ===
 def _factor_eval_w_slope(ctx):
@@ -3559,7 +3609,7 @@ def _factor_eval_w_slope(ctx):
     if m5 is None or m30 is None or m30 <= 0:
         return False, {"bias": None}
     bias = (float(m5) - float(m30)) / float(m30)
-    if bias >= float(W_BIAS_LOW):
+    if bias >= float(_factor_param(ctx, "w_slope", "low")):
         return False, {"bias": bias}
     slope_ok = bool(w_detail.get("ma30_slope_up2"))
     return (not slope_ok), {"bias": bias, "slope_ok": slope_ok}
@@ -3583,7 +3633,7 @@ def _factor_eval_weekly_bear(ctx):
 # === hlband/factors/lib/weekly_bear_confirm.py ===
 def _w_bear_confirm_need():
     """最少 1：当天空头即可挂清仓；勿用 `x or 2`（0 会被当成缺省翻成 2）。"""
-    raw = globals().get("W_BEAR_CONFIRM_DAYS", 2)
+    raw = _factor_param(None, "weekly_bear_confirm", "days")
     try:
         n = int(2 if raw is None else raw)
     except Exception:
@@ -3628,9 +3678,21 @@ def _factor_eval_plat_break(ctx):
     closes = market.get("closes")
     highs = market.get("highs")
     lows = market.get("lows")
-    lookback = int(globals().get("SCALE_PLAT_LOOKBACK") or 20)
-    max_range = float(globals().get("SCALE_PLAT_MAX_RANGE") or 0.10)
-    buf = float(globals().get("SCALE_PLAT_BREAK_BUF") or 0.0)
+    raw_lb = _factor_param(ctx, "plat_break", "lookback")
+    raw_rng = _factor_param(ctx, "plat_break", "max_range")
+    raw_buf = _factor_param(ctx, "plat_break", "break_buf")
+    try:
+        lookback = int(20 if raw_lb is None else raw_lb)
+    except (TypeError, ValueError):
+        lookback = 20
+    try:
+        max_range = float(0.10 if raw_rng is None else raw_rng)
+    except (TypeError, ValueError):
+        max_range = 0.10
+    try:
+        buf = float(0.0 if raw_buf is None else raw_buf)
+    except (TypeError, ValueError):
+        buf = 0.0
     if lookback < 5 or max_range <= 0:
         return False, {}
     if closes is None or highs is None or lows is None:
@@ -3675,7 +3737,11 @@ def _factor_eval_w_macd_golden(ctx):
         return False, {}
     if golden_now and (not golden_prev):
         return True, {"golden_now": True}
-    ratio = float(globals().get("SCALE_W_HIST_EXPAND_RATIO") or 1.0)
+    raw_ratio = _factor_param(ctx, "w_macd_golden", "hist_expand")
+    try:
+        ratio = float(1.0 if raw_ratio is None else raw_ratio)
+    except (TypeError, ValueError):
+        ratio = 1.0
     if ratio <= 1.0:
         return True, {"ratio": ratio}
     base = abs(hist_prev) if abs(hist_prev) > 1e-12 else hist
@@ -3697,14 +3763,16 @@ def _factor_eval_stop_loss(ctx):
         cost = 0.0
     if cost <= 0 or price is None:
         return False, {}
-    hit = float(price) <= cost * (1.0 - float(STOP_LOSS))
+    hit = float(price) <= cost * (1.0 - float(_factor_param(ctx, "stop_loss", "pct")))
     return bool(hit), {"cost": cost, "price": float(price)}
 
 # === hlband/factors/lib/trail_stop.py ===
-def _trail_tier_params(max_profit):
+def _trail_tier_params(max_profit, tiers=None):
     """按峰值浮盈选档，返回 (giveback, profit_floor)；未达起步档则 (None, None)。"""
     mp = float(max_profit)
-    for lo, hi, giveback, floor in TRAIL_TIERS:
+    if tiers is None:
+        tiers = _factor_param(None, "trail_stop", "tiers")
+    for lo, hi, giveback, floor in tiers or ():
         if mp < float(lo):
             continue
         if hi is not None and mp >= float(hi):
@@ -3714,7 +3782,7 @@ def _trail_tier_params(max_profit):
     return None, None
 
 
-def _trail_stop_hit(price, cost, peak=None):
+def _trail_stop_hit(price, cost, peak=None, tiers=None):
     """阶梯移动止盈：峰值浮盈落档后，回撤超容忍 或 跌破利润底线。"""
     if cost is None or cost <= 0:
         return False
@@ -3723,7 +3791,7 @@ def _trail_stop_hit(price, cost, peak=None):
     if peak is None or peak <= 0:
         return False
     max_profit = (float(peak) - float(cost)) / float(cost)
-    giveback_lim, profit_floor = _trail_tier_params(max_profit)
+    giveback_lim, profit_floor = _trail_tier_params(max_profit, tiers=tiers)
     if giveback_lim is None:
         return False
     giveback = (float(peak) - float(price)) / float(peak)
@@ -3753,12 +3821,16 @@ def _factor_eval_trail_stop(ctx):
         cost = 0.0
     if price is None:
         return False, {}
-    return bool(_trail_stop_hit(price, cost, peak=peak)), {"cost": cost, "peak": peak}
+    tiers = _factor_param(ctx, "trail_stop", "tiers")
+    return bool(_trail_stop_hit(price, cost, peak=peak, tiers=tiers)), {
+        "cost": cost,
+        "peak": peak,
+    }
 
 # === hlband/factors/lib/time_force.py ===
 def _trail_arm():
     """档 1 起步 peak_lo；time_force 让路与网格 init 指纹共用。"""
-    tiers = globals().get("TRAIL_TIERS") or ()
+    tiers = _factor_param(None, "trail_stop", "tiers")
     try:
         return float(tiers[0][0])
     except (IndexError, TypeError, ValueError):
@@ -3819,15 +3891,16 @@ def _time_force_mark_skip(lot, peak_ret, hold_bars, m60):
     _save_state()
 
 
-def _time_force_hit(price, closes, hold_bars, lot=None):
-    """智能时间成本：持仓 > TIME_FORCE_BARS 后评估出场。
-    BARS<=0 关闭整条规则。
+def _time_force_hit(price, closes, hold_bars, lot=None, ctx=None):
+    """智能时间成本：持仓 > time_force.bars 后评估出场。
+    bars<=0 关闭整条规则。
     D_MA_SLOW<=0 时慢线地板不存在，同样不触发（BARS 仍独立）。
     收盘破日线慢均线 → 立即强制平仓。
     仍站上慢线时：峰值已达 TRAIL 档1 peak_lo 则不按日历强平；
     从未武装的死钱仓立即强平。"""
     try:
-        bars_lim = int(TIME_FORCE_BARS)
+        raw_bars = _factor_param(ctx, "time_force", "bars")
+        bars_lim = int(raw_bars)
     except (TypeError, ValueError):
         bars_lim = 0
     if bars_lim <= 0:
@@ -3876,7 +3949,7 @@ def _factor_eval_time_force(ctx):
             hold_bars = getattr(A, "hold_bars", 0)
     else:
         hold_bars = lot.get("hold_bars", 0)
-    return bool(_time_force_hit(price, closes, hold_bars, lot=lot)), {}
+    return bool(_time_force_hit(price, closes, hold_bars, lot=lot, ctx=ctx)), {}
 
 # === hlband/factors/registry.py ===
 def _factor_registry():
@@ -3945,23 +4018,6 @@ def _recipe_hit(expr, ctx):
 
 # === hlband/factors/slots.py ===
 _RECIPE_THRESHOLD_KEYS = (
-    "CHASE_MAX_PCT",
-    "VOL_DRY_RATIO",
-    "VOL_DRY_N",
-    "MA_TOUCH_TOL",
-    "VOL_PULLBACK_RATIO",
-    "VOL_PULLBACK_N",
-    "VOL_PULLBACK_CONFIRM_DAYS",
-    "W_BIAS_HARD",
-    "W_BIAS_LOW",
-    "W_MA30_SLOPE_WEEKS",
-    "STOP_LOSS",
-    "TRAIL_TIERS",
-    "TIME_FORCE_BARS",
-    "W_BEAR_CONFIRM_DAYS",
-    "SCALE_PLAT_LOOKBACK",
-    "SCALE_PLAT_MAX_RANGE",
-    "SCALE_W_HIST_EXPAND_RATIO",
     "D_MA_MID",
     "D_MA_SLOW",
     "W_MA_FAST",
@@ -3972,20 +4028,52 @@ _RECIPE_THRESHOLD_KEYS = (
 )
 
 
-def _recipe_fingerprint(overrides=None, recipe=None):
-    """表达式 + 被覆盖的阈值键；不扫全因子开关。"""
-    rec = recipe if recipe is not None else (globals().get("RECIPE") or {})
-    ov = dict(overrides or {})
-    covered = {}
+def _fold_factor_params_for_fingerprint(fp_src, overrides, param_keys=None):
+    """深合并 overrides.factor_params；袋里只留 D_MA_* / W_MA_* / MACD_*。"""
+    fp = {}
+    for fid, block in (fp_src or {}).items():
+        if isinstance(block, dict):
+            copied = dict(block)
+            if "tiers" in copied:
+                copied["tiers"] = _factor_tiers_as_lists(copied.get("tiers"))
+            fp[str(fid)] = copied
+        else:
+            fp[str(fid)] = block
+    leftover = {}
     allow = set(_RECIPE_THRESHOLD_KEYS)
+    ov = dict(overrides or {})
+    incoming = ov.get("factor_params")
+    if isinstance(incoming, dict):
+        for fid, block in incoming.items():
+            if not isinstance(block, dict):
+                continue
+            cur = fp.get(str(fid))
+            if not isinstance(cur, dict):
+                cur = {}
+                fp[str(fid)] = cur
+            cur.update(block)
+            if str(fid) == "trail_stop" and "tiers" in cur:
+                cur["tiers"] = _factor_tiers_as_lists(cur.get("tiers"))
     for k in sorted(ov):
-        if k in allow:
-            covered[k] = ov[k]
+        ks = str(k)
+        if ks == "factor_params":
+            continue
+        if ks in allow:
+            leftover[ks] = ov[k]
+    return fp, leftover
+
+
+def _recipe_fingerprint(overrides=None, recipe=None):
+    """表达式 + 折进表的阈值；不扫全因子开关。"""
+    rec = recipe if recipe is not None else (globals().get("RECIPE") or {})
+    fp, leftover = _fold_factor_params_for_fingerprint(
+        rec.get("factor_params") or {}, overrides
+    )
     payload = {
         "entry": rec.get("entry"),
         "exit": rec.get("exit"),
-        "factor_params": rec.get("factor_params") or {},
-        "overrides": covered,
+        "factor_params": fp,
+        "overrides": leftover,
         "scale_in": rec.get("scale_in"),
         "scale_out": rec.get("scale_out"),
     }
@@ -6937,7 +7025,7 @@ def _eval_daily_buy(closes, volumes):
 
 
 def _weekly_bias_guard(w_detail):
-    """周线 (MA5-MA34)/MA34 >= W_BIAS_HARD → 禁开。"""
+    """周线 (MA5-MA34)/MA34 >= w_bias.hard → 禁开。"""
     ok, det = _factor_eval("w_bias", {"market": {"w_detail": w_detail or {}}})
     return ok, det.get("bias")
 
@@ -9478,7 +9566,7 @@ def _register_live_timer(C):
 
 def _trail_tiers_json():
     """整表 compact JSON；网格指纹 trail_tiers=。"""
-    tiers = globals().get("TRAIL_TIERS") or ()
+    tiers = _factor_param(None, "trail_stop", "tiers") or ()
     out = []
     for row in tiers:
         seq = list(row)
@@ -9729,13 +9817,13 @@ def _init_impl(C):
         "ma_type=",
         _ma_kind(),
         "stop=",
-        STOP_LOSS,
+        _factor_param(None, "stop_loss", "pct"),
         "trail_arm=",
         _trail_arm(),
         "trail_tiers=",
         _trail_tiers_json(),
         "chase<",
-        CHASE_MAX_PCT,
+        _factor_param(None, "chase", "max_pct"),
         "scale=",
         SCALE_ENABLE,
         "scale_lots=",
@@ -9747,11 +9835,15 @@ def _init_impl(C):
         "scale_arm_bars=",
         SCALE_ARM_BARS,
         "scale_plat=",
-        "%d/%.2f" % (SCALE_PLAT_LOOKBACK, SCALE_PLAT_MAX_RANGE),
+        "%d/%.2f"
+        % (
+            int(_factor_param(None, "plat_break", "lookback") or 20),
+            float(_factor_param(None, "plat_break", "max_range") or 0.10),
+        ),
         "scale_w_expand=",
-        SCALE_W_HIST_EXPAND_RATIO,
+        _factor_param(None, "w_macd_golden", "hist_expand"),
         "time_force_bars=",
-        TIME_FORCE_BARS,
+        _factor_param(None, "time_force", "bars"),
         "time_force_min_ret=",
         _time_force_min_ret(),
         "recipe=",
@@ -9789,12 +9881,12 @@ def _init_impl(C):
         scale_arm=SCALE_ARM,
         scale_arm_bars=SCALE_ARM_BARS,
         scale_w_hist_min=SCALE_W_HIST_MIN,
-        scale_plat_lookback=SCALE_PLAT_LOOKBACK,
-        scale_plat_max_range=SCALE_PLAT_MAX_RANGE,
-        scale_w_hist_expand=SCALE_W_HIST_EXPAND_RATIO,
-        stop=STOP_LOSS,
+        scale_plat_lookback=_factor_param(None, "plat_break", "lookback"),
+        scale_plat_max_range=_factor_param(None, "plat_break", "max_range"),
+        scale_w_hist_expand=_factor_param(None, "w_macd_golden", "hist_expand"),
+        stop=_factor_param(None, "stop_loss", "pct"),
         trail_arm=_trail_arm(),
-        time_force_bars=TIME_FORCE_BARS,
+        time_force_bars=_factor_param(None, "time_force", "bars"),
         time_force_min_ret=_time_force_min_ret(),
         close_exec="%s-%s"
         % (

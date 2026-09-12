@@ -86,13 +86,14 @@ class RecipeFingerprintTests(unittest.TestCase):
         self.assertTrue(got0["has_recipe"])
         exp0 = expected_fingerprint(defaults, {})
         self.assertEqual(got0["recipe"], exp0["recipe"])
-        text1 = run_init_probe({"CHASE_MAX_PCT": 0.03})
+        ov = {"factor_params": {"chase": {"max_pct": 0.03}}}
+        text1 = run_init_probe(ov)
         got1 = parse_fingerprint(text1)
         self.assertTrue(got1["has_recipe"])
         self.assertNotEqual(got0["recipe"], got1["recipe"])
         self.assertEqual(
             got1["recipe"],
-            recipe_fingerprint(overrides={"CHASE_MAX_PCT": 0.03}),
+            recipe_fingerprint(overrides=ov),
         )
 
 

@@ -55,99 +55,33 @@ W_MA_LIFE = 34
 MACD_FAST = 12
 MACD_SLOW = 26
 MACD_SIGNAL = 9
-# 高位禁开：周线乖离 (MA5-MA34)/MA34 >= 此值 → 不做新开（追高风险）
-# 例 0.08 = MA5 相对生命线 MA34 高 8% 以上禁开
-W_BIAS_HARD = 0.08
-# 低位斜率过滤：乖离 < 此值视为「低位区」；此时若 MA34 未连续向上则禁开
-# 例 0.02 = 乖离不足 2% 时要求生命线已拐头向上
-W_BIAS_LOW = 0.02
-# 低位区判定「连续向上」的周数：需 life[t]>life[t-1]>life[t-2]（即 2 周斜率）
-# 常量名 W_MA30_SLOPE_WEEKS 为历史兼容；比较对象是 W_MA_LIFE（34）
-W_MA30_SLOPE_WEEKS = 2
 
-# ---- 日线买卖 ----
+# ---- 日线买卖（均线周期是 structure，阈值在 RECIPE.factor_params）----
 # 日线均线（算法见标的 ma_type / MA_TYPE）：中线→回踩/无量阴跌；慢线→回踩支撑 + 时间成本地板
-#   <=0 关闭该条（与 TIME_FORCE_BARS 相同约定）
-#   关中线：回踩只看慢线（若开着）；vol_dry_skip 关掉
-#   关慢线：回踩只看中线；time_force 破慢线地板关掉（BARS 仍独立，网格只改慢线不自动改 BARS）
+#   <=0 关闭该条（与 time_force.bars 相同约定）
+#   关中线：回踩只看慢线（若开着）；vol_dry 关掉
+#   关慢线：回踩只看中线；time_force 破慢线地板关掉（bars 仍独立）
 #   两条都关：无 pullback_vol 新开；加仓仍可走 plat_break / w_macd_golden
 D_MA_MID = 20
 D_MA_SLOW = 60
 
-# 买点 pullback_vol：缩量回踩强支撑
-#   价格贴近 MA20 或 MA60（|价-均线|/均线 <= 容差）且连续 N 日量 < 当日均量 * 比例
-#   贴均线只看当天；缩量按 VOL_PULLBACK_CONFIRM_DAYS 连续确认
-MA_TOUCH_TOL = 0.025          # 0.025 = 距均线 ±2.5% 内算「回踩到位」
-VOL_PULLBACK_N = 10           # 缩量比较的均量窗口（日，始终 SMA）
-VOL_PULLBACK_RATIO = 0.9      # 量 < 均量*0.9 视为缩量
-# 缩量连续确认日：<=0 或 1=当天缩量即可；2=今昨都缩量才算 pullback_vol
-VOL_PULLBACK_CONFIRM_DAYS = 2
-
-# 全局禁开 vol_dry_skip（无量阴跌不言底）：
-#   收盘跌破 MA20 且量 < N 日均量 * 比例 → 当天任何买点失效
-VOL_DRY_N = 20
-VOL_DRY_RATIO = 0.60          # 量 < 20 日均量的 60% 视为无量阴跌
-
-# 卖① trail_stop：阶梯式移动止盈
-#   按历史最高浮盈 (peak-cost)/cost 选档；触发条件：
-#     自峰值回撤 > giveback，或（若设了 profit_floor）当前浮盈 < 底线
-#   元组：(peak_lo, peak_hi, giveback, profit_floor)
-#     peak_hi=None 无上限；profit_floor=None 不设硬底线
-#   档1 起步保护 [3%,6%)：回撤>1.5%（同旧版，防破本）
-#   档2 落袋为安 [6%,10%)：回撤>3% 或 利润跌破 3%
-#   档3 放鹰吃肉 >=10%：回撤>4%（利润垫扛日线洗盘）
-#   档1 peak_lo 同时是 time_force 让路阈值（_trail_arm）；加仓门槛 SCALE_ARM 仍独立
-#   参数网格中配置示例：[[0.03,0.06,0.015,null],[0.06,0.10,0.03,0.03],[0.10,null,0.04,null]]
-TRAIL_TIERS = (
-    (0.03, 0.06, 0.015, None),
-    (0.06, 0.10, 0.03, 0.03),
-    (0.10, None, 0.04, None),
-)
-# 卖② time_force：智能时间成本（防长期磨人，不砍还在趋势里的仓）
-#   BARS = 日线慢均线一半
-#   BARS<=0：关闭整条 time_force
-#   收盘破日线 MA60 → 立即强制平仓
-#   仍站上 MA60 且峰值浮盈 < 档1 peak_lo → 立即强制平仓（未武装仓满 BARS 即日历强平）
-#   仍站上 MA60 且峰值 >= 档1 peak_lo → 不按日历强平，交给 trail / 破 MA60 / 周线空
-#   已武装仓才把 MA60 当出场地板、不是最长持仓
-TIME_FORCE_BARS = D_MA_SLOW // 2
-
-# 兜底风控（优先级高）
-# chase_skip：当日涨幅 (收-昨收)/昨收 >= 此值 → 禁开（防追高）
-CHASE_MAX_PCT = 0.05
-# stop_loss：收盘价 <= 成本 * (1 - 此值) → 硬止损清仓
-STOP_LOSS = 0.08
-# weekly_bear 强制清仓：连续 N 个信号日（日 K）仍为空头才挂 pending_exit
-#   N<=0 或 1：当天空头即挂（与改前一致）；N=2：连续两日仍空才挂
-#   禁开 / 撤买入 pending 仍按「当日」空头即时生效，不要求满 N 日
-W_BEAR_CONFIRM_DAYS = 2
-
-# （另有 weekly_bear：周线空头判定见 factors/lib/weekly_bear；确认清仓见 weekly_bear_confirm）
-
-# 盈利后加仓（回踩加仓 + 破平台推仓，任一即可）：
-#   门槛：峰值浮盈 >= SCALE_ARM，且该笔已持仓 >= SCALE_ARM_BARS 日
-#   触发（任一）：缩量回踩 / 日线收盘突破前期平台 / 近两周周线 MACD 金叉且柱放大
-#   回踩加仓仍受 chase_skip；破平台/金叉不受（突破日允许较大涨幅）
-#   执行日若已触发卖点则取消加仓、让路出场
-# SCALE_ONCE_PER_ROUND：同一轮只加一次。加过仓后该只须全平才能再开，不能把剩余仓当新开
-#   关掉 once 后单票不再有数字顶，只剩 BOOK_LOT_MAX
-# SCALE_W_HIST_MIN：周线 MACD 柱低于此值不加（过滤深空头里的冲高）；None 关闭
-# SCALE_LOTS=True：每笔独立成本/峰值/止盈；False：均价合并后整仓出
-# weekly_bear 仍一次出清剩余各笔；trail_stop / time_force / stop_loss 按笔
+# 盈利后加仓门槛（仓位层，不进 factor_params）：
+#   峰值浮盈 >= SCALE_ARM，且该笔已持仓 >= SCALE_ARM_BARS 日
+#   回踩加仓仍受 chase；破平台/金叉不受
+#   执行日若已触发卖点则取消加仓
+# SCALE_ONCE_PER_ROUND：同一轮只加一次
+# SCALE_W_HIST_MIN：周线 MACD 柱低于此值不加；None 关闭
+# SCALE_LOTS=True：每笔独立成本/峰值/止盈
 SCALE_ENABLE = True
 SCALE_ONCE_PER_ROUND = True
 SCALE_ARM = 0.03
 SCALE_ARM_BARS = 8
 SCALE_W_HIST_MIN = -0.01
 SCALE_LOTS = True
-# 日线平台：回看 N 日（不含当日）高低点；振幅 <= 此值视为平台；收盘严格站上高点且昨收仍在平台内
-SCALE_PLAT_LOOKBACK = 20
-SCALE_PLAT_MAX_RANGE = 0.10          # 0.10 = 平台振幅不超过 10%
-# 周线 MACD：本周或上周 DIF 上穿 DEA；上周金叉则本周红柱须比上周放大此倍数
-SCALE_W_HIST_EXPAND_RATIO = 1.2
 
-# 默认 Recipe：四槽布尔式，数字仍读上面的全局阈值，不写死在叶子里。
-# scale_out 恒 false：减仓槽未启用；Intent 预留 reduce，strategy 忽略。
+# 默认 Recipe：四槽布尔式。数字真源是 factor_params 字面量。
+# D_MA_* / W_MA_* / MACD_* 是 structure。SCALE_ARM 等仓位门槛不进表。
+# scale_out 恒 false：减仓未启用。
 RECIPE = {
     "entry": [
         "and",
@@ -178,21 +112,54 @@ RECIPE = {
         "time_force",
     ],
     "scale_out": False,
-    "factor_params": {},
+    "factor_params": {
+        # chase：当日涨幅 >= max_pct 禁开
+        "chase": {"max_pct": 0.05},
+        # vol_dry：收盘破中线且量 < n 日均量 * ratio
+        "vol_dry": {"ratio": 0.60, "n": 20},
+        # pullback_vol：贴均线 tol + 连续 confirm_days 日量 < vol_n 日均量 * ratio
+        "pullback_vol": {
+            "tol": 0.025,
+            "vol_n": 10,
+            "ratio": 0.9,
+            "confirm_days": 2,
+        },
+        # w_bias：周线 (MA5-MA34)/MA34 >= hard 禁开
+        "w_bias": {"hard": 0.08},
+        # w_slope：乖离 < low 且生命线未连续 slope_weeks 周向上则禁开
+        "w_slope": {"low": 0.02, "slope_weeks": 2},
+        # weekly_bear_confirm：连续 days 个信号日仍空才清仓；<=0/1=当天
+        "weekly_bear_confirm": {"days": 2},
+        # plat_break：回看 lookback 日振幅 <= max_range 且收盘破高
+        "plat_break": {
+            "lookback": 20,
+            "max_range": 0.10,
+            "break_buf": 0.0,
+        },
+        # w_macd_golden：上周金叉则本周红柱须放大 hist_expand 倍
+        "w_macd_golden": {"hist_expand": 1.2},
+        # stop_loss：收盘 <= 成本 * (1 - pct)
+        "stop_loss": {"pct": 0.08},
+        # trail_stop：档 (peak_lo, peak_hi, giveback, profit_floor)；档1 peak_lo 给 time_force 让路
+        "trail_stop": {
+            "tiers": [
+                [0.03, 0.06, 0.015, None],
+                [0.06, 0.10, 0.03, 0.03],
+                [0.10, None, 0.04, None],
+            ]
+        },
+        # time_force：持仓 > bars 后评估；<=0 关整条
+        "time_force": {"bars": 30},
+    },
 }
 
-# 策略交易面板 bind → 模块常量。编辑器/回测无注入时用上面默认值。
-# 只上屏：开关 / 资金基数 / 固定金额 / 可部署比例 / 硬风控。买点窗口、时间成本、加仓细节、SCALE_LOTS、
-# TRAIL_TIERS、均线周期、BOOK_STOCKS 子配置（ma_type / dividend_type）、
-# MA_TYPE、路径、账号仍只在 config（N 以 BOOK_STOCKS 长度为准）。
+# 策略交易面板 bind → 模块常量。因子阈值不上屏（改 RECIPE.factor_params）。
+# 只上屏：开关 / 资金基数 / 固定金额 / 可部署比例 / 加仓开关。
 PANEL_BINDS = (
     ("panel_dry_run", "DRY_RUN", "bool"),
     ("panel_budget_base", "BUDGET_BASE", "str"),
     ("panel_budget", "TRADE_BUDGET", "float"),
     ("panel_cash_ratio", "CASH_RATIO", "float"),
-    ("panel_w_bias_hard", "W_BIAS_HARD", "float"),
-    ("panel_chase_pct", "CHASE_MAX_PCT", "float"),
-    ("panel_stop_loss", "STOP_LOSS", "float"),
     ("panel_scale", "SCALE_ENABLE", "bool"),
 )
 

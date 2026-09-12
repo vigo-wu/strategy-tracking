@@ -13,13 +13,13 @@
       "id": "sl06",
       "label": "止损 6%",
       "kind": "tighten",
-      "overrides": {"STOP_LOSS": 0.06}
+      "overrides": {"factor_params": {"stop_loss": {"pct": 0.06}}}
     },
     {
       "id": "sl10",
       "label": "止损 10%",
       "kind": "loosen",
-      "overrides": {"STOP_LOSS": 0.10}
+      "overrides": {"factor_params": {"stop_loss": {"pct": 0.10}}}
     }
   ]
 }

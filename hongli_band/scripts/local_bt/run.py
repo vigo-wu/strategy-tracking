@@ -159,42 +159,58 @@ def default_log_name(stock: str, year: str = "", ma_type: str = "") -> str:
     return "_".join(parts) + ".txt"
 
 
-def _as_trail_tiers(raw: Any) -> tuple:
-    if not raw:
-        return ()
-    out = []
-    for row in raw:
-        if row is None:
-            continue
-        seq = list(row)
-        while len(seq) < 4:
-            seq.append(None)
-        lo, hi, gb, fl = seq[0], seq[1], seq[2], seq[3]
-        out.append(
-            (
-                float(lo),
-                None if hi is None else float(hi),
-                float(gb),
-                None if fl is None else float(fl),
-            )
-        )
-    return tuple(out)
+_DELETED_FACTOR_KEYS = frozenset(
+    {
+        "CHASE_MAX_PCT",
+        "W_BIAS_HARD",
+        "W_BIAS_LOW",
+        "W_MA30_SLOPE_WEEKS",
+        "MA_TOUCH_TOL",
+        "VOL_PULLBACK_N",
+        "VOL_PULLBACK_RATIO",
+        "VOL_PULLBACK_CONFIRM_DAYS",
+        "VOL_DRY_N",
+        "VOL_DRY_RATIO",
+        "TRAIL_TIERS",
+        "TIME_FORCE_BARS",
+        "STOP_LOSS",
+        "W_BEAR_CONFIRM_DAYS",
+        "SCALE_PLAT_LOOKBACK",
+        "SCALE_PLAT_MAX_RANGE",
+        "SCALE_W_HIST_EXPAND_RATIO",
+        "SCALE_PLAT_BREAK_BUF",
+    }
+)
 
 
 def apply_config_overrides(ns: dict[str, Any], overrides: Mapping[str, Any] | None) -> None:
-    """把命名格子的覆盖写进拼接脚本命名空间（运行时全局）。"""
+    """合 factor_params 进表；D_MA_* / 资金等仍写 ns。顶层旧键 / 点路径立刻报错。"""
     if not overrides:
         return
+    sync = ns.get("_factor_params_apply_global")
     for raw_k, val in overrides.items():
         key = str(raw_k)
-        if key == "TRAIL_TIERS":
-            ns[key] = _as_trail_tiers(val)
-        else:
-            ns[key] = val
+        if key in _DELETED_FACTOR_KEYS:
+            raise ValueError(
+                "已删除的顶层因子键 %s：请写 overrides.factor_params"
+                "（如 {\"stop_loss\": {\"pct\": 0.06}}）"
+                % key
+            )
+        if "." in key:
+            raise ValueError(
+                "顶层点路径 %s 不会进表：请写 overrides.factor_params"
+                "（如 stop_loss.pct → factor_params.stop_loss.pct）"
+                % key
+            )
+        if key == "factor_params":
+            if callable(sync):
+                sync(val)
+            continue
+        ns[key] = val
 
 
 def install_config_overrides(ns: dict[str, Any], overrides: Mapping[str, Any] | None) -> None:
-    """exec 之后立刻覆盖；并包一层 _apply_panel，避免面板把 STOP_LOSS 打回默认。"""
+    """exec 之后立刻覆盖；并包一层 _apply_panel，避免面板把资金/开关打回默认。"""
     if not overrides:
         return
     apply_config_overrides(ns, overrides)
@@ -530,19 +546,34 @@ def _patch_fast_ohlcv(ns: dict) -> None:
         return tup
 
     def _get_ohlcv_1d(C, stock):
-        plat_n = int(ns.get("SCALE_PLAT_LOOKBACK") or 20)
+        fp = ((ns.get("RECIPE") or {}).get("factor_params") or {})
+        plat = fp.get("plat_break") or {}
+        pull = fp.get("pullback_vol") or {}
+        dry = fp.get("vol_dry") or {}
+        try:
+            plat_n = int(plat.get("lookback") or 20)
+        except (TypeError, ValueError):
+            plat_n = 20
         mid_n = int(ns.get("D_MA_MID") or 0)
         slow_n = int(ns.get("D_MA_SLOW") or 0)
         try:
-            confirm_n = int(ns.get("VOL_PULLBACK_CONFIRM_DAYS") or 1)
+            confirm_n = int(pull.get("confirm_days") or 1)
         except (TypeError, ValueError):
             confirm_n = 1
-        vol_pb_need = int(ns.get("VOL_PULLBACK_N") or 0) + max(0, confirm_n - 1)
+        try:
+            vol_n = int(pull.get("vol_n") or 0)
+        except (TypeError, ValueError):
+            vol_n = 0
+        try:
+            dry_n = int(dry.get("n") or 0)
+        except (TypeError, ValueError):
+            dry_n = 0
+        vol_pb_need = vol_n + max(0, confirm_n - 1)
         need = max(
             mid_n if mid_n > 0 else 0,
             slow_n if slow_n > 0 else 0,
             vol_pb_need,
-            int(ns.get("VOL_DRY_N") or 0),
+            dry_n,
             plat_n + 2,
         ) + 10
         period = getattr(ns.get("A"), "period", "1d")

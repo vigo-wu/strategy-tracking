@@ -13,5 +13,5 @@ def _factor_eval_stop_loss(ctx):
         cost = 0.0
     if cost <= 0 or price is None:
         return False, {}
-    hit = float(price) <= cost * (1.0 - float(STOP_LOSS))
+    hit = float(price) <= cost * (1.0 - float(_factor_param(ctx, "stop_loss", "pct")))
     return bool(hit), {"cost": cost, "price": float(price)}

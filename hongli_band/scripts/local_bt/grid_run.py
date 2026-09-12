@@ -21,7 +21,7 @@ from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, as_complete
 from multiprocessing import get_context
 from pathlib import Path
 from queue import Empty, Full
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Mapping
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
@@ -49,8 +49,12 @@ from grid_spec import (  # noqa: E402
     YEAR_WINDOW_KEYS,
     GridSpecError,
     apply_year_windows,
+    deep_merge_factor_params,
     fill_year_windows,
+    flatten_factor_params,
     json_ready,
+    nest_factor_path,
+    overrides_has_trail_tiers,
     recipe_fingerprint,
     reject_retired_min_ret,
     struct_eq,
@@ -87,7 +91,7 @@ from asset_split import (  # noqa: E402
 )
 from market_csv import compact_day, peek_daily_csv_meta  # noqa: E402
 from book_backtest import book_log_name, book_stocks_hash, run_book_backtest  # noqa: E402
-from run import _as_trail_tiers, clear_market_store_cache, run_init_probe  # noqa: E402
+from run import clear_market_store_cache, run_init_probe  # noqa: E402
 from trades_csv import trades_csv_path  # noqa: E402
 
 WARN_CELL_SOFT = 8
@@ -361,13 +365,18 @@ def load_config_defaults() -> dict[str, Any]:
     from grid_spec import param_catalog
 
     mod = _load_hlband_config()
+    rec = getattr(mod, "RECIPE", None) or {}
+    flat = flatten_factor_params(rec.get("factor_params") or {})
     out: dict[str, Any] = {}
     seen: set[str] = set()
     for spec in param_catalog():
-        if spec.key in seen or not hasattr(mod, spec.key):
+        if spec.key in seen:
             continue
         seen.add(spec.key)
-        out[spec.key] = getattr(mod, spec.key)
+        if spec.key in flat:
+            out[spec.key] = flat[spec.key]
+        elif hasattr(mod, spec.key):
+            out[spec.key] = getattr(mod, spec.key)
     return out
 
 
@@ -426,31 +435,38 @@ def load_book_lock() -> list[tuple[str, str, str]]:
     return out
 
 
+def _fp_table_from_defaults(defaults: Mapping[str, Any] | None) -> dict[str, Any]:
+    table: dict[str, Any] = {}
+    for key, val in dict(defaults or {}).items():
+        ks = str(key)
+        if "." not in ks:
+            continue
+        table = deep_merge_factor_params(table, nest_factor_path(ks, val))
+    return table
+
+
 def expected_fingerprint(
     defaults: dict[str, Any],
     overrides: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    merged = dict(defaults)
     ov = overrides or {}
-    if "TRAIL_TIERS" in ov:
-        merged["TRAIL_TIERS"] = _as_trail_tiers(ov["TRAIL_TIERS"])
-    for k, v in ov.items():
-        if k == "TRAIL_TIERS":
-            continue
-        merged[k] = v
+    incoming = ov.get("factor_params") if isinstance(ov.get("factor_params"), dict) else {}
+    fp = deep_merge_factor_params(_fp_table_from_defaults(defaults), incoming)
+    stop = float((fp.get("stop_loss") or {}).get("pct"))
+    time_force_bars = int((fp.get("time_force") or {}).get("bars"))
     arm = None
     try:
-        arm = float(merged["TRAIL_TIERS"][0][0])
+        arm = float(fp["trail_stop"]["tiers"][0][0])
     except (IndexError, TypeError, ValueError, KeyError):
         arm = None
     out = {
-        "stop": float(merged["STOP_LOSS"]),
-        "time_force_bars": int(merged["TIME_FORCE_BARS"]),
+        "stop": stop,
+        "time_force_bars": time_force_bars,
         "time_force_min_ret": float(arm) if arm is not None else 0.0,
         "trail_arm": arm,
     }
-    if "TRAIL_TIERS" in ov:
-        out["trail_tiers"] = json_ready(merged["TRAIL_TIERS"])
+    if overrides_has_trail_tiers(ov):
+        out["trail_tiers"] = json_ready((fp.get("trail_stop") or {}).get("tiers"))
     out["recipe"] = recipe_fingerprint(overrides=ov)
     return out
 
@@ -1001,7 +1017,7 @@ def probe_cell(
     except Exception as e:
         raise GridError("格子 %s 探针失败: %s" % (cell["id"], e)) from e
     expected = expected_fingerprint(defaults, cell["overrides"])
-    need_trail = "TRAIL_TIERS" in (cell.get("overrides") or {})
+    need_trail = overrides_has_trail_tiers(cell.get("overrides") or {})
     assert_fingerprint_text(text, expected, need_trail=need_trail, source=str(probe_log))
 
 

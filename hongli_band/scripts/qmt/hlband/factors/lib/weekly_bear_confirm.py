@@ -1,7 +1,7 @@
 # === hlband/factors/lib/weekly_bear_confirm.py ===
 def _w_bear_confirm_need():
     """最少 1：当天空头即可挂清仓；勿用 `x or 2`（0 会被当成缺省翻成 2）。"""
-    raw = globals().get("W_BEAR_CONFIRM_DAYS", 2)
+    raw = _factor_param(None, "weekly_bear_confirm", "days")
     try:
         n = int(2 if raw is None else raw)
     except Exception:

@@ -8,7 +8,7 @@ from typing import Any, Mapping
 
 from analyze import DEFAULT_DIVIDEND_TYPE, normalize_dividend_type, normalize_ma_type
 from asset_split import DEFAULT_UNIVERSE_DIR
-from grid_spec import _as_year, year_range_set
+from grid_spec import GridSpecError, _as_year, reject_deleted_factor_keys, year_range_set
 from robust_gate import fill_gate, validate_gate
 
 REPO = Path(__file__).resolve().parents[3]
@@ -210,6 +210,10 @@ def load_spec(path: str | Path | Mapping[str, Any]) -> dict[str, Any]:
             raise RobustSpecError("spec 须为 JSON 对象")
         raw = dict(raw)
 
+    try:
+        reject_deleted_factor_keys(raw)
+    except GridSpecError as e:
+        raise RobustSpecError(str(e)) from e
     win = validate_year_windows(raw)
     raw.update(win)
     sampling = fill_sampling(raw)

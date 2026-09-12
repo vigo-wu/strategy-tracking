@@ -3,26 +3,26 @@
 一 id 一文件。接口：`_factor_eval_<id>(ctx) → (bool, detail)`。  
 中性：只回答「条件是否成立」，买/卖/加/减由 [../NAV.md](../NAV.md) 的 Recipe / Intent 赋予。
 
-登记表：[../registry.py](../registry.py)。阈值：[../../config.py](../../config.py) 全局，不写死在叶子里。
+登记表：[../registry.py](../registry.py)。阈值：[../../config.py](../../config.py) 的 `RECIPE.factor_params` 字面量，不写死在叶子里。不存在 `STOP_LOSS` 这类模块全局别名。
 
 ---
 
 ## 清单
 
-| id | 文件 | 现逻辑 | 主要读 | 阈值（全局） |
+| id | 文件 | 现逻辑 | 主要读 | 阈值（`factor_params`） |
 | :--- | :--- | :--- | :--- | :--- |
-| `pullback_vol` | [pullback_vol.py](pullback_vol.py) | 贴中/慢均线 + 连续缩量 | 日线价量 | `MA_TOUCH_TOL` `VOL_PULLBACK_*` `D_MA_MID` `D_MA_SLOW` |
-| `chase` | [chase.py](chase.py) | 当日涨幅过大 | 日线收盘 | `CHASE_MAX_PCT` |
-| `vol_dry` | [vol_dry.py](vol_dry.py) | 跌破中线且无量 | 日线价量 | `VOL_DRY_*` `D_MA_MID` |
-| `w_bias` | [w_bias.py](w_bias.py) | 周线高位乖离 | `w_detail` | `W_BIAS_HARD` |
-| `w_slope` | [w_slope.py](w_slope.py) | 低位生命线未连升 | `w_detail` | `W_BIAS_LOW` `W_MA30_SLOPE_WEEKS` |
-| `weekly_bear` | [weekly_bear.py](weekly_bear.py) | **当天空头**（破生命线 / 零轴下死叉） | `w_detail` | `W_MA_LIFE` 等已在周线特征里 |
-| `weekly_bear_confirm` | [weekly_bear_confirm.py](weekly_bear_confirm.py) | **确认清仓**：streak ≥ N | `state.w_bear_streak` | `W_BEAR_CONFIRM_DAYS` |
-| `plat_break` | [plat_break.py](plat_break.py) | 日线收盘破窄幅平台 | 高低收 | `SCALE_PLAT_*` |
-| `w_macd_golden` | [w_macd_golden.py](w_macd_golden.py) | 近两周金叉且红柱放大 | `w_detail` | `SCALE_W_HIST_EXPAND_RATIO` |
-| `stop_loss` | [stop_loss.py](stop_loss.py) | 收盘相对成本 | `state.lot` / `cost` | `STOP_LOSS` |
-| `trail_stop` | [trail_stop.py](trail_stop.py) | 阶梯回撤 / 利润底 | `hold_peak` | `TRAIL_TIERS` |
-| `time_force` | [time_force.py](time_force.py) | 持仓日 + 慢线地板 + 武装让路 | `hold_bars` / peak | `TIME_FORCE_BARS` `D_MA_SLOW` |
+| `pullback_vol` | [pullback_vol.py](pullback_vol.py) | 贴中/慢均线 + 连续缩量 | 日线价量 | `pullback_vol.*`；中/慢线周期仍是 `D_MA_*` |
+| `chase` | [chase.py](chase.py) | 当日涨幅过大 | 日线收盘 | `chase.max_pct` |
+| `vol_dry` | [vol_dry.py](vol_dry.py) | 跌破中线且无量 | 日线价量 | `vol_dry.ratio` / `n`；中线周期仍是 `D_MA_MID` |
+| `w_bias` | [w_bias.py](w_bias.py) | 周线高位乖离 | `w_detail` | `w_bias.hard` |
+| `w_slope` | [w_slope.py](w_slope.py) | 低位生命线未连升 | `w_detail` | `w_slope.low` / `slope_weeks` |
+| `weekly_bear` | [weekly_bear.py](weekly_bear.py) | **当天空头**（破生命线 / 零轴下死叉） | `w_detail` | 无叶子阈值；周期在 structure |
+| `weekly_bear_confirm` | [weekly_bear_confirm.py](weekly_bear_confirm.py) | **确认清仓**：streak ≥ N | `state.w_bear_streak` | `weekly_bear_confirm.days` |
+| `plat_break` | [plat_break.py](plat_break.py) | 日线收盘破窄幅平台 | 高低收 | `plat_break.lookback` / `max_range` / `break_buf` |
+| `w_macd_golden` | [w_macd_golden.py](w_macd_golden.py) | 近两周金叉且红柱放大 | `w_detail` | `w_macd_golden.hist_expand` |
+| `stop_loss` | [stop_loss.py](stop_loss.py) | 收盘相对成本 | `state.lot` / `cost` | `stop_loss.pct` |
+| `trail_stop` | [trail_stop.py](trail_stop.py) | 阶梯回撤 / 利润底 | `hold_peak` | `trail_stop.tiers` |
+| `time_force` | [time_force.py](time_force.py) | 持仓日 + 慢线地板 + 武装让路 | `hold_bars` / peak | `time_force.bars`；慢线周期仍是 `D_MA_SLOW` |
 
 叶子 id 用 `chase`；日志码 `chase_skip` 由 `slots` / strategy 映射（`vol_dry`→`vol_dry_skip`，`w_bias`→`w_bias_skip`，`w_slope`→`w_slope_skip`）。确认清仓对外 reason 仍是 `weekly_bear`。
 

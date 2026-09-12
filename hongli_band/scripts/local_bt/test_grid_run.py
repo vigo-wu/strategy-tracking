@@ -74,11 +74,11 @@ def _walk(
 
 def _nine_cell_spec() -> dict:
     defaults = {
-        "STOP_LOSS": 0.08,
-        "TIME_FORCE_BARS": 30,
-        "TRAIL_TIERS": ((0.03, 0.06, 0.015, None), (0.06, 0.10, 0.03, 0.03), (0.10, None, 0.04, None)),
+        "stop_loss.pct": 0.08,
+        "time_force.bars": 30,
+        "trail_stop.tiers": ((0.03, 0.06, 0.015, None), (0.06, 0.10, 0.03, 0.03), (0.10, None, 0.04, None)),
     }
-    cells = build_cells({"STOP_LOSS": [0.05, 0.06, 0.07, 0.09, 0.10, 0.11, 0.12, 0.13]}, defaults)
+    cells = build_cells({"stop_loss.pct": [0.05, 0.06, 0.07, 0.09, 0.10, 0.11, 0.12, 0.13]}, defaults)
     return {"theme": "hongli_band", "sweep": "nine_cells", "compare_div": "front_ratio", "cells": cells}
 
 
@@ -107,7 +107,7 @@ class GridRunApiTest(unittest.TestCase):
     def test_missing_base_ok(self) -> None:
         spec = {
             "cells": [
-                {"id": "sl06", "kind": "tighten", "overrides": {"STOP_LOSS": 0.06}},
+                {"id": "sl06", "kind": "tighten", "overrides": {"factor_params": {"stop_loss": {"pct": 0.06}}}},
             ]
         }
         cells = validate_spec(spec)
@@ -121,7 +121,7 @@ class GridRunApiTest(unittest.TestCase):
             "compare_div": "front_ratio",
             "cells": [
                 {"id": "base", "label": "现行", "kind": "base", "overrides": {}},
-                {"id": "sl06", "label": "止损 6%", "kind": "tighten", "overrides": {"STOP_LOSS": 0.06}},
+                {"id": "sl06", "label": "止损 6%", "kind": "tighten", "overrides": {"factor_params": {"stop_loss": {"pct": 0.06}}}},
             ],
         }
         book = [_walk(start="20200101", end="20201231")]
@@ -331,16 +331,16 @@ class GridRunApiTest(unittest.TestCase):
 
     def test_load_config_defaults_covers_catalog(self) -> None:
         defaults = load_config_defaults()
-        self.assertIn("STOP_LOSS", defaults)
-        self.assertIn("TRAIL_TIERS", defaults)
-        self.assertIn("CHASE_MAX_PCT", defaults)
-        self.assertIn("W_BIAS_HARD", defaults)
-        self.assertIn("MA_TOUCH_TOL", defaults)
-        self.assertIn("VOL_PULLBACK_CONFIRM_DAYS", defaults)
-        self.assertEqual(int(defaults["VOL_PULLBACK_CONFIRM_DAYS"]), 2)
+        self.assertIn("stop_loss.pct", defaults)
+        self.assertIn("trail_stop.tiers", defaults)
+        self.assertIn("chase.max_pct", defaults)
+        self.assertIn("w_bias.hard", defaults)
+        self.assertIn("pullback_vol.tol", defaults)
+        self.assertIn("pullback_vol.confirm_days", defaults)
+        self.assertEqual(int(defaults["pullback_vol.confirm_days"]), 2)
         self.assertNotIn("STATE_FILE", defaults)
-        self.assertAlmostEqual(float(defaults["CHASE_MAX_PCT"]), 0.05)
-        self.assertAlmostEqual(float(defaults["STOP_LOSS"]), 0.08)
+        self.assertAlmostEqual(float(defaults["chase.max_pct"]), 0.05)
+        self.assertAlmostEqual(float(defaults["stop_loss.pct"]), 0.08)
 
     def test_parse_fingerprint_trail_tiers_distinguishes_giveback(self) -> None:
         current = [
@@ -366,11 +366,11 @@ class GridRunApiTest(unittest.TestCase):
         self.assertAlmostEqual(got["trail_tiers"][0][2], 0.015)
         expected = expected_fingerprint(
             {
-                "STOP_LOSS": 0.08,
-                "TIME_FORCE_BARS": 30,
-                "TRAIL_TIERS": current,
+                "stop_loss.pct": 0.08,
+                "time_force.bars": 30,
+                "trail_stop.tiers": current,
             },
-            {"TRAIL_TIERS": current},
+            {"factor_params": {"trail_stop": {"tiers": current}}},
         )
         self.assertEqual(expected["trail_tiers"][0][2], 0.015)
         self.assertNotEqual(compact_cur, compact_other)
@@ -381,7 +381,9 @@ class GridRunApiTest(unittest.TestCase):
         self.assertNotEqual(got["trail_tiers"][0][2], other_got["trail_tiers"][0][2])
 
     def test_grid_book_overrides_wallet_follows_trade_budget(self) -> None:
-        ov = grid_book_overrides({"STOP_LOSS": 0.06, "TRADE_BUDGET": 200000})
+        ov = grid_book_overrides(
+            {"factor_params": {"stop_loss": {"pct": 0.06}}, "TRADE_BUDGET": 200000}
+        )
         self.assertTrue(ov["compound_backtest"])
         self.assertEqual(ov["TRADE_BUDGET"], 200000.0)
         self.assertEqual(ov["wallet_cash"], 200000.0)
@@ -392,7 +394,9 @@ class GridRunApiTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             cell = Path(td) / "report" / "grid" / "s" / "base"
             job = _walk(basket="tune", stocks=["600001.SH"], start="20220101", end="20221231")
-            payload = job_payload(job, cell, {"STOP_LOSS": 0.06, "TRADE_BUDGET": 100000})
+            payload = job_payload(
+                job, cell, {"factor_params": {"stop_loss": {"pct": 0.06}}, "TRADE_BUDGET": 100000}
+            )
             out = Path(payload["out_dir"])
             self.assertIn("tune", out.parts)
             self.assertTrue(payload["log_name"].startswith("tune_"))
@@ -454,24 +458,64 @@ class GridRunApiTest(unittest.TestCase):
         with self.assertRaises(GridError):
             validate_spec(spec)
 
+    def test_load_spec_rejects_old_stop_loss(self) -> None:
+        spec = {
+            "cells": [
+                {"id": "sl06", "kind": "tighten", "overrides": {"STOP_LOSS": 0.06}},
+            ]
+        }
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "old.json"
+            path.write_text(json.dumps(spec), encoding="utf-8")
+            with self.assertRaises(GridError) as ctx:
+                load_spec(path)
+        self.assertIn("STOP_LOSS", str(ctx.exception))
+        with self.assertRaises(GridError):
+            validate_spec(spec)
+
+    def test_load_spec_rejects_flat_stop_loss_pct(self) -> None:
+        spec = {
+            "cells": [
+                {"id": "sl06", "kind": "tighten", "overrides": {"stop_loss.pct": 0.06}},
+            ]
+        }
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "flat.json"
+            path.write_text(json.dumps(spec), encoding="utf-8")
+            with self.assertRaises(GridError) as ctx:
+                load_spec(path)
+        self.assertIn("stop_loss.pct", str(ctx.exception))
+        with self.assertRaises(GridError):
+            validate_spec(spec)
+
 
 class GridInitProbeTest(unittest.TestCase):
+    def test_run_init_probe_rejects_old_stop_loss(self) -> None:
+        with self.assertRaises(ValueError) as ctx:
+            run_init_probe({"STOP_LOSS": 0.06})
+        self.assertIn("STOP_LOSS", str(ctx.exception))
+
+    def test_run_init_probe_rejects_flat_stop_loss_pct(self) -> None:
+        with self.assertRaises(ValueError) as ctx:
+            run_init_probe({"stop_loss.pct": 0.06})
+        self.assertIn("stop_loss.pct", str(ctx.exception))
+
     def test_run_init_probe_applies_stop_loss(self) -> None:
-        text = run_init_probe({"STOP_LOSS": 0.06})
+        text = run_init_probe({"factor_params": {"stop_loss": {"pct": 0.06}}})
         got = parse_fingerprint(text)
         self.assertTrue(got["has_stop"])
         self.assertTrue(got["has_tfb"])
         self.assertAlmostEqual(float(got["stop"]), 0.06)
         defaults = load_config_defaults()
-        expected = expected_fingerprint(defaults, {"STOP_LOSS": 0.06})
+        expected = expected_fingerprint(defaults, {"factor_params": {"stop_loss": {"pct": 0.06}}})
         self.assertAlmostEqual(float(got["stop"]), expected["stop"])
         self.assertEqual(got["time_force_bars"], expected["time_force_bars"])
 
     def test_run_cell_probe_then_all_walks(self) -> None:
         defaults = {
-            "STOP_LOSS": 0.08,
-            "TIME_FORCE_BARS": 30,
-            "TRAIL_TIERS": (
+            "stop_loss.pct": 0.08,
+            "time_force.bars": 30,
+            "trail_stop.tiers": (
                 (0.03, 0.06, 0.015, None),
                 (0.06, 0.10, 0.03, 0.03),
                 (0.10, None, 0.04, None),
@@ -482,7 +526,7 @@ class GridInitProbeTest(unittest.TestCase):
             "id": "sl06",
             "label": "止损 6%",
             "kind": "tighten",
-            "overrides": {"STOP_LOSS": 0.06},
+            "overrides": {"factor_params": {"stop_loss": {"pct": 0.06}}},
         }
         jobs = [
             _walk(basket="tune", stocks=["AAA111.SH"]),
@@ -514,16 +558,16 @@ class GridInitProbeTest(unittest.TestCase):
 
     def test_run_cell_bar_progress_updates_label(self) -> None:
         defaults = {
-            "STOP_LOSS": 0.08,
-            "TIME_FORCE_BARS": 30,
-            "TRAIL_TIERS": ((0.03, 0.06, 0.015, None),),
+            "stop_loss.pct": 0.08,
+            "time_force.bars": 30,
+            "trail_stop.tiers": ((0.03, 0.06, 0.015, None),),
             "TRADE_BUDGET": 100000.0,
         }
         cell = {
             "id": "sl06",
             "label": "止损 6%",
             "kind": "tighten",
-            "overrides": {"STOP_LOSS": 0.06},
+            "overrides": {"factor_params": {"stop_loss": {"pct": 0.06}}},
         }
         jobs = [_walk(basket="tune")]
         probe_text = (
@@ -569,16 +613,16 @@ class GridInitProbeTest(unittest.TestCase):
 
     def test_run_cell_probe_fail_skips_walks(self) -> None:
         defaults = {
-            "STOP_LOSS": 0.08,
-            "TIME_FORCE_BARS": 30,
-            "TRAIL_TIERS": ((0.03, 0.06, 0.015, None),),
+            "stop_loss.pct": 0.08,
+            "time_force.bars": 30,
+            "trail_stop.tiers": ((0.03, 0.06, 0.015, None),),
             "TRADE_BUDGET": 100000.0,
         }
         cell = {
             "id": "sl06",
             "label": "止损 6%",
             "kind": "tighten",
-            "overrides": {"STOP_LOSS": 0.06},
+            "overrides": {"factor_params": {"stop_loss": {"pct": 0.06}}},
         }
         jobs = [_walk()]
         with tempfile.TemporaryDirectory() as td:
@@ -654,9 +698,9 @@ class WalkProgressTest(unittest.TestCase):
 
 
 _POOL_DEFAULTS = {
-    "STOP_LOSS": 0.08,
-    "TIME_FORCE_BARS": 30,
-    "TRAIL_TIERS": ((0.03, 0.06, 0.015, None),),
+    "stop_loss.pct": 0.08,
+    "time_force.bars": 30,
+    "trail_stop.tiers": ((0.03, 0.06, 0.015, None),),
     "TRADE_BUDGET": 100000.0,
 }
 _POOL_PROBE = (

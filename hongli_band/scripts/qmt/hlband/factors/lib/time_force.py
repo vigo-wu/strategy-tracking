@@ -1,7 +1,7 @@
 # === hlband/factors/lib/time_force.py ===
 def _trail_arm():
     """档 1 起步 peak_lo；time_force 让路与网格 init 指纹共用。"""
-    tiers = globals().get("TRAIL_TIERS") or ()
+    tiers = _factor_param(None, "trail_stop", "tiers")
     try:
         return float(tiers[0][0])
     except (IndexError, TypeError, ValueError):
@@ -62,15 +62,16 @@ def _time_force_mark_skip(lot, peak_ret, hold_bars, m60):
     _save_state()
 
 
-def _time_force_hit(price, closes, hold_bars, lot=None):
-    """智能时间成本：持仓 > TIME_FORCE_BARS 后评估出场。
-    BARS<=0 关闭整条规则。
+def _time_force_hit(price, closes, hold_bars, lot=None, ctx=None):
+    """智能时间成本：持仓 > time_force.bars 后评估出场。
+    bars<=0 关闭整条规则。
     D_MA_SLOW<=0 时慢线地板不存在，同样不触发（BARS 仍独立）。
     收盘破日线慢均线 → 立即强制平仓。
     仍站上慢线时：峰值已达 TRAIL 档1 peak_lo 则不按日历强平；
     从未武装的死钱仓立即强平。"""
     try:
-        bars_lim = int(TIME_FORCE_BARS)
+        raw_bars = _factor_param(ctx, "time_force", "bars")
+        bars_lim = int(raw_bars)
     except (TypeError, ValueError):
         bars_lim = 0
     if bars_lim <= 0:
@@ -119,4 +120,4 @@ def _factor_eval_time_force(ctx):
             hold_bars = getattr(A, "hold_bars", 0)
     else:
         hold_bars = lot.get("hold_bars", 0)
-    return bool(_time_force_hit(price, closes, hold_bars, lot=lot)), {}
+    return bool(_time_force_hit(price, closes, hold_bars, lot=lot, ctx=ctx)), {}

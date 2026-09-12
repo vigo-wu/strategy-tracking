@@ -1,7 +1,7 @@
 # 红利板块波段策略：周线定方向，日线找买卖点
 
 **主题目录**：`hongli_band/`｜**版本**：v1.68｜**形态**：单仓骨架 / 分笔多仓｜**运行**：国金 QMT 终端模型（见 §5）；本地 CSV 回放（见 §6）  
-**参数默认值**：`hongli_band/scripts/qmt/hlband/config.py`（文档以该文件为准）。实盘在「模型交易 → 新建/编辑策略交易」面板只覆盖开关 / 资金基数 / 固定金额 / 可部署比例 / 硬风控（`hlband/panel.xml`）；编辑器回测无注入时用 config。买点窗口、时间成本、加仓细节、`SCALE_LOTS`、阶梯止盈 `TRAIL_TIERS`、均线周期、`BOOK_STOCKS` 子配置 / `MA_TYPE`、路径仍只在 config。
+**参数默认值**：`hongli_band/scripts/qmt/hlband/config.py`（文档以该文件为准）。因子数字真源是 `RECIPE.factor_params`。实盘在「模型交易 → 新建/编辑策略交易」面板只覆盖开关 / 资金基数 / 固定金额 / 可部署比例 / 加仓开关（`hlband/panel.xml`）；编辑器回测无注入时用 config。买点窗口、时间成本、加仓细节、`SCALE_LOTS`、阶梯止盈 `trail_stop.tiers`、均线周期、`BOOK_STOCKS` 子配置 / `MA_TYPE`、路径仍只在 config。
 
 ---
 
@@ -22,9 +22,9 @@
 
 周线均线为斐波那契 **MA5 / MA13（日志多头，周期写死）/ MA34（生命线 `W_MA_LIFE`）**；周线取数 need 另钳原 MA55 暖机地板。价格均线算法优先取 `BOOK_STOCKS[code].ma_type`，缺省回落全局 `MA_TYPE`（`EMA` 或 `SMA`，默认 EMA）；成交量均量始终 SMA。文档与日志里的 `w_ma30` 字段实际是生命线 MA34。实盘与回测都只用**上一根已收盘周 K**（丢掉今天所在自然周，周五尾盘也看上周），对齐 QMT 回测 0000 原生 `1w`。
 
-1. `(MA5_W - MA34_W) / MA34_W >= W_BIAS_HARD`（当前 `0.08`）→ 禁开（`w_bias_skip`）。
-2. **低位斜率**：当周线乖离 `< W_BIAS_LOW`（当前 `0.02`）时，要求 **MA34 连续 `W_MA30_SLOPE_WEEKS` 周向上**（当前 `2`；常量名历史兼容，比较对象是生命线），否则禁开（`w_slope_skip`）；执行日也会取消 pending。
-3. 周线空头（收盘破 34 周，或 DIF/DEA 零轴下死叉）：**当日即禁开**（`weekly_bear`）；持仓强制清仓须 **连续 `W_BEAR_CONFIRM_DAYS` 根日 K（信号日）仍空**（当前 `2`）才挂 `pending_exit`；执行日若仍空头则取消买入 pending。
+1. `(MA5_W - MA34_W) / MA34_W >= w_bias.hard`（当前 `0.08`）→ 禁开（`w_bias_skip`）。
+2. **低位斜率**：当周线乖离 `< w_slope.low`（当前 `0.02`）时，要求 **MA34 连续 `w_slope.slope_weeks` 周向上**（当前 `2`），否则禁开（`w_slope_skip`）；执行日也会取消 pending。
+3. 周线空头（收盘破 34 周，或 DIF/DEA 零轴下死叉）：**当日即禁开**（`weekly_bear`）；持仓强制清仓须 **连续 `weekly_bear_confirm.days` 根日 K（信号日）仍空**（当前 `2`）才挂 `pending_exit`；执行日若仍空头则取消买入 pending。
 
 说明：开仓不强制要求 `weekly_bull`；多头（MA5>MA13 且 DIF>0 且红柱且生命线未明显走平）仅用于日志，禁开靠乖离/斜率/空头。
 
@@ -34,8 +34,8 @@
 
 ### 买点 缩量回踩强支撑（`pullback_vol`）
 
-- 收盘靠近 `MA20` 或 `MA60`（容差 `MA_TOUCH_TOL`，当前 ±2.5%；算法见标的 `ma_type` / `MA_TYPE`）
-- **连续** `VOL_PULLBACK_CONFIRM_DAYS` 日（当前 `2`）成交量 `<` 该日 `MAVOL10 × VOL_PULLBACK_RATIO`（当前 `0.9`）；贴均线只看当天
+- 收盘靠近 `MA20` 或 `MA60`（容差 `pullback_vol.tol`，当前 ±2.5%；算法见标的 `ma_type` / `MA_TYPE`）
+- **连续** `pullback_vol.confirm_days` 日（当前 `2`）成交量 `<` 该日 `MAVOL10 × pullback_vol.ratio`（当前 `0.9`）；贴均线只看当天
 
 空仓时开第一笔（`pullback_vol`）。已持仓且门槛+触发都满足、且本轮尚未加过仓时挂 `pending_entry add=True`，尾盘按**分档金额**成交（第二笔 30% cap；全池最后一槽吃剩余；错过则次日开盘补）。加仓仍受下方全局拦截（破平台/金叉不受 `chase_skip`）；另有 `scale_once` / `scale_bars` / `scale_w_hist` / `scale_sell_block` / `scale_cap` / `book_lot_cap`。周线空头 / 乖离 / 斜率 / 无量阴跌会取消加仓 pending。
 
@@ -44,16 +44,16 @@
 | 触发 | 条件 | 日志码 |
 | :--- | :--- | :--- |
 | 缩量回踩 | 与第一笔相同：近 MA20/60 且连续 N 日缩量；受 `chase_skip` | `pullback_vol` |
-| 日线破平台 | 回看 `SCALE_PLAT_LOOKBACK` 日（当前 20，不含当日）高低点振幅 `(高-低)/低 <= SCALE_PLAT_MAX_RANGE`（当前 10%）；收盘严格站上该窗口最高价；昨收仍在平台内 | `plat_break` |
-| 周线 MACD 金叉放大 | 本周 DIF 上穿 DEA 且红柱比上周增长；或上周已金叉、本周红柱达到上周柱绝对值 × `SCALE_W_HIST_EXPAND_RATIO`（当前 1.2） | `w_macd_golden` |
+| 日线破平台 | 回看 `plat_break.lookback` 日（当前 20，不含当日）高低点振幅 `(高-低)/低 <= plat_break.max_range`（当前 10%）；收盘严格站上该窗口最高价；昨收仍在平台内 | `plat_break` |
+| 周线 MACD 金叉放大 | 本周 DIF 上穿 DEA 且红柱比上周增长；或上周已金叉、本周红柱达到上周柱绝对值 × `w_macd_golden.hist_expand`（当前 1.2） | `w_macd_golden` |
 
 ### 全局拦截（任一则当日不开 / 可取消 pending）
 
 | 条件 | 日志码 |
 | :--- | :--- |
 | 周线空头 | `weekly_bear` |
-| 当日涨幅 ≥ `CHASE_MAX_PCT`（当前 `0.05`） | `chase_skip` |
-| 收盘 < MA20 且量 < MAVOL20 × `VOL_DRY_RATIO`（当前 `0.60`） | `vol_dry_skip` |
+| 当日涨幅 ≥ `chase.max_pct`（当前 `0.05`） | `chase_skip` |
+| 收盘 < MA20 且量 < MAVOL20 × `vol_dry.ratio`（当前 `0.60`） | `vol_dry_skip` |
 | 周线高位乖离 / 低位斜率不达标 | `w_bias_skip` / `w_slope_skip` |
 | 账户或单标的额度已满 / 全池满 3 笔 | `buy_cap` / `scale_cap` / `book_lot_cap` |
 
@@ -125,10 +125,10 @@
 | 卖点 | 条件 | 日志码 |
 | :--- | :--- | :--- |
 | ① 阶梯移动止盈 | 按**该笔**峰值浮盈选档（见下表）；回撤超容忍或跌破利润底线 | `trail_stop` |
-| ② 智能时间 | **该笔**持仓 **> `TIME_FORCE_BARS`**（当前 = 日线 MA60/2 = 30）日：破日线 MA60 → 强制平仓；仍站上 MA60 且峰值浮盈 **< TRAIL 档1 `peak_lo`**（当前 3%）→ **立即强制平仓**；峰值已达门槛 → **不按日历强平**，交给移动止盈 / 破 MA60 / 周线转空 | `time_force` |
-| 兜底 | 收盘 ≤ **该笔**成本 × (1 − `STOP_LOSS`)（当前 `0.08`）/ 周线转空且连续 `W_BEAR_CONFIRM_DAYS` 日 | `stop_loss` / `weekly_bear` |
+| ② 智能时间 | **该笔**持仓 **> `time_force.bars`**（当前 30）日：破日线 MA60 → 强制平仓；仍站上 MA60 且峰值浮盈 **< TRAIL 档1 `peak_lo`**（当前 3%）→ **立即强制平仓**；峰值已达门槛 → **不按日历强平**，交给移动止盈 / 破 MA60 / 周线转空 | `time_force` |
+| 兜底 | 收盘 ≤ **该笔**成本 × (1 − `stop_loss.pct`)（当前 `0.08`）/ 周线转空且连续 `weekly_bear_confirm.days` 日 | `stop_loss` / `weekly_bear` |
 
-阶梯档位 `TRAIL_TIERS`（峰值浮盈 = `(hold_peak − cost) / cost`）：
+阶梯档位 `trail_stop.tiers`（峰值浮盈 = `(hold_peak − cost) / cost`）：
 
 | 档 | 峰值浮盈 | 回撤容忍 | 利润底线 |
 | :--- | :--- | :--- | :--- |
@@ -186,28 +186,28 @@
 | `LOT_ADD_FRAC` | `0.30` | 第二笔 30%；全池最后一槽不锁此值，改吃剩余约 20% cap（仅 config） |
 | `MA_TYPE` | `"EMA"` | 价格均线缺省：`EMA`/`SMA`；`BOOK_STOCKS[code].ma_type` 优先（仅 config；量均始终 SMA，MACD 仍 EMA） |
 | `W_MA_FAST/LIFE` | `5` / `34` | 周线快线/生命线；日志多头中线写死 13（仅 config） |
-| `W_BIAS_HARD` | `0.08` | 周线高位乖离禁开（相对 MA34） |
-| `W_BIAS_LOW` | `0.02` | 低位区阈值（配合斜率；仅 config） |
-| `W_MA30_SLOPE_WEEKS` | `2` | 低位区生命线 MA34 连续向上周数（仅 config） |
-| `W_BEAR_CONFIRM_DAYS` | `2` | 周线空头清仓须连续信号日数（仅 config） |
+| `w_bias.hard` | `0.08` | 周线高位乖离禁开（相对 MA34；`RECIPE.factor_params`） |
+| `w_slope.low` | `0.02` | 低位区阈值（配合斜率；`factor_params`） |
+| `w_slope.slope_weeks` | `2` | 低位区生命线 MA34 连续向上周数（`factor_params`） |
+| `weekly_bear_confirm.days` | `2` | 周线空头清仓须连续信号日数（`factor_params`） |
 | `D_MA_MID/SLOW` | `20` / `60` | 日线中/慢均线；`<=0` 关闭该条（关中线同时关无量阴跌禁开；关慢线则 time_force 破线地板关掉；仅 config） |
-| `MA_TOUCH_TOL` | `0.025` | 回踩均线容差（仅 config） |
-| `VOL_PULLBACK_N/RATIO` | `10` / `0.9` | 买点均量窗口与缩量比例（仅 config） |
-| `VOL_PULLBACK_CONFIRM_DAYS` | `2` | 缩量连续确认日；`<=0`/`1`=当天即可（仅 config） |
-| `VOL_DRY_N/RATIO` | `20` / `0.60` | 无量阴跌禁开（仅 config） |
-| `TRAIL_TIERS` | 见 §3 | 阶梯移动止盈（档3 回撤 4%） |
-| `TIME_FORCE_BARS` | `D_MA_SLOW//2`（30） | 时间成本起始持仓日；未武装仓满此日即日历强平，已武装仓才把 MA60 当出场地板（仅 config） |
+| `pullback_vol.tol` | `0.025` | 回踩均线容差（`factor_params`） |
+| `pullback_vol.vol_n` / `ratio` | `10` / `0.9` | 买点均量窗口与缩量比例（`factor_params`） |
+| `pullback_vol.confirm_days` | `2` | 缩量连续确认日；`<=0`/`1`=当天即可（`factor_params`） |
+| `vol_dry.n` / `ratio` | `20` / `0.60` | 无量阴跌禁开（`factor_params`） |
+| `trail_stop.tiers` | 见 §3 | 阶梯移动止盈（档3 回撤 4%；`factor_params`） |
+| `time_force.bars` | `30` | 时间成本起始持仓日；`<=0` 关整条；未武装仓满此日即日历强平（`factor_params`） |
 | `SCALE_ENABLE` | `True` | 盈利后满足持仓日/周线柱，再缩量回踩或破平台或周线 MACD 金叉放大则加第二笔 |
 | `SCALE_LOTS` | `True` | 分笔独立止盈止损；关则均价合并整仓出（仅 config，实盘勿改） |
 | `SCALE_ONCE_PER_ROUND` | `True` | 同一轮只加一次；加过仓后该只须全平才能再开（仅 config） |
 | `SCALE_ARM` | `0.03` | 峰值浮盈门槛（独立于 TRAIL 档1；仅 config） |
 | `SCALE_ARM_BARS` | `8` | 第一笔持仓满 8 日才加仓（仅 config） |
 | `SCALE_W_HIST_MIN` | `-0.01` | 周线 MACD 柱低于此值不加仓（仅 config） |
-| `SCALE_PLAT_LOOKBACK` | `20` | 日线平台回看日（不含当日；仅 config） |
-| `SCALE_PLAT_MAX_RANGE` | `0.10` | 平台振幅上限 10%；更宽则不算平台（仅 config） |
-| `SCALE_W_HIST_EXPAND_RATIO` | `1.2` | 上周金叉时本周红柱须放大至 1.2 倍（仅 config） |
-| `STOP_LOSS` | `0.08` | 硬止损（相对该笔成本） |
-| `CHASE_MAX_PCT` | `0.05` | 追高禁开 |
+| `plat_break.lookback` | `20` | 日线平台回看日（不含当日；`factor_params`） |
+| `plat_break.max_range` | `0.10` | 平台振幅上限 10%；更宽则不算平台（`factor_params`） |
+| `w_macd_golden.hist_expand` | `1.2` | 上周金叉时本周红柱须放大至 1.2 倍（`factor_params`） |
+| `stop_loss.pct` | `0.08` | 硬止损（相对该笔成本；`factor_params`） |
+| `chase.max_pct` | `0.05` | 追高禁开（`factor_params`）
 | `LIVE_CLOSE_CONFIRM` | `True` | 收盘确认 + 开盘兜底 |
 | `SIGNAL_CONFIRM_START/END` | `145630` / `150000` | 用当日近似完整 K 确认信号；须早于尾盘成交 |
 | `PENDING_EXEC_START/END` | `145640` / `145700` | 14:56:40 连续竞价尾盘限价：买挂卖一、卖挂买一；14:57 起不报 |

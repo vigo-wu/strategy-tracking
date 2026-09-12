@@ -1,22 +1,5 @@
 # === hlband/factors/slots.py ===
 _RECIPE_THRESHOLD_KEYS = (
-    "CHASE_MAX_PCT",
-    "VOL_DRY_RATIO",
-    "VOL_DRY_N",
-    "MA_TOUCH_TOL",
-    "VOL_PULLBACK_RATIO",
-    "VOL_PULLBACK_N",
-    "VOL_PULLBACK_CONFIRM_DAYS",
-    "W_BIAS_HARD",
-    "W_BIAS_LOW",
-    "W_MA30_SLOPE_WEEKS",
-    "STOP_LOSS",
-    "TRAIL_TIERS",
-    "TIME_FORCE_BARS",
-    "W_BEAR_CONFIRM_DAYS",
-    "SCALE_PLAT_LOOKBACK",
-    "SCALE_PLAT_MAX_RANGE",
-    "SCALE_W_HIST_EXPAND_RATIO",
     "D_MA_MID",
     "D_MA_SLOW",
     "W_MA_FAST",
@@ -27,20 +10,52 @@ _RECIPE_THRESHOLD_KEYS = (
 )
 
 
-def _recipe_fingerprint(overrides=None, recipe=None):
-    """表达式 + 被覆盖的阈值键；不扫全因子开关。"""
-    rec = recipe if recipe is not None else (globals().get("RECIPE") or {})
-    ov = dict(overrides or {})
-    covered = {}
+def _fold_factor_params_for_fingerprint(fp_src, overrides, param_keys=None):
+    """深合并 overrides.factor_params；袋里只留 D_MA_* / W_MA_* / MACD_*。"""
+    fp = {}
+    for fid, block in (fp_src or {}).items():
+        if isinstance(block, dict):
+            copied = dict(block)
+            if "tiers" in copied:
+                copied["tiers"] = _factor_tiers_as_lists(copied.get("tiers"))
+            fp[str(fid)] = copied
+        else:
+            fp[str(fid)] = block
+    leftover = {}
     allow = set(_RECIPE_THRESHOLD_KEYS)
+    ov = dict(overrides or {})
+    incoming = ov.get("factor_params")
+    if isinstance(incoming, dict):
+        for fid, block in incoming.items():
+            if not isinstance(block, dict):
+                continue
+            cur = fp.get(str(fid))
+            if not isinstance(cur, dict):
+                cur = {}
+                fp[str(fid)] = cur
+            cur.update(block)
+            if str(fid) == "trail_stop" and "tiers" in cur:
+                cur["tiers"] = _factor_tiers_as_lists(cur.get("tiers"))
     for k in sorted(ov):
-        if k in allow:
-            covered[k] = ov[k]
+        ks = str(k)
+        if ks == "factor_params":
+            continue
+        if ks in allow:
+            leftover[ks] = ov[k]
+    return fp, leftover
+
+
+def _recipe_fingerprint(overrides=None, recipe=None):
+    """表达式 + 折进表的阈值；不扫全因子开关。"""
+    rec = recipe if recipe is not None else (globals().get("RECIPE") or {})
+    fp, leftover = _fold_factor_params_for_fingerprint(
+        rec.get("factor_params") or {}, overrides
+    )
     payload = {
         "entry": rec.get("entry"),
         "exit": rec.get("exit"),
-        "factor_params": rec.get("factor_params") or {},
-        "overrides": covered,
+        "factor_params": fp,
+        "overrides": leftover,
         "scale_in": rec.get("scale_in"),
         "scale_out": rec.get("scale_out"),
     }

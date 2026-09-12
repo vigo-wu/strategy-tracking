@@ -1,8 +1,10 @@
 # === hlband/factors/lib/trail_stop.py ===
-def _trail_tier_params(max_profit):
+def _trail_tier_params(max_profit, tiers=None):
     """按峰值浮盈选档，返回 (giveback, profit_floor)；未达起步档则 (None, None)。"""
     mp = float(max_profit)
-    for lo, hi, giveback, floor in TRAIL_TIERS:
+    if tiers is None:
+        tiers = _factor_param(None, "trail_stop", "tiers")
+    for lo, hi, giveback, floor in tiers or ():
         if mp < float(lo):
             continue
         if hi is not None and mp >= float(hi):
@@ -12,7 +14,7 @@ def _trail_tier_params(max_profit):
     return None, None
 
 
-def _trail_stop_hit(price, cost, peak=None):
+def _trail_stop_hit(price, cost, peak=None, tiers=None):
     """阶梯移动止盈：峰值浮盈落档后，回撤超容忍 或 跌破利润底线。"""
     if cost is None or cost <= 0:
         return False
@@ -21,7 +23,7 @@ def _trail_stop_hit(price, cost, peak=None):
     if peak is None or peak <= 0:
         return False
     max_profit = (float(peak) - float(cost)) / float(cost)
-    giveback_lim, profit_floor = _trail_tier_params(max_profit)
+    giveback_lim, profit_floor = _trail_tier_params(max_profit, tiers=tiers)
     if giveback_lim is None:
         return False
     giveback = (float(peak) - float(price)) / float(peak)
@@ -51,4 +53,8 @@ def _factor_eval_trail_stop(ctx):
         cost = 0.0
     if price is None:
         return False, {}
-    return bool(_trail_stop_hit(price, cost, peak=peak)), {"cost": cost, "peak": peak}
+    tiers = _factor_param(ctx, "trail_stop", "tiers")
+    return bool(_trail_stop_hit(price, cost, peak=peak, tiers=tiers)), {
+        "cost": cost,
+        "peak": peak,
+    }

@@ -74,7 +74,7 @@ def _register_live_timer(C):
 
 def _trail_tiers_json():
     """整表 compact JSON；网格指纹 trail_tiers=。"""
-    tiers = globals().get("TRAIL_TIERS") or ()
+    tiers = _factor_param(None, "trail_stop", "tiers") or ()
     out = []
     for row in tiers:
         seq = list(row)
@@ -325,13 +325,13 @@ def _init_impl(C):
         "ma_type=",
         _ma_kind(),
         "stop=",
-        STOP_LOSS,
+        _factor_param(None, "stop_loss", "pct"),
         "trail_arm=",
         _trail_arm(),
         "trail_tiers=",
         _trail_tiers_json(),
         "chase<",
-        CHASE_MAX_PCT,
+        _factor_param(None, "chase", "max_pct"),
         "scale=",
         SCALE_ENABLE,
         "scale_lots=",
@@ -343,11 +343,15 @@ def _init_impl(C):
         "scale_arm_bars=",
         SCALE_ARM_BARS,
         "scale_plat=",
-        "%d/%.2f" % (SCALE_PLAT_LOOKBACK, SCALE_PLAT_MAX_RANGE),
+        "%d/%.2f"
+        % (
+            int(_factor_param(None, "plat_break", "lookback") or 20),
+            float(_factor_param(None, "plat_break", "max_range") or 0.10),
+        ),
         "scale_w_expand=",
-        SCALE_W_HIST_EXPAND_RATIO,
+        _factor_param(None, "w_macd_golden", "hist_expand"),
         "time_force_bars=",
-        TIME_FORCE_BARS,
+        _factor_param(None, "time_force", "bars"),
         "time_force_min_ret=",
         _time_force_min_ret(),
         "recipe=",
@@ -385,12 +389,12 @@ def _init_impl(C):
         scale_arm=SCALE_ARM,
         scale_arm_bars=SCALE_ARM_BARS,
         scale_w_hist_min=SCALE_W_HIST_MIN,
-        scale_plat_lookback=SCALE_PLAT_LOOKBACK,
-        scale_plat_max_range=SCALE_PLAT_MAX_RANGE,
-        scale_w_hist_expand=SCALE_W_HIST_EXPAND_RATIO,
-        stop=STOP_LOSS,
+        scale_plat_lookback=_factor_param(None, "plat_break", "lookback"),
+        scale_plat_max_range=_factor_param(None, "plat_break", "max_range"),
+        scale_w_hist_expand=_factor_param(None, "w_macd_golden", "hist_expand"),
+        stop=_factor_param(None, "stop_loss", "pct"),
         trail_arm=_trail_arm(),
-        time_force_bars=TIME_FORCE_BARS,
+        time_force_bars=_factor_param(None, "time_force", "bars"),
         time_force_min_ret=_time_force_min_ret(),
         close_exec="%s-%s"
         % (

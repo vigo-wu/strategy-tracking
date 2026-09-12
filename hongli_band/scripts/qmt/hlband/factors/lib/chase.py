@@ -12,4 +12,4 @@ def _factor_eval_chase(ctx):
     if prev <= 0:
         return False, {"prev": prev}
     chg = (price - prev) / prev
-    return chg >= float(CHASE_MAX_PCT), {"chg": chg}
+    return chg >= float(_factor_param(ctx, "chase", "max_pct")), {"chg": chg}

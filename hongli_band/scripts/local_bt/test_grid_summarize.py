@@ -95,7 +95,7 @@ def _cell(
         "kind": kind,
         "overrides": overrides
         if overrides is not None
-        else ({"STOP_LOSS": 0.06} if cid != "base" else {}),
+        else ({"factor_params": {"stop_loss": {"pct": 0.06}}} if cid != "base" else {}),
         "samples": {"book": book},
     }
 
@@ -328,14 +328,19 @@ class GridSummarizeTest(unittest.TestCase):
                 "more_keys",
                 "other",
                 check=_win(calmar=2.0),
-                overrides={"STOP_LOSS": 0.06, "TRAIL_STOP": 0.08},
+                overrides={
+                    "factor_params": {
+                        "stop_loss": {"pct": 0.06},
+                        "chase": {"max_pct": 0.03},
+                    }
+                },
                 oos_pnl=9999.0,
             ),
             _cell(
                 "less_keys",
                 "other",
                 check=_win(calmar=1.95),
-                overrides={"STOP_LOSS": 0.06},
+                overrides={"factor_params": {"stop_loss": {"pct": 0.06}}},
                 oos_pnl=1.0,
             ),
         ]
@@ -441,7 +446,7 @@ class GridSummarizeTest(unittest.TestCase):
                 "id": "sl06",
                 "label": "sl06",
                 "kind": "tighten",
-                "overrides": {"STOP_LOSS": 0.06},
+                "overrides": {"factor_params": {"stop_loss": {"pct": 0.06}}},
                 "samples": {
                     "winner": {"is_pnl": 1.0, "oos_pnl": 1.0, "n_logs_ok": 4},
                     "book": {
@@ -509,7 +514,7 @@ class GridSummarizeTest(unittest.TestCase):
                         "sweep": "tmp",
                         "cells": [
                             {"id": "base", "kind": "base", "overrides": {}},
-                            {"id": "vpn15", "kind": "other", "overrides": {"VOL_PULLBACK_N": 15}},
+                            {"id": "vpn15", "kind": "other", "overrides": {"factor_params": {"pullback_vol": {"n": 15}}}},
                         ],
                     }
                 ),

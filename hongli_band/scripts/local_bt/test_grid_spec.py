@@ -45,13 +45,14 @@ from grid_spec import (  # noqa: E402
 )
 
 DEFAULTS = {
-    "STOP_LOSS": 0.08,
-    "TIME_FORCE_BARS": 30,
-    "TRAIL_TIERS": (
+    "stop_loss.pct": 0.08,
+    "time_force.bars": 30,
+    "trail_stop.tiers": (
         (0.03, 0.06, 0.015, None),
         (0.06, 0.10, 0.03, 0.03),
         (0.10, None, 0.04, None),
     ),
+    "chase.max_pct": 0.05,
 }
 CUR_TIERS = [
     [0.03, 0.06, 0.015, None],
@@ -70,20 +71,24 @@ GB02_TIERS = [
 ]
 
 
+def _sl(pct: float) -> dict:
+    return {"factor_params": {"stop_loss": {"pct": pct}}}
+
+
 class GridSpecTest(unittest.TestCase):
     def test_stop_loss_default_chips(self) -> None:
-        cells = build_cells({"STOP_LOSS": [0.06, 0.10]}, DEFAULTS)
+        cells = build_cells({"stop_loss.pct": [0.06, 0.10]}, DEFAULTS)
         ids = [c["id"] for c in cells]
         self.assertEqual(ids, ["sl06", "sl10"])
         by = {c["id"]: c for c in cells}
         self.assertFalse(by["sl06"]["is_current"])
         self.assertEqual(by["sl06"]["kind"], "tighten")
-        self.assertEqual(by["sl06"]["overrides"]["STOP_LOSS"], 0.06)
+        self.assertEqual(by["sl06"]["overrides"]["factor_params"]["stop_loss"]["pct"], 0.06)
         self.assertEqual(by["sl10"]["kind"], "loosen")
-        self.assertEqual(by["sl10"]["overrides"]["STOP_LOSS"], 0.10)
+        self.assertEqual(by["sl10"]["overrides"]["factor_params"]["stop_loss"]["pct"], 0.10)
 
     def test_scan_includes_current_marks(self) -> None:
-        cells = build_cells({"STOP_LOSS": [0.06, 0.08, 0.10]}, DEFAULTS)
+        cells = build_cells({"stop_loss.pct": [0.06, 0.08, 0.10]}, DEFAULTS)
         ids = [c["id"] for c in cells]
         self.assertEqual(set(ids), {"sl06", "sl08", "sl10"})
         by = {c["id"]: c for c in cells}
@@ -91,46 +96,53 @@ class GridSpecTest(unittest.TestCase):
         self.assertEqual(by["sl08"]["n_diffs"], 0)
         self.assertTrue(by["sl06"]["recipe"])
         self.assertNotEqual(by["sl06"]["recipe"], by["sl08"]["recipe"])
-        self.assertAlmostEqual(by["sl08"]["overrides"]["STOP_LOSS"], 0.08)
+        self.assertAlmostEqual(by["sl08"]["overrides"]["factor_params"]["stop_loss"]["pct"], 0.08)
         self.assertIn("★现行", by["sl08"]["label"])
         self.assertFalse(by["sl06"]["is_current"])
 
     def test_cartesian_stop_and_trail(self) -> None:
         cells = build_cells(
-            {"STOP_LOSS": [0.06, 0.10], "TRAIL_TIERS": [ARM04_TIERS]},
+            {"stop_loss.pct": [0.06, 0.10], "trail_stop.tiers": [ARM04_TIERS]},
             DEFAULTS,
         )
-        tok = family_token("TRAIL_TIERS", coerce_level("TRAIL_TIERS", ARM04_TIERS))
+        tok = family_token("trail_stop.tiers", coerce_level("trail_stop.tiers", ARM04_TIERS))
         ids = [c["id"] for c in cells]
         self.assertEqual(set(ids), {"sl06_%s" % tok, "sl10_%s" % tok})
         self.assertEqual(len(cells), 2)
         by = {c["id"]: c for c in cells}
         cid = "sl06_%s" % tok
         self.assertEqual(by[cid]["kind"], "other")
-        self.assertEqual(set(by[cid]["overrides"]), {"STOP_LOSS", "TRAIL_TIERS"})
-        self.assertTrue(struct_eq(by[cid]["overrides"]["TRAIL_TIERS"], ARM04_TIERS))
-        self.assertAlmostEqual(by[cid]["overrides"]["TRAIL_TIERS"][0][0], 0.04)
+        self.assertEqual(set(by[cid]["overrides"]), {"factor_params"})
+        self.assertTrue(
+            struct_eq(by[cid]["overrides"]["factor_params"]["trail_stop"]["tiers"], ARM04_TIERS)
+        )
+        self.assertAlmostEqual(
+            by[cid]["overrides"]["factor_params"]["trail_stop"]["tiers"][0][0], 0.04
+        )
 
     def test_product_count(self) -> None:
-        self.assertEqual(product_count({"STOP_LOSS": [0.06, 0.10]}, DEFAULTS), 2)
+        self.assertEqual(product_count({"stop_loss.pct": [0.06, 0.10]}, DEFAULTS), 2)
         self.assertEqual(
-            product_count({"STOP_LOSS": [0.06, 0.10], "TRAIL_TIERS": [ARM04_TIERS]}, DEFAULTS),
+            product_count(
+                {"stop_loss.pct": [0.06, 0.10], "trail_stop.tiers": [ARM04_TIERS]},
+                DEFAULTS,
+            ),
             2,
         )
         self.assertEqual(product_count({}, DEFAULTS), 0)
 
     def test_empty_scan_raises(self) -> None:
         with self.assertRaises(GridSpecError) as ctx:
-            unique_levels("STOP_LOSS", [], DEFAULTS)
+            unique_levels("stop_loss.pct", [], DEFAULTS)
         self.assertIn("扫描取值", str(ctx.exception))
         with self.assertRaises(GridSpecError):
-            build_cells({"STOP_LOSS": []}, DEFAULTS)
+            build_cells({"stop_loss.pct": []}, DEFAULTS)
 
     def test_bars_zero_is_off(self) -> None:
-        cells = build_cells({"TIME_FORCE_BARS": [0]}, DEFAULTS)
+        cells = build_cells({"time_force.bars": [0]}, DEFAULTS)
         by = {c["id"]: c for c in cells}
         self.assertEqual(by["tfb0"]["kind"], "off")
-        self.assertEqual(by["tfb0"]["overrides"]["TIME_FORCE_BARS"], 0)
+        self.assertEqual(by["tfb0"]["overrides"]["factor_params"]["time_force"]["bars"], 0)
 
     def test_dma_mid_zero_label(self) -> None:
         self.assertEqual(family_value_label("D_MA_MID", 0), "日线中均线关闭")
@@ -149,17 +161,17 @@ class GridSpecTest(unittest.TestCase):
             [0.10, None, 0.04, None],
         ]
         with self.assertRaises(GridSpecError) as ctx:
-            unique_levels("TRAIL_TIERS", [bad], DEFAULTS)
+            unique_levels("trail_stop.tiers", [bad], DEFAULTS)
         self.assertIn("上限", str(ctx.exception))
 
     def test_keep_label_on_rebuild(self) -> None:
-        first = build_cells({"STOP_LOSS": [0.06, 0.10]}, DEFAULTS)
+        first = build_cells({"stop_loss.pct": [0.06, 0.10]}, DEFAULTS)
         for c in first:
             if c["id"] == "sl06":
                 c["label"] = "手改止损6"
                 c["kind"] = "other"
         keep = keep_from_cells(first)
-        second = build_cells({"STOP_LOSS": [0.06, 0.10]}, DEFAULTS, keep=keep)
+        second = build_cells({"stop_loss.pct": [0.06, 0.10]}, DEFAULTS, keep=keep)
         by = {c["id"]: c for c in second}
         self.assertEqual(by["sl06"]["label"], "手改止损6")
         self.assertEqual(by["sl06"]["kind"], "other")
@@ -167,25 +179,24 @@ class GridSpecTest(unittest.TestCase):
     def test_correct_illegal_kind_inline(self) -> None:
         raw = [
             {"id": "base", "kind": "base", "overrides": {}},
-            {"id": "sl06", "kind": "sl06", "overrides": {"STOP_LOSS": 0.06}},
+            {"id": "sl06", "kind": "sl06", "overrides": _sl(0.06)},
         ]
         fixed = correct_cell_kinds(raw, DEFAULTS)
         self.assertEqual(fixed[1]["kind"], "tighten")
-        path = REPO / "hongli_band" / "gridConfig" / "stop_loss.json"
+        path = REPO / ".cursor" / "skills" / "qmt-local-bt-grid" / "examples" / "stop_loss.json"
         spec = json.loads(path.read_text(encoding="utf-8"))
         fixed = correct_cell_kinds(spec["cells"], DEFAULTS)
         by = {c["id"]: c for c in fixed}
         self.assertEqual(by["base"]["kind"], "base")
         self.assertEqual(by["sl06"]["kind"], "tighten")
         self.assertEqual(by["sl10"]["kind"], "loosen")
-        self.assertTrue(by["sl07"]["kind"] in ("tighten", "loosen"))
         axes = axes_from_cells(fixed, DEFAULTS)
-        self.assertIn("STOP_LOSS", axes)
+        self.assertIn("stop_loss.pct", axes)
         self.assertFalse(generator_locked(fixed))
 
     def test_infer_kind_stop(self) -> None:
-        self.assertEqual(infer_kind("STOP_LOSS", 0.06, DEFAULTS), "tighten")
-        self.assertEqual(infer_kind("STOP_LOSS", 0.10, DEFAULTS), "loosen")
+        self.assertEqual(infer_kind("stop_loss.pct", 0.06, DEFAULTS), "tighten")
+        self.assertEqual(infer_kind("stop_loss.pct", 0.10, DEFAULTS), "loosen")
 
     def test_unknown_keys_lock_generator(self) -> None:
         cells = [
@@ -195,61 +206,70 @@ class GridSpecTest(unittest.TestCase):
         self.assertTrue(generator_locked(cells))
         known = [
             {"id": "base", "kind": "base", "overrides": {}},
-            {"id": "ch03", "kind": "other", "overrides": {"CHASE_MAX_PCT": 0.03}},
+            {
+                "id": "ch03",
+                "kind": "other",
+                "overrides": {"factor_params": {"chase": {"max_pct": 0.03}}},
+            },
         ]
         self.assertFalse(generator_locked(known))
+        dotted = [
+            {"id": "sl06", "kind": "other", "overrides": {"stop_loss.pct": 0.06}},
+        ]
+        self.assertTrue(generator_locked(dotted))
 
     def test_overrides_summary(self) -> None:
         self.assertEqual(overrides_summary({}), "（无覆盖）")
-        self.assertIn("STOP_LOSS=0.06", overrides_summary({"STOP_LOSS": 0.06}))
+        self.assertIn("stop_loss.pct=0.06", overrides_summary(_sl(0.06)))
 
     def test_catalog_includes_entry_not_infra(self) -> None:
         ids = catalog_ids()
-        self.assertIn("CHASE_MAX_PCT", ids)
-        self.assertIn("W_BIAS_HARD", ids)
-        self.assertIn("MA_TOUCH_TOL", ids)
-        self.assertIn("VOL_PULLBACK_CONFIRM_DAYS", ids)
-        self.assertIn("STOP_LOSS", ids)
-        self.assertIn("TRAIL_TIERS", ids)
+        self.assertIn("chase.max_pct", ids)
+        self.assertIn("w_bias.hard", ids)
+        self.assertIn("pullback_vol.tol", ids)
+        self.assertIn("pullback_vol.confirm_days", ids)
+        self.assertIn("stop_loss.pct", ids)
+        self.assertIn("trail_stop.tiers", ids)
         self.assertNotIn("TRAIL", ids)
+        self.assertNotIn("STOP_LOSS", ids)
         self.assertNotIn("STATE_FILE", ids)
         self.assertNotIn("DRY_RUN", ids)
-        spec = next(p for p in param_catalog() if p.id == "TRAIL_TIERS")
-        self.assertEqual(spec.key, "TRAIL_TIERS")
+        spec = next(p for p in param_catalog() if p.id == "trail_stop.tiers")
+        self.assertEqual(spec.key, "trail_stop.tiers")
         self.assertEqual(spec.dtype, "tuple")
         self.assertEqual(spec.abbrev, "tt")
         self.assertEqual(spec.kind_mode, "exit")
 
     def test_parse_percent_and_int(self) -> None:
-        self.assertAlmostEqual(parse_scan_token("STOP_LOSS", "6"), 0.06)
-        self.assertAlmostEqual(parse_scan_token("STOP_LOSS", "0.06"), 0.06)
-        self.assertAlmostEqual(parse_scan_token("STOP_LOSS", "6%"), 0.06)
-        self.assertAlmostEqual(parse_scan_token("STOP_LOSS", "6％"), 0.06)
-        self.assertEqual(parse_scan_token("VOL_PULLBACK_N", "8"), 8)
-        self.assertEqual(parse_scan_token("VOL_PULLBACK_CONFIRM_DAYS", "3"), 3)
-        self.assertEqual(parse_scan_values("STOP_LOSS", "6, 10"), [0.06, 0.10])
-        self.assertEqual(parse_scan_values("STOP_LOSS", "6% 10%"), [0.06, 0.10])
-        self.assertEqual(parse_scan_values("STOP_LOSS", "6%,10%"), [0.06, 0.10])
-        self.assertEqual(parse_scan_values("CHASE_MAX_PCT", "3 7"), [0.03, 0.07])
+        self.assertAlmostEqual(parse_scan_token("stop_loss.pct", "6"), 0.06)
+        self.assertAlmostEqual(parse_scan_token("stop_loss.pct", "0.06"), 0.06)
+        self.assertAlmostEqual(parse_scan_token("stop_loss.pct", "6%"), 0.06)
+        self.assertAlmostEqual(parse_scan_token("stop_loss.pct", "6％"), 0.06)
+        self.assertEqual(parse_scan_token("pullback_vol.vol_n", "8"), 8)
+        self.assertEqual(parse_scan_token("pullback_vol.confirm_days", "3"), 3)
+        self.assertEqual(parse_scan_values("stop_loss.pct", "6, 10"), [0.06, 0.10])
+        self.assertEqual(parse_scan_values("stop_loss.pct", "6% 10%"), [0.06, 0.10])
+        self.assertEqual(parse_scan_values("stop_loss.pct", "6%,10%"), [0.06, 0.10])
+        self.assertEqual(parse_scan_values("chase.max_pct", "3 7"), [0.03, 0.07])
 
     def test_cartesian_stop_and_chase(self) -> None:
-        defaults = dict(DEFAULTS)
-        defaults["CHASE_MAX_PCT"] = 0.05
         cells = build_cells(
-            {"STOP_LOSS": [0.06, 0.10], "CHASE_MAX_PCT": [0.03]},
-            defaults,
+            {"stop_loss.pct": [0.06, 0.10], "chase.max_pct": [0.03]},
+            DEFAULTS,
         )
         ids = [c["id"] for c in cells]
         self.assertIn("sl06_ch03", ids)
         self.assertEqual(len(cells), 2)
         by = {c["id"]: c for c in cells}
         self.assertEqual(by["sl06_ch03"]["kind"], "other")
-        self.assertAlmostEqual(by["sl06_ch03"]["overrides"]["CHASE_MAX_PCT"], 0.03)
-        self.assertEqual(set(by["sl06_ch03"]["overrides"]), {"STOP_LOSS", "CHASE_MAX_PCT"})
+        self.assertAlmostEqual(
+            by["sl06_ch03"]["overrides"]["factor_params"]["chase"]["max_pct"], 0.03
+        )
+        self.assertEqual(set(by["sl06_ch03"]["overrides"]), {"factor_params"})
 
     def test_default_selection_none(self) -> None:
         sel = default_param_selection()
-        self.assertFalse(sel["STOP_LOSS"]["selected"])
+        self.assertFalse(sel["stop_loss.pct"]["selected"])
         self.assertFalse(any(rec.get("selected") for rec in sel.values()))
         axes = axes_from_selection(sel)
         self.assertEqual(axes, {})
@@ -257,47 +277,47 @@ class GridSpecTest(unittest.TestCase):
         self.assertEqual(cells, [])
 
     def test_axes_from_cells_keeps_current_level(self) -> None:
-        cells = build_cells({"STOP_LOSS": [0.06, 0.08, 0.10]}, DEFAULTS)
+        cells = build_cells({"stop_loss.pct": [0.06, 0.08, 0.10]}, DEFAULTS)
         axes = axes_from_cells(cells, DEFAULTS)
-        self.assertIn("STOP_LOSS", axes)
-        vals = axes["STOP_LOSS"]
+        self.assertIn("stop_loss.pct", axes)
+        vals = axes["stop_loss.pct"]
         self.assertTrue(any(abs(float(v) - 0.08) < 1e-9 for v in vals))
         self.assertTrue(any(abs(float(v) - 0.06) < 1e-9 for v in vals))
 
     def test_merge_param_selection_fills_new_catalog_keys(self) -> None:
-        stale = {"STOP_LOSS": {"selected": True, "scan": "6,10"}}
+        stale = {"stop_loss.pct": {"selected": True, "scan": "6,10"}}
         merged = merge_param_selection(stale)
-        self.assertIn("VOL_PULLBACK_CONFIRM_DAYS", merged)
-        self.assertFalse(merged["VOL_PULLBACK_CONFIRM_DAYS"]["selected"])
-        self.assertTrue(merged["STOP_LOSS"]["selected"])
-        self.assertEqual(merged["STOP_LOSS"]["scan"], "6,10")
+        self.assertIn("pullback_vol.confirm_days", merged)
+        self.assertFalse(merged["pullback_vol.confirm_days"]["selected"])
+        self.assertTrue(merged["stop_loss.pct"]["selected"])
+        self.assertEqual(merged["stop_loss.pct"]["scan"], "6,10")
         self.assertNotIn("NOT_A_CONFIG", merged)
 
     def test_merge_drops_legacy_trail_axis(self) -> None:
         stale = {
             "TRAIL": {"selected": True, "scan": "4"},
-            "STOP_LOSS": {"selected": True, "scan": "6,10"},
+            "stop_loss.pct": {"selected": True, "scan": "6,10"},
         }
         merged = merge_param_selection(stale)
         self.assertNotIn("TRAIL", merged)
-        self.assertIn("TRAIL_TIERS", merged)
-        self.assertFalse(merged["TRAIL_TIERS"]["selected"])
-        self.assertTrue(merged["STOP_LOSS"]["selected"])
+        self.assertIn("trail_stop.tiers", merged)
+        self.assertFalse(merged["trail_stop.tiers"]["selected"])
+        self.assertTrue(merged["stop_loss.pct"]["selected"])
 
     def test_trail_json_scan_and_newline_roundtrip(self) -> None:
         scan = json.dumps(ARM04_TIERS, ensure_ascii=False, separators=(",", ":"))
-        vals = parse_scan_values("TRAIL_TIERS", scan)
+        vals = parse_scan_values("trail_stop.tiers", scan)
         self.assertEqual(len(vals), 1)
         self.assertTrue(struct_eq(vals[0], ARM04_TIERS))
-        text = format_scan_values("TRAIL_TIERS", [CUR_TIERS, ARM04_TIERS])
+        text = format_scan_values("trail_stop.tiers", [CUR_TIERS, ARM04_TIERS])
         self.assertIn("\n", text)
-        parsed = parse_scan_values("TRAIL_TIERS", text)
+        parsed = parse_scan_values("trail_stop.tiers", text)
         self.assertEqual(len(parsed), 2)
         self.assertTrue(struct_eq(parsed[0], CUR_TIERS))
         self.assertTrue(struct_eq(parsed[1], ARM04_TIERS))
 
     def test_trail_list_tuple_marks_current(self) -> None:
-        cells = build_cells({"TRAIL_TIERS": [CUR_TIERS]}, DEFAULTS)
+        cells = build_cells({"trail_stop.tiers": [CUR_TIERS]}, DEFAULTS)
         self.assertEqual(len(cells), 1)
         self.assertTrue(cells[0]["is_current"])
         self.assertEqual(cells[0]["n_diffs"], 0)
@@ -309,19 +329,19 @@ class GridSpecTest(unittest.TestCase):
             [0.06, 0.10, 0.03, 0.03],
             [0.10, None, 0.04, None],
         ]
-        cells = build_cells({"TRAIL_TIERS": [tight]}, DEFAULTS)
+        cells = build_cells({"trail_stop.tiers": [tight]}, DEFAULTS)
         self.assertEqual(cells[0]["kind"], "tighten")
         self.assertFalse(cells[0]["is_current"])
-        self.assertEqual(infer_kind("TRAIL_TIERS", tight, DEFAULTS), "tighten")
+        self.assertEqual(infer_kind("trail_stop.tiers", tight, DEFAULTS), "tighten")
 
     def test_trail_giveback_change_is_other(self) -> None:
-        cells = build_cells({"TRAIL_TIERS": [GB02_TIERS]}, DEFAULTS)
+        cells = build_cells({"trail_stop.tiers": [GB02_TIERS]}, DEFAULTS)
         self.assertEqual(cells[0]["kind"], "other")
         self.assertFalse(cells[0]["is_current"])
 
     def test_trail_table_summary_in_label(self) -> None:
         self.assertEqual(
-            family_value_label("TRAIL_TIERS", CUR_TIERS),
+            family_value_label("trail_stop.tiers", CUR_TIERS),
             "阶梯止盈 3%/1.5% · 6%/3%/底3% · 10%/4%",
         )
 
@@ -357,8 +377,8 @@ class GridSpecTest(unittest.TestCase):
 
     def test_auto_sweep_name_from_axes(self) -> None:
         axes = {
-            "VOL_PULLBACK_N": [15],
-            "VOL_PULLBACK_CONFIRM_DAYS": [1, 3],
+            "pullback_vol.vol_n": [15],
+            "pullback_vol.confirm_days": [1, 3],
         }
         self.assertEqual(sweep_stem_from_axes(axes), "vpn_vpc")
         when = datetime(2026, 9, 7, 20, 34, 12)
@@ -378,7 +398,7 @@ class GridSpecTest(unittest.TestCase):
         self.assertNotIn("W_MA_MID", ids)
         self.assertNotIn("W_MA_SLOW", ids)
         self.assertIn("SCALE_ARM", ids)
-        self.assertIn("TIME_FORCE_BARS", ids)
+        self.assertIn("time_force.bars", ids)
 
     def test_reject_retired_min_ret_spec(self) -> None:
         with self.assertRaises(GridSpecError) as ctx:
@@ -407,6 +427,29 @@ class GridSpecTest(unittest.TestCase):
                 }
             )
         self.assertIn("TIME_FORCE_GRACE_BARS", str(ctx.exception))
+
+    def test_reject_old_factor_key(self) -> None:
+        with self.assertRaises(GridSpecError) as ctx:
+            reject_retired_min_ret(
+                {
+                    "cells": [
+                        {"id": "sl06", "overrides": {"STOP_LOSS": 0.06}},
+                    ]
+                }
+            )
+        self.assertIn("STOP_LOSS", str(ctx.exception))
+
+    def test_reject_flat_factor_path(self) -> None:
+        with self.assertRaises(GridSpecError) as ctx:
+            reject_retired_min_ret(
+                {
+                    "cells": [
+                        {"id": "sl06", "overrides": {"stop_loss.pct": 0.06}},
+                    ]
+                }
+            )
+        self.assertIn("stop_loss.pct", str(ctx.exception))
+        self.assertIn("factor_params", str(ctx.exception))
 
 
 if __name__ == "__main__":

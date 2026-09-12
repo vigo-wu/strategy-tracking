@@ -5,7 +5,7 @@
 因子不决定买/卖/加/减；立场由 Recipe 所在槽赋予。同一原子可进多槽（如 `pullback_vol` 开仓+加仓）。
 
 **契约**：[架构.md](../../../../docs/架构重构/架构.md) §2.4–2.7、[Recipe分类.md](../../../../docs/架构重构/Recipe分类.md)。  
-**默认表达式**：[config.py](../config.py) 的 `RECIPE`（AST 无数字；阈值仍读全局常量）。  
+**默认表达式**：[config.py](../config.py) 的 `RECIPE`（AST 无数字；阈值只读 `factor_params` 字面量）。  
 **上游指标**：[../indicators/NAV.md](../indicators/NAV.md)。  
 **消费**：`strategy.py` 组 ctx → 评槽 → Intent → 挂 pending；`budget.py` / `qmt_common` 订单不进本目录。
 
@@ -17,7 +17,7 @@
 
 | 文件 | 符号（主） | 做什么 |
 | :--- | :--- | :--- |
-| [ctx.py](ctx.py) | `_weekly_market_features` `_build_factor_ctx` `_factor_ctx_bind_state` | 组 `ctx = {market, state, clock}`；周线 MA/MACD；日线量均预计算。`weekly_bull` 只在这里算，仅日志 |
+| [ctx.py](ctx.py) | `_factor_param` `_factor_params_apply_global` `_weekly_market_features` `_build_factor_ctx` `_factor_ctx_bind_state` | 组 `ctx = {market, state, clock}`；读 `RECIPE.factor_params`；周线 MA/MACD；日线量均预计算。`weekly_bull` 只在这里算，仅日志 |
 | [registry.py](registry.py) | `_factor_registry` `_factor_eval` `_factor_hit` | `id → eval` |
 | [expr.py](expr.py) | `_recipe_hit` | `and` / `or` / `not`；`False`/`None` = 恒假 |
 | [slots.py](slots.py) | `_eval_*_slot` `_eval_recipe_slots` `_recipe_fingerprint` | 四槽 → `{hit, reasons, detail}`；日志码映射（`chase` → `chase_skip`） |
@@ -43,7 +43,7 @@ market.py
 
 ## 默认四槽（现网）
 
-真源是 `config.RECIPE`，不是 `Recipe分类.md` 里偏旧的加仓草图。
+真源是 `config.RECIPE`。四槽草图与阈值约定见 [Recipe分类.md](../../../../docs/架构重构/Recipe分类.md)。
 
 | 槽 | 形态 | 备注 |
 | :--- | :--- | :--- |
@@ -54,13 +54,13 @@ market.py
 
 `weekly_bear` = 当天空头（禁开/撤买）。确认清仓用独立叶子 `weekly_bear_confirm`（读 streak）。`_update_w_bear_streak` 不进 `eval`。
 
-网格/探针打 `recipe=` 指纹（表达式 + 被覆盖的阈值键）。不要做全因子 `2^n` 开关。AST 不上 `panel.xml`。
+网格/探针打 `recipe=` 指纹（表达式 + 折进 `factor_params` 的阈值 + 结构键 overrides）。不要做全因子 `2^n` 开关。AST 不上 `panel.xml`。
 
 ---
 
 ## 加因子 / 改 Recipe
 
-1. `lib/<id>.py` 写 `_factor_eval_<id>(ctx) → (bool, detail)`，阈值读 `globals()`（`CHASE_MAX_PCT` 等），**不写死数字**。
+1. `lib/<id>.py` 写 `_factor_eval_<id>(ctx) → (bool, detail)`，阈值读 `_factor_param(ctx, id, key)`（`RECIPE.factor_params`），**不写死数字**。网格覆盖走 `overrides.factor_params`，由 `_factor_params_apply_global` 按 id 再按 key 合并。
 2. `MODULE_ORDER` 在 `registry.py` 之前插入该文件。
 3. [registry.py](registry.py) 登记 `id → eval`。
 4. 默认盘要启用：改 `config.RECIPE` 引用该 id。

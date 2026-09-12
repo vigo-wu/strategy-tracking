@@ -791,7 +791,7 @@ def _render_param_table(defaults: dict[str, Any], busy: bool) -> None:
                 "选用": st.column_config.CheckboxColumn("选用", default=False),
                 "扫描取值": st.column_config.TextColumn(
                     "扫描取值",
-                    help="标量：逗号或空格分隔，如 6,10。百分数可写 6%、6 或 0.06。TRAIL_TIERS 写 JSON 整表，多组换行。",
+                    help="标量：逗号或空格分隔，如 6,10。百分数可写 6%、6 或 0.06。trail_stop.tiers 写 JSON 整表，多组换行。",
                 ),
             },
             key="grid_param_editor",

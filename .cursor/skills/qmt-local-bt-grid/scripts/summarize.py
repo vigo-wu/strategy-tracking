@@ -344,6 +344,15 @@ def _sign(val: float | None, eps: float = EPS_PNL) -> int:
 def _n_override_keys(overrides: Any) -> int:
     if not isinstance(overrides, dict):
         return 0
+    fp = overrides.get("factor_params")
+    if isinstance(fp, dict):
+        n = 0
+        for block in fp.values():
+            if isinstance(block, dict):
+                n += len(block)
+            else:
+                n += 1
+        return n + sum(1 for k in overrides if k != "factor_params")
     return len(overrides)
 
 

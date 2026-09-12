@@ -30,6 +30,7 @@ from grid_run import (  # noqa: E402
     expected_fingerprint,
     load_config_defaults,
 )
+from grid_spec import overrides_has_trail_tiers  # noqa: E402
 from run import run_init_probe  # noqa: E402
 from robust_sample import load_freeze, sample_baskets_for_spec, write_freeze  # noqa: E402
 from robust_spec import (  # noqa: E402
@@ -256,7 +257,7 @@ def run_robust(
 
     # init 探针：不回放 K 线；通过后全部篮子（含第一组）再跑
     defaults = load_config_defaults()
-    need_trail = "TRAIL_TIERS" in (spec.get("overrides") or {})
+    need_trail = overrides_has_trail_tiers(spec.get("overrides") or {})
     expected = expected_fingerprint(defaults, spec.get("overrides") or {})
     _emit(on_progress, phase="probe", done=0, total=n, label="探针 init")
     probe_log = root / "probe_init.txt"
