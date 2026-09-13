@@ -36,12 +36,13 @@ JSON 可序列化。元组在 JSON 里用数组；`null` = Python `None`。
     }
   },
   "structure": {
-    "d_ma": {"mid": 15}
+    "d_ma": {"mid": 15},
+    "atr": {"n": 14}
   }
 }
 ```
 
-结构轴 id：`d_ma.mid` `d_ma.slow` `w_ma.fast` `w_ma.mid` `w_ma.life` `macd.fast` `macd.slow` `macd.signal`。短 id 如 `dmm15`。不要写顶层 `D_MA_MID` 或顶层 `d_ma.mid`。
+结构轴 id：`d_ma.mid` `d_ma.slow` `w_ma.fast` `w_ma.mid` `w_ma.life` `macd.fast` `macd.slow` `macd.signal` `atr.n`。短 id 如 `dmm15` / `atr`。出场另有 `atr_stop.k`（短 id `ask`）。不要写顶层 `D_MA_MID` 或顶层 `d_ma.mid`。
 
 空 `overrides` = `base`（现行片段常量，仍跑一遍以便对照目录与指纹）。
 

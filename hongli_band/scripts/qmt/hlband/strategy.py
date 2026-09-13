@@ -323,21 +323,32 @@ def _eval_scale_push(closes, highs, lows, w_detail, pullback=False):
     return bool(reasons), reasons
 
 
-def _eval_lot_sell(price, closes, lot):
+def _lot_exit_order():
+    """按笔评卖：RECIPE.exit 去掉 weekly_bear_confirm（周空走 force_empty）。"""
+    ordered = (globals().get("RECIPE") or {}).get("exit") or ()
+    out = []
+    for fid in list(ordered):
+        if str(fid) == "weekly_bear_confirm":
+            continue
+        out.append(fid)
+    return out
+
+
+def _eval_lot_sell(price, closes, lot, highs=None, lows=None):
     ctx = _build_factor_ctx(
         closes,
         None,
-        None,
-        None,
+        highs,
+        lows,
         {},
         price,
         state={"lot": lot, "cost": lot.get("price")},
     )
-    slot = _eval_exit_slot(ctx, ["stop_loss", "trail_stop", "time_force"])
+    slot = _eval_exit_slot(ctx, _lot_exit_order())
     return bool(slot.get("hit")), list(slot.get("reasons") or [])
 
 
-def _collect_lot_exits(price, closes, force_empty):
+def _collect_lot_exits(price, closes, force_empty, highs=None, lows=None):
     lots = _ensure_lots()
     if not lots:
         return False, [], [], 0
@@ -347,7 +358,7 @@ def _collect_lot_exits(price, closes, force_empty):
         return True, ["weekly_bear"], lot_ids, shares
     exits = []
     for lot in lots:
-        ok, reasons = _eval_lot_sell(price, closes, lot)
+        ok, reasons = _eval_lot_sell(price, closes, lot, highs=highs, lows=lows)
         if ok:
             exits.append((lot, reasons))
     if not exits:
@@ -894,6 +905,7 @@ _SELL_LABELS = {
     "time_force": "卖点2-时间成本智能平仓",
     "weekly_bear": "周线转空强制清仓",
     "stop_loss": "硬止损",
+    "atr_stop": "ATR止损",
     "skip_add_bar": "加仓成交后当日不评卖",
 }
 _BUY_LABELS = {
@@ -1577,7 +1589,7 @@ def _handle_stock(C, ctx):
         exit_shares = 0
     elif holding and _lots_enabled():
         sell_ok, sell_reasons, exit_ids, exit_shares = _collect_lot_exits(
-            price, closes_s, force_empty
+            price, closes_s, force_empty, highs=highs_s, lows=lows_s
         )
         stop_hit = "stop_loss" in sell_reasons
         trail_hit = "trail_stop" in sell_reasons
@@ -1591,7 +1603,7 @@ def _handle_stock(C, ctx):
                 hold_peak=getattr(A, "hold_peak", None),
                 hold_bars=getattr(A, "hold_bars", 0),
             )
-            slot_x = _eval_exit_slot(fctx_x, ["stop_loss", "trail_stop", "time_force"])
+            slot_x = _eval_exit_slot(fctx_x, _lot_exit_order())
             sell_ok = bool(slot_x.get("hit"))
             sell_reasons = list(slot_x.get("reasons") or [])
             stop_hit = "stop_loss" in sell_reasons

@@ -230,6 +230,8 @@ class GridSpecTest(unittest.TestCase):
         self.assertIn("pullback_vol.tol", ids)
         self.assertIn("pullback_vol.confirm_days", ids)
         self.assertIn("stop_loss.pct", ids)
+        self.assertIn("atr_stop.k", ids)
+        self.assertIn("atr.n", ids)
         self.assertIn("trail_stop.tiers", ids)
         self.assertNotIn("TRAIL", ids)
         self.assertNotIn("STOP_LOSS", ids)

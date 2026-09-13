@@ -5,7 +5,7 @@
 因子不决定买/卖/加/减；立场由 Recipe 所在槽赋予。同一原子可进多槽（如 `pullback_vol` 开仓+加仓）。
 
 **契约**：[架构.md](../../../../docs/架构重构/架构.md) §2.4–2.7、[Recipe分类.md](../../../../docs/架构重构/Recipe分类.md)。  
-**默认表达式**：[config.py](../config.py) 的 `RECIPE`（AST 无数字；阈值只读 `factor_params` 字面量；均线/MACD 窗只读 `structure`）。  
+**默认表达式**：[config.py](../config.py) 的 `RECIPE`（AST 无数字；阈值只读 `factor_params` 字面量；均线/MACD/ATR 窗只读 `structure`）。  
 **上游指标**：[../indicators/NAV.md](../indicators/NAV.md)。  
 **消费**：`strategy.py` 组 ctx → 评槽 → Intent → 挂 pending；`budget.py` / `qmt_common` 订单不进本目录。
 
@@ -17,7 +17,7 @@
 
 | 文件 | 符号（主） | 做什么 |
 | :--- | :--- | :--- |
-| [ctx.py](ctx.py) | `_factor_param` `_factor_params_apply_global` `_structure_windows` `_structure_apply_global` `_weekly_market_features` `_build_factor_ctx` `_factor_ctx_bind_state` | 组 `ctx = {market, state, clock}`；读 `RECIPE.factor_params` / `RECIPE.structure`；周线 MA/MACD；日线量均预计算。`weekly_bull` 只在这里算，仅日志 |
+| [ctx.py](ctx.py) | `_factor_param` `_factor_params_apply_global` `_structure_windows` `_structure_apply_global` `_weekly_market_features` `_build_factor_ctx` `_factor_ctx_bind_state` | 组 `ctx = {market, state, clock}`；读 `RECIPE.factor_params` / `RECIPE.structure`；周线 MA/MACD；日线量均与威尔德 ATR 预计算。`weekly_bull` 只在这里算，仅日志 |
 | [registry.py](registry.py) | `_factor_registry` `_factor_eval` `_factor_hit` | `id → eval` |
 | [expr.py](expr.py) | `_recipe_hit` | `and` / `or` / `not`；`False`/`None` = 恒假 |
 | [slots.py](slots.py) | `_eval_*_slot` `_eval_recipe_slots` `_recipe_fingerprint` | 四槽 → `{hit, reasons, detail}`；日志码映射（`chase` → `chase_skip`） |
@@ -49,7 +49,7 @@ market.py
 | :--- | :--- | :--- |
 | `entry` | `¬chase ∧ ¬vol_dry ∧ ¬w_bias ∧ ¬w_slope ∧ ¬weekly_bear ∧ pullback_vol` | 日志码由 slots 映射 |
 | `scale_in` | `¬vol_dry ∧ ¬w_bias ∧ ¬w_slope ∧ ¬weekly_bear ∧ ((pullback_vol ∧ ¬chase) ∨ plat_break ∨ w_macd_golden)` | 破平台/金叉**不受** chase；回踩加仓受。`SCALE_ARM` / `scale_once` / 满槽在 `_scale_gate`，不进表达式 |
-| `exit` | 有序列表：`weekly_bear_confirm > stop_loss > trail_stop > time_force` | 确认清仓 reason 仍打 `weekly_bear` |
+| `exit` | 有序列表：`weekly_bear_confirm > stop_loss > atr_stop > trail_stop > time_force` | 确认清仓 reason 仍打 `weekly_bear` |
 | `scale_out` | `false` | **减仓未启用**。Intent 预留 `reduce`，strategy 忽略 |
 
 `weekly_bear` = 当天空头（禁开/撤买）。确认清仓用独立叶子 `weekly_bear_confirm`（读 streak）。`_update_w_bear_streak` 不进 `eval`。
@@ -60,7 +60,7 @@ market.py
 
 ## 加因子 / 改 Recipe
 
-1. `lib/<id>.py` 写 `_factor_eval_<id>(ctx) → (bool, detail)`，阈值读 `_factor_param(ctx, id, key)`（`RECIPE.factor_params`），**不写死数字**。均线/MACD 窗读 `_structure_windows()`（`RECIPE.structure`）。网格覆盖走 `overrides.factor_params` / `overrides.structure`，由 `_factor_params_apply_global` / `_structure_apply_global` 按段再按 key 合并。
+1. `lib/<id>.py` 写 `_factor_eval_<id>(ctx) → (bool, detail)`，阈值读 `_factor_param(ctx, id, key)`（`RECIPE.factor_params`），**不写死数字**。均线/MACD/ATR 窗读 `_structure_windows()`（`RECIPE.structure`）。网格覆盖走 `overrides.factor_params` / `overrides.structure`，由 `_factor_params_apply_global` / `_structure_apply_global` 按段再按 key 合并。
 2. `MODULE_ORDER` 在 `registry.py` 之前插入该文件。
 3. [registry.py](registry.py) 登记 `id → eval`。
 4. 默认盘要启用：改 `config.RECIPE` 引用该 id。

@@ -17,7 +17,7 @@ MAE 为何不可信、本轮数字：需要时再读 [reference-lessons.md](refe
 
 ## 何时使用
 
-- 用户要确认 `stop_loss.pct` / `trail_stop.tiers` / `time_force.bars`（或同类出场阈值）哪个更好
+- 用户要确认 `stop_loss.pct` / `atr_stop.k` / `trail_stop.tiers` / `time_force.bars`（或同类出场阈值）哪个更好
 - 用户说网格、扫参、最优参数、对照重跑、样本外选参
 - 已有主题 `scripts/local_bt/` 与 config `BOOK_STOCKS`
 
@@ -120,7 +120,7 @@ python .cursor/skills/qmt-local-bt-grid/scripts/summarize.py --sweep-dir hongli_
 
 空间隔离示例见 `examples/stop_loss_space.json`（`asset_split.mode=random_from_csv`，宇宙默认 `tools/csv/none`）。
 
-`kind`：`base` / `tighten` / `loosen` / `off` / `other`（`id=base` 仅兼容旧 spec）。扫描生成的格子用 token id；等于 config 时 `is_current=true`。因子/结构轴 id 是点路径（如 `stop_loss.pct`、`d_ma.mid`）；格子 `overrides` 写成 `{"factor_params": {"stop_loss": {"pct": 0.06}}}` 或 `{"structure": {"d_ma": {"mid": 15}}}`。资金仍是顶层全局名（`CASH_RATIO`）。顶层旧键（`STOP_LOSS` / `D_MA_MID`）和顶层点路径（`stop_loss.pct` / `d_ma.mid`）都直接报错。
+`kind`：`base` / `tighten` / `loosen` / `off` / `other`（`id=base` 仅兼容旧 spec）。扫描生成的格子用 token id；等于 config 时 `is_current=true`。因子/结构轴 id 是点路径（如 `stop_loss.pct`、`atr_stop.k`、`d_ma.mid`、`atr.n`）；格子 `overrides` 写成 `{"factor_params": {"stop_loss": {"pct": 0.06}}}`、`{"factor_params": {"atr_stop": {"k": 2}}}` 或 `{"structure": {"d_ma": {"mid": 15}}}` / `{"structure": {"atr": {"n": 14}}}`。资金仍是顶层全局名（`CASH_RATIO`）。顶层旧键（`STOP_LOSS` / `D_MA_MID`）和顶层点路径（`stop_loss.pct` / `d_ma.mid`）都直接报错。
 
 ## 已知限制（继承 `run_book_backtest`）
 

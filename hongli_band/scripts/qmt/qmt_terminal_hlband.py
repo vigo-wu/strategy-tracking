@@ -55,9 +55,10 @@ TRADE_BUDGET = 100000.0
 # 价格均线缺省：EMA 或 SMA（大小写不敏感）。BOOK_STOCKS[code].ma_type 优先；
 # 缺省/非法回落本常量。只作用于周/日价格均线；成交量均量始终 SMA；MACD 仍用 EMA。
 MA_TYPE = "EMA"
-# 周/日均线周期与 MACD 窗在 RECIPE.structure（字面量）。
+# 周/日均线周期、MACD 窗与 ATR 窗在 RECIPE.structure（字面量）。
 # 日线：中线→回踩/无量阴跌；慢线→回踩支撑 + 时间成本地板。<=0 关该条。
 # 周线：快/生命线（5/34）；mid=13 仅日志多头。取数 need 另钳原 MA55 暖机地板。
+# ATR：威尔德平滑窗 atr.n；<=0 关 atr_stop。
 
 # 盈利后加仓门槛（仓位层，不进 factor_params）：
 #   峰值浮盈 >= SCALE_ARM，且该笔已持仓 >= SCALE_ARM_BARS 日
@@ -101,6 +102,7 @@ RECIPE = {
     "exit": [
         "weekly_bear_confirm",
         "stop_loss",
+        "atr_stop",
         "trail_stop",
         "time_force",
     ],
@@ -133,6 +135,8 @@ RECIPE = {
         "w_macd_golden": {"hist_expand": 1.2},
         # stop_loss：收盘 <= 成本 * (1 - pct)
         "stop_loss": {"pct": 0.08},
+        # atr_stop：收盘 <= 成本 - k * ATR；k<=0 关
+        "atr_stop": {"k": 2},
         # trail_stop：档 (peak_lo, peak_hi, giveback, profit_floor)；档1 peak_lo 给 time_force 让路
         "trail_stop": {
             "tiers": [
@@ -151,6 +155,8 @@ RECIPE = {
         "w_ma": {"fast": 5, "mid": 13, "life": 34},
         # MACD DIF/DEA/柱
         "macd": {"fast": 12, "slow": 26, "signal": 9},
+        # 日线威尔德 ATR；<=0 关 atr_stop
+        "atr": {"n": 14},
     },
 }
 
@@ -233,7 +239,7 @@ LOG_DIR = r"D:\HlBandV7\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBandV7"
-STRATEGY_VER = "v1.68"
+STRATEGY_VER = "v1.69"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
@@ -2075,6 +2081,50 @@ def _calc_macd(closes, fast, slow, signal):
     hist = dif - dea
     return dif, dea, hist
 
+# === hlband/indicators/atr.py ===
+def _true_range(highs, lows, closes):
+    """真实波幅。首根 H-L，其后 max(H-L, |H-C_prev|, |L-C_prev|)。"""
+    if highs is None or lows is None or closes is None:
+        return None
+    h = np.asarray(highs, dtype=float)
+    l = np.asarray(lows, dtype=float)
+    c = np.asarray(closes, dtype=float)
+    n = min(len(h), len(l), len(c))
+    if n <= 0:
+        return None
+    h = h[:n]
+    l = l[:n]
+    c = c[:n]
+    tr = np.full(n, np.nan, dtype=float)
+    tr[0] = h[0] - l[0]
+    for i in range(1, n):
+        tr[i] = max(h[i] - l[i], abs(h[i] - c[i - 1]), abs(l[i] - c[i - 1]))
+    return tr
+
+
+def _wilder(values, n):
+    """威尔德平滑：首值=前 n 根 SMA，其后 (prev*(n-1)+x)/n。"""
+    v = np.asarray(values, dtype=float)
+    n = int(n)
+    if n <= 0 or len(v) < n:
+        return None
+    out = np.full(len(v), np.nan, dtype=float)
+    out[n - 1] = float(np.mean(v[:n]))
+    for i in range(n, len(v)):
+        out[i] = (out[i - 1] * (n - 1) + v[i]) / float(n)
+    return out
+
+
+def _calc_atr(highs, lows, closes, n):
+    """威尔德 ATR。n 必传，不读 RECIPE；n<=0 或长度不足返回 None。"""
+    n = int(n)
+    if n <= 0:
+        return None
+    tr = _true_range(highs, lows, closes)
+    if tr is None:
+        return None
+    return _wilder(tr, n)
+
 # === hlband/indicators/price_ma.py ===
 def _ma_kind():
     """价格均线类型：优先 BOOK_STOCKS[A.stock].ma_type，否则 MA_TYPE；非法回落 EMA。"""
@@ -3098,12 +3148,17 @@ def _ohlcv_need_1d():
     except (TypeError, ValueError):
         dry_n = 20
     vol_pb_need = vol_n + max(0, confirm_n - 1)
+    try:
+        atr_n = int(_structure_windows()["atr"]["n"] or 0)
+    except (TypeError, ValueError, KeyError):
+        atr_n = 0
     return max(
         mid_n if mid_n > 0 else 0,
         slow_n if slow_n > 0 else 0,
         vol_pb_need,
         dry_n,
         plat_n + 2,
+        atr_n if atr_n > 0 else 0,
     ) + 10
 
 
@@ -3297,6 +3352,7 @@ def _structure_windows():
     d_ma = rec.get("d_ma") or {}
     w_ma = rec.get("w_ma") or {}
     macd = rec.get("macd") or {}
+    atr = rec.get("atr") or {}
     return {
         "d_ma": {
             "mid": _structure_int(d_ma, "mid", 20),
@@ -3311,6 +3367,9 @@ def _structure_windows():
             "fast": _structure_int(macd, "fast", 12),
             "slow": _structure_int(macd, "slow", 26),
             "signal": _structure_int(macd, "signal", 9),
+        },
+        "atr": {
+            "n": _structure_int(atr, "n", 14),
         },
     }
 
@@ -3525,6 +3584,12 @@ def _build_factor_ctx(
     ready, daily = _factor_daily_features(closes, volumes)
     if price is None:
         price = daily.get("price")
+    try:
+        atr_n = int(_structure_windows()["atr"]["n"] or 0)
+    except (TypeError, ValueError, KeyError):
+        atr_n = 0
+    atr_arr = _calc_atr(highs, lows, closes, atr_n) if atr_n > 0 else None
+    atr = _last_valid(atr_arr) if atr_arr is not None else None
     market = {
         "close": price,
         "closes": closes,
@@ -3545,6 +3610,8 @@ def _build_factor_ctx(
         "v10": daily.get("v10"),
         "v20": daily.get("v20"),
         "vol_need": daily.get("vol_need"),
+        "atr": atr,
+        "atr_n": atr_n,
     }
     return {
         "market": market,
@@ -3817,6 +3884,40 @@ def _factor_eval_stop_loss(ctx):
     hit = float(price) <= cost * (1.0 - float(_factor_param(ctx, "stop_loss", "pct")))
     return bool(hit), {"cost": cost, "price": float(price)}
 
+# === hlband/factors/lib/atr_stop.py ===
+def _factor_eval_atr_stop(ctx):
+    """收盘 <= 成本 - k * ATR。n<=0 或 k<=0 关掉。"""
+    market = (ctx or {}).get("market") or {}
+    state = (ctx or {}).get("state") or {}
+    lot = state.get("lot") or {}
+    cost = lot.get("price")
+    if cost is None:
+        cost = state.get("cost")
+    price = market.get("close")
+    atr = market.get("atr")
+    try:
+        atr_n = int(market.get("atr_n") or 0)
+    except (TypeError, ValueError):
+        atr_n = 0
+    try:
+        k = float(_factor_param(ctx, "atr_stop", "k"))
+    except (TypeError, ValueError):
+        k = 0.0
+    try:
+        cost = float(cost or 0)
+    except (TypeError, ValueError):
+        cost = 0.0
+    if atr_n <= 0 or k <= 0 or cost <= 0 or price is None or atr is None:
+        return False, {}
+    try:
+        atr = float(atr)
+    except (TypeError, ValueError):
+        return False, {}
+    if atr <= 0:
+        return False, {}
+    hit = float(price) <= cost - k * atr
+    return bool(hit), {"cost": cost, "price": float(price), "atr": atr, "k": k}
+
 # === hlband/factors/lib/trail_stop.py ===
 def _trail_tier_params(max_profit, tiers=None):
     """按峰值浮盈选档，返回 (giveback, profit_floor)；未达起步档则 (None, None)。"""
@@ -4015,6 +4116,7 @@ def _factor_registry():
         "plat_break": _factor_eval_plat_break,
         "w_macd_golden": _factor_eval_w_macd_golden,
         "stop_loss": _factor_eval_stop_loss,
+        "atr_stop": _factor_eval_atr_stop,
         "trail_stop": _factor_eval_trail_stop,
         "time_force": _factor_eval_time_force,
     }
@@ -4093,7 +4195,7 @@ def _merge_nested_table(dst, incoming):
 
 
 def _fold_tables_for_fingerprint(fp_src, st_src, overrides):
-    """深合并 overrides.factor_params / structure；袋里只留万一还在的非表键。"""
+    """深合并 overrides.factor_params / structure。overrides 袋保持空（apply 后再算指纹）。"""
     fp = {}
     for fid, block in (fp_src or {}).items():
         if isinstance(block, dict):
@@ -7298,21 +7400,32 @@ def _eval_scale_push(closes, highs, lows, w_detail, pullback=False):
     return bool(reasons), reasons
 
 
-def _eval_lot_sell(price, closes, lot):
+def _lot_exit_order():
+    """按笔评卖：RECIPE.exit 去掉 weekly_bear_confirm（周空走 force_empty）。"""
+    ordered = (globals().get("RECIPE") or {}).get("exit") or ()
+    out = []
+    for fid in list(ordered):
+        if str(fid) == "weekly_bear_confirm":
+            continue
+        out.append(fid)
+    return out
+
+
+def _eval_lot_sell(price, closes, lot, highs=None, lows=None):
     ctx = _build_factor_ctx(
         closes,
         None,
-        None,
-        None,
+        highs,
+        lows,
         {},
         price,
         state={"lot": lot, "cost": lot.get("price")},
     )
-    slot = _eval_exit_slot(ctx, ["stop_loss", "trail_stop", "time_force"])
+    slot = _eval_exit_slot(ctx, _lot_exit_order())
     return bool(slot.get("hit")), list(slot.get("reasons") or [])
 
 
-def _collect_lot_exits(price, closes, force_empty):
+def _collect_lot_exits(price, closes, force_empty, highs=None, lows=None):
     lots = _ensure_lots()
     if not lots:
         return False, [], [], 0
@@ -7322,7 +7435,7 @@ def _collect_lot_exits(price, closes, force_empty):
         return True, ["weekly_bear"], lot_ids, shares
     exits = []
     for lot in lots:
-        ok, reasons = _eval_lot_sell(price, closes, lot)
+        ok, reasons = _eval_lot_sell(price, closes, lot, highs=highs, lows=lows)
         if ok:
             exits.append((lot, reasons))
     if not exits:
@@ -7869,6 +7982,7 @@ _SELL_LABELS = {
     "time_force": "卖点2-时间成本智能平仓",
     "weekly_bear": "周线转空强制清仓",
     "stop_loss": "硬止损",
+    "atr_stop": "ATR止损",
     "skip_add_bar": "加仓成交后当日不评卖",
 }
 _BUY_LABELS = {
@@ -8552,7 +8666,7 @@ def _handle_stock(C, ctx):
         exit_shares = 0
     elif holding and _lots_enabled():
         sell_ok, sell_reasons, exit_ids, exit_shares = _collect_lot_exits(
-            price, closes_s, force_empty
+            price, closes_s, force_empty, highs=highs_s, lows=lows_s
         )
         stop_hit = "stop_loss" in sell_reasons
         trail_hit = "trail_stop" in sell_reasons
@@ -8566,7 +8680,7 @@ def _handle_stock(C, ctx):
                 hold_peak=getattr(A, "hold_peak", None),
                 hold_bars=getattr(A, "hold_bars", 0),
             )
-            slot_x = _eval_exit_slot(fctx_x, ["stop_loss", "trail_stop", "time_force"])
+            slot_x = _eval_exit_slot(fctx_x, _lot_exit_order())
             sell_ok = bool(slot_x.get("hit"))
             sell_reasons = list(slot_x.get("reasons") or [])
             stop_hit = "stop_loss" in sell_reasons
@@ -9875,10 +9989,14 @@ def _init_impl(C):
         "%d/%d" % (_win["w_ma"]["fast"], _win["w_ma"]["life"]),
         "dMA=",
         "%d/%d" % (_win["d_ma"]["mid"], _win["d_ma"]["slow"]),
+        "atr=",
+        int(_win["atr"]["n"]),
         "ma_type=",
         _ma_kind(),
         "stop=",
         _factor_param(None, "stop_loss", "pct"),
+        "atr_stop=",
+        _factor_param(None, "atr_stop", "k"),
         "trail_arm=",
         _trail_arm(),
         "trail_tiers=",

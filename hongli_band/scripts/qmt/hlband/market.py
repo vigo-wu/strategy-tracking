@@ -581,12 +581,17 @@ def _ohlcv_need_1d():
     except (TypeError, ValueError):
         dry_n = 20
     vol_pb_need = vol_n + max(0, confirm_n - 1)
+    try:
+        atr_n = int(_structure_windows()["atr"]["n"] or 0)
+    except (TypeError, ValueError, KeyError):
+        atr_n = 0
     return max(
         mid_n if mid_n > 0 else 0,
         slow_n if slow_n > 0 else 0,
         vol_pb_need,
         dry_n,
         plat_n + 2,
+        atr_n if atr_n > 0 else 0,
     ) + 10
 
 

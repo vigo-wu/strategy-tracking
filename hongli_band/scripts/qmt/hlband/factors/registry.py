@@ -11,6 +11,7 @@ def _factor_registry():
         "plat_break": _factor_eval_plat_break,
         "w_macd_golden": _factor_eval_w_macd_golden,
         "stop_loss": _factor_eval_stop_loss,
+        "atr_stop": _factor_eval_atr_stop,
         "trail_stop": _factor_eval_trail_stop,
         "time_force": _factor_eval_time_force,
     }

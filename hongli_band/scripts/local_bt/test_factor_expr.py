@@ -95,13 +95,21 @@ class DefaultRecipeShapeTests(unittest.TestCase):
         self.assertIn("w_macd_golden", or_node)
         self.assertEqual(
             recipe["exit"],
-            ["weekly_bear_confirm", "stop_loss", "trail_stop", "time_force"],
+            [
+                "weekly_bear_confirm",
+                "stop_loss",
+                "atr_stop",
+                "trail_stop",
+                "time_force",
+            ],
         )
         fp = recipe["factor_params"]
         self.assertAlmostEqual(fp["chase"]["max_pct"], 0.05)
         self.assertAlmostEqual(fp["stop_loss"]["pct"], 0.08)
+        self.assertAlmostEqual(fp["atr_stop"]["k"], 2)
         self.assertEqual(fp["time_force"]["bars"], 30)
         self.assertEqual(fp["pullback_vol"]["vol_n"], 10)
+        self.assertEqual(recipe["structure"]["atr"]["n"], 14)
 
 
 def _chase_ctx(chg):

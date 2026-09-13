@@ -26,7 +26,7 @@
         <mxCell id="pit" parent="1" vertex="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;fontSize=16;fontFamily=Microsoft YaHei;" value="动态复权（PIT）&lt;br&gt;none 价 + divid factors · 仅回测">
           <mxGeometry x="80" y="420" width="460" height="100" as="geometry" />
         </mxCell>
-        <mxCell id="ind" parent="1" vertex="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=16;fontFamily=Microsoft YaHei;" value="技术指标库&lt;br&gt;MA · EMA · MACD · （ATR 未用）&lt;br&gt;只吃复权序列，不算持仓 / 账户">
+        <mxCell id="ind" parent="1" vertex="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=16;fontFamily=Microsoft YaHei;" value="技术指标库&lt;br&gt;MA · EMA · MACD · ATR（威尔德）&lt;br&gt;只吃复权序列，不算持仓 / 账户">
           <mxGeometry x="80" y="580" width="460" height="120" as="geometry" />
         </mxCell>
         <mxCell id="ctx" parent="1" vertex="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;fontSize=16;fontFamily=Microsoft YaHei;" value="Feature / Ctx&lt;br&gt;market + 持仓快照 + clock　·　eval 只读">
@@ -56,7 +56,7 @@
         <mxCell id="aside" parent="1" vertex="1" style="rounded=0;whiteSpace=wrap;html=1;align=left;verticalAlign=top;fillColor=#fff2cc;strokeColor=#d6b656;spacingLeft=20;spacingTop=16;spacingRight=16;fontSize=15;fontFamily=Microsoft YaHei;" value="仓位层（不算因子）&lt;br&gt;&lt;br&gt;优先级：清仓 &gt; 减仓 &gt; 加仓 &gt; 开仓&lt;br&gt;BOOK_LOT_MAX / 50·30·剩余&lt;br&gt;scale_once · 大仓空优先开仓&lt;br&gt;T+1 · skip_sell_eval_day&lt;br&gt;有卖点则取消加仓&lt;br&gt;&lt;br&gt;账户数据只进仓位管理&lt;br&gt;持仓数据进 Ctx / 因子&lt;br&gt;指标库不连 STATE">
           <mxGeometry x="800" y="1320" width="600" height="400" as="geometry" />
         </mxCell>
-        <mxCell id="note" parent="1" vertex="1" style="rounded=0;whiteSpace=wrap;html=1;align=left;verticalAlign=top;fillColor=#f5f5f5;strokeColor=#999999;spacingLeft=20;spacingTop=16;spacingRight=16;fontSize=15;fontFamily=Microsoft YaHei;" value="默认 Recipe（迁移第一期对齐现网，不先改语义）&lt;br&gt;&lt;br&gt;开仓　¬chase ∧ ¬vol_dry ∧ ¬w_bias ∧ ¬w_slope ∧ ¬weekly_bear ∧ pullback_vol&lt;br&gt;加仓　仓位门槛在仓位层；信号 = pullback_vol ∨ plat_break ∨ w_macd_golden&lt;br&gt;清仓　有序：weekly_bear(确认) &gt; stop_loss &gt; trail_stop &gt; time_force&lt;br&gt;减仓　false">
+        <mxCell id="note" parent="1" vertex="1" style="rounded=0;whiteSpace=wrap;html=1;align=left;verticalAlign=top;fillColor=#f5f5f5;strokeColor=#999999;spacingLeft=20;spacingTop=16;spacingRight=16;fontSize=15;fontFamily=Microsoft YaHei;" value="默认 Recipe（迁移第一期对齐现网，不先改语义）&lt;br&gt;&lt;br&gt;开仓　¬chase ∧ ¬vol_dry ∧ ¬w_bias ∧ ¬w_slope ∧ ¬weekly_bear ∧ pullback_vol&lt;br&gt;加仓　仓位门槛在仓位层；信号 = pullback_vol ∨ plat_break ∨ w_macd_golden&lt;br&gt;清仓　有序：weekly_bear(确认) &gt; stop_loss &gt; atr_stop &gt; trail_stop &gt; time_force&lt;br&gt;减仓　false">
           <mxGeometry x="80" y="1780" width="1320" height="140" as="geometry" />
         </mxCell>
         <mxCell id="foot" parent="1" vertex="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=14;fontFamily=Microsoft YaHei;" value="闭环回边：委托成交 → 回写持仓 STATE 与全池账本。实盘不绕回 OHLCV。">

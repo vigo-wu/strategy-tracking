@@ -67,6 +67,7 @@ def _structure_windows():
     d_ma = rec.get("d_ma") or {}
     w_ma = rec.get("w_ma") or {}
     macd = rec.get("macd") or {}
+    atr = rec.get("atr") or {}
     return {
         "d_ma": {
             "mid": _structure_int(d_ma, "mid", 20),
@@ -81,6 +82,9 @@ def _structure_windows():
             "fast": _structure_int(macd, "fast", 12),
             "slow": _structure_int(macd, "slow", 26),
             "signal": _structure_int(macd, "signal", 9),
+        },
+        "atr": {
+            "n": _structure_int(atr, "n", 14),
         },
     }
 
@@ -295,6 +299,12 @@ def _build_factor_ctx(
     ready, daily = _factor_daily_features(closes, volumes)
     if price is None:
         price = daily.get("price")
+    try:
+        atr_n = int(_structure_windows()["atr"]["n"] or 0)
+    except (TypeError, ValueError, KeyError):
+        atr_n = 0
+    atr_arr = _calc_atr(highs, lows, closes, atr_n) if atr_n > 0 else None
+    atr = _last_valid(atr_arr) if atr_arr is not None else None
     market = {
         "close": price,
         "closes": closes,
@@ -315,6 +325,8 @@ def _build_factor_ctx(
         "v10": daily.get("v10"),
         "v20": daily.get("v20"),
         "vol_need": daily.get("vol_need"),
+        "atr": atr,
+        "atr_n": atr_n,
     }
     return {
         "market": market,

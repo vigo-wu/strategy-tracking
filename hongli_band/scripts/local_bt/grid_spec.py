@@ -21,7 +21,7 @@ _HLBAND_CONFIG = _HERE.parent / "qmt" / "hlband" / "config.py"
 
 GROUP_ORDER = ("入场", "出场", "加仓", "资金", "结构")
 KIND_EXIT_IDS = frozenset(
-    {"stop_loss.pct", "trail_stop.tiers", "time_force.bars"}
+    {"stop_loss.pct", "trail_stop.tiers", "time_force.bars", "atr_stop.k"}
 )
 ENTRY_KEYS = (
     "pullback_vol.tol",
@@ -40,6 +40,7 @@ EXIT_KEYS = (
     "trail_stop.tiers",
     "time_force.bars",
     "weekly_bear_confirm.days",
+    "atr_stop.k",
 )
 SCALE_FACTOR_KEYS = (
     "plat_break.lookback",
@@ -56,8 +57,9 @@ STRUCTURE_KEYS = (
     "macd.fast",
     "macd.slow",
     "macd.signal",
+    "atr.n",
 )
-STRUCTURE_ROOTS = frozenset({"d_ma", "w_ma", "macd"})
+STRUCTURE_ROOTS = frozenset({"d_ma", "w_ma", "macd", "atr"})
 MONEY_KEYS = (
     "CASH_RATIO",
     "BOOK_LOT_MAX",
@@ -198,6 +200,8 @@ PARAM_LABELS = {
     "macd.fast": "MACD 快线",
     "macd.slow": "MACD 慢线",
     "macd.signal": "MACD 信号",
+    "atr.n": "日线ATR窗",
+    "atr_stop.k": "ATR止损倍数",
 }
 ABBREV_FIXED = {
     "stop_loss.pct": "sl",
@@ -237,6 +241,8 @@ ABBREV_FIXED = {
     "macd.fast": "mcf",
     "macd.slow": "mcs",
     "macd.signal": "mcg",
+    "atr.n": "atr",
+    "atr_stop.k": "ask",
 }
 DEFAULT_SCAN = {
     "stop_loss.pct": "6,10",
@@ -1013,6 +1019,15 @@ def infer_kind(family: str, value: Any, defaults: Mapping[str, Any]) -> str:
         if iv > int(cur):
             return "loosen"
         return "other"
+    if family == "atr_stop.k":
+        fv = float(value)
+        if fv <= 0:
+            return "off"
+        if num_eq(fv, cur):
+            return "other"
+        if fv < float(cur):
+            return "tighten"
+        return "loosen"
     fv = float(value)
     if num_eq(fv, cur):
         return "other"
@@ -1068,7 +1083,7 @@ def infer_kind_from_overrides(
     spec = get_param(key)
     if spec is None or spec.kind_mode != "exit":
         return "other"
-    if key in ("stop_loss.pct", "time_force.bars"):
+    if key in ("stop_loss.pct", "time_force.bars", "atr_stop.k"):
         return infer_kind(key, flat[key], defaults)
     return "other"
 
@@ -1152,7 +1167,12 @@ def family_value_label(family: str, value: Any) -> str:
         if iv <= 0:
             return "时间成本关闭"
         return "时间成本 %s 根" % iv
-    if family in ("d_ma.mid", "d_ma.slow"):
+    if family == "atr_stop.k":
+        fv = float(value)
+        if fv <= 0:
+            return "ATR止损关闭"
+        return "ATR止损 %gx" % fv
+    if family in ("d_ma.mid", "d_ma.slow", "atr.n"):
         try:
             iv = int(value)
         except (TypeError, ValueError):

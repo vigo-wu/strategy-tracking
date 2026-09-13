@@ -21,6 +21,7 @@
 | `plat_break` | [plat_break.py](plat_break.py) | 日线收盘破窄幅平台 | 高低收 | `plat_break.lookback` / `max_range` / `break_buf` |
 | `w_macd_golden` | [w_macd_golden.py](w_macd_golden.py) | 近两周金叉且红柱放大 | `w_detail` | `w_macd_golden.hist_expand` |
 | `stop_loss` | [stop_loss.py](stop_loss.py) | 收盘相对成本 | `state.lot` / `cost` | `stop_loss.pct` |
+| `atr_stop` | [atr_stop.py](atr_stop.py) | 收盘 <= 成本 − k×ATR | `state.lot` / `market.atr` | `atr_stop.k`；窗是 `structure.atr.n`（`<=0` 关） |
 | `trail_stop` | [trail_stop.py](trail_stop.py) | 阶梯回撤 / 利润底 | `hold_peak` | `trail_stop.tiers` |
 | `time_force` | [time_force.py](time_force.py) | 持仓日 + 慢线地板 + 武装让路 | `hold_bars` / peak | `time_force.bars`；慢线周期是 `structure.d_ma.slow` |
 
@@ -49,7 +50,7 @@
 
 | 给叶子 | 不给叶子 |
 | :--- | :--- |
-| 复权 OHLCV、已算均线/MACD、成本、峰值、持仓日、当前 lot、`w_bear_streak` | 现金、全池账本、pending、T+1、`passorder` |
+| 复权 OHLCV、已算均线/MACD/ATR、成本、峰值、持仓日、当前 lot、`w_bear_streak` | 现金、全池账本、pending、T+1、`passorder` |
 
 `eval` 约定只读。例外：`time_force` 为对齐现网，命中「武装让路」时仍会写 `time_force_trend_skip`（与旧 `_time_force_hit` 相同）。不要把新的写盘塞进其它叶子。
 

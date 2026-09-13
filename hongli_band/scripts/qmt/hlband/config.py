@@ -45,9 +45,10 @@ TRADE_BUDGET = 100000.0
 # 价格均线缺省：EMA 或 SMA（大小写不敏感）。BOOK_STOCKS[code].ma_type 优先；
 # 缺省/非法回落本常量。只作用于周/日价格均线；成交量均量始终 SMA；MACD 仍用 EMA。
 MA_TYPE = "EMA"
-# 周/日均线周期与 MACD 窗在 RECIPE.structure（字面量）。
+# 周/日均线周期、MACD 窗与 ATR 窗在 RECIPE.structure（字面量）。
 # 日线：中线→回踩/无量阴跌；慢线→回踩支撑 + 时间成本地板。<=0 关该条。
 # 周线：快/生命线（5/34）；mid=13 仅日志多头。取数 need 另钳原 MA55 暖机地板。
+# ATR：威尔德平滑窗 atr.n；<=0 关 atr_stop。
 
 # 盈利后加仓门槛（仓位层，不进 factor_params）：
 #   峰值浮盈 >= SCALE_ARM，且该笔已持仓 >= SCALE_ARM_BARS 日
@@ -91,6 +92,7 @@ RECIPE = {
     "exit": [
         "weekly_bear_confirm",
         "stop_loss",
+        "atr_stop",
         "trail_stop",
         "time_force",
     ],
@@ -123,6 +125,8 @@ RECIPE = {
         "w_macd_golden": {"hist_expand": 1.2},
         # stop_loss：收盘 <= 成本 * (1 - pct)
         "stop_loss": {"pct": 0.08},
+        # atr_stop：收盘 <= 成本 - k * ATR；k<=0 关
+        "atr_stop": {"k": 2},
         # trail_stop：档 (peak_lo, peak_hi, giveback, profit_floor)；档1 peak_lo 给 time_force 让路
         "trail_stop": {
             "tiers": [
@@ -141,6 +145,8 @@ RECIPE = {
         "w_ma": {"fast": 5, "mid": 13, "life": 34},
         # MACD DIF/DEA/柱
         "macd": {"fast": 12, "slow": 26, "signal": 9},
+        # 日线威尔德 ATR；<=0 关 atr_stop
+        "atr": {"n": 14},
     },
 }
 
@@ -223,7 +229,7 @@ LOG_DIR = r"D:\HlBandV7\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBandV7"
-STRATEGY_VER = "v1.68"
+STRATEGY_VER = "v1.69"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
