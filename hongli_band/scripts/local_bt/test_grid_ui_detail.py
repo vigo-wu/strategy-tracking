@@ -16,6 +16,7 @@ try:
         _DETAIL_TUNE_BG_DARK,
         _cell_column_mean,
         _composite_n_diffs_map,
+        _default_robust_cell_id,
         _detail_metric_tone,
         _detail_window_rows,
         _detail_window_table_html,
@@ -31,6 +32,7 @@ except ImportError:
     _DETAIL_TUNE_BG_DARK = ""  # type: ignore[misc, assignment]
     _cell_column_mean = None  # type: ignore[misc, assignment]
     _composite_n_diffs_map = None  # type: ignore[misc, assignment]
+    _default_robust_cell_id = None  # type: ignore[misc, assignment]
     _detail_metric_tone = None  # type: ignore[misc, assignment]
     _detail_window_rows = None  # type: ignore[misc, assignment]
     _detail_window_table_html = None  # type: ignore[misc, assignment]
@@ -493,6 +495,16 @@ class GridUiCompositeRecommendTest(unittest.TestCase):
         self.assertEqual(nd["cur"], 0)
         self.assertEqual(nd["x"], 2)
         self.assertGreater(nd["y"], 2)
+
+
+@unittest.skipIf(_default_robust_cell_id is None, "streamlit (or grid_ui deps) not installed")
+class GridUiRobustCellPickTest(unittest.TestCase):
+    def test_prefers_rec_then_composite_then_first(self) -> None:
+        cells = [{"id": "a"}, {"id": "b"}, {"id": "c"}]
+        self.assertEqual(_default_robust_cell_id(cells, "b", "c"), "b")
+        self.assertEqual(_default_robust_cell_id(cells, "", "c"), "c")
+        self.assertEqual(_default_robust_cell_id(cells, "nope", "also"), "a")
+        self.assertEqual(_default_robust_cell_id([], "b", "c"), "")
 
 
 if __name__ == "__main__":

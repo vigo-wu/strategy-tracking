@@ -22,7 +22,7 @@ description: >-
 ## 硬规则
 
 1. **真组合**：`run_book_backtest` / `run_one_basket`，禁止单票预算加总冒充组合。
-2. **灌参**：默认空 = 现行 config；可选 `overrides_from` → `summary.recommend.id` → `cells[].overrides`。
+2. **灌参**：默认空 = 现行 config；可选 `overrides_from` → `overrides_cell_id` 或 `summary.recommend.id` → `cells[].overrides`。网格页可选手动格子 id 送入。
 3. **时间嵌套**：`deploy_start > check_end`；GO/NO-GO **只看盲测窗**。
 4. **硬门**：卡玛 / 回撤 / 夏普 / 盈亏比。**软门**：胜率 / 笔数（默认 `veto=false` 只 warn）。
 5. **整次 GO**：`pass_rate` ∧ 中位卡玛 ∧ P10 回撤。

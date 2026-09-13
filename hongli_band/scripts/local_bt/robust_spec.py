@@ -97,7 +97,7 @@ def resolve_overrides_from_summary(
     *,
     recommend_id: str | None = None,
 ) -> dict[str, Any]:
-    """recommend.id → cells[].overrides；base 可为空对象。"""
+    """recommend.id（或 recommend_id）→ cells[].overrides；base 可为空对象。"""
     path = Path(summary_path)
     if not path.is_absolute():
         path = REPO / path
@@ -109,7 +109,8 @@ def resolve_overrides_from_summary(
         raise RobustSpecError("summary.json 格式无效")
 
     rec = summary.get("recommend") if isinstance(summary.get("recommend"), Mapping) else {}
-    rid = str(recommend_id or rec.get("id") or "").strip()
+    rec_id = str(rec.get("id") or "").strip()
+    rid = str(recommend_id or rec_id).strip()
     if not rid:
         raise RobustSpecError("summary 无 recommend.id")
 
@@ -131,7 +132,7 @@ def resolve_overrides_from_summary(
     by_id = {str(c.get("id") or "").strip(): c for c in cells if str(c.get("id") or "").strip()}
     cell = by_id.get(rid)
     if cell is None:
-        raise RobustSpecError("cells 中无 recommend.id=%s" % rid)
+        raise RobustSpecError("cells 中无格子 id=%s" % rid)
     ov = cell.get("overrides")
     if ov is None:
         ov = {}
@@ -142,7 +143,7 @@ def resolve_overrides_from_summary(
         "kind": cell.get("kind"),
         "label": cell.get("label") or rid,
         "overrides": dict(ov),
-        "reason": rec.get("reason"),
+        "reason": rec.get("reason") if rid == rec_id else "手动指定格子",
         "summary_path": str(path),
     }
 
@@ -164,7 +165,10 @@ def resolve_overrides(spec: Mapping[str, Any]) -> dict[str, Any]:
         }
     ofrom = str(src.get("overrides_from") or "").strip()
     if ofrom:
-        return resolve_overrides_from_summary(ofrom)
+        cell_id = str(src.get("overrides_cell_id") or "").strip()
+        return resolve_overrides_from_summary(
+            ofrom, recommend_id=cell_id or None
+        )
     return {
         "id": "config",
         "kind": "base",

@@ -100,6 +100,7 @@ ROBUST_KEYS: tuple[str, ...] = (
     "robust_compare_div",
     "robust_compound",
     "robust_param_source",
+    "robust_cell_id",
     "robust_h_calmar_en",
     "robust_h_calmar_min",
     "robust_h_dd_en",

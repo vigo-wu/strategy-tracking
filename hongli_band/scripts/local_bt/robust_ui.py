@@ -59,6 +59,7 @@ def _ensure_state() -> None:
     ss.setdefault("robust_compound", True)
     ss.setdefault("robust_universe", "tools/csv/none")
     ss.setdefault("robust_param_source", PARAM_SOURCE_CONFIG)
+    ss.setdefault("robust_cell_id", "")
     ss.setdefault("robust_busy", False)
     # hard
     ss.setdefault("robust_h_calmar_en", bool(dg["hard"]["calmar"]["enabled"]))
@@ -135,6 +136,7 @@ def _current_spec() -> dict[str, Any]:
         "theme": "hongli_band",
         "run_id": str(ss.get("robust_run_id") or "post_grid_robust").strip(),
         "overrides_from": ofrom,
+        "overrides_cell_id": str(ss.get("robust_cell_id") or "").strip() if ofrom else "",
         "overrides": {},
         "year_start": int(ss.get("robust_year_start")),
         "year_end": int(ss.get("robust_year_end")),
@@ -269,7 +271,7 @@ def render_robust_mode() -> None:
     repo = THEME.parent
 
     st.markdown("**参数来源**")
-    st.caption("默认用现行 config；可选网格 summary 灌入 recommend 的 overrides。不改 config 文件。")
+    st.caption("默认用现行 config；可选网格 summary 灌入指定格子（缺省 recommend.id）的 overrides。不改 config 文件。")
     sums = _list_grid_summaries()
     rels = [PARAM_SOURCE_CONFIG]
     for path in sums:
@@ -290,8 +292,17 @@ def render_robust_mode() -> None:
     )
     pick = str(st.session_state.get("robust_param_source") or PARAM_SOURCE_CONFIG).strip()
     if pick and pick != PARAM_SOURCE_CONFIG:
+        st.text_input(
+            "格子 id",
+            key="robust_cell_id",
+            disabled=busy,
+            help="空则用 summary.recommend.id；网格「送入」会写入所选 id。",
+        )
+        cell_id = str(st.session_state.get("robust_cell_id") or "").strip()
         try:
-            meta = resolve_overrides_from_summary(pick)
+            meta = resolve_overrides_from_summary(
+                pick, recommend_id=cell_id or None
+            )
             st.caption(
                 "将用 **%s**（%s）· %s"
                 % (

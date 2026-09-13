@@ -135,6 +135,17 @@ class TestRobustSpec(unittest.TestCase):
             got = resolve_overrides_from_summary(path)
             self.assertEqual(got["id"], "sl06")
             self.assertEqual(got["overrides"]["factor_params"]["stop_loss"]["pct"], 0.06)
+            base = resolve_overrides_from_summary(path, recommend_id="base")
+            self.assertEqual(base["id"], "base")
+            self.assertEqual(base["overrides"], {})
+            self.assertEqual(base["reason"], "手动指定格子")
+            via = resolve_overrides(
+                {"overrides_from": str(path), "overrides_cell_id": "base"}
+            )
+            self.assertEqual(via["id"], "base")
+            with self.assertRaises(Exception) as ctx:
+                resolve_overrides_from_summary(path, recommend_id="nope")
+            self.assertIn("无格子 id", str(ctx.exception))
 
     def test_base_empty_overrides(self) -> None:
         with tempfile.TemporaryDirectory() as td:

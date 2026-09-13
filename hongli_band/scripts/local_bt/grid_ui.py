@@ -2130,6 +2130,27 @@ def _render_result_sort_bar() -> tuple[str, bool]:
     return metric, descending
 
 
+def _default_robust_cell_id(
+    cells: list[dict[str, Any]],
+    rec_id: str,
+    composite_id: str,
+) -> str:
+    ids = [str(c.get("id") or "").strip() for c in cells if str(c.get("id") or "").strip()]
+    for cand in (str(rec_id or "").strip(), str(composite_id or "").strip()):
+        if cand and cand in ids:
+            return cand
+    return ids[0] if ids else ""
+
+
+def _summary_relpath(sum_path: Path) -> str:
+    try:
+        return str(sum_path.resolve().relative_to(Path(__file__).resolve().parents[3])).replace(
+            "\\", "/"
+        )
+    except ValueError:
+        return str(sum_path)
+
+
 def _render_results() -> None:
     summary = st.session_state.get("grid_summary")
     if not isinstance(summary, dict) or not summary.get("cells"):
@@ -2195,7 +2216,7 @@ def _render_results() -> None:
         st.warning(rec_reason or "无格子过门")
     if composite:
         st.info(
-            "综合推荐 **%s** · 夏普/年化/回撤/盈亏比组内名次平均（不过门，不能送实盘评估）"
+            "综合推荐 **%s** · 夏普/年化/回撤/盈亏比组内名次平均（不过门）"
             % (composite.get("label") or composite.get("id") or "")
         )
     else:
@@ -2206,19 +2227,44 @@ def _render_results() -> None:
 
         sweep_dir = _grid_sweep_dir(summary)
         sum_path = sweep_dir / "summary.json"
-        can_robust = bool(rec_id) and sum_path.is_file()
-        if not rec_id:
-            st.caption("无过门推荐，不能送入实盘评估。")
-        if can_robust and st.button("送入实盘评估", key="grid_to_robust"):
-            try:
-                rel = str(sum_path.resolve().relative_to(Path(__file__).resolve().parents[3])).replace(
-                    "\\", "/"
+        cell_ids = [
+            str(c.get("id") or "").strip()
+            for c in cells
+            if str(c.get("id") or "").strip()
+        ]
+        label_by_id = {
+            str(c.get("id") or "").strip(): str(c.get("label") or c.get("id") or "")
+            for c in cells
+            if str(c.get("id") or "").strip()
+        }
+        default_id = _default_robust_cell_id(
+            cells, rec_id, str((composite or {}).get("id") or "")
+        )
+        cur = str(st.session_state.get("grid_robust_cell") or "").strip()
+        if cell_ids and cur not in cell_ids:
+            st.session_state["grid_robust_cell"] = default_id
+        can_robust = bool(cell_ids) and sum_path.is_file()
+        if can_robust:
+            c1, c2 = st.columns([4, 1], vertical_alignment="bottom")
+            with c1:
+                picked = st.selectbox(
+                    "送入实盘评估",
+                    options=cell_ids,
+                    format_func=lambda i: "%s · %s" % (i, label_by_id.get(i, i)),
+                    key="grid_robust_cell",
                 )
-            except ValueError:
-                rel = str(sum_path)
-            st.session_state["robust_param_source"] = rel
-            st.session_state[UI_MODE_KEY] = ROBUST_MODE
-            st.rerun()
+            with c2:
+                do_send = st.button("送入", type="primary", key="grid_to_robust")
+            st.caption("不过门；锁定该格 overrides 做随机组合。过门推荐仍只用于选参结论。")
+            if do_send:
+                cid = str(picked or st.session_state.get("grid_robust_cell") or "").strip()
+                if cid in label_by_id:
+                    st.session_state["robust_param_source"] = _summary_relpath(sum_path)
+                    st.session_state["robust_cell_id"] = cid
+                    st.session_state[UI_MODE_KEY] = ROBUST_MODE
+                    st.rerun()
+        elif not sum_path.is_file():
+            st.caption("无 summary.json，不能送入实盘评估。")
     except Exception:
         pass
     if space_on:
