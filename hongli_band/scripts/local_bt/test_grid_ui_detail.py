@@ -11,10 +11,17 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 try:
-    from grid_ui import _detail_metric_tone, _detail_window_rows
+    from grid_ui import (
+        _detail_metric_tone,
+        _detail_window_rows,
+        _detail_window_table_html,
+        _stack_detail_window_rows,
+    )
 except ImportError:
     _detail_metric_tone = None  # type: ignore[misc, assignment]
     _detail_window_rows = None  # type: ignore[misc, assignment]
+    _detail_window_table_html = None  # type: ignore[misc, assignment]
+    _stack_detail_window_rows = None  # type: ignore[misc, assignment]
 
 
 @unittest.skipIf(_detail_window_rows is None, "streamlit (or grid_ui deps) not installed")
@@ -73,6 +80,81 @@ class GridUiDetailRowsTest(unittest.TestCase):
         self.assertEqual(rows[2]["夏普"], 0.9)
         self.assertEqual(rows[2]["笔数"], 2)
         self.assertAlmostEqual(rows[2]["回撤%"], 5.0)
+
+    def test_basket_written_when_set(self) -> None:
+        rows = _detail_window_rows(
+            {"id": "sl06", "label": "止损 6%"}, {}, basket="调参"
+        )
+        self.assertEqual(len(rows), 3)
+        self.assertEqual([r["篮子"] for r in rows], ["调参", "调参", "调参"])
+        self.assertNotIn("篮子", _detail_window_rows({"id": "x", "label": "y"}, {})[0])
+
+
+@unittest.skipIf(
+    _stack_detail_window_rows is None or _detail_window_table_html is None,
+    "streamlit (or grid_ui deps) not installed",
+)
+class GridUiDetailStackHtmlTest(unittest.TestCase):
+    def test_space_off_three_rows_no_basket(self) -> None:
+        rows = _stack_detail_window_rows(
+            {"id": "sl06", "label": "止损 6%"}, {}, space_on=False
+        )
+        self.assertEqual(len(rows), 3)
+        self.assertEqual([r["区间"] for r in rows], ["全区间", "调参期", "验收期"])
+        self.assertTrue(all("篮子" not in r for r in rows))
+
+    def test_space_on_six_rows_tune_then_holdout(self) -> None:
+        book = {
+            "windows": {"check": {"sharpe": 1.1, "n_trades": 4}},
+            "holdout_windows": {"check": {"sharpe": 0.9, "n_trades": 2}},
+        }
+        rows = _stack_detail_window_rows(
+            {"id": "sl06", "label": "止损 6%"}, book, space_on=True
+        )
+        self.assertEqual(len(rows), 6)
+        self.assertEqual(
+            [(r["篮子"], r["区间"]) for r in rows],
+            [
+                ("调参", "全区间"),
+                ("调参", "调参期"),
+                ("调参", "验收期"),
+                ("盲测", "全区间"),
+                ("盲测", "调参期"),
+                ("盲测", "验收期"),
+            ],
+        )
+        self.assertEqual(rows[2]["夏普"], 1.1)
+        self.assertEqual(rows[2]["笔数"], 4)
+        self.assertEqual(rows[5]["夏普"], 0.9)
+        self.assertEqual(rows[5]["笔数"], 2)
+
+    def test_space_on_missing_holdout_still_six_empty(self) -> None:
+        rows = _stack_detail_window_rows(
+            {"id": "sl06", "label": "止损 6%"}, {}, space_on=True
+        )
+        self.assertEqual(len(rows), 6)
+        self.assertEqual([r["篮子"] for r in rows], ["调参"] * 3 + ["盲测"] * 3)
+        self.assertTrue(all(r["夏普"] is None for r in rows))
+
+    def test_html_no_basket_rowspan_3(self) -> None:
+        rows = _stack_detail_window_rows(
+            {"id": "sl06", "label": "止损 6%"}, {}, space_on=False
+        )
+        html = _detail_window_table_html(rows)
+        self.assertNotIn("篮子", html)
+        self.assertIn('rowspan="3"', html)
+        self.assertNotIn('rowspan="6"', html)
+
+    def test_html_basket_rowspan_6(self) -> None:
+        rows = _stack_detail_window_rows(
+            {"id": "sl06", "label": "止损 6%"}, {}, space_on=True
+        )
+        html = _detail_window_table_html(rows)
+        self.assertIn("篮子", html)
+        self.assertEqual(html.count(">调参</"), 1)
+        self.assertEqual(html.count(">盲测</"), 1)
+        self.assertIn('rowspan="6"', html)
+        self.assertEqual(html.count('rowspan="3"'), 2)
 
 
 @unittest.skipIf(_detail_metric_tone is None, "streamlit (or grid_ui deps) not installed")

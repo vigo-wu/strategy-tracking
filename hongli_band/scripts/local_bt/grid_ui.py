@@ -1474,6 +1474,7 @@ def _detail_window_rows(
     book: dict[str, Any],
     *,
     windows_key: str = "windows",
+    basket: str | None = None,
 ) -> list[dict[str, Any]]:
     """每格固定 3 行（全区间 / 调参期 / 验收期），缺窗也出空指标行。"""
     cid = cell.get("id")
@@ -1481,28 +1482,47 @@ def _detail_window_rows(
     rows: list[dict[str, Any]] = []
     for period, wkey in _DETAIL_PERIODS:
         mdd = _window_metric(book, wkey, "max_dd", windows_key=windows_key)
-        rows.append(
-            {
-                "id": cid,
-                "label": label,
-                "区间": period,
-                "夏普": _window_metric(book, wkey, "sharpe", windows_key=windows_key),
-                "笔数": _window_metric(book, wkey, "n_trades", windows_key=windows_key),
-                "卡玛": _window_metric(book, wkey, "calmar", windows_key=windows_key),
-                "回撤%": None if mdd is None else round(abs(float(mdd)) * 100.0, 2),
-                "胜率%": _window_metric(book, wkey, "win_rate", windows_key=windows_key),
-                "盈亏比": _window_metric(
-                    book, wkey, "profit_factor", windows_key=windows_key
-                ),
-                "几何年化%": _window_metric(
-                    book, wkey, "avg_ann_pct", windows_key=windows_key
-                ),
-                "账户盈亏": _window_metric(
-                    book, wkey, "avg_year_pnl", windows_key=windows_key
-                ),
-            }
-        )
+        row: dict[str, Any] = {
+            "id": cid,
+            "label": label,
+            "区间": period,
+            "夏普": _window_metric(book, wkey, "sharpe", windows_key=windows_key),
+            "笔数": _window_metric(book, wkey, "n_trades", windows_key=windows_key),
+            "卡玛": _window_metric(book, wkey, "calmar", windows_key=windows_key),
+            "回撤%": None if mdd is None else round(abs(float(mdd)) * 100.0, 2),
+            "胜率%": _window_metric(book, wkey, "win_rate", windows_key=windows_key),
+            "盈亏比": _window_metric(
+                book, wkey, "profit_factor", windows_key=windows_key
+            ),
+            "几何年化%": _window_metric(
+                book, wkey, "avg_ann_pct", windows_key=windows_key
+            ),
+            "账户盈亏": _window_metric(
+                book, wkey, "avg_year_pnl", windows_key=windows_key
+            ),
+        }
+        if basket:
+            row["篮子"] = basket
+        rows.append(row)
     return rows
+
+
+def _stack_detail_window_rows(
+    cell: dict[str, Any],
+    book: dict[str, Any],
+    *,
+    space_on: bool,
+) -> list[dict[str, Any]]:
+    """无空间隔离 3 行；有则调参 3 + 盲测 3（缺 holdout 窗也出空行）。"""
+    if not space_on:
+        return _detail_window_rows(cell, book, windows_key="windows")
+    tune = _detail_window_rows(
+        cell, book, windows_key="windows", basket="调参"
+    )
+    hold = _detail_window_rows(
+        cell, book, windows_key="holdout_windows", basket="盲测"
+    )
+    return tune + hold
 
 
 _DETAIL_TONE_COLS = ("夏普", "卡玛", "胜率%", "盈亏比", "几何年化%", "账户盈亏")
@@ -1600,6 +1620,10 @@ def _html_cell(
     return "<%s%s style=\"%s\">%s</%s>" % (tag, rs, style, text, tag)
 
 
+def _detail_table_has_basket(rows: list[dict[str, Any]]) -> bool:
+    return any(str(r.get("篮子") or "").strip() for r in rows)
+
+
 def _detail_window_table_html(
     rows: list[dict[str, Any]],
     gate: dict[str, Any] | None = None,
@@ -1610,8 +1634,16 @@ def _detail_window_table_html(
         "vertical-align:middle;color:%s;"
         % (pal["border"], pal["color"])
     )
-    headers = ["id", "label", ""] + list(_DETAIL_METRIC_COLS)
-    th_align = ["left", "left", "center"] + ["right"] * len(_DETAIL_METRIC_COLS)
+    has_basket = _detail_table_has_basket(rows)
+    group_size = (_DETAIL_GROUP_SIZE * 2) if has_basket else _DETAIL_GROUP_SIZE
+    if has_basket:
+        headers = ["id", "label", "篮子", ""] + list(_DETAIL_METRIC_COLS)
+        th_align = ["left", "left", "center", "center"] + ["right"] * len(
+            _DETAIL_METRIC_COLS
+        )
+    else:
+        headers = ["id", "label", ""] + list(_DETAIL_METRIC_COLS)
+        th_align = ["left", "left", "center"] + ["right"] * len(_DETAIL_METRIC_COLS)
     wrap = "overflow-x:auto;width:100%;"
     table = (
         "width:100%%;border-collapse:collapse;font-size:0.9rem;color:%s;"
@@ -1635,7 +1667,7 @@ def _detail_window_table_html(
     i = 0
     group_i = 0
     while i < n:
-        chunk = rows[i : i + _DETAIL_GROUP_SIZE]
+        chunk = rows[i : i + group_size]
         span = len(chunk)
         zebra = pal["zebra"] if group_i % 2 == 1 else ""
         bg = "background:%s;" % zebra if zebra else ""
@@ -1665,12 +1697,29 @@ def _detail_window_table_html(
                         rowspan=span,
                     )
                 )
-            period_style = "%s%stext-align:center;white-space:nowrap;" % (
+            mid_style = "%s%stext-align:center;white-space:nowrap;" % (
                 cell_base,
                 bg,
             )
+            if has_basket and (
+                j == 0
+                or str(chunk[j - 1].get("篮子") or "") != str(row.get("篮子") or "")
+            ):
+                basket = str(row.get("篮子") or "")
+                basket_span = 0
+                for later in chunk[j:]:
+                    if str(later.get("篮子") or "") != basket:
+                        break
+                    basket_span += 1
+                parts.append(
+                    _html_cell(
+                        html.escape(basket),
+                        mid_style,
+                        rowspan=basket_span,
+                    )
+                )
             parts.append(
-                _html_cell(html.escape(str(row.get("区间") or "")), period_style)
+                _html_cell(html.escape(str(row.get("区间") or "")), mid_style)
             )
             for col in _DETAIL_METRIC_COLS:
                 extra = ""
@@ -1684,7 +1733,7 @@ def _detail_window_table_html(
                     _html_cell(_fmt_detail_metric(col, row.get(col)), metric_style)
                 )
             parts.append("</tr>")
-        i += _DETAIL_GROUP_SIZE
+        i += group_size
         group_i += 1
     parts.append("</tbody></table></div>")
     return "".join(parts)
@@ -1878,8 +1927,7 @@ def _render_results() -> None:
     win = fill_year_windows(summary)
     main_rows: list[dict[str, Any]] = []
     current_ids: set[str] = set()
-    tune_detail_rows: list[dict[str, Any]] = []
-    hold_detail_rows: list[dict[str, Any]] = []
+    detail_rows: list[dict[str, Any]] = []
     notes = rec.get("candidates") or []
     notes_by_id = {n.get("id"): n for n in notes if isinstance(n, dict)}
     cells = list(summary.get("cells") or [])
@@ -1910,11 +1958,7 @@ def _render_results() -> None:
             main["盲测盈亏"] = _round_pnl(b.get("corner_oos_pnl"))
         main["是否通过"] = "否" if compact else "是"
         main_rows.append(main)
-        tune_detail_rows.extend(_detail_window_rows(cell, b, windows_key="windows"))
-        if isinstance(b.get("holdout_windows"), dict):
-            hold_detail_rows.extend(
-                _detail_window_rows(cell, b, windows_key="holdout_windows")
-            )
+        detail_rows.extend(_stack_detail_window_rows(cell, b, space_on=space_on))
 
     df = pd.DataFrame(main_rows)
     preview_ids = {
@@ -1958,11 +2002,13 @@ def _render_results() -> None:
 
     with st.expander("窗内夏普 / 笔数 / 年化", expanded=False):
         _render_detail_window_table(
-            tune_detail_rows,
-            "调参标的" if space_on or hold_detail_rows else "跟踪池 / 主样本",
+            detail_rows,
+            (
+                "调参 3 行用于选参，盲测 3 行只否决，两篮数字不可加总"
+                if space_on
+                else "跟踪池 / 主样本"
+            ),
         )
-        if hold_detail_rows:
-            _render_detail_window_table(hold_detail_rows, "盲测标的（未参与调参）")
         st.caption(
             "过门用验收期窗内：卡玛、回撤%、夏普、笔数、胜率、盈亏比（非样本级整段）。"
             "笔数 = 窗内平仓；胜率 / 盈亏比按笔数。"
