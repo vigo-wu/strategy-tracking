@@ -106,12 +106,8 @@ scale_in:
   # 破平台 / 金叉不受 chase；回踩加仓受
 
 exit:
-  有序列表（不是单棵 and/or）：
-    1) weekly_bear_confirm   # 对外 reason 仍打 weekly_bear
-    2) stop_loss
-    3) atr_stop
-    4) trail_stop
-    5) time_force
+  weekly_bear_confirm | stop_loss | atr_stop | trail_stop | time_force
+  # or 短路；主因 = 第一个命中叶子 id（清仓打 weekly_bear_confirm）
 
 scale_out:
   false   # 现网无独立减仓槽

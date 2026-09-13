@@ -40,6 +40,65 @@ class FactorExprTests(unittest.TestCase):
         finally:
             ns["_factor_eval"] = orig
 
+    def test_recipe_explain_not_leaf(self) -> None:
+        ns = self.ns
+
+        def fake_eval(fid, ctx):
+            return bool(ctx.get(fid)), {}
+
+        orig = ns["_factor_eval"]
+        ns["_factor_eval"] = fake_eval
+        try:
+            hit, rs = ns["_recipe_explain"](
+                ["and", ["not", "chase"], "pullback_vol"],
+                {"chase": True, "pullback_vol": True},
+            )
+            self.assertFalse(hit)
+            self.assertEqual(rs, ["chase"])
+            hit, rs = ns["_recipe_explain"](
+                ["and", ["not", "chase"], "pullback_vol"],
+                {"chase": False, "pullback_vol": True},
+            )
+            self.assertTrue(hit)
+            self.assertEqual(rs, ["pullback_vol"])
+        finally:
+            ns["_factor_eval"] = orig
+
+    def test_recipe_not_leaves_top_and(self) -> None:
+        ns = self.ns
+        recipe = ns["RECIPE"]
+        self.assertEqual(
+            ns["_recipe_not_leaves"](recipe["scale_in"]),
+            ["vol_dry", "w_bias", "w_slope", "weekly_bear"],
+        )
+        self.assertNotIn("chase", ns["_recipe_not_leaves"](recipe["scale_in"]))
+
+    def test_exit_slot_or_confirm_and_stop(self) -> None:
+        ns = self.ns
+        ctx_confirm = {
+            "market": {"close": 10.0},
+            "state": {"w_bear_streak": 2, "cost": 10.0},
+        }
+        slot = ns["_eval_exit_slot"](ctx_confirm)
+        self.assertTrue(slot["hit"])
+        self.assertEqual(slot["reasons"], ["weekly_bear_confirm"])
+        lot = {"id": 1, "price": 10.0, "hold_peak": 10.2, "hold_bars": 5}
+        ctx_stop = {
+            "market": {"close": 9.0},
+            "state": {"lot": lot, "cost": 10.0, "w_bear_streak": 0},
+        }
+        slot = ns["_eval_exit_slot"](ctx_stop)
+        self.assertTrue(slot["hit"])
+        self.assertEqual(slot["reasons"], ["stop_loss"])
+
+    def test_entry_slot_chase_reason(self) -> None:
+        ns = self.ns
+        ctx = _chase_ctx(0.08)
+        ctx["market"]["w_detail"] = {}
+        slot = ns["_eval_entry_slot"](ctx)
+        self.assertFalse(slot["hit"])
+        self.assertEqual(slot["reasons"], ["chase"])
+
     def test_weekly_bear_same_day_vs_confirm(self) -> None:
         ns = self.ns
         detail = {
@@ -74,6 +133,24 @@ class FactorExprTests(unittest.TestCase):
         }
         self.assertFalse(ns["_factor_hit"]("weekly_bear", ctx_flat))
 
+    def test_eval_lot_sell_fallback_uses_streak(self) -> None:
+        ns = self.ns
+        A = ns["A"]
+        prev = getattr(A, "_w_bear_streak", 0)
+        lot = {"id": 1, "price": 10.0, "hold_peak": 10.0, "hold_bars": 1}
+        closes = [10.0] * 80
+        try:
+            A._w_bear_streak = 2
+            ok, rs = ns["_eval_lot_sell"](10.0, closes, lot)
+            self.assertTrue(ok)
+            self.assertEqual(rs, ["weekly_bear_confirm"])
+            A._w_bear_streak = 1
+            ok, rs = ns["_eval_lot_sell"](10.0, closes, lot)
+            self.assertFalse(ok)
+            self.assertNotIn("weekly_bear_confirm", rs)
+        finally:
+            A._w_bear_streak = prev
+
 
 class DefaultRecipeShapeTests(unittest.TestCase):
     def test_asymmetric_scale_in(self) -> None:
@@ -96,6 +173,7 @@ class DefaultRecipeShapeTests(unittest.TestCase):
         self.assertEqual(
             recipe["exit"],
             [
+                "or",
                 "weekly_bear_confirm",
                 "stop_loss",
                 "atr_stop",

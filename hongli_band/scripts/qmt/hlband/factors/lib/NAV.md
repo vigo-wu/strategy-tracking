@@ -25,7 +25,7 @@
 | `trail_stop` | [trail_stop.py](trail_stop.py) | 阶梯回撤 / 利润底 | `hold_peak` | `trail_stop.tiers` |
 | `time_force` | [time_force.py](time_force.py) | 持仓日 + 慢线地板 + 武装让路 | `hold_bars` / peak | `time_force.bars`；慢线周期是 `structure.d_ma.slow` |
 
-叶子 id 用 `chase`；日志码 `chase_skip` 由 `slots` / strategy 映射（`vol_dry`→`vol_dry_skip`，`w_bias`→`w_bias_skip`，`w_slope`→`w_slope_skip`）。确认清仓对外 reason 仍是 `weekly_bear`。
+日志 / 成交主因直接用叶子 id（`chase`、`vol_dry`、`w_bias`、`w_slope`、`weekly_bear_confirm`）。当天空头禁开仍是 `weekly_bear`。历史 log 里的 `*_skip` / 清仓 `weekly_bear` 由选股/summarize 兼容读取。
 
 不要拆 `pullback_vol` 为 `near_ma & vol_shrink`（现网复合原子）。`weekly_bull` 不是因子。
 

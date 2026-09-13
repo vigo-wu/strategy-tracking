@@ -1043,7 +1043,7 @@ def _book_checkin(
     _book_save(data)
 
 
-def _sync_signal_book(day, now_s, buy_sig, scale_sig, holding, sell_ok, force_empty):
+def _sync_signal_book(day, now_s, buy_sig, scale_sig, holding, sell_ok):
     if not _equal_split_on():
         return
     window = _book_window_id(now_s)
@@ -1051,7 +1051,7 @@ def _sync_signal_book(day, now_s, buy_sig, scale_sig, holding, sell_ok, force_em
         return
     pe = getattr(A, "pending_entry", None)
     px = getattr(A, "pending_exit", None)
-    sell = bool(isinstance(px, dict) or sell_ok or force_empty)
+    sell = bool(isinstance(px, dict) or sell_ok)
     buy = bool(isinstance(pe, dict)) or bool(buy_sig) or (bool(scale_sig) and bool(holding))
     add = False
     if isinstance(pe, dict) and pe.get("add"):
@@ -1064,7 +1064,8 @@ def _sync_signal_book(day, now_s, buy_sig, scale_sig, holding, sell_ok, force_em
     sell_all = False
     if isinstance(px, dict):
         reasons = px.get("reasons") or []
-        if (not px.get("lot_ids")) or ("weekly_bear" in reasons):
+        flatten = _is_weekly_flatten(px.get("reason"), reasons)
+        if (not px.get("lot_ids")) or flatten:
             sell_all = True
     n_lots = 0
     for lot in getattr(A, "lots", None) or []:

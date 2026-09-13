@@ -93,32 +93,43 @@ def _update_w_bear_streak(weekly_bear, sig_day, track):
     return streak >= need, streak
 
 
-def _eval_daily_buy(closes, volumes):
-    """买点：缩量回踩中/慢均线。d_ma.mid/slow<=0 关闭该条。"""
-    ctx = _build_factor_ctx(closes, volumes, None, None, {}, None)
-    detail = dict(ctx["market"].get("daily_detail") or {})
-    if not ctx["market"].get("daily_ready"):
-        return False, [], detail
-    if _factor_hit("chase", ctx):
-        return False, ["chase_skip"], detail
-    if _factor_hit("vol_dry", ctx):
-        return False, ["vol_dry_skip"], detail
-    ok, extra = _factor_eval("pullback_vol", ctx)
-    detail.update(extra or {})
-    reasons = ["pullback_vol"] if ok else []
-    return bool(reasons), reasons, detail
+def _is_weekly_flatten(reason=None, reasons=None):
+    """清仓周空：新码 weekly_bear_confirm，盘上旧 pending 仍可能是 weekly_bear。"""
+    codes = ("weekly_bear_confirm", "weekly_bear")
+    if reason and str(reason) in codes:
+        return True
+    for r in reasons or ():
+        if str(r) in codes:
+            return True
+    return False
 
 
-def _weekly_bias_guard(w_detail):
-    """周线 (MA5-MA34)/MA34 >= w_bias.hard → 禁开。"""
-    ok, det = _factor_eval("w_bias", {"market": {"w_detail": w_detail or {}}})
-    return ok, det.get("bias")
+def _scale_in_gate_hit(ctx):
+    """执行日撤买：RECIPE.scale_in 顶层 not 叶子任一为真。"""
+    recipe = globals().get("RECIPE") or {}
+    for fid in _recipe_not_leaves(recipe.get("scale_in")):
+        if _factor_hit(fid, ctx):
+            return fid
+    return None
 
 
-def _weekly_low_slope_guard(w_detail):
-    """低位 (MA5-MA34)/MA34 < W_BIAS_LOW 且生命线 MA34 未连续向上 → 禁开。"""
-    ok, det = _factor_eval("w_slope", {"market": {"w_detail": w_detail or {}}})
-    return ok, det.get("bias")
+def _bind_exit_ctx(base_ctx, lot=None, cost=None, hold_peak=None, hold_bars=None):
+    fields = {}
+    if lot is not None:
+        fields["lot"] = lot
+        if cost is None:
+            cost = lot.get("price")
+        if hold_peak is None:
+            hold_peak = lot.get("hold_peak")
+        if hold_bars is None:
+            hold_bars = lot.get("hold_bars")
+    if cost is not None:
+        fields["cost"] = cost
+    if hold_peak is not None:
+        fields["hold_peak"] = hold_peak
+    if hold_bars is not None:
+        fields["hold_bars"] = hold_bars
+    return _factor_ctx_bind_state(base_ctx, **fields)
 
 
 def _update_hold_peak(high_px, cost):
@@ -299,66 +310,33 @@ def _scale_ready(w_detail=None):
     return ok
 
 
-def _daily_plat_break(closes, highs, lows):
-    """日线收盘确认突破前期平台：回看窗口振幅够窄，今日收盘站上窗口最高价，昨收仍在平台内。"""
-    ctx = _build_factor_ctx(closes, None, highs, lows, {}, None)
-    return _factor_hit("plat_break", ctx)
-
-
-def _weekly_macd_golden_expand(w_detail):
-    """近两周周线 MACD 金叉，且当前红柱比上周放大。"""
-    return _factor_hit("w_macd_golden", {"market": {"w_detail": w_detail or {}}})
-
-
-def _eval_scale_push(closes, highs, lows, w_detail, pullback=False):
-    """加仓触发：缩量回踩 或 日线破平台 或 周线 MACD 金叉柱放大。"""
-    ctx = _build_factor_ctx(closes, None, highs, lows, w_detail, None)
-    reasons = []
-    if pullback:
-        reasons.append("pullback_vol")
-    if _factor_hit("plat_break", ctx):
-        reasons.append("plat_break")
-    if _factor_hit("w_macd_golden", ctx):
-        reasons.append("w_macd_golden")
-    return bool(reasons), reasons
-
-
-def _lot_exit_order():
-    """按笔评卖：RECIPE.exit 去掉 weekly_bear_confirm（周空走 force_empty）。"""
-    ordered = (globals().get("RECIPE") or {}).get("exit") or ()
-    out = []
-    for fid in list(ordered):
-        if str(fid) == "weekly_bear_confirm":
-            continue
-        out.append(fid)
-    return out
-
-
-def _eval_lot_sell(price, closes, lot, highs=None, lows=None):
-    ctx = _build_factor_ctx(
-        closes,
-        None,
-        highs,
-        lows,
-        {},
-        price,
-        state={"lot": lot, "cost": lot.get("price")},
-    )
-    slot = _eval_exit_slot(ctx, _lot_exit_order())
+def _eval_lot_sell(price, closes, lot, highs=None, lows=None, base_ctx=None):
+    if base_ctx is None:
+        base_ctx = _build_factor_ctx(
+            closes,
+            None,
+            highs,
+            lows,
+            {},
+            price,
+            state={
+                "w_bear_streak": int(getattr(A, "_w_bear_streak", 0) or 0),
+            },
+        )
+    ctx = _bind_exit_ctx(base_ctx, lot=lot)
+    slot = _eval_exit_slot(ctx)
     return bool(slot.get("hit")), list(slot.get("reasons") or [])
 
 
-def _collect_lot_exits(price, closes, force_empty, highs=None, lows=None):
+def _collect_lot_exits(base_ctx, price, closes, highs=None, lows=None):
     lots = _ensure_lots()
     if not lots:
         return False, [], [], 0
-    if force_empty:
-        lot_ids = [int(l.get("id") or 0) for l in lots]
-        shares = sum(int(l.get("shares") or 0) for l in lots)
-        return True, ["weekly_bear"], lot_ids, shares
     exits = []
     for lot in lots:
-        ok, reasons = _eval_lot_sell(price, closes, lot, highs=highs, lows=lows)
+        ok, reasons = _eval_lot_sell(
+            price, closes, lot, highs=highs, lows=lows, base_ctx=base_ctx
+        )
         if ok:
             exits.append((lot, reasons))
     if not exits:
@@ -584,21 +562,17 @@ def _should_emit_bar_status(C, now, force, status_idle):
     return True
 
 
-def _bar_signal_rising_edge(buy_sig, sell_ok, force_empty):
+def _bar_signal_rising_edge(buy_sig, sell_ok):
     """
-    相对上一 tick 的买卖/强平上升沿。
+    相对上一 tick 的买卖上升沿。
     电平一直为真时不再强制打状态行（避免收盘确认窗刷屏）。
     """
-    cur = (bool(buy_sig), bool(sell_ok), bool(force_empty))
+    cur = (bool(buy_sig), bool(sell_ok))
     prev = getattr(A, "_bar_sig_prev", None)
     A._bar_sig_prev = cur
     if prev is None:
-        return bool(cur[0] or cur[1] or cur[2])
-    return (
-        (cur[0] and not prev[0])
-        or (cur[1] and not prev[1])
-        or (cur[2] and not prev[2])
-    )
+        return bool(cur[0] or cur[1])
+    return (cur[0] and not prev[0]) or (cur[1] and not prev[1])
 
 
 def _lot_open_day(lot):
@@ -903,6 +877,7 @@ def _on_signal_order_ok(side, px=None, day=None, add=False):
 _SELL_LABELS = {
     "trail_stop": "卖点1-移动止盈回撤",
     "time_force": "卖点2-时间成本智能平仓",
+    "weekly_bear_confirm": "周线转空强制清仓",
     "weekly_bear": "周线转空强制清仓",
     "stop_loss": "硬止损",
     "atr_stop": "ATR止损",
@@ -912,6 +887,10 @@ _BUY_LABELS = {
     "pullback_vol": "买点1-缩量回踩强支撑",
     "plat_break": "加仓-日线突破前期平台",
     "w_macd_golden": "加仓-周线MACD金叉柱放大",
+    "chase": "追高过滤跳过",
+    "w_bias": "周线高位乖离禁开",
+    "w_slope": "低位周线MA34未连升禁开",
+    "vol_dry": "无量阴跌禁开",
     "chase_skip": "追高过滤跳过",
     "w_bias_skip": "周线高位乖离禁开",
     "w_slope_skip": "低位周线MA34未连升禁开",
@@ -1016,16 +995,9 @@ def _try_exec_pending_entry(
     last_px,
     holding,
     cash,
-    weekly_bear,
-    w_bias_block,
-    w_slope_block,
-    vol_dry_block,
+    fctx,
     w_detail,
-    force_empty,
     sell_ok,
-    stop_hit,
-    trail_hit,
-    time_force_hit,
 ):
     """成交就绪的 pending_entry。'done'=return；'force_eval'=让路卖点；None=继续。"""
     if str(getattr(A, "_universe_pass", "") or "") == "eval":
@@ -1045,10 +1017,7 @@ def _try_exec_pending_entry(
         print("%s pending_entry cancel add_no_pos" % STRATEGY_NAME)
         _event_log("pending_entry_cancel", reason="add_no_pos")
         return "done"
-    sell_block = bool(
-        pe_is_add
-        and (force_empty or sell_ok or stop_hit or trail_hit or time_force_hit)
-    )
+    sell_block = bool(pe_is_add and sell_ok)
     scale_ok, scale_why = _scale_gate(w_detail, price=last_px) if pe_is_add else (True, "")
     if sell_block or (pe_is_add and (not scale_ok)):
         why = "scale_sell_block" if sell_block else scale_why
@@ -1063,21 +1032,14 @@ def _try_exec_pending_entry(
         if sell_block:
             return "force_eval"
         return "done"
-    if weekly_bear or w_bias_block or w_slope_block or vol_dry_block:
+    gate = _scale_in_gate_hit(fctx)
+    if gate:
         A.pending_entry = None
         _save_state()
-        if weekly_bear:
-            why = "weekly_bear"
-        elif w_bias_block:
-            why = "w_bias_skip"
-        elif w_slope_block:
-            why = "w_slope_skip"
-        else:
-            why = "vol_dry_skip"
-        print("%s pending_entry cancel %s" % (STRATEGY_NAME, why))
+        print("%s pending_entry cancel %s" % (STRATEGY_NAME, gate))
         _event_log(
             "pending_entry_cancel",
-            reason=why,
+            reason=gate,
             signal_day=pe_entry.get("signal_day"),
         )
         return "done"
@@ -1222,14 +1184,7 @@ def _handle_open_exec_no_fallback(C, ctx):
         buy_sig = False
         scale_sig = isinstance(pe, dict) and bool(pe.get("add"))
         sell_ok = isinstance(px, dict)
-        force_empty = False
-        if isinstance(px, dict):
-            reasons = px.get("reasons") or []
-            if str(px.get("reason") or "") == "weekly_bear" or "weekly_bear" in reasons:
-                force_empty = True
-        _sync_signal_book(
-            day, now_s, buy_sig, scale_sig, holding, sell_ok, force_empty
-        )
+        _sync_signal_book(day, now_s, buy_sig, scale_sig, holding, sell_ok)
         if isinstance(px, dict):
             t_open, t_last, _src = _live_tick_open_last(C)
             if t_last > 0:
@@ -1508,22 +1463,17 @@ def _handle_stock(C, ctx):
     weekly_bear = _factor_hit("weekly_bear", fctx)
     # 清仓二次确认只在 bt / confirm / 开盘兜底累计；盘中 exec 不改 streak
     track_bear = (not live_cc) or (phase == "confirm") or bool(need_fallback)
-    force_empty, w_bear_n = _update_w_bear_streak(
+    w_bear_confirmed, w_bear_n = _update_w_bear_streak(
         weekly_bear, sig_day_weekly, track=track_bear
     )
     fctx = _factor_ctx_bind_state(
         fctx,
         w_bear_streak=w_bear_n,
-        w_bear_confirmed=force_empty,
+        w_bear_confirmed=w_bear_confirmed,
         cost=_pos_cost_price(),
     )
-    force_empty = _factor_hit("weekly_bear_confirm", fctx)
-    w_bias_block = _factor_hit("w_bias", fctx)
-    w_slope_block = _factor_hit("w_slope", fctx)
-    w_bias = (_factor_eval("w_bias", fctx)[1] or {}).get("bias")
     entry_slot = _eval_entry_slot(fctx)
     buy_reasons = list(entry_slot.get("reasons") or [])
-    buy_ok = bool(entry_slot.get("hit"))
     sell_ok = False
     sell_reasons = []
 
@@ -1576,11 +1526,8 @@ def _handle_stock(C, ctx):
         if _update_hold_peak(high_px, cost):
             _save_state()
 
-    stop_hit = False
-    trail_hit = False
-    time_force_hit = False
     skip_sell_eval = str(getattr(A, "_skip_sell_eval_day", "") or "") == str(day)
-    force_empty_act = False if skip_sell_eval else bool(force_empty)
+    skip_before = bool(getattr(A, "time_force_trend_skip", False))
     if skip_sell_eval and holding:
         _log_skip_sell_eval_day(day)
         sell_ok = False
@@ -1589,55 +1536,35 @@ def _handle_stock(C, ctx):
         exit_shares = 0
     elif holding and _lots_enabled():
         sell_ok, sell_reasons, exit_ids, exit_shares = _collect_lot_exits(
-            price, closes_s, force_empty, highs=highs_s, lows=lows_s
+            fctx, price, closes_s, highs=highs_s, lows=lows_s
         )
-        stop_hit = "stop_loss" in sell_reasons
-        trail_hit = "trail_stop" in sell_reasons
-        time_force_hit = "time_force" in sell_reasons
-    else:
-        skip_before = bool(getattr(A, "time_force_trend_skip", False))
-        if holding:
-            fctx_x = _factor_ctx_bind_state(
-                fctx,
-                cost=cost,
-                hold_peak=getattr(A, "hold_peak", None),
-                hold_bars=getattr(A, "hold_bars", 0),
-            )
-            slot_x = _eval_exit_slot(fctx_x, _lot_exit_order())
-            sell_ok = bool(slot_x.get("hit"))
-            sell_reasons = list(slot_x.get("reasons") or [])
-            stop_hit = "stop_loss" in sell_reasons
-            trail_hit = "trail_stop" in sell_reasons
-            time_force_hit = "time_force" in sell_reasons
-        if holding and (not skip_before) and bool(getattr(A, "time_force_trend_skip", False)):
-            _save_state()
+    elif holding:
+        fctx_x = _bind_exit_ctx(
+            fctx,
+            cost=cost,
+            hold_peak=getattr(A, "hold_peak", None),
+            hold_bars=getattr(A, "hold_bars", 0),
+        )
+        slot_x = _eval_exit_slot(fctx_x)
+        sell_ok = bool(slot_x.get("hit"))
+        sell_reasons = list(slot_x.get("reasons") or [])
+    if holding and (not skip_before) and bool(getattr(A, "time_force_trend_skip", False)):
+        _save_state()
 
     ret_pct = None
     if holding and cost > 0:
         ret_pct = (price - cost) / cost
 
-    skip_codes = (
-        "chase_skip",
-        "w_bias_skip",
-        "w_slope_skip",
-        "vol_dry_skip",
-        "weekly_bear",
-    )
-    real_buys = [r for r in buy_reasons if r not in skip_codes]
     buy_sig = bool(entry_slot.get("hit"))
-    vol_dry_block = _factor_hit("vol_dry", fctx)
     scale_slot = _eval_scale_in_slot(fctx)
-    scale_push_reasons = list(scale_slot.get("triggers") or [])
+    scale_reasons = list(scale_slot.get("reasons") or [])
     scale_ok, scale_why = _scale_gate(w_detail, price=price)
     scale_sig = bool(scale_ok and scale_slot.get("hit"))
-    exit_for_intent = {
-        "hit": bool(force_empty_act or sell_ok),
-        "reasons": (["weekly_bear"] if force_empty_act else []) + list(sell_reasons),
-    }
+    exit_slot = {"hit": bool(sell_ok), "reasons": list(sell_reasons)}
     intent = _arbitrate_intent(
         entry=entry_slot,
         scale_in=scale_slot,
-        exit_slot=exit_for_intent,
+        exit_slot=exit_slot,
         scale_out=_eval_scale_out_slot(fctx),
         scale_gate_ok=scale_ok,
         holding=holding,
@@ -1646,20 +1573,12 @@ def _handle_stock(C, ctx):
     )
 
     if not bt and upass != "exec":
-        _sync_signal_book(
-            day,
-            now_s,
-            buy_sig,
-            scale_sig,
-            holding,
-            sell_ok,
-            force_empty_act,
-        )
+        _sync_signal_book(day, now_s, buy_sig, scale_sig, holding, sell_ok)
 
     pe_now = bool(getattr(A, "pending_entry", None))
     px_now = bool(getattr(A, "pending_exit", None))
     # 信号上升沿强制打；实盘其余按 LIVE_HEARTBEAT_SEC；回测 idle 用 status_idle
-    force_bar_log = _bar_signal_rising_edge(buy_sig or scale_sig, sell_ok, force_empty)
+    force_bar_log = _bar_signal_rising_edge(buy_sig or scale_sig, sell_ok)
     status_idle = (bool(holding) or pe_now or px_now) and (not force_bar_log)
     if upass != "exec" and _should_emit_bar_status(C, now, force_bar_log, status_idle):
         A.ready_logged = True
@@ -1693,12 +1612,12 @@ def _handle_stock(C, ctx):
                 ",".join(buy_reasons) if buy_reasons else "-",
                 scale_sig,
                 (
-                    ",".join(scale_push_reasons)
-                    if scale_push_reasons
-                    else (scale_why or "-")
+                    ",".join(scale_reasons)
+                    if scale_sig and scale_reasons
+                    else (scale_why or (",".join(scale_reasons) if scale_reasons else "-"))
                 ),
-                sell_ok or force_empty_act,
-                ",".join((["weekly_bear"] if force_empty else []) + sell_reasons) or "-",
+                sell_ok,
+                ",".join(sell_reasons) if sell_reasons else "-",
                 holding,
                 _pos_lots() if holding else 0,
                 None if ret_pct is None else ("%.2f%%" % (ret_pct * 100.0)),
@@ -1730,12 +1649,12 @@ def _handle_stock(C, ctx):
             buyR=",".join(buy_reasons) if buy_reasons else "-",
             scale=scale_sig,
             scaleR=(
-                ",".join(scale_push_reasons)
-                if scale_push_reasons
-                else (scale_why or "-")
+                ",".join(scale_reasons)
+                if scale_sig and scale_reasons
+                else (scale_why or (",".join(scale_reasons) if scale_reasons else "-"))
             ),
-            sell=bool(sell_ok or force_empty_act),
-            sellR=",".join((["weekly_bear"] if force_empty else []) + sell_reasons) or "-",
+            sell=bool(sell_ok),
+            sellR=",".join(sell_reasons) if sell_reasons else "-",
             hold=holding,
             nlot=_pos_lots() if holding else 0,
             ret=None if ret_pct is None else round(ret_pct * 100.0, 4),
@@ -1757,16 +1676,9 @@ def _handle_stock(C, ctx):
         exec_last_px,
         holding,
         cash,
-        weekly_bear,
-        w_bias_block,
-        w_slope_block,
-        vol_dry_block,
+        fctx,
         w_detail,
-        force_empty,
         sell_ok,
-        stop_hit,
-        trail_hit,
-        time_force_hit,
     )
     if entry_act == "done":
         return
@@ -1797,28 +1709,16 @@ def _handle_stock(C, ctx):
                 if live_cc:
                     _mark_signal_eval_done(day, is_confirm)
                 return
-            if force_empty_act:
-                reason = "weekly_bear"
-            elif stop_hit:
-                reason = "stop_loss"
-            elif trail_hit:
-                reason = "trail_stop"
-            elif time_force_hit:
-                reason = "time_force"
-            else:
-                reason = sell_reasons[0] if sell_reasons else "SELL"
-            reasons = (["weekly_bear"] if force_empty_act else []) + list(sell_reasons)
-            seen = set()
             uniq = []
-            for r in reasons:
+            seen = set()
+            for r in sell_reasons:
                 if r not in seen and r != "skip_add_bar":
                     seen.add(r)
                     uniq.append(r)
+            reason = uniq[0] if uniq else "SELL"
             # 周线清仓用 sig_w；日线卖点用 sig_d
             exit_sig_day = (
-                sig_day_weekly
-                if (force_empty_act or reason == "weekly_bear")
-                else sig_day_daily
+                sig_day_weekly if _is_weekly_flatten(reason, uniq) else sig_day_daily
             )
             A.pending_exit = {
                 "mode": "day",
@@ -1871,11 +1771,12 @@ def _handle_stock(C, ctx):
                 if live_cc:
                     _mark_signal_eval_done(day, is_confirm)
                 return
+            add_reasons = list(intent.get("reasons") or scale_reasons)
             A.pending_entry = {
                 "signal_day": sig_day_daily,
                 "signal_tag": tag,
                 "close": price,
-                "reasons": list(scale_push_reasons),
+                "reasons": add_reasons,
                 "add": True,
             }
             A.pending_exit = None
@@ -1883,14 +1784,14 @@ def _handle_stock(C, ctx):
                 _mark_signal_eval_done(day, is_confirm)
             else:
                 _save_state()
-            primary = scale_push_reasons[0] if scale_push_reasons else "entry"
+            primary = add_reasons[0] if add_reasons else "entry"
             print(
                 "%s pending_entry set add signal=%s label=%s all=%s day=%s close=%.4f lots=%s phase=%s"
                 % (
                     STRATEGY_NAME,
                     primary,
                     _reason_label(primary, "buy"),
-                    _format_reasons(scale_push_reasons, "buy"),
+                    _format_reasons(add_reasons, "buy"),
                     sig_day_daily,
                     price,
                     _pos_lots(),
@@ -1901,7 +1802,7 @@ def _handle_stock(C, ctx):
                 "pending_entry_set",
                 signal=primary,
                 label=_reason_label(primary, "buy"),
-                all_reasons=_format_reasons(scale_push_reasons, "buy"),
+                all_reasons=_format_reasons(add_reasons, "buy"),
                 signal_day=sig_day_daily,
                 close=price,
                 phase=phase,
@@ -1917,16 +1818,9 @@ def _handle_stock(C, ctx):
                 exec_last_px,
                 holding,
                 cash,
-                weekly_bear,
-                w_bias_block,
-                w_slope_block,
-                vol_dry_block,
+                fctx,
                 w_detail,
-                force_empty,
                 sell_ok,
-                stop_hit,
-                trail_hit,
-                time_force_hit,
             )
         elif live_cc:
             _mark_signal_eval_done(day, is_confirm)
@@ -1943,25 +1837,26 @@ def _handle_stock(C, ctx):
             if live_cc:
                 _mark_signal_eval_done(day, is_confirm)
             return
+        open_reasons = list(intent.get("reasons") or buy_reasons)
         A.pending_entry = {
             "signal_day": sig_day_daily,
             "signal_tag": tag,
             "close": price,
-            "reasons": list(real_buys),
+            "reasons": open_reasons,
         }
         A.pending_exit = None
         if live_cc:
             _mark_signal_eval_done(day, is_confirm)
         else:
             _save_state()
-        primary = real_buys[0] if real_buys else "entry"
+        primary = open_reasons[0] if open_reasons else "entry"
         print(
             "%s pending_entry set signal=%s label=%s all=%s day=%s close=%.4f phase=%s"
             % (
                 STRATEGY_NAME,
                 primary,
                 _reason_label(primary, "buy"),
-                _format_reasons(real_buys, "buy"),
+                _format_reasons(open_reasons, "buy"),
                 sig_day_daily,
                 price,
                 phase,
@@ -1971,7 +1866,7 @@ def _handle_stock(C, ctx):
             "pending_entry_set",
             signal=primary,
             label=_reason_label(primary, "buy"),
-            all_reasons=_format_reasons(real_buys, "buy"),
+            all_reasons=_format_reasons(open_reasons, "buy"),
             signal_day=sig_day_daily,
             close=price,
             phase=phase,
@@ -1986,16 +1881,9 @@ def _handle_stock(C, ctx):
             exec_last_px,
             holding,
             cash,
-            weekly_bear,
-            w_bias_block,
-            w_slope_block,
-            vol_dry_block,
+            fctx,
             w_detail,
-            force_empty,
             sell_ok,
-            stop_hit,
-            trail_hit,
-            time_force_hit,
         )
     elif live_cc:
         _mark_signal_eval_done(day, is_confirm)

@@ -54,7 +54,7 @@ def _arbitrate_intent(
             shares=shares,
         )
     if holding and scale_in.get("hit") and scale_gate_ok:
-        return _intent_pack("buy", "add", scale_in.get("reasons") or scale_in.get("triggers"))
+        return _intent_pack("buy", "add", scale_in.get("reasons"))
     if (not holding) and entry.get("hit"):
         return _intent_pack("buy", "open", entry.get("reasons"))
     return _intent_blank()

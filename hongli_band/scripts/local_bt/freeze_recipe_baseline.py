@@ -93,30 +93,47 @@ def _eval_cases(ns: dict) -> list[dict]:
     lows = [c - 0.1 for c in closes]
     closes_w = [10.0 + 0.05 * i for i in range(50)]
     bull, bear, detail = ns["_eval_weekly"](closes_w)
-    buy_ok, buy_rs, _ = ns["_eval_daily_buy"](closes, vols)
+    ctx = ns["_build_factor_ctx"](closes, vols, highs, lows, detail, None)
+    entry = ns["_eval_entry_slot"](ctx)
     cases.append(
         {
             "id": "trend_up",
             "weekly_bull": bool(bull),
             "weekly_bear": bool(bear),
-            "buy_ok": bool(buy_ok),
-            "buy_reasons": list(buy_rs),
-            "w_bias": bool(ns["_weekly_bias_guard"](detail)[0]),
-            "w_slope": bool(ns["_weekly_low_slope_guard"](detail)[0]),
+            "buy_ok": bool(entry.get("hit")),
+            "buy_reasons": list(entry.get("reasons") or []),
+            "w_bias": bool(ns["_factor_hit"]("w_bias", ctx)),
+            "w_slope": bool(ns["_factor_hit"]("w_slope", ctx)),
         }
     )
 
     chase_c = list(closes)
     chase_c[-1] = chase_c[-2] * 1.08
-    buy_ok, buy_rs, _ = ns["_eval_daily_buy"](chase_c, vols)
-    cases.append({"id": "chase", "buy_ok": bool(buy_ok), "buy_reasons": list(buy_rs)})
+    chase_ctx = ns["_build_factor_ctx"](chase_c, vols, highs, lows, detail, None)
+    entry = ns["_eval_entry_slot"](chase_ctx)
+    cases.append(
+        {
+            "id": "chase",
+            "buy_ok": bool(entry.get("hit")),
+            "buy_reasons": list(entry.get("reasons") or []),
+        }
+    )
 
     dry_c = list(closes)
     dry_v = list(vols)
     dry_c[-1] = 8.0
     dry_v[-1] = 1.0e4
-    buy_ok, buy_rs, _ = ns["_eval_daily_buy"](dry_c, dry_v)
-    cases.append({"id": "vol_dry", "buy_ok": bool(buy_ok), "buy_reasons": list(buy_rs)})
+    dry_h = [c + 0.1 for c in dry_c]
+    dry_l = [c - 0.1 for c in dry_c]
+    dry_ctx = ns["_build_factor_ctx"](dry_c, dry_v, dry_h, dry_l, detail, None)
+    entry = ns["_eval_entry_slot"](dry_ctx)
+    cases.append(
+        {
+            "id": "vol_dry",
+            "buy_ok": bool(entry.get("hit")),
+            "buy_reasons": list(entry.get("reasons") or []),
+        }
+    )
 
     lot = {
         "id": 1,
@@ -142,34 +159,43 @@ def _eval_cases(ns: dict) -> list[dict]:
     pb_c[-1] = float(m20)
     pb_c[-2] = float(m20) * 1.001
     pb_v = [1.0e6] * 80
-    pb_v[-1] = 2.0e5
-    pb_v[-2] = 2.0e5
-    buy_ok, buy_rs, _ = ns["_eval_daily_buy"](pb_c, pb_v)
-    cases.append({"id": "pullback", "buy_ok": bool(buy_ok), "buy_reasons": list(buy_rs)})
+    pb_h = [c + 0.1 for c in pb_c]
+    pb_l = [c - 0.1 for c in pb_c]
+    pb_ctx = ns["_build_factor_ctx"](pb_c, pb_v, pb_h, pb_l, detail, None)
+    entry = ns["_eval_entry_slot"](pb_ctx)
+    cases.append(
+        {
+            "id": "pullback",
+            "buy_ok": bool(entry.get("hit")),
+            "buy_reasons": list(entry.get("reasons") or []),
+        }
+    )
 
     bear_w = [12.0] * 40 + [8.0] * 10
     bull, bear, detail = ns["_eval_weekly"](bear_w)
+    bear_ctx = ns["_build_factor_ctx"](closes, vols, highs, lows, detail, None)
     cases.append(
         {
             "id": "weekly_bear_day",
             "weekly_bull": bool(bull),
             "weekly_bear": bool(bear),
-            "w_bias": bool(ns["_weekly_bias_guard"](detail)[0]),
-            "w_slope": bool(ns["_weekly_low_slope_guard"](detail)[0]),
+            "w_bias": bool(ns["_factor_hit"]("w_bias", bear_ctx)),
+            "w_slope": bool(ns["_factor_hit"]("w_slope", bear_ctx)),
         }
     )
 
     plat_c = [10.0] * 30 + [10.3]
     plat_h = [10.05] * 30 + [10.35]
     plat_l = [9.95] * 30 + [10.2]
-    plat = bool(ns["_daily_plat_break"](plat_c, plat_h, plat_l))
-    push_ok, push_rs = ns["_eval_scale_push"](plat_c, plat_h, plat_l, detail, pullback=False)
+    plat_ctx = ns["_build_factor_ctx"](plat_c, None, plat_h, plat_l, detail, None)
+    plat = bool(ns["_factor_hit"]("plat_break", plat_ctx))
+    scale = ns["_eval_scale_in_slot"](plat_ctx)
     cases.append(
         {
             "id": "plat_break",
             "plat": plat,
-            "scale_ok": bool(push_ok),
-            "scale_reasons": list(push_rs),
+            "scale_ok": bool(scale.get("hit")),
+            "scale_reasons": list(scale.get("reasons") or []),
         }
     )
     return cases

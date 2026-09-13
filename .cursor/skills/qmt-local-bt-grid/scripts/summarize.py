@@ -110,7 +110,8 @@ def _sell_counts(trades: list[dict[str, Any]]) -> dict[str, Any]:
         "sell": dict(by_sig),
         "n_trail": int(by_sig.get("trail_stop", 0)),
         "n_stop": int(by_sig.get("stop_loss", 0)),
-        "n_weekly": int(by_sig.get("weekly_bear", 0)),
+        "n_weekly": int(by_sig.get("weekly_bear_confirm", 0))
+        + int(by_sig.get("weekly_bear", 0)),
         "n_time": int(by_sig.get("time_force", 0)),
         "by_year": {str(y): round(by_year[y], 2) for y in sorted(by_year)},
     }

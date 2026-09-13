@@ -12,8 +12,8 @@
 实盘报单成功后**保留**信号 pending / 止盈元数据，**仅成交回调**后清除；废单/撤单后下一尾盘或开盘窗自动重试。  
 **加仓成交后当日不再评新卖点**（`skip_sell_eval_day`，实盘同一根日 K 的后续 tick 也跳过）；已挂的 `pending_exit` 仍可成交。T+1 导致整仓/多笔只卖掉一部分时，若 `pending_exit.lot_ids` 还有剩余笔则**保留** pending，不因部分成交清掉。
 
-**加仓**（`SCALE_ENABLE`）：已有仓且同时满足门槛：任一笔峰值浮盈 `>= SCALE_ARM`（`0.03`，独立于 TRAIL 档1）、该笔持仓日 `>= SCALE_ARM_BARS`（`8`）、周线 MACD 柱 `>= SCALE_W_HIST_MIN`（`-0.01`）。第二笔触发为下列**任一**：① 合格缩量回踩（`pullback_vol`，回踩加仓）；② 日线收盘确认突破前期平台（`plat_break`，破平台推仓）；③ 近两周周线 MACD 黄金交叉且柱放大（`w_macd_golden`）。`SCALE_ONCE_PER_ROUND`（默认开）：**同一轮只加一次**——加仓成交后锁定，该只只要还剩任何一笔就不能再买；两笔都平掉后才能再开下一轮。金额：第二笔 30% cap；若该笔已是全池第三槽则吃剩余可部署资金。执行日若已触发卖点则**取消加仓、让路出场**。全池最多 3 笔（`BOOK_LOT_MAX`），前两笔 50%/30%、第三笔吃剩余（约 20% cap）；满则 `book_lot_cap`。回踩加仓仍受 `chase_skip`；破平台/金叉不受。**移动止盈不让路加仓信号评估**，但执行日卖点优先。  
-**多仓**（`SCALE_LOTS`，默认开）：记账在共用模块 `scripts/qmt_common/single/lots.py`。每笔自己的成本、峰值、持仓日数、时间成本豁免；`stop_loss` / `atr_stop` / `trail_stop` / `time_force` **按笔**出。`weekly_bear` 仍一次出清剩余各笔。第一笔可以先止盈，第二笔继续拿（本轮已加过则不再加第三笔）。券商可卖是合计 `can_use`，与 `lots=[id]` 可能对不齐；卖出时打 `SELL lot-can_use`，若目标笔当日新开且可卖来自旧仓则打 `WARN`。  
+**加仓**（`SCALE_ENABLE`）：已有仓且同时满足门槛：任一笔峰值浮盈 `>= SCALE_ARM`（`0.03`，独立于 TRAIL 档1）、该笔持仓日 `>= SCALE_ARM_BARS`（`8`）、周线 MACD 柱 `>= SCALE_W_HIST_MIN`（`-0.01`）。第二笔触发为下列**任一**：① 合格缩量回踩（`pullback_vol`，回踩加仓）；② 日线收盘确认突破前期平台（`plat_break`，破平台推仓）；③ 近两周周线 MACD 黄金交叉且柱放大（`w_macd_golden`）。`SCALE_ONCE_PER_ROUND`（默认开）：**同一轮只加一次**——加仓成交后锁定，该只只要还剩任何一笔就不能再买；两笔都平掉后才能再开下一轮。金额：第二笔 30% cap；若该笔已是全池第三槽则吃剩余可部署资金。执行日若已触发卖点则**取消加仓、让路出场**。全池最多 3 笔（`BOOK_LOT_MAX`），前两笔 50%/30%、第三笔吃剩余（约 20% cap）；满则 `book_lot_cap`。回踩加仓仍受 `chase`；破平台/金叉不受。**移动止盈不让路加仓信号评估**，但执行日卖点优先。  
+**多仓**（`SCALE_LOTS`，默认开）：记账在共用模块 `scripts/qmt_common/single/lots.py`。每笔自己的成本、峰值、持仓日数、时间成本豁免；`stop_loss` / `atr_stop` / `trail_stop` / `time_force` **按笔**出。`weekly_bear_confirm` 仍一次出清剩余各笔。第一笔可以先止盈，第二笔继续拿（本轮已加过则不再加第三笔）。券商可卖是合计 `can_use`，与 `lots=[id]` 可能对不齐；卖出时打 `SELL lot-can_use`，若目标笔当日新开且可卖来自旧仓则打 `WARN`。  
 关 `SCALE_LOTS` 则均价合并、整仓出。
 
 ---
@@ -22,8 +22,8 @@
 
 周线均线为斐波那契 **MA5 / MA13 / MA34**（`RECIPE.structure.w_ma` 的 `fast` / `mid` / `life`，当前 5 / 13 / 34；`mid` 只给日志多头 `weekly_bull`）。周线取数 need 另钳原 MA55 暖机地板。价格均线**算法**优先取 `BOOK_STOCKS[code].ma_type`，缺省回落全局 `MA_TYPE`（`EMA` 或 `SMA`，默认 EMA）；成交量均量始终 SMA。文档与日志里的 `w_ma30` 字段实际是生命线 MA34。实盘与回测都只用**上一根已收盘周 K**（丢掉今天所在自然周，周五尾盘也看上周），对齐 QMT 回测 0000 原生 `1w`。
 
-1. `(MA5_W - MA34_W) / MA34_W >= w_bias.hard`（当前 `0.08`）→ 禁开（`w_bias_skip`）。
-2. **低位斜率**：当周线乖离 `< w_slope.low`（当前 `0.02`）时，要求 **MA34 连续 `w_slope.slope_weeks` 周向上**（当前 `2`），否则禁开（`w_slope_skip`）；执行日也会取消 pending。
+1. `(MA5_W - MA34_W) / MA34_W >= w_bias.hard`（当前 `0.08`）→ 禁开（`w_bias`）。
+2. **低位斜率**：当周线乖离 `< w_slope.low`（当前 `0.02`）时，要求 **MA34 连续 `w_slope.slope_weeks` 周向上**（当前 `2`），否则禁开（`w_slope`）；执行日也会取消 pending。
 3. 周线空头（收盘破 34 周，或 DIF/DEA 零轴下死叉）：**当日即禁开**（`weekly_bear`）；持仓强制清仓须 **连续 `weekly_bear_confirm.days` 根日 K（信号日）仍空**（当前 `2`）才挂 `pending_exit`；执行日若仍空头则取消买入 pending。
 
 说明：开仓不强制要求 `weekly_bull`；多头（MA5>MA13 且 DIF>0 且红柱且生命线未明显走平）仅用于日志，禁开靠乖离/斜率/空头。
@@ -37,13 +37,13 @@
 - 收盘靠近 `MA20` 或 `MA60`（容差 `pullback_vol.tol`，当前 ±2.5%；算法见标的 `ma_type` / `MA_TYPE`）
 - **连续** `pullback_vol.confirm_days` 日（当前 `2`）成交量 `<` 该日 `MAVOL10 × pullback_vol.ratio`（当前 `0.9`）；贴均线只看当天
 
-空仓时开第一笔（`pullback_vol`）。已持仓且门槛+触发都满足、且本轮尚未加过仓时挂 `pending_entry add=True`，尾盘按**分档金额**成交（第二笔 30% cap；全池最后一槽吃剩余；错过则次日开盘补）。加仓仍受下方全局拦截（破平台/金叉不受 `chase_skip`）；另有 `scale_once` / `scale_bars` / `scale_w_hist` / `scale_sell_block` / `scale_cap` / `book_lot_cap`。周线空头 / 乖离 / 斜率 / 无量阴跌会取消加仓 pending。
+空仓时开第一笔（`pullback_vol`）。已持仓且门槛+触发都满足、且本轮尚未加过仓时挂 `pending_entry add=True`，尾盘按**分档金额**成交（第二笔 30% cap；全池最后一槽吃剩余；错过则次日开盘补）。加仓仍受下方全局拦截（破平台/金叉不受 `chase`）；另有 `scale_once` / `scale_bars` / `scale_w_hist` / `scale_sell_block` / `scale_cap` / `book_lot_cap`。周线空头 / 乖离 / 斜率 / 无量阴跌会取消加仓 pending。
 
 ### 加仓触发（持仓中，回踩或破平台任一）
 
 | 触发 | 条件 | 日志码 |
 | :--- | :--- | :--- |
-| 缩量回踩 | 与第一笔相同：近 MA20/60 且连续 N 日缩量；受 `chase_skip` | `pullback_vol` |
+| 缩量回踩 | 与第一笔相同：近 MA20/60 且连续 N 日缩量；受 `chase` | `pullback_vol` |
 | 日线破平台 | 回看 `plat_break.lookback` 日（当前 20，不含当日）高低点振幅 `(高-低)/低 <= plat_break.max_range`（当前 10%）；收盘严格站上该窗口最高价；昨收仍在平台内 | `plat_break` |
 | 周线 MACD 金叉放大 | 本周 DIF 上穿 DEA 且红柱比上周增长；或上周已金叉、本周红柱达到上周柱绝对值 × `w_macd_golden.hist_expand`（当前 1.2） | `w_macd_golden` |
 
@@ -52,12 +52,12 @@
 | 条件 | 日志码 |
 | :--- | :--- |
 | 周线空头 | `weekly_bear` |
-| 当日涨幅 ≥ `chase.max_pct`（当前 `0.05`） | `chase_skip` |
-| 收盘 < MA20 且量 < MAVOL20 × `vol_dry.ratio`（当前 `0.60`） | `vol_dry_skip` |
-| 周线高位乖离 / 低位斜率不达标 | `w_bias_skip` / `w_slope_skip` |
+| 当日涨幅 ≥ `chase.max_pct`（当前 `0.05`） | `chase` |
+| 收盘 < MA20 且量 < MAVOL20 × `vol_dry.ratio`（当前 `0.60`） | `vol_dry` |
+| 周线高位乖离 / 低位斜率不达标 | `w_bias` / `w_slope` |
 | 账户或单标的额度已满 / 全池满 3 笔 | `buy_cap` / `scale_cap` / `book_lot_cap` |
 
-`chase_skip` 拦第一笔和回踩加仓；破平台 / 周线金叉加仓不受 5% 涨幅禁开。其余拦截对加仓同样生效。
+`chase` 拦第一笔和回踩加仓；破平台 / 周线金叉加仓不受 5% 涨幅禁开。其余拦截对加仓同样生效。
 
 ---
 
@@ -126,7 +126,7 @@
 | :--- | :--- | :--- |
 | ① 阶梯移动止盈 | 按**该笔**峰值浮盈选档（见下表）；回撤超容忍或跌破利润底线 | `trail_stop` |
 | ② 智能时间 | **该笔**持仓 **> `time_force.bars`**（当前 30）日：破日线 MA60 → 强制平仓；仍站上 MA60 且峰值浮盈 **< TRAIL 档1 `peak_lo`**（当前 3%）→ **立即强制平仓**；峰值已达门槛 → **不按日历强平**，交给移动止盈 / 破 MA60 / 周线转空 | `time_force` |
-| 兜底 | 收盘 ≤ **该笔**成本 × (1 − `stop_loss.pct`)（当前 `0.08`），或收盘 ≤ 成本 − `atr_stop.k`×ATR（当前 `k=2`、`atr.n=14`）/ 周线转空且连续 `weekly_bear_confirm.days` 日 | `stop_loss` / `atr_stop` / `weekly_bear` |
+| 兜底 | 收盘 ≤ **该笔**成本 × (1 − `stop_loss.pct`)（当前 `0.08`），或收盘 ≤ 成本 − `atr_stop.k`×ATR（当前 `k=2`、`atr.n=14`）/ 周线转空且连续 `weekly_bear_confirm.days` 日 | `stop_loss` / `atr_stop` / `weekly_bear_confirm` |
 
 阶梯档位 `trail_stop.tiers`（峰值浮盈 = `(hold_peak − cost) / cost`）：
 
@@ -136,9 +136,9 @@
 | 落袋为安 | [6%, 10%) | 3% | 至少带走 3% |
 | 放鹰吃肉 | ≥ 10% | 4% | — |
 
-优先级（挂 pending 主因）：`weekly_bear` > `stop_loss` > `atr_stop` > `trail_stop` > `time_force`。  
+优先级（挂 pending 主因，`RECIPE.exit` 的 or 短路）：`weekly_bear_confirm` > `stop_loss` > `atr_stop` > `trail_stop` > `time_force`。  
 持仓过除权除息：卖点评估前按 `get_divid_factors` 的 `dr` 缩放该票 `cost`/`hold_peak`（送转同步股数）；**配股默认按未认购**（股数不含配股部分），实盘用券商量延后判定认购后再加权成本；除权日当日开仓不缩放。回测若行情是**静态** `front`/`front_ratio`/`back`/`back_ratio`/`follow`（未走 PIT）则跳过；**PIT 激活**（回测 front*→none+因子）时与实盘一样缩放。本地回测操作明细同步写「送转」行，成交轮次按缩放后成本/股数计收益%。  
-`SCALE_LOTS` 开启时，除 `weekly_bear` 一次出清外，其余卖点只平触发的那几笔（日志 `lots=[id]`）。  
+`SCALE_LOTS` 开启时，除 `weekly_bear_confirm` 一次出清外，其余卖点只平触发的那几笔（日志 `lots=[id]`）。  
 买卖委托失败/T+1 skip 时**保留**对应 pending（及持仓元数据）；实盘报单成功亦保留至成交，废单后尾盘或次日开盘窗可重试。当日新买的笔 T+1 不可卖，不清仓状态。  
 加仓成交后当日状态行可见 `skip_add_bar`，不应再出现新的 `pending_exit set`。T+1 部分成交且目标笔仍在应看到 `pending_exit keep after partial fill`。卖出前有 `SELL lot-can_use`；`risk=True` 时说明目标笔当日新开、可卖可能来自旧仓。
 

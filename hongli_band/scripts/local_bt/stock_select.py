@@ -61,11 +61,15 @@ RE_SELL_SIG = re.compile(r"SELL by signal=(\w+)")
 RE_BUY_SIG = re.compile(r"BUY(?: add)? by signal=(\w+)")
 RE_BANNER_N = re.compile(r"\bn=\s*(\d+)")
 SKIP_CODES = (
+    "w_bias",
+    "w_slope",
+    "vol_dry",
+    "chase",
+    "weekly_bear",
     "w_bias_skip",
     "w_slope_skip",
     "vol_dry_skip",
     "chase_skip",
-    "weekly_bear",
 )
 # 默认回落；实际打分年由扫描结果推断（含尚未走完的最大年）
 SCORE_YEARS = ("2021", "2022", "2023", "2024", "2025", "2026")
@@ -821,14 +825,16 @@ def _agg_from_years(rec: dict[str, Any], score_years: tuple[str, ...]) -> dict[s
     n_sell = sum(sell.values())
     trail = float(sell.get("trail_stop") or 0)
     stop = float(sell.get("stop_loss") or 0)
-    bear = float(sell.get("weekly_bear") or 0)
+    bear = float(sell.get("weekly_bear_confirm") or 0) + float(
+        sell.get("weekly_bear") or 0
+    )
     trail_share = (trail / n_sell) if n_sell else None
     stop_share = (stop / n_sell) if n_sell else None
     bear_share = (bear / n_sell) if n_sell else None
     quality = None
     if n_sell:
         quality = trail_share - stop_share - bear_share
-    bias_n = int(skip.get("w_bias_skip") or 0)
+    bias_n = int(skip.get("w_bias") or 0) + int(skip.get("w_bias_skip") or 0)
     bias_density = (bias_n / n_bars) if n_bars else None
     win_share = (max_win_pnl / gp) if gp > 1e-9 else None
     recent = rec.get("recent") or {}

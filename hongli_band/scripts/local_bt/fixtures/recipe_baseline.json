@@ -9,7 +9,9 @@
       "weekly_bull": false,
       "weekly_bear": false,
       "buy_ok": false,
-      "buy_reasons": [],
+      "buy_reasons": [
+        "pullback_vol"
+      ],
       "w_bias": false,
       "w_slope": false
     },
@@ -17,14 +19,14 @@
       "id": "chase",
       "buy_ok": false,
       "buy_reasons": [
-        "chase_skip"
+        "chase"
       ]
     },
     {
       "id": "vol_dry",
       "buy_ok": false,
       "buy_reasons": [
-        "vol_dry_skip"
+        "vol_dry"
       ]
     },
     {
@@ -43,7 +45,7 @@
     },
     {
       "id": "pullback",
-      "buy_ok": true,
+      "buy_ok": false,
       "buy_reasons": [
         "pullback_vol"
       ]
@@ -58,9 +60,9 @@
     {
       "id": "plat_break",
       "plat": true,
-      "scale_ok": true,
+      "scale_ok": false,
       "scale_reasons": [
-        "plat_break"
+        "w_slope"
       ]
     }
   ],

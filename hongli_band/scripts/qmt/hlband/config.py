@@ -90,6 +90,7 @@ RECIPE = {
         ],
     ],
     "exit": [
+        "or",
         "weekly_bear_confirm",
         "stop_loss",
         "atr_stop",
