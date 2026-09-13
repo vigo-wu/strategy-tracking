@@ -1783,6 +1783,12 @@ def _detail_metric_tone(
     return None
 
 
+_DETAIL_TUNE_BG_DARK = "rgba(56, 139, 253, 0.12)"
+_DETAIL_HOLD_BG_DARK = "rgba(210, 153, 34, 0.12)"
+_DETAIL_TUNE_BG_LIGHT = "rgba(56, 139, 253, 0.10)"
+_DETAIL_HOLD_BG_LIGHT = "rgba(210, 153, 34, 0.12)"
+
+
 def _detail_table_palette() -> dict[str, str]:
     dark = True
     try:
@@ -1796,13 +1802,25 @@ def _detail_table_palette() -> dict[str, str]:
             "header_bg": "var(--secondary-background-color, #262730)",
             "border": "rgba(230,237,243,0.18)",
             "zebra": "rgba(255,255,255,0.04)",
+            "tune": _DETAIL_TUNE_BG_DARK,
+            "hold": _DETAIL_HOLD_BG_DARK,
         }
     return {
         "color": "var(--text-color, #1f2328)",
         "header_bg": "var(--secondary-background-color, #f0f2f6)",
         "border": "rgba(31,35,40,0.18)",
         "zebra": "rgba(0,0,0,0.04)",
+        "tune": _DETAIL_TUNE_BG_LIGHT,
+        "hold": _DETAIL_HOLD_BG_LIGHT,
     }
+
+
+def _basket_row_bg(pal: dict[str, str], basket: str) -> str:
+    if basket == "调参":
+        return pal.get("tune") or ""
+    if basket == "盲测":
+        return pal.get("hold") or ""
+    return ""
 
 
 def _html_cell(
@@ -1866,18 +1884,21 @@ def _detail_window_table_html(
         chunk = rows[i : i + group_size]
         span = len(chunk)
         zebra = pal["zebra"] if group_i % 2 == 1 else ""
-        bg = "background:%s;" % zebra if zebra else ""
+        id_bg = "background:%s;" % zebra if zebra else ""
         for j, row in enumerate(chunk):
+            basket = str(row.get("篮子") or "")
+            row_color = _basket_row_bg(pal, basket) if has_basket else zebra
+            row_bg = "background:%s;" % row_color if row_color else ""
             parts.append("<tr>")
             if j == 0:
                 id_style = "%s%stext-align:left;white-space:nowrap;" % (
                     cell_base,
-                    bg,
+                    id_bg,
                 )
                 label_style = (
                     "%s%stext-align:left;width:%s;max-width:%s;"
                     "white-space:normal;overflow-wrap:anywhere;"
-                    % (cell_base, bg, _DETAIL_LABEL_WIDTH, _DETAIL_LABEL_WIDTH)
+                    % (cell_base, id_bg, _DETAIL_LABEL_WIDTH, _DETAIL_LABEL_WIDTH)
                 )
                 parts.append(
                     _html_cell(
@@ -1895,13 +1916,12 @@ def _detail_window_table_html(
                 )
             mid_style = "%s%stext-align:center;white-space:nowrap;" % (
                 cell_base,
-                bg,
+                row_bg,
             )
             if has_basket and (
                 j == 0
                 or str(chunk[j - 1].get("篮子") or "") != str(row.get("篮子") or "")
             ):
-                basket = str(row.get("篮子") or "")
                 basket_span = 0
                 for later in chunk[j:]:
                     if str(later.get("篮子") or "") != basket:
@@ -1923,7 +1943,7 @@ def _detail_window_table_html(
                     extra = "color:%s;" % _DETAIL_PASS_COLOR
                 metric_style = (
                     "%s%stext-align:right;font-variant-numeric:tabular-nums;%s"
-                    % (cell_base, bg, extra)
+                    % (cell_base, row_bg, extra)
                 )
                 parts.append(
                     _html_cell(_fmt_detail_metric(col, row.get(col)), metric_style)

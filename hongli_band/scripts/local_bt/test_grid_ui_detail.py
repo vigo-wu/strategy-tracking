@@ -12,6 +12,8 @@ if str(HERE) not in sys.path:
 
 try:
     from grid_ui import (
+        _DETAIL_HOLD_BG_DARK,
+        _DETAIL_TUNE_BG_DARK,
         _cell_column_mean,
         _composite_n_diffs_map,
         _detail_metric_tone,
@@ -25,6 +27,8 @@ try:
         _stack_detail_window_rows,
     )
 except ImportError:
+    _DETAIL_HOLD_BG_DARK = ""  # type: ignore[misc, assignment]
+    _DETAIL_TUNE_BG_DARK = ""  # type: ignore[misc, assignment]
     _cell_column_mean = None  # type: ignore[misc, assignment]
     _composite_n_diffs_map = None  # type: ignore[misc, assignment]
     _detail_metric_tone = None  # type: ignore[misc, assignment]
@@ -158,6 +162,8 @@ class GridUiDetailStackHtmlTest(unittest.TestCase):
         self.assertNotIn("篮子", html)
         self.assertIn('rowspan="3"', html)
         self.assertNotIn('rowspan="6"', html)
+        self.assertNotIn(_DETAIL_TUNE_BG_DARK, html)
+        self.assertNotIn(_DETAIL_HOLD_BG_DARK, html)
 
     def test_html_basket_rowspan_6(self) -> None:
         rows = _stack_detail_window_rows(
@@ -169,6 +175,10 @@ class GridUiDetailStackHtmlTest(unittest.TestCase):
         self.assertEqual(html.count(">盲测</"), 1)
         self.assertIn('rowspan="6"', html)
         self.assertEqual(html.count('rowspan="3"'), 2)
+        self.assertIn(_DETAIL_TUNE_BG_DARK, html)
+        self.assertIn(_DETAIL_HOLD_BG_DARK, html)
+        self.assertGreater(html.count(_DETAIL_TUNE_BG_DARK), 0)
+        self.assertGreater(html.count(_DETAIL_HOLD_BG_DARK), 0)
 
 
 @unittest.skipIf(_detail_metric_tone is None, "streamlit (or grid_ui deps) not installed")
