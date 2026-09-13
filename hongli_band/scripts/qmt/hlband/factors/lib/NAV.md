@@ -3,7 +3,7 @@
 一 id 一文件。接口：`_factor_eval_<id>(ctx) → (bool, detail)`。  
 中性：只回答「条件是否成立」，买/卖/加/减由 [../NAV.md](../NAV.md) 的 Recipe / Intent 赋予。
 
-登记表：[../registry.py](../registry.py)。阈值：[../../config.py](../../config.py) 的 `RECIPE.factor_params` 字面量，不写死在叶子里。不存在 `STOP_LOSS` 这类模块全局别名。
+登记表：[../catalog.py](../catalog.py) 的 `LEAVES`（`registry` 按表取 `_factor_eval_<id>`）。作者改 `LEAVES` 的 `default`；运行时阈值是已写入的 `RECIPE.factor_params`，不写死在叶子里。不存在 `STOP_LOSS` 这类模块全局别名。`weekly_bear` 无阈值，不要给它写出空 `{}`。
 
 ---
 
@@ -59,4 +59,4 @@
 
 ## 加叶子
 
-`lib/<id>.py` → `_deploy_qmt_gbk.py` 插在 `registry.py` 前 → `registry` 登记 → 需要则改 `RECIPE`。步骤见 [../NAV.md](../NAV.md)。
+`catalog.LEAVES` + `lib/<id>.py` + 默认盘要启用时改四槽 AST。lib 拼包顺序跟 `LEAVES`；不要手改 `registry` / `MODULE_ORDER` / `grid_spec` 白名单。步骤见 [../NAV.md](../NAV.md)。

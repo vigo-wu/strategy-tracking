@@ -64,8 +64,9 @@ SCALE_ARM_BARS = 8
 SCALE_W_HIST_MIN = -0.01
 SCALE_LOTS = True
 
-# 默认 Recipe：四槽布尔式。阈值真源 factor_params；均线/MACD 窗真源 structure。
-# SCALE_ARM 等仓位门槛不进表。scale_out 恒 false：减仓未启用。
+# 默认 Recipe：四槽布尔式。因子数字在 factors/catalog.py（写入 factor_params）；
+# 均线/MACD/ATR 窗真源 structure。SCALE_ARM 等仓位门槛不进表。
+# scale_out 恒 false：减仓未启用。
 RECIPE = {
     "entry": [
         "and",
@@ -99,49 +100,6 @@ RECIPE = {
         "time_force",
     ],
     "scale_out": False,
-    "factor_params": {
-        # chase：当日涨幅 >= max_pct 禁开
-        "chase": {"max_pct": 0.05},
-        # vol_dry：收盘破中线且量 < n 日均量 * ratio
-        "vol_dry": {"ratio": 0.60, "n": 20},
-        # pullback_vol：贴均线 tol + 连续 confirm_days 日量 < vol_n 日均量 * ratio
-        "pullback_vol": {
-            "tol": 0.025,
-            "vol_n": 10,
-            "ratio": 0.9,
-            "confirm_days": 2,
-        },
-        # w_bias：周线 (MA5-MA34)/MA34 >= hard 禁开
-        "w_bias": {"hard": 0.08},
-        # w_slope：乖离 < low 且生命线未连续 slope_weeks 周向上则禁开
-        "w_slope": {"low": 0.02, "slope_weeks": 2},
-        # weekly_bear_confirm：连续 days 个信号日仍空才清仓；<=0/1=当天
-        "weekly_bear_confirm": {"days": 2},
-        # plat_break：回看 lookback 日振幅 <= max_range 且收盘破高
-        "plat_break": {
-            "lookback": 20,
-            "max_range": 0.10,
-            "break_buf": 0.0,
-        },
-        # w_macd_golden：上周金叉则本周红柱须放大 hist_expand 倍
-        "w_macd_golden": {"hist_expand": 1.2},
-        # stop_loss：收盘 <= 成本 * (1 - pct)
-        "stop_loss": {"pct": 0.08},
-        # atr_stop：收盘 <= 成本 - k * ATR；k<=0 关
-        "atr_stop": {"k": 2},
-        # atr_trail_stop：峰值相对成本 > k1*ATR 武装；k2 峰值回撤；<=0 关该档
-        "atr_trail_stop": {"k1": 2, "k2": 2},
-        # trail_stop：档 (peak_lo, peak_hi, giveback, profit_floor)；默认 exit 不引用
-        "trail_stop": {
-            "tiers": [
-                [0.03, 0.06, 0.015, None],
-                [0.06, 0.10, 0.03, 0.03],
-                [0.10, None, 0.04, None],
-            ]
-        },
-        # time_force：持仓 > bars 后评估；arm=峰值浮盈让路；bars<=0 关整条；arm<=0 关让路
-        "time_force": {"bars": 30, "arm": 0.03},
-    },
     "structure": {
         # 日线中/慢均线；<=0 关该条
         "d_ma": {"mid": 20, "slow": 60},
@@ -154,7 +112,7 @@ RECIPE = {
     },
 }
 
-# 策略交易面板 bind → 模块常量。因子阈值不上屏（改 RECIPE.factor_params）。
+# 策略交易面板 bind → 模块常量。因子阈值不上屏（改 catalog.LEAVES）。
 # 只上屏：开关 / 资金基数 / 固定金额 / 可部署比例 / 加仓开关。
 PANEL_BINDS = (
     ("panel_dry_run", "DRY_RUN", "bool"),

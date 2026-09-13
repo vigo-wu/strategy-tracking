@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import itertools
 import json
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -17,48 +18,13 @@ EDITOR_CELL_MAX = 30
 JOB_CONFIRM_THRESHOLD = 400
 
 _HERE = Path(__file__).resolve().parent
-_HLBAND_CONFIG = _HERE.parent / "qmt" / "hlband" / "config.py"
 
 GROUP_ORDER = ("入场", "出场", "加仓", "资金", "结构")
-KIND_EXIT_IDS = frozenset(
-    {
-        "stop_loss.pct",
-        "trail_stop.tiers",
-        "time_force.bars",
-        "time_force.arm",
-        "atr_stop.k",
-        "atr_trail_stop.k1",
-        "atr_trail_stop.k2",
-    }
-)
-ENTRY_KEYS = (
-    "pullback_vol.tol",
-    "pullback_vol.ratio",
-    "pullback_vol.vol_n",
-    "pullback_vol.confirm_days",
-    "vol_dry.ratio",
-    "vol_dry.n",
-    "chase.max_pct",
-    "w_bias.hard",
-    "w_slope.low",
-    "w_slope.slope_weeks",
-)
-EXIT_KEYS = (
-    "stop_loss.pct",
-    "trail_stop.tiers",
-    "time_force.bars",
-    "weekly_bear_confirm.days",
-    "atr_stop.k",
-    "atr_trail_stop.k1",
-    "atr_trail_stop.k2",
-    "time_force.arm",
-)
-SCALE_FACTOR_KEYS = (
-    "plat_break.lookback",
-    "plat_break.max_range",
-    "plat_break.break_buf",
-    "w_macd_golden.hist_expand",
-)
+KIND_EXIT_IDS: frozenset[str] = frozenset()
+ENTRY_KEYS: tuple[str, ...] = ()
+EXIT_KEYS: tuple[str, ...] = ()
+SCALE_FACTOR_KEYS: tuple[str, ...] = ()
+_LEAVES: dict[str, Any] = {}
 STRUCTURE_KEYS = (
     "d_ma.mid",
     "d_ma.slow",
@@ -78,23 +44,15 @@ MONEY_KEYS = (
     "LOT_ADD_FRAC",
     "TRADE_BUDGET",
 )
-PERCENT_KEYS = frozenset(
+_MONEY_PERCENT_KEYS = frozenset(
     {
-        "stop_loss.pct",
-        "pullback_vol.tol",
-        "pullback_vol.ratio",
-        "vol_dry.ratio",
-        "chase.max_pct",
-        "w_bias.hard",
-        "w_slope.low",
-        "plat_break.max_range",
         "CASH_RATIO",
         "LOT_OPEN_FRAC",
         "LOT_ADD_FRAC",
         "SCALE_ARM",
-        "time_force.arm",
     }
 )
+PERCENT_KEYS = set(_MONEY_PERCENT_KEYS)
 DELETED_FACTOR_KEYS = frozenset(
     {
         "CHASE_MAX_PCT",
@@ -170,32 +128,12 @@ SKIP_NAMES = frozenset(
         "STRATEGY_NAME",
         "STRATEGY_VER",
         "RECIPE",
+        "LEAVES",
     }
 )
 NONE_TOKENS = frozenset({"none", "null", "-", "—", "无", "nan"})
 
 PARAM_LABELS = {
-    "stop_loss.pct": "止损",
-    "trail_stop.tiers": "阶梯止盈",
-    "time_force.bars": "时间成本 BARS",
-    "time_force.arm": "时间成本让路",
-    "atr_trail_stop.k1": "ATR移动武装",
-    "atr_trail_stop.k2": "ATR移动回撤",
-    "weekly_bear_confirm.days": "周线空确认日",
-    "pullback_vol.tol": "回踩容差",
-    "pullback_vol.ratio": "缩量回踩比例",
-    "pullback_vol.vol_n": "缩量窗口",
-    "pullback_vol.confirm_days": "缩量确认日",
-    "vol_dry.ratio": "无量阴跌比例",
-    "vol_dry.n": "无量窗口",
-    "chase.max_pct": "追高禁开",
-    "w_bias.hard": "周线高位禁开",
-    "w_slope.low": "低位乖离",
-    "w_slope.slope_weeks": "低位斜率周数",
-    "plat_break.lookback": "平台回看",
-    "plat_break.max_range": "平台振幅",
-    "plat_break.break_buf": "平台突破缓冲",
-    "w_macd_golden.hist_expand": "金叉柱放大",
     "SCALE_ENABLE": "加仓开关",
     "SCALE_ONCE_PER_ROUND": "每轮只加一次",
     "SCALE_ARM": "加仓门槛",
@@ -216,30 +154,8 @@ PARAM_LABELS = {
     "macd.slow": "MACD 慢线",
     "macd.signal": "MACD 信号",
     "atr.n": "日线ATR窗",
-    "atr_stop.k": "ATR止损倍数",
 }
 ABBREV_FIXED = {
-    "stop_loss.pct": "sl",
-    "trail_stop.tiers": "tt",
-    "time_force.bars": "tfb",
-    "time_force.arm": "tfa",
-    "atr_trail_stop.k1": "atk1",
-    "atr_trail_stop.k2": "atk2",
-    "weekly_bear_confirm.days": "wbc",
-    "chase.max_pct": "ch",
-    "w_bias.hard": "wb",
-    "w_slope.low": "wl",
-    "w_slope.slope_weeks": "ws",
-    "pullback_vol.tol": "mt",
-    "pullback_vol.ratio": "vpr",
-    "pullback_vol.vol_n": "vpn",
-    "pullback_vol.confirm_days": "vpc",
-    "vol_dry.ratio": "vdr",
-    "vol_dry.n": "vdn",
-    "plat_break.lookback": "spl",
-    "plat_break.max_range": "spr",
-    "plat_break.break_buf": "spb",
-    "w_macd_golden.hist_expand": "she",
     "SCALE_ENABLE": "se",
     "SCALE_ONCE_PER_ROUND": "sor",
     "SCALE_ARM": "sa",
@@ -260,7 +176,6 @@ ABBREV_FIXED = {
     "macd.slow": "mcs",
     "macd.signal": "mcg",
     "atr.n": "atr",
-    "atr_stop.k": "ask",
 }
 DEFAULT_SCAN = {
     "stop_loss.pct": "6,10",
@@ -608,12 +523,68 @@ def _skip_name(name: str) -> bool:
 
 
 def _load_config_ns() -> dict[str, Any]:
-    if not _HLBAND_CONFIG.is_file():
-        raise GridSpecError("找不到 %s" % _HLBAND_CONFIG)
-    ns: dict[str, Any] = {}
-    code = _HLBAND_CONFIG.read_text(encoding="utf-8")
-    exec(compile(code, str(_HLBAND_CONFIG), "exec"), ns, ns)
-    return ns
+    qmt = str(_HERE.parent / "qmt")
+    if qmt not in sys.path:
+        sys.path.insert(0, qmt)
+    from _hlband_ns import load_hlband_ns
+
+    try:
+        return load_hlband_ns()
+    except FileNotFoundError as exc:
+        raise GridSpecError("找不到 %s" % exc) from exc
+
+
+def _iter_leaf_params(leaves: Mapping[str, Any] | None):
+    for fid, leaf in (leaves or {}).items():
+        group = (leaf or {}).get("group")
+        for key, spec in ((leaf or {}).get("params") or {}).items():
+            yield str(fid), str(key), "%s.%s" % (fid, key), group, spec or {}
+
+
+def _keys_for_group(leaves: Mapping[str, Any] | None, group: str) -> tuple[str, ...]:
+    rows: list[tuple[int, str]] = []
+    for _fid, _key, path, grp, spec in _iter_leaf_params(leaves):
+        if grp != group:
+            continue
+        try:
+            axis = int(spec.get("axis", 10**6))
+        except (TypeError, ValueError):
+            axis = 10**6
+        rows.append((axis, path))
+    rows.sort()
+    return tuple(path for _axis, path in rows)
+
+
+def _leaf_param_meta(family: str) -> dict[str, Any] | None:
+    parts = str(family).split(".", 1)
+    if len(parts) != 2:
+        return None
+    leaf = _LEAVES.get(parts[0]) or {}
+    spec = ((leaf.get("params") or {}).get(parts[1]))
+    return spec if isinstance(spec, dict) else None
+
+
+def _install_leaf_axes() -> None:
+    global ENTRY_KEYS, EXIT_KEYS, SCALE_FACTOR_KEYS, KIND_EXIT_IDS, PERCENT_KEYS, _LEAVES
+    ns = _load_config_ns()
+    leaves = ns.get("LEAVES") or {}
+    _LEAVES = dict(leaves)
+    ENTRY_KEYS = _keys_for_group(leaves, "entry")
+    EXIT_KEYS = _keys_for_group(leaves, "exit")
+    SCALE_FACTOR_KEYS = _keys_for_group(leaves, "scale")
+    kind_ids: set[str] = set()
+    percents = set(_MONEY_PERCENT_KEYS)
+    for _fid, _key, path, _grp, spec in _iter_leaf_params(leaves):
+        if spec.get("label"):
+            PARAM_LABELS[path] = str(spec["label"])
+        if spec.get("abbrev"):
+            ABBREV_FIXED[path] = str(spec["abbrev"])
+        if spec.get("percent"):
+            percents.add(path)
+        if spec.get("kind"):
+            kind_ids.add(path)
+    KIND_EXIT_IDS = frozenset(kind_ids)
+    PERCENT_KEYS = percents
 
 
 def _scan_config_names(ns: Mapping[str, Any]) -> list[str]:
@@ -722,6 +693,9 @@ def _ordered_ids(found: Iterable[str]) -> list[str]:
     )
     out.extend(rest)
     return out
+
+
+_install_leaf_axes()
 
 
 def _build_catalog() -> tuple[ParamSpec, ...]:
@@ -1025,48 +999,23 @@ def infer_kind(family: str, value: Any, defaults: Mapping[str, Any]) -> str:
     spec = require_param(family)
     if spec.kind_mode != "exit":
         return "other"
-    if spec.dtype == "tuple":
+    meta = _leaf_param_meta(family) or {}
+    kind = meta.get("kind")
+    if kind == "trail_tiers" or spec.dtype == "tuple":
         return _trail_tiers_kind(value, current_value(family, defaults))
     cur = current_value(family, defaults)
-    if family == "time_force.bars":
-        iv = int(value)
-        if iv <= 0:
-            return "off"
-        if iv < int(cur):
-            return "tighten"
-        if iv > int(cur):
-            return "loosen"
+    try:
+        fv = float(value)
+    except (TypeError, ValueError):
         return "other"
-    if family == "atr_stop.k":
-        fv = float(value)
-        if fv <= 0:
-            return "off"
-        if num_eq(fv, cur):
-            return "other"
-        if fv < float(cur):
-            return "tighten"
-        return "loosen"
-    if family in ("atr_trail_stop.k1", "atr_trail_stop.k2"):
-        fv = float(value)
-        if fv <= 0:
-            return "off"
-        if num_eq(fv, cur):
-            return "other"
-        if fv < float(cur):
-            return "tighten"
-        return "loosen"
-    if family == "time_force.arm":
-        fv = float(value)
-        if fv <= 0:
-            return "off"
-        if num_eq(fv, cur):
-            return "other"
+    if meta.get("off") == "le0" and fv <= 0:
+        return "off"
+    if num_eq(fv, cur):
+        return "other"
+    if kind == "smaller_loosen":
         if fv < float(cur):
             return "loosen"
         return "tighten"
-    fv = float(value)
-    if num_eq(fv, cur):
-        return "other"
     if fv < float(cur):
         return "tighten"
     return "loosen"
@@ -1119,16 +1068,7 @@ def infer_kind_from_overrides(
     spec = get_param(key)
     if spec is None or spec.kind_mode != "exit":
         return "other"
-    if key in (
-        "stop_loss.pct",
-        "time_force.bars",
-        "time_force.arm",
-        "atr_stop.k",
-        "atr_trail_stop.k1",
-        "atr_trail_stop.k2",
-    ):
-        return infer_kind(key, flat[key], defaults)
-    return "other"
+    return infer_kind(key, flat[key], defaults)
 
 
 def _format_pct(value: float) -> str:

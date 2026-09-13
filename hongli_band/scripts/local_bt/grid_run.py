@@ -364,10 +364,10 @@ def _load_hlband_config():
 
 
 def load_config_defaults() -> dict[str, Any]:
-    from grid_spec import param_catalog
+    from grid_spec import _load_config_ns, param_catalog
 
-    mod = _load_hlband_config()
-    rec = getattr(mod, "RECIPE", None) or {}
+    ns = _load_config_ns()
+    rec = ns.get("RECIPE") or {}
     flat = flatten_factor_params(rec.get("factor_params") or {})
     flat.update(flatten_structure(rec.get("structure") or {}))
     out: dict[str, Any] = {}
@@ -378,8 +378,8 @@ def load_config_defaults() -> dict[str, Any]:
         seen.add(spec.key)
         if spec.key in flat:
             out[spec.key] = flat[spec.key]
-        elif hasattr(mod, spec.key):
-            out[spec.key] = getattr(mod, spec.key)
+        elif spec.key in ns:
+            out[spec.key] = ns[spec.key]
     return out
 
 

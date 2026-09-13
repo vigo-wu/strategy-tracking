@@ -9,7 +9,11 @@ HERE = Path(__file__).resolve().parent
 HLBAND = HERE / "hlband"
 PREVIEW = HERE / "qmt_terminal_hlband.py"
 REPO = HERE.parents[2]
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(REPO / "scripts"))
+
+from _hlband_ns import load_hlband_ns  # noqa: E402
 
 from qmt_common._deploy_lib import (  # noqa: E402
     build_bundle,
@@ -24,8 +28,9 @@ TARGETS = [
     QMT_DIR / "红利波段.py",
 ]
 
-MODULE_ORDER = [
+_MODULE_HEAD = [
     "config.py",
+    "factors/catalog.py",
     "common:ctx.py",
     "common:live_log.py",
     "common:time_util.py",
@@ -47,20 +52,8 @@ MODULE_ORDER = [
     "common:pit_front.py",
     "market.py",
     "factors/ctx.py",
-    "factors/lib/pullback_vol.py",
-    "factors/lib/chase.py",
-    "factors/lib/vol_dry.py",
-    "factors/lib/w_bias.py",
-    "factors/lib/w_slope.py",
-    "factors/lib/weekly_bear.py",
-    "factors/lib/weekly_bear_confirm.py",
-    "factors/lib/plat_break.py",
-    "factors/lib/w_macd_golden.py",
-    "factors/lib/stop_loss.py",
-    "factors/lib/atr_stop.py",
-    "factors/lib/trail_stop.py",
-    "factors/lib/atr_trail_stop.py",
-    "factors/lib/time_force.py",
+]
+_MODULE_TAIL = [
     "factors/registry.py",
     "factors/expr.py",
     "factors/slots.py",
@@ -71,10 +64,39 @@ MODULE_ORDER = [
     "common:orders_pending.py",
     "common:single/orders.py",
     "budget.py",
-        "strategy.py",
-        "universe.py",
-        "runtime.py",
+    "strategy.py",
+    "universe.py",
+    "runtime.py",
 ]
+
+
+def _hlband_ns():
+    return load_hlband_ns()
+
+
+def _leaf_lib_paths(leaves):
+    return ["factors/lib/%s.py" % fid for fid in leaves]
+
+
+def _check_leaf_files(leaves):
+    lib = HLBAND / "factors" / "lib"
+    on_disk = {p.stem for p in lib.glob("*.py")}
+    want = set(leaves)
+    missing = sorted(want - on_disk)
+    extra = sorted(on_disk - want)
+    if missing or extra:
+        raise SystemExit(
+            "LEAVES 与 lib/ 不一致 missing=%s extra=%s" % (missing, extra)
+        )
+
+
+def build_module_order():
+    leaves = _hlband_ns()["LEAVES"]
+    _check_leaf_files(leaves)
+    return list(_MODULE_HEAD) + _leaf_lib_paths(leaves) + list(_MODULE_TAIL)
+
+
+MODULE_ORDER = build_module_order()
 
 
 def main() -> None:

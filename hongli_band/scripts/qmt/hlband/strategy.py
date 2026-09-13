@@ -875,28 +875,13 @@ def _on_signal_order_ok(side, px=None, day=None, add=False):
 
 
 _SELL_LABELS = {
-    "trail_stop": "卖点1-移动止盈回撤",
-    "time_force": "卖点2-时间成本智能平仓",
-    "weekly_bear_confirm": "周线转空强制清仓",
-    "weekly_bear": "周线转空强制清仓",
-    "stop_loss": "硬止损",
-    "atr_stop": "ATR止损",
-    "atr_trail_stop": "ATR移动止盈",
     "skip_add_bar": "加仓成交后当日不评卖",
 }
 _BUY_LABELS = {
-    "pullback_vol": "买点1-缩量回踩强支撑",
-    "plat_break": "加仓-日线突破前期平台",
-    "w_macd_golden": "加仓-周线MACD金叉柱放大",
-    "chase": "追高过滤跳过",
-    "w_bias": "周线高位乖离禁开",
-    "w_slope": "低位周线MA34未连升禁开",
-    "vol_dry": "无量阴跌禁开",
     "chase_skip": "追高过滤跳过",
     "w_bias_skip": "周线高位乖离禁开",
     "w_slope_skip": "低位周线MA34未连升禁开",
     "vol_dry_skip": "无量阴跌禁开",
-    "weekly_bear": "周线空头禁开",
     "scale_once": "本轮已加仓",
     "book_lot_cap": "跟踪池已满三笔跳过买入",
     "buy_cap": "账户或单标的额度已满跳过开仓",
@@ -908,6 +893,11 @@ _BUY_LABELS = {
 
 def _reason_label(code, kind="sell"):
     code = str(code or "")
+    leaf = ((globals().get("LEAVES") or {}).get(code) or {})
+    if kind == "buy" and leaf.get("label_buy"):
+        return leaf.get("label_buy")
+    if leaf.get("label"):
+        return leaf.get("label")
     table = _SELL_LABELS if kind == "sell" else _BUY_LABELS
     return table.get(code, code)
 

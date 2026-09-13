@@ -74,8 +74,9 @@ SCALE_ARM_BARS = 8
 SCALE_W_HIST_MIN = -0.01
 SCALE_LOTS = True
 
-# 默认 Recipe：四槽布尔式。阈值真源 factor_params；均线/MACD 窗真源 structure。
-# SCALE_ARM 等仓位门槛不进表。scale_out 恒 false：减仓未启用。
+# 默认 Recipe：四槽布尔式。因子数字在 factors/catalog.py（写入 factor_params）；
+# 均线/MACD/ATR 窗真源 structure。SCALE_ARM 等仓位门槛不进表。
+# scale_out 恒 false：减仓未启用。
 RECIPE = {
     "entry": [
         "and",
@@ -109,49 +110,6 @@ RECIPE = {
         "time_force",
     ],
     "scale_out": False,
-    "factor_params": {
-        # chase：当日涨幅 >= max_pct 禁开
-        "chase": {"max_pct": 0.05},
-        # vol_dry：收盘破中线且量 < n 日均量 * ratio
-        "vol_dry": {"ratio": 0.60, "n": 20},
-        # pullback_vol：贴均线 tol + 连续 confirm_days 日量 < vol_n 日均量 * ratio
-        "pullback_vol": {
-            "tol": 0.025,
-            "vol_n": 10,
-            "ratio": 0.9,
-            "confirm_days": 2,
-        },
-        # w_bias：周线 (MA5-MA34)/MA34 >= hard 禁开
-        "w_bias": {"hard": 0.08},
-        # w_slope：乖离 < low 且生命线未连续 slope_weeks 周向上则禁开
-        "w_slope": {"low": 0.02, "slope_weeks": 2},
-        # weekly_bear_confirm：连续 days 个信号日仍空才清仓；<=0/1=当天
-        "weekly_bear_confirm": {"days": 2},
-        # plat_break：回看 lookback 日振幅 <= max_range 且收盘破高
-        "plat_break": {
-            "lookback": 20,
-            "max_range": 0.10,
-            "break_buf": 0.0,
-        },
-        # w_macd_golden：上周金叉则本周红柱须放大 hist_expand 倍
-        "w_macd_golden": {"hist_expand": 1.2},
-        # stop_loss：收盘 <= 成本 * (1 - pct)
-        "stop_loss": {"pct": 0.08},
-        # atr_stop：收盘 <= 成本 - k * ATR；k<=0 关
-        "atr_stop": {"k": 2},
-        # atr_trail_stop：峰值相对成本 > k1*ATR 武装；k2 峰值回撤；<=0 关该档
-        "atr_trail_stop": {"k1": 2, "k2": 2},
-        # trail_stop：档 (peak_lo, peak_hi, giveback, profit_floor)；默认 exit 不引用
-        "trail_stop": {
-            "tiers": [
-                [0.03, 0.06, 0.015, None],
-                [0.06, 0.10, 0.03, 0.03],
-                [0.10, None, 0.04, None],
-            ]
-        },
-        # time_force：持仓 > bars 后评估；arm=峰值浮盈让路；bars<=0 关整条；arm<=0 关让路
-        "time_force": {"bars": 30, "arm": 0.03},
-    },
     "structure": {
         # 日线中/慢均线；<=0 关该条
         "d_ma": {"mid": 20, "slow": 60},
@@ -164,7 +122,7 @@ RECIPE = {
     },
 }
 
-# 策略交易面板 bind → 模块常量。因子阈值不上屏（改 RECIPE.factor_params）。
+# 策略交易面板 bind → 模块常量。因子阈值不上屏（改 catalog.LEAVES）。
 # 只上屏：开关 / 资金基数 / 固定金额 / 可部署比例 / 加仓开关。
 PANEL_BINDS = (
     ("panel_dry_run", "DRY_RUN", "bool"),
@@ -253,6 +211,287 @@ _ORDER_DEAD = (54, 57, 53, 5, 6, 9)
 _VALID_PERIODS = (
     "1m", "3m", "5m", "15m", "30m", "1h", "1d", "1w", "1mon", "1q", "1hy", "1y",
 )
+
+# === hlband/factors/catalog.py ===
+# 叶子登记 / 默认阈值 / 网格轴元数据。运行时写入 RECIPE.factor_params。
+# 文件名 = id；_factor_eval_<id> 在 lib/<id>.py。
+
+LEAVES = {
+    "pullback_vol": {
+        "label": "买点1-缩量回踩强支撑",
+        "group": "entry",
+        "params": {
+            "tol": {
+                "default": 0.025,
+                "percent": True,
+                "abbrev": "mt",
+                "label": "回踩容差",
+                "axis": 0,
+            },
+            "ratio": {
+                "default": 0.9,
+                "percent": True,
+                "abbrev": "vpr",
+                "label": "缩量回踩比例",
+                "axis": 1,
+            },
+            "vol_n": {
+                "default": 10,
+                "percent": False,
+                "abbrev": "vpn",
+                "label": "缩量窗口",
+                "axis": 2,
+            },
+            "confirm_days": {
+                "default": 2,
+                "percent": False,
+                "abbrev": "vpc",
+                "label": "缩量确认日",
+                "axis": 3,
+            },
+        },
+    },
+    "chase": {
+        "label": "追高过滤跳过",
+        "group": "entry",
+        "params": {
+            "max_pct": {
+                "default": 0.05,
+                "percent": True,
+                "abbrev": "ch",
+                "label": "追高禁开",
+                "axis": 6,
+            },
+        },
+    },
+    "vol_dry": {
+        "label": "无量阴跌禁开",
+        "group": "entry",
+        "params": {
+            "ratio": {
+                "default": 0.60,
+                "percent": True,
+                "abbrev": "vdr",
+                "label": "无量阴跌比例",
+                "axis": 4,
+            },
+            "n": {
+                "default": 20,
+                "percent": False,
+                "abbrev": "vdn",
+                "label": "无量窗口",
+                "axis": 5,
+            },
+        },
+    },
+    "w_bias": {
+        "label": "周线高位乖离禁开",
+        "group": "entry",
+        "params": {
+            "hard": {
+                "default": 0.08,
+                "percent": True,
+                "abbrev": "wb",
+                "label": "周线高位禁开",
+                "axis": 7,
+            },
+        },
+    },
+    "w_slope": {
+        "label": "低位周线MA34未连升禁开",
+        "group": "entry",
+        "params": {
+            "low": {
+                "default": 0.02,
+                "percent": True,
+                "abbrev": "wl",
+                "label": "低位乖离",
+                "axis": 8,
+            },
+            "slope_weeks": {
+                "default": 2,
+                "percent": False,
+                "abbrev": "ws",
+                "label": "低位斜率周数",
+                "axis": 9,
+            },
+        },
+    },
+    "weekly_bear": {
+        "label": "周线转空强制清仓",
+        "label_buy": "周线空头禁开",
+        "group": "entry",
+        "params": {},
+    },
+    "weekly_bear_confirm": {
+        "label": "周线转空强制清仓",
+        "group": "exit",
+        "params": {
+            "days": {
+                "default": 2,
+                "percent": False,
+                "abbrev": "wbc",
+                "label": "周线空确认日",
+                "axis": 3,
+            },
+        },
+    },
+    "plat_break": {
+        "label": "加仓-日线突破前期平台",
+        "group": "scale",
+        "params": {
+            "lookback": {
+                "default": 20,
+                "percent": False,
+                "abbrev": "spl",
+                "label": "平台回看",
+                "axis": 0,
+            },
+            "max_range": {
+                "default": 0.10,
+                "percent": True,
+                "abbrev": "spr",
+                "label": "平台振幅",
+                "axis": 1,
+            },
+            "break_buf": {
+                "default": 0.0,
+                "percent": False,
+                "abbrev": "spb",
+                "label": "平台突破缓冲",
+                "axis": 2,
+            },
+        },
+    },
+    "w_macd_golden": {
+        "label": "加仓-周线MACD金叉柱放大",
+        "group": "scale",
+        "params": {
+            "hist_expand": {
+                "default": 1.2,
+                "percent": False,
+                "abbrev": "she",
+                "label": "金叉柱放大",
+                "axis": 3,
+            },
+        },
+    },
+    "stop_loss": {
+        "label": "硬止损",
+        "group": "exit",
+        "params": {
+            "pct": {
+                "default": 0.08,
+                "percent": True,
+                "abbrev": "sl",
+                "label": "止损",
+                "kind": "smaller_tighten",
+                "off": None,
+                "axis": 0,
+            },
+        },
+    },
+    "atr_stop": {
+        "label": "ATR止损",
+        "group": "exit",
+        "params": {
+            "k": {
+                "default": 2,
+                "percent": False,
+                "abbrev": "ask",
+                "label": "ATR止损倍数",
+                "kind": "smaller_tighten",
+                "off": "le0",
+                "axis": 4,
+            },
+        },
+    },
+    "trail_stop": {
+        "label": "卖点1-移动止盈回撤",
+        "group": "exit",
+        "params": {
+            "tiers": {
+                "default": [
+                    [0.03, 0.06, 0.015, None],
+                    [0.06, 0.10, 0.03, 0.03],
+                    [0.10, None, 0.04, None],
+                ],
+                "percent": False,
+                "abbrev": "tt",
+                "label": "阶梯止盈",
+                "kind": "trail_tiers",
+                "axis": 1,
+            },
+        },
+    },
+    "atr_trail_stop": {
+        "label": "ATR移动止盈",
+        "group": "exit",
+        "params": {
+            "k1": {
+                "default": 2,
+                "percent": False,
+                "abbrev": "atk1",
+                "label": "ATR移动武装",
+                "kind": "smaller_tighten",
+                "off": "le0",
+                "axis": 5,
+            },
+            "k2": {
+                "default": 2,
+                "percent": False,
+                "abbrev": "atk2",
+                "label": "ATR移动回撤",
+                "kind": "smaller_tighten",
+                "off": "le0",
+                "axis": 6,
+            },
+        },
+    },
+    "time_force": {
+        "label": "卖点2-时间成本智能平仓",
+        "group": "exit",
+        "params": {
+            "bars": {
+                "default": 30,
+                "percent": False,
+                "abbrev": "tfb",
+                "label": "时间成本 BARS",
+                "kind": "smaller_tighten",
+                "off": "le0",
+                "axis": 2,
+            },
+            "arm": {
+                "default": 0.03,
+                "percent": True,
+                "abbrev": "tfa",
+                "label": "时间成本让路",
+                "kind": "smaller_loosen",
+                "off": "le0",
+                "axis": 7,
+            },
+        },
+    },
+}
+
+
+def _leaves_factor_params(leaves=None):
+    table = {}
+    src = LEAVES if leaves is None else leaves
+    for fid, leaf in src.items():
+        params = (leaf or {}).get("params") or {}
+        if not params:
+            continue
+        block = {}
+        for key, spec in params.items():
+            block[key] = spec["default"]
+        table[fid] = block
+    return table
+
+
+_rec = globals().get("RECIPE")
+if isinstance(_rec, dict):
+    _rec["factor_params"] = _leaves_factor_params()
 
 # === qmt_common/ctx.py ===
 # 作用: 全局运行时对象与手数工具
@@ -4169,22 +4408,22 @@ def _factor_eval_time_force(ctx):
 
 # === hlband/factors/registry.py ===
 def _factor_registry():
-    return {
-        "pullback_vol": _factor_eval_pullback_vol,
-        "chase": _factor_eval_chase,
-        "vol_dry": _factor_eval_vol_dry,
-        "w_bias": _factor_eval_w_bias,
-        "w_slope": _factor_eval_w_slope,
-        "weekly_bear": _factor_eval_weekly_bear,
-        "weekly_bear_confirm": _factor_eval_weekly_bear_confirm,
-        "plat_break": _factor_eval_plat_break,
-        "w_macd_golden": _factor_eval_w_macd_golden,
-        "stop_loss": _factor_eval_stop_loss,
-        "atr_stop": _factor_eval_atr_stop,
-        "trail_stop": _factor_eval_trail_stop,
-        "atr_trail_stop": _factor_eval_atr_trail_stop,
-        "time_force": _factor_eval_time_force,
-    }
+    out = {}
+    missing = []
+    leaves = globals().get("LEAVES") or {}
+    for fid in leaves:
+        key = str(fid)
+        fn = globals().get("_factor_eval_" + key)
+        if callable(fn):
+            out[key] = fn
+        else:
+            missing.append(key)
+    if missing:
+        raise RuntimeError("LEAVES 缺 _factor_eval_: %s" % ",".join(missing))
+    return out
+
+
+_factor_registry()
 
 
 def _factor_eval(fid, ctx):
@@ -8042,28 +8281,13 @@ def _on_signal_order_ok(side, px=None, day=None, add=False):
 
 
 _SELL_LABELS = {
-    "trail_stop": "卖点1-移动止盈回撤",
-    "time_force": "卖点2-时间成本智能平仓",
-    "weekly_bear_confirm": "周线转空强制清仓",
-    "weekly_bear": "周线转空强制清仓",
-    "stop_loss": "硬止损",
-    "atr_stop": "ATR止损",
-    "atr_trail_stop": "ATR移动止盈",
     "skip_add_bar": "加仓成交后当日不评卖",
 }
 _BUY_LABELS = {
-    "pullback_vol": "买点1-缩量回踩强支撑",
-    "plat_break": "加仓-日线突破前期平台",
-    "w_macd_golden": "加仓-周线MACD金叉柱放大",
-    "chase": "追高过滤跳过",
-    "w_bias": "周线高位乖离禁开",
-    "w_slope": "低位周线MA34未连升禁开",
-    "vol_dry": "无量阴跌禁开",
     "chase_skip": "追高过滤跳过",
     "w_bias_skip": "周线高位乖离禁开",
     "w_slope_skip": "低位周线MA34未连升禁开",
     "vol_dry_skip": "无量阴跌禁开",
-    "weekly_bear": "周线空头禁开",
     "scale_once": "本轮已加仓",
     "book_lot_cap": "跟踪池已满三笔跳过买入",
     "buy_cap": "账户或单标的额度已满跳过开仓",
@@ -8075,6 +8299,11 @@ _BUY_LABELS = {
 
 def _reason_label(code, kind="sell"):
     code = str(code or "")
+    leaf = ((globals().get("LEAVES") or {}).get(code) or {})
+    if kind == "buy" and leaf.get("label_buy"):
+        return leaf.get("label_buy")
+    if leaf.get("label"):
+        return leaf.get("label")
     table = _SELL_LABELS if kind == "sell" else _BUY_LABELS
     return table.get(code, code)
 
