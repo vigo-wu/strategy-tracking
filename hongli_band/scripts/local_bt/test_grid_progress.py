@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -20,6 +21,7 @@ from grid_progress import (  # noqa: E402
     STATUS_RUNNING,
     GridPaused,
     _CMDLINE_CACHE,
+    atomic_write_json,
     build_progress,
     can_resume,
     check_pause,
@@ -52,6 +54,53 @@ from grid_run import (  # noqa: E402
     run_sweep,
 )
 from test_grid_run import _FakeSummarize, _POOL_DEFAULTS, _walk  # noqa: E402
+
+
+def _win_access_denied() -> PermissionError:
+    err = PermissionError(13, "拒绝访问。")
+    err.winerror = 5
+    return err
+
+
+class AtomicWriteJsonTest(unittest.TestCase):
+    def test_roundtrip_leaves_no_tmp(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "progress.json"
+            atomic_write_json(dest, {"k": 1})
+            self.assertEqual(json.loads(dest.read_text(encoding="utf-8")), {"k": 1})
+            leftovers = list(Path(td).glob("progress.json.tmp*"))
+            self.assertEqual(leftovers, [])
+
+    def test_replace_retries_then_succeeds(self) -> None:
+        calls = {"n": 0}
+        real = os.replace
+
+        def flaky(src: str | os.PathLike[str], dst: str | os.PathLike[str]) -> None:
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise _win_access_denied()
+            real(src, dst)
+
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "progress.json"
+            dest.write_text("old", encoding="utf-8")
+            with patch("grid_progress.os.replace", flaky), patch("grid_progress.time.sleep"):
+                atomic_write_json(dest, {"ok": True})
+            self.assertEqual(json.loads(dest.read_text(encoding="utf-8")), {"ok": True})
+            self.assertEqual(calls["n"], 3)
+
+    def test_replace_busy_exhausted_raises(self) -> None:
+        def always_busy(src: str | os.PathLike[str], dst: str | os.PathLike[str]) -> None:
+            raise _win_access_denied()
+
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "progress.json"
+            with patch("grid_progress.os.replace", always_busy), patch("grid_progress.time.sleep"):
+                with self.assertRaises(PermissionError):
+                    atomic_write_json(dest, {"ok": True})
+            leftovers = list(Path(td).glob("progress.json.tmp*"))
+            self.assertEqual(leftovers, [])
+            self.assertFalse(dest.exists())
 
 
 class ChunkIdsTest(unittest.TestCase):

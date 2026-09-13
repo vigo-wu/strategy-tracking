@@ -2,6 +2,7 @@
 """网格分组进度：progress.json、pause.flag、脏组删目录、worker 是否仍活着。"""
 from __future__ import annotations
 
+import errno
 import json
 import os
 import shutil
@@ -23,6 +24,11 @@ SPAWN_GRACE_SEC = 45.0
 CMDLINE_CACHE_SEC = 5.0
 WAIT_DEAD_TIMEOUT_SEC = 20.0
 WAIT_DEAD_SETTLE_SEC = 0.4
+ATOMIC_REPLACE_ATTEMPTS = 12
+ATOMIC_REPLACE_DELAY_SEC = 0.05
+ATOMIC_REPLACE_DELAY_CAP_SEC = 0.5
+# WinError 5 拒绝访问 / 32 共享冲突 / 33 锁冲突：UI 读 progress.json 或杀毒扫盘时常见。
+_REPLACE_BUSY_WINERROR = (5, 32, 33)
 _CMDLINE_CACHE: dict[int, tuple[float, str]] = {}
 
 IsCellDir = Callable[[Path], bool]
@@ -54,12 +60,56 @@ def pause_path(dest: str | Path) -> Path:
     return Path(dest) / PAUSE_NAME
 
 
+def _replace_is_busy(exc: BaseException) -> bool:
+    if not isinstance(exc, OSError):
+        return False
+    winerr = getattr(exc, "winerror", None)
+    if winerr in _REPLACE_BUSY_WINERROR:
+        return True
+    if isinstance(exc, PermissionError):
+        return True
+    busy = {errno.EACCES, errno.EPERM}
+    ebusy = getattr(errno, "EBUSY", None)
+    if ebusy is not None:
+        busy.add(ebusy)
+    return exc.errno in busy
+
+
+def _replace_with_retry(src: Path, dest: Path) -> None:
+    delay = ATOMIC_REPLACE_DELAY_SEC
+    last: OSError | None = None
+    for attempt in range(ATOMIC_REPLACE_ATTEMPTS):
+        try:
+            os.replace(src, dest)
+            return
+        except OSError as exc:
+            last = exc
+            if not _replace_is_busy(exc) or attempt + 1 >= ATOMIC_REPLACE_ATTEMPTS:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2.0, ATOMIC_REPLACE_DELAY_CAP_SEC)
+    if last is not None:
+        raise last
+
+
 def atomic_write_json(path: str | Path, data: Mapping[str, Any]) -> None:
     dest = Path(path)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_suffix(dest.suffix + ".tmp")
-    tmp.write_text(json.dumps(dict(data), ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(dest)
+    payload = json.dumps(dict(data), ensure_ascii=False, indent=2)
+    tmp = dest.with_name("%s.tmp.%s" % (dest.name, os.getpid()))
+    try:
+        with tmp.open("w", encoding="utf-8", newline="\n") as fh:
+            fh.write(payload)
+            fh.flush()
+            os.fsync(fh.fileno())
+        _replace_with_retry(tmp, dest)
+    except Exception:
+        if tmp.is_file():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+        raise
 
 
 def load_progress(dest: str | Path) -> dict[str, Any] | None:
