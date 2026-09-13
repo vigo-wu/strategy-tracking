@@ -21,7 +21,15 @@ _HLBAND_CONFIG = _HERE.parent / "qmt" / "hlband" / "config.py"
 
 GROUP_ORDER = ("入场", "出场", "加仓", "资金", "结构")
 KIND_EXIT_IDS = frozenset(
-    {"stop_loss.pct", "trail_stop.tiers", "time_force.bars", "atr_stop.k"}
+    {
+        "stop_loss.pct",
+        "trail_stop.tiers",
+        "time_force.bars",
+        "time_force.arm",
+        "atr_stop.k",
+        "atr_trail_stop.k1",
+        "atr_trail_stop.k2",
+    }
 )
 ENTRY_KEYS = (
     "pullback_vol.tol",
@@ -41,6 +49,9 @@ EXIT_KEYS = (
     "time_force.bars",
     "weekly_bear_confirm.days",
     "atr_stop.k",
+    "atr_trail_stop.k1",
+    "atr_trail_stop.k2",
+    "time_force.arm",
 )
 SCALE_FACTOR_KEYS = (
     "plat_break.lookback",
@@ -81,6 +92,7 @@ PERCENT_KEYS = frozenset(
         "LOT_OPEN_FRAC",
         "LOT_ADD_FRAC",
         "SCALE_ARM",
+        "time_force.arm",
     }
 )
 DELETED_FACTOR_KEYS = frozenset(
@@ -166,6 +178,9 @@ PARAM_LABELS = {
     "stop_loss.pct": "止损",
     "trail_stop.tiers": "阶梯止盈",
     "time_force.bars": "时间成本 BARS",
+    "time_force.arm": "时间成本让路",
+    "atr_trail_stop.k1": "ATR移动武装",
+    "atr_trail_stop.k2": "ATR移动回撤",
     "weekly_bear_confirm.days": "周线空确认日",
     "pullback_vol.tol": "回踩容差",
     "pullback_vol.ratio": "缩量回踩比例",
@@ -207,6 +222,9 @@ ABBREV_FIXED = {
     "stop_loss.pct": "sl",
     "trail_stop.tiers": "tt",
     "time_force.bars": "tfb",
+    "time_force.arm": "tfa",
+    "atr_trail_stop.k1": "atk1",
+    "atr_trail_stop.k2": "atk2",
     "weekly_bear_confirm.days": "wbc",
     "chase.max_pct": "ch",
     "w_bias.hard": "wb",
@@ -273,7 +291,7 @@ class GridSpecError(ValueError):
 
 
 RETIRED_MIN_RET_MSG = (
-    "TIME_FORCE_MIN_RET 已删除：让路阈值跟 TRAIL 档1 peak_lo。"
+    "TIME_FORCE_MIN_RET 已删除：让路是 time_force.arm；禁止顶层 TIME_FORCE_MIN_RET。"
     "请去掉该轴后重存 spec；关时间成本请扫 time_force.bars=0。"
 )
 RETIRED_GRACE_MSG = (
@@ -1028,6 +1046,24 @@ def infer_kind(family: str, value: Any, defaults: Mapping[str, Any]) -> str:
         if fv < float(cur):
             return "tighten"
         return "loosen"
+    if family in ("atr_trail_stop.k1", "atr_trail_stop.k2"):
+        fv = float(value)
+        if fv <= 0:
+            return "off"
+        if num_eq(fv, cur):
+            return "other"
+        if fv < float(cur):
+            return "tighten"
+        return "loosen"
+    if family == "time_force.arm":
+        fv = float(value)
+        if fv <= 0:
+            return "off"
+        if num_eq(fv, cur):
+            return "other"
+        if fv < float(cur):
+            return "loosen"
+        return "tighten"
     fv = float(value)
     if num_eq(fv, cur):
         return "other"
@@ -1083,7 +1119,14 @@ def infer_kind_from_overrides(
     spec = get_param(key)
     if spec is None or spec.kind_mode != "exit":
         return "other"
-    if key in ("stop_loss.pct", "time_force.bars", "atr_stop.k"):
+    if key in (
+        "stop_loss.pct",
+        "time_force.bars",
+        "time_force.arm",
+        "atr_stop.k",
+        "atr_trail_stop.k1",
+        "atr_trail_stop.k2",
+    ):
         return infer_kind(key, flat[key], defaults)
     return "other"
 
@@ -1167,6 +1210,18 @@ def family_value_label(family: str, value: Any) -> str:
         if iv <= 0:
             return "时间成本关闭"
         return "时间成本 %s 根" % iv
+    if family == "time_force.arm":
+        fv = float(value)
+        if fv <= 0:
+            return "时间成本让路关闭"
+        return "时间成本让路 %s" % _format_pct(fv)
+    if family in ("atr_trail_stop.k1", "atr_trail_stop.k2"):
+        fv = float(value)
+        spec = get_param(family)
+        label = spec.label if spec else family
+        if fv <= 0:
+            return "%s关闭" % label
+        return "%s %gx" % (label, fv)
     if family == "atr_stop.k":
         fv = float(value)
         if fv <= 0:

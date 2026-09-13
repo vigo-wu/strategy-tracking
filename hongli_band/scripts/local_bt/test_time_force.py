@@ -50,7 +50,7 @@ def _load_tf_ns(**overrides):
         "_pos_cost_price": lambda: 100.0,
         "RECIPE": {
             "factor_params": {
-                "time_force": {"bars": 30},
+                "time_force": {"bars": 30, "arm": 0.03},
                 "trail_stop": {"tiers": [list(row) for row in TIERS]},
             },
             "structure": {
@@ -132,6 +132,21 @@ class TimeForceHitTest(unittest.TestCase):
         ns_s = _load_tf_ns()
         ns_s["RECIPE"]["structure"]["d_ma"]["slow"] = 0
         self.assertFalse(ns_s["_time_force_hit"](9.5, _closes(), 99, lot=_lot()))
+
+    def test_arm_own_not_trail_tier(self) -> None:
+        ns = _load_tf_ns()
+        ns["RECIPE"]["factor_params"]["trail_stop"]["tiers"][0][0] = 0.20
+        lot = _lot(cost=100.0, peak=104.0)
+        self.assertFalse(ns["_time_force_hit"](10.0, _closes(), 31, lot=lot))
+        ns["RECIPE"]["factor_params"]["time_force"]["arm"] = 0.10
+        lot2 = _lot(cost=100.0, peak=104.0)
+        self.assertTrue(ns["_time_force_hit"](10.0, _closes(), 31, lot=lot2))
+
+    def test_arm_off_calendar_on_ma(self) -> None:
+        ns = _load_tf_ns()
+        ns["RECIPE"]["factor_params"]["time_force"]["arm"] = 0
+        lot = _lot(cost=100.0, peak=104.0)
+        self.assertTrue(ns["_time_force_hit"](10.0, _closes(), 31, lot=lot))
 
 
 if __name__ == "__main__":

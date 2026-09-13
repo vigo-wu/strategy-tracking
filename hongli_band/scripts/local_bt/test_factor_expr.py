@@ -73,7 +73,7 @@ class FactorExprTests(unittest.TestCase):
         )
         self.assertNotIn("chase", ns["_recipe_not_leaves"](recipe["scale_in"]))
 
-    def test_exit_slot_or_confirm_and_stop(self) -> None:
+    def test_exit_slot_or_confirm_and_atr(self) -> None:
         ns = self.ns
         ctx_confirm = {
             "market": {"close": 10.0},
@@ -82,14 +82,21 @@ class FactorExprTests(unittest.TestCase):
         slot = ns["_eval_exit_slot"](ctx_confirm)
         self.assertTrue(slot["hit"])
         self.assertEqual(slot["reasons"], ["weekly_bear_confirm"])
-        lot = {"id": 1, "price": 10.0, "hold_peak": 10.2, "hold_bars": 5}
+        lot = {"id": 1, "price": 10.0, "hold_peak": 12.1, "hold_bars": 5}
         ctx_stop = {
-            "market": {"close": 9.0},
+            "market": {"close": 8.0, "atr": 1.0, "atr_n": 14},
             "state": {"lot": lot, "cost": 10.0, "w_bear_streak": 0},
         }
         slot = ns["_eval_exit_slot"](ctx_stop)
         self.assertTrue(slot["hit"])
-        self.assertEqual(slot["reasons"], ["stop_loss"])
+        self.assertEqual(slot["reasons"], ["atr_stop"])
+        ctx_trail = {
+            "market": {"close": 10.0, "atr": 1.0, "atr_n": 14},
+            "state": {"lot": lot, "cost": 10.0, "w_bear_streak": 0},
+        }
+        slot = ns["_eval_exit_slot"](ctx_trail)
+        self.assertTrue(slot["hit"])
+        self.assertEqual(slot["reasons"], ["atr_trail_stop"])
 
     def test_entry_slot_chase_reason(self) -> None:
         ns = self.ns
@@ -175,17 +182,21 @@ class DefaultRecipeShapeTests(unittest.TestCase):
             [
                 "or",
                 "weekly_bear_confirm",
-                "stop_loss",
                 "atr_stop",
-                "trail_stop",
+                "atr_trail_stop",
                 "time_force",
             ],
         )
+        self.assertNotIn("stop_loss", recipe["exit"])
+        self.assertNotIn("trail_stop", recipe["exit"])
         fp = recipe["factor_params"]
         self.assertAlmostEqual(fp["chase"]["max_pct"], 0.05)
         self.assertAlmostEqual(fp["stop_loss"]["pct"], 0.08)
         self.assertAlmostEqual(fp["atr_stop"]["k"], 2)
+        self.assertAlmostEqual(fp["atr_trail_stop"]["k1"], 2)
+        self.assertAlmostEqual(fp["atr_trail_stop"]["k2"], 2)
         self.assertEqual(fp["time_force"]["bars"], 30)
+        self.assertAlmostEqual(fp["time_force"]["arm"], 0.03)
         self.assertEqual(fp["pullback_vol"]["vol_n"], 10)
         self.assertEqual(recipe["structure"]["atr"]["n"], 14)
 

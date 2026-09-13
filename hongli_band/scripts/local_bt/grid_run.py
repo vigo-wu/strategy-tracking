@@ -457,16 +457,25 @@ def expected_fingerprint(
     fp = deep_merge_factor_params(_fp_table_from_defaults(defaults), incoming)
     stop = float((fp.get("stop_loss") or {}).get("pct"))
     time_force_bars = int((fp.get("time_force") or {}).get("bars"))
-    arm = None
+    trail_arm = None
     try:
-        arm = float(fp["trail_stop"]["tiers"][0][0])
+        trail_arm = float(fp["trail_stop"]["tiers"][0][0])
     except (IndexError, TypeError, ValueError, KeyError):
-        arm = None
+        trail_arm = None
+    tf_arm = None
+    try:
+        raw_arm = (fp.get("time_force") or {}).get("arm")
+        if raw_arm is not None:
+            tf_arm = float(raw_arm)
+    except (TypeError, ValueError):
+        tf_arm = None
+    if tf_arm is None:
+        tf_arm = 0.03
     out = {
         "stop": stop,
         "time_force_bars": time_force_bars,
-        "time_force_min_ret": float(arm) if arm is not None else 0.0,
-        "trail_arm": arm,
+        "time_force_min_ret": float(tf_arm),
+        "trail_arm": trail_arm,
     }
     if overrides_has_trail_tiers(ov):
         out["trail_tiers"] = json_ready((fp.get("trail_stop") or {}).get("tiers"))

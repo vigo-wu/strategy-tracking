@@ -92,9 +92,10 @@ RECIPE = {
     "exit": [
         "or",
         "weekly_bear_confirm",
-        "stop_loss",
+        # "stop_loss",
         "atr_stop",
-        "trail_stop",
+        # "trail_stop",
+        "atr_trail_stop",
         "time_force",
     ],
     "scale_out": False,
@@ -128,7 +129,9 @@ RECIPE = {
         "stop_loss": {"pct": 0.08},
         # atr_stop：收盘 <= 成本 - k * ATR；k<=0 关
         "atr_stop": {"k": 2},
-        # trail_stop：档 (peak_lo, peak_hi, giveback, profit_floor)；档1 peak_lo 给 time_force 让路
+        # atr_trail_stop：峰值相对成本 > k1*ATR 武装；k2 峰值回撤；<=0 关该档
+        "atr_trail_stop": {"k1": 2, "k2": 2},
+        # trail_stop：档 (peak_lo, peak_hi, giveback, profit_floor)；默认 exit 不引用
         "trail_stop": {
             "tiers": [
                 [0.03, 0.06, 0.015, None],
@@ -136,8 +139,8 @@ RECIPE = {
                 [0.10, None, 0.04, None],
             ]
         },
-        # time_force：持仓 > bars 后评估；<=0 关整条
-        "time_force": {"bars": 30},
+        # time_force：持仓 > bars 后评估；arm=峰值浮盈让路；bars<=0 关整条；arm<=0 关让路
+        "time_force": {"bars": 30, "arm": 0.03},
     },
     "structure": {
         # 日线中/慢均线；<=0 关该条
@@ -146,7 +149,7 @@ RECIPE = {
         "w_ma": {"fast": 5, "mid": 13, "life": 34},
         # MACD DIF/DEA/柱
         "macd": {"fast": 12, "slow": 26, "signal": 9},
-        # 日线威尔德 ATR；<=0 关 atr_stop
+        # 日线威尔德 ATR；<=0 关 atr_stop / atr_trail_stop
         "atr": {"n": 14},
     },
 }
@@ -230,7 +233,7 @@ LOG_DIR = r"D:\HlBandV7\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "HlBandV7"
-STRATEGY_VER = "v1.69"
+STRATEGY_VER = "v1.70"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）

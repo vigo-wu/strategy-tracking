@@ -199,6 +199,17 @@ class GridSpecTest(unittest.TestCase):
         self.assertEqual(infer_kind("stop_loss.pct", 0.06, DEFAULTS), "tighten")
         self.assertEqual(infer_kind("stop_loss.pct", 0.10, DEFAULTS), "loosen")
 
+    def test_infer_kind_atr_trail_and_arm(self) -> None:
+        from grid_run import load_config_defaults
+
+        defaults = load_config_defaults()
+        self.assertEqual(infer_kind("atr_trail_stop.k1", 1, defaults), "tighten")
+        self.assertEqual(infer_kind("atr_trail_stop.k2", 3, defaults), "loosen")
+        self.assertEqual(infer_kind("atr_trail_stop.k1", 0, defaults), "off")
+        self.assertEqual(infer_kind("time_force.arm", 0.01, defaults), "loosen")
+        self.assertEqual(infer_kind("time_force.arm", 0.06, defaults), "tighten")
+        self.assertEqual(infer_kind("time_force.arm", 0, defaults), "off")
+
     def test_unknown_keys_lock_generator(self) -> None:
         cells = [
             {"id": "base", "kind": "base", "overrides": {}},
@@ -231,6 +242,9 @@ class GridSpecTest(unittest.TestCase):
         self.assertIn("pullback_vol.confirm_days", ids)
         self.assertIn("stop_loss.pct", ids)
         self.assertIn("atr_stop.k", ids)
+        self.assertIn("atr_trail_stop.k1", ids)
+        self.assertIn("atr_trail_stop.k2", ids)
+        self.assertIn("time_force.arm", ids)
         self.assertIn("atr.n", ids)
         self.assertIn("trail_stop.tiers", ids)
         self.assertNotIn("TRAIL", ids)
@@ -242,6 +256,18 @@ class GridSpecTest(unittest.TestCase):
         self.assertEqual(spec.dtype, "tuple")
         self.assertEqual(spec.abbrev, "tt")
         self.assertEqual(spec.kind_mode, "exit")
+        arm = next(p for p in param_catalog() if p.id == "time_force.arm")
+        self.assertEqual(arm.dtype, "percent")
+        self.assertEqual(arm.abbrev, "tfa")
+        self.assertEqual(arm.kind_mode, "exit")
+        k1 = next(p for p in param_catalog() if p.id == "atr_trail_stop.k1")
+        self.assertEqual(k1.dtype, "int")
+        self.assertEqual(k1.abbrev, "atk1")
+        self.assertEqual(k1.kind_mode, "exit")
+        k2 = next(p for p in param_catalog() if p.id == "atr_trail_stop.k2")
+        self.assertEqual(k2.dtype, "int")
+        self.assertEqual(k2.abbrev, "atk2")
+        self.assertNotEqual(k2.dtype, "percent")
 
     def test_parse_percent_and_int(self) -> None:
         self.assertAlmostEqual(parse_scan_token("stop_loss.pct", "6"), 0.06)

@@ -881,6 +881,7 @@ _SELL_LABELS = {
     "weekly_bear": "周线转空强制清仓",
     "stop_loss": "硬止损",
     "atr_stop": "ATR止损",
+    "atr_trail_stop": "ATR移动止盈",
     "skip_add_bar": "加仓成交后当日不评卖",
 }
 _BUY_LABELS = {

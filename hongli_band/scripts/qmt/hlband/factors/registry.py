@@ -13,6 +13,7 @@ def _factor_registry():
         "stop_loss": _factor_eval_stop_loss,
         "atr_stop": _factor_eval_atr_stop,
         "trail_stop": _factor_eval_trail_stop,
+        "atr_trail_stop": _factor_eval_atr_trail_stop,
         "time_force": _factor_eval_time_force,
     }
 

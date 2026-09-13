@@ -106,8 +106,9 @@ scale_in:
   # 破平台 / 金叉不受 chase；回踩加仓受
 
 exit:
-  weekly_bear_confirm | stop_loss | atr_stop | trail_stop | time_force
-  # or 短路；主因 = 第一个命中叶子 id（清仓打 weekly_bear_confirm）
+  weekly_bear_confirm | atr_stop | atr_trail_stop | time_force
+  # or 短路；主因 = 第一个命中叶子 id
+  # stop_loss / trail_stop 叶子仍在，默认 AST 不引用（源码注释关掉）
 
 scale_out:
   false   # 现网无独立减仓槽
@@ -122,7 +123,7 @@ scale_out:
 | 因子 | 主要读的 state |
 | :--- | :--- |
 | `chase` / `vol_dry` / `w_bias` / `w_slope` / `pullback_vol` / `plat_break` / `w_macd_golden` | 可几乎只靠 market |
-| `stop_loss` / `atr_stop` / `trail_stop` | `cost`、`hold_peak`（或 lot 同名字段）；`atr_stop` 另读 `market.atr` |
+| `stop_loss` / `atr_stop` / `trail_stop` / `atr_trail_stop` | `cost`、`hold_peak`（或 lot 同名字段）；`atr_stop` / `atr_trail_stop` 另读 `market.atr` |
 | `time_force` | `hold_bars`、`hold_max_ret`、`time_force_trend_skip` |
 | `weekly_bear`（当天空头，禁开/撤买） | 主要靠 `w_detail` |
 | `weekly_bear_confirm`（确认清仓） | `w_bear_streak`、`w_bear_last_day` |
@@ -133,7 +134,7 @@ scale_out:
 
 ## 7. 第一期复合原子（现网叶子）
 
-引擎可支持细原子，但默认 Recipe **只引用**下表。每个 id 对应 `hlband/factors/lib/<id>.py`。阈值读 `RECIPE.factor_params`（`_factor_param`），**没有** `STOP_LOSS` / `CHASE_MAX_PCT` 这类模块全局别名。均线/MACD/ATR 窗读 `RECIPE.structure`（`_structure_windows`），`<=0` 关条。
+引擎可支持细原子，但现网叶子 **只登记**下表。每个 id 对应 `hlband/factors/lib/<id>.py`。默认 exit AST 引用其中一部分（见 §5）。阈值读 `RECIPE.factor_params`（`_factor_param`），**没有** `STOP_LOSS` / `CHASE_MAX_PCT` 这类模块全局别名。均线/MACD/ATR 窗读 `RECIPE.structure`（`_structure_windows`），`<=0` 关条。
 
 | id | 现逻辑 | 阈值（`factor_params`） |
 | :--- | :--- | :--- |
@@ -148,8 +149,9 @@ scale_out:
 | `w_macd_golden` | 周金叉且柱放大 | `w_macd_golden.hist_expand` |
 | `stop_loss` | 收盘相对成本 | `stop_loss.pct` |
 | `atr_stop` | 收盘 <= 成本 − k×ATR | `atr_stop.k`；窗是 `structure.atr.n` |
-| `trail_stop` | 档位回撤 / 利润底 | `trail_stop.tiers` |
-| `time_force` | 持仓日 + 慢线地板 + 武装让路 | `time_force.bars` |
+| `atr_trail_stop` | 峰值相对成本 > k1×ATR 武装；收盘<=成本或峰值回撤>=k2×ATR | `atr_trail_stop.k1` / `k2`；`k1<=0` 整条关；`k2<=0` 只保本 |
+| `trail_stop` | 档位回撤 / 利润底 | `trail_stop.tiers`（默认 exit 不引用） |
+| `time_force` | 持仓日 + 慢线地板 + 武装让路 | `time_force.bars` / `time_force.arm`；`arm<=0` 关让路 |
 
 仓位门槛（`SCALE_ARM` / `scale_once` / 满槽）**不进** Factor Lib，也不进 `factor_params`。
 
@@ -164,7 +166,7 @@ scale_out:
 | 住哪 | 例子 | 说明 |
 | :--- | :--- | :--- |
 | `RECIPE` 四槽 AST | `entry` / `scale_in` / `exit` / `scale_out` | 无数字 |
-| `RECIPE.factor_params` | `stop_loss.pct`、`atr_stop.k`、`chase.max_pct`、`trail_stop.tiers` | 因子阈值；`_factor_param` |
+| `RECIPE.factor_params` | `stop_loss.pct`、`atr_stop.k`、`atr_trail_stop.k1` / `k2`、`time_force.arm`、`chase.max_pct`、`trail_stop.tiers` | 因子阈值；`_factor_param` |
 | `RECIPE.structure` | 见下表 | 均线/MACD/ATR **窗**；`_structure_windows` |
 | 算法（不是窗） | `MA_TYPE`、`BOOK_STOCKS[].ma_type` | SMA/EMA；不上 `structure` |
 | 仓位 / 资金全局 | `SCALE_ARM`、`CASH_RATIO`、`TRADE_BUDGET` | 不上表、不上因子面板 |
@@ -176,15 +178,17 @@ scale_out:
 | `d_ma` | `mid` / `slow` | 20 / 60 | 日线回踩/无量阴跌；慢线还是 time_force 地板 |
 | `w_ma` | `fast` / `mid` / `life` | 5 / 13 / 34 | 周线快/中/生命线；`mid` 仅日志 `weekly_bull` |
 | `macd` | `fast` / `slow` / `signal` | 12 / 26 / 9 | 周线 DIF/DEA/柱 |
-| `atr` | `n` | 14 | 日线威尔德 ATR；`<=0` 关 `atr_stop` |
+| `atr` | `n` | 14 | 日线威尔德 ATR；`<=0` 关 `atr_stop` / `atr_trail_stop` |
 
 读窗：调用方先 `_structure_windows()`，再把 `n` 传给 `_price_ma` / `_calc_macd`（三窗必传）/ `_calc_atr`。缺键用上表数字字面量。网格覆盖 `_structure_apply_global`，按段再按 key 合并。QMT 暖机（`market._ohlcv_need_*`）走 `_structure_windows()`；local_bt `run.py` 读裸表，缺键当 0——现网字面量齐全时两者一致。
 
-网格：轴 id 是点路径（`stop_loss.pct` / `atr_stop.k` / `d_ma.mid` / `atr.n`）；短 id 如 `dmm15` / `ask` / `atr`。格子 `overrides` 必须写成：
+网格：轴 id 是点路径（`stop_loss.pct` / `atr_stop.k` / `atr_trail_stop.k1` / `k2` / `time_force.arm` / `d_ma.mid` / `atr.n`）；短 id 如 `dmm15` / `ask` / `atk1` / `atk2` / `tfa` / `atr`。`atr_trail_stop.k1` / `k2` **不是**百分比轴。格子 `overrides` 必须写成：
 
 ```text
 {"factor_params": {"stop_loss": {"pct": 0.06}}}
 {"factor_params": {"atr_stop": {"k": 2}}}
+{"factor_params": {"atr_trail_stop": {"k1": 2, "k2": 2}}}
+{"factor_params": {"time_force": {"arm": 0.03}}}
 {"structure": {"d_ma": {"mid": 15}}}
 {"structure": {"atr": {"n": 14}}}
 ```

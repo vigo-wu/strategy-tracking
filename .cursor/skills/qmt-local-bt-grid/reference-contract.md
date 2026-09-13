@@ -13,7 +13,8 @@
 2. **隔离产物目录**：`report/grid/<sweep>/<cell>/<sample>/<div>/`。禁止写回基线 `report/<div>/`。
 3. **init 指纹**（写进同一份 log，供 runner 校验）
    - 必有：`stop=`、`time_force_bars=`（若策略有这两项）。
-   - 扫阶梯止盈：`trail_arm=` = `trail_stop.tiers` 档 1 的 `peak_lo`；另打 compact `trail_tiers=` JSON，探针按整表相等（起步相同、giveback 不同也要能抓到）。
+   - `time_force_min_ret=` = `time_force.arm`（标签名不改；不要从 trail 档1 推）。
+   - 扫阶梯止盈：`trail_arm=` = `trail_stop.tiers` 档 1 的 `peak_lo`（与让路脱钩）；另打 compact `trail_tiers=` JSON，探针按整表相等（起步相同、giveback 不同也要能抓到）。
 4. **主样本 walk**：默认 config `BOOK_STOCKS` 一段 `run_book_backtest`（`year_start0101`–`year_end1231`）。`asset_split.mode=random_from_csv` 时调参 / 盲测 **各一段**（名单写入 `freeze.json` / `spec.json`；CSV 仍用 `csv_for`）。禁止 stock×年独立 10 万账户，禁止 `tune∪holdout` 同一钱包。
 5. **空间隔离（可选）**：`asset_split` 见 skill 示例 `stop_loss_space.json`。选参主 KPI 仅 tune 股；holdout × 验收年复用 `gate` 否决（无覆盖不得过门）。
 6. **过门 `gate`**：绝对合格线（可逐项禁用）+ 可选相对 base + 可选卡玛同向；指标用 `windows.check.*`；排序用验收期卡玛 Δ。写入 spec/freeze/summary；只汇总可 `--gate-json` / 侧栏覆盖。
@@ -26,7 +27,8 @@ JSON 可序列化。元组在 JSON 里用数组；`null` = Python `None`。
 {
   "factor_params": {
     "stop_loss": {"pct": 0.10},
-    "time_force": {"bars": 0},
+    "time_force": {"bars": 0, "arm": 0.03},
+    "atr_trail_stop": {"k1": 2, "k2": 2},
     "trail_stop": {
       "tiers": [
         [0.04, 0.06, 0.015, null],
@@ -42,7 +44,7 @@ JSON 可序列化。元组在 JSON 里用数组；`null` = Python `None`。
 }
 ```
 
-结构轴 id：`d_ma.mid` `d_ma.slow` `w_ma.fast` `w_ma.mid` `w_ma.life` `macd.fast` `macd.slow` `macd.signal` `atr.n`。短 id 如 `dmm15` / `atr`。出场另有 `atr_stop.k`（短 id `ask`）。不要写顶层 `D_MA_MID` 或顶层 `d_ma.mid`。
+结构轴 id：`d_ma.mid` `d_ma.slow` `w_ma.fast` `w_ma.mid` `w_ma.life` `macd.fast` `macd.slow` `macd.signal` `atr.n`。短 id 如 `dmm15` / `atr`。出场另有 `atr_stop.k`（短 id `ask`）、`atr_trail_stop.k1` / `k2`（`atk1` / `atk2`，**不是**百分比轴）、`time_force.arm`（`tfa`，百分比）。不要写顶层 `D_MA_MID` 或顶层 `d_ma.mid`。
 
 空 `overrides` = `base`（现行片段常量，仍跑一遍以便对照目录与指纹）。
 

@@ -31,17 +31,13 @@
     },
     {
       "id": "stop_loss",
-      "sell_ok": true,
-      "sell_reasons": [
-        "stop_loss"
-      ]
+      "sell_ok": false,
+      "sell_reasons": []
     },
     {
       "id": "trailish",
-      "sell_ok": true,
-      "sell_reasons": [
-        "trail_stop"
-      ]
+      "sell_ok": false,
+      "sell_reasons": []
     },
     {
       "id": "pullback",

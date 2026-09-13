@@ -333,6 +333,9 @@ class GridRunApiTest(unittest.TestCase):
         self.assertEqual(int(defaults["d_ma.mid"]), 20)
         self.assertEqual(int(defaults["d_ma.slow"]), 60)
         self.assertEqual(int(defaults["w_ma.mid"]), 13)
+        self.assertAlmostEqual(float(defaults["time_force.arm"]), 0.03)
+        self.assertAlmostEqual(float(defaults["atr_trail_stop.k1"]), 2)
+        self.assertAlmostEqual(float(defaults["atr_trail_stop.k2"]), 2)
         self.assertNotIn("D_MA_MID", defaults)
 
     def test_parse_fingerprint_trail_tiers_distinguishes_giveback(self) -> None:
@@ -542,6 +545,53 @@ class GridInitProbeTest(unittest.TestCase):
         expected = expected_fingerprint(defaults, ov)
         got = parse_fingerprint(text)
         self.assertEqual(got["recipe"], expected["recipe"])
+
+    def test_expected_fingerprint_tf_min_ret_from_arm(self) -> None:
+        defaults = load_config_defaults()
+        base = expected_fingerprint(defaults, {})
+        self.assertAlmostEqual(base["time_force_min_ret"], 0.03)
+        self.assertAlmostEqual(base["trail_arm"], 0.03)
+        trail_ov = {
+            "factor_params": {
+                "trail_stop": {
+                    "tiers": [
+                        [0.20, 0.06, 0.015, None],
+                        [0.06, 0.10, 0.03, 0.03],
+                        [0.10, None, 0.04, None],
+                    ]
+                }
+            }
+        }
+        trail = expected_fingerprint(defaults, trail_ov)
+        self.assertAlmostEqual(trail["time_force_min_ret"], 0.03)
+        self.assertAlmostEqual(trail["trail_arm"], 0.20)
+        arm = expected_fingerprint(
+            defaults, {"factor_params": {"time_force": {"arm": 0.10}}}
+        )
+        self.assertAlmostEqual(arm["time_force_min_ret"], 0.10)
+        self.assertAlmostEqual(arm["trail_arm"], 0.03)
+
+    def test_run_init_probe_time_force_arm_not_trail(self) -> None:
+        text = run_init_probe({"factor_params": {"time_force": {"arm": 0.10}}})
+        got = parse_fingerprint(text)
+        self.assertAlmostEqual(float(got["time_force_min_ret"]), 0.10)
+        self.assertAlmostEqual(float(got["trail_arm"]), 0.03)
+        text2 = run_init_probe(
+            {
+                "factor_params": {
+                    "trail_stop": {
+                        "tiers": [
+                            [0.20, 0.06, 0.015, None],
+                            [0.06, 0.10, 0.03, 0.03],
+                            [0.10, None, 0.04, None],
+                        ]
+                    }
+                }
+            }
+        )
+        got2 = parse_fingerprint(text2)
+        self.assertAlmostEqual(float(got2["time_force_min_ret"]), 0.03)
+        self.assertAlmostEqual(float(got2["trail_arm"]), 0.20)
 
     def test_run_init_probe_applies_stop_loss(self) -> None:
         text = run_init_probe({"factor_params": {"stop_loss": {"pct": 0.06}}})

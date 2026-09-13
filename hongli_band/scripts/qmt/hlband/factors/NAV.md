@@ -49,7 +49,7 @@ market.py
 | :--- | :--- | :--- |
 | `entry` | `¬chase ∧ ¬vol_dry ∧ ¬w_bias ∧ ¬w_slope ∧ ¬weekly_bear ∧ pullback_vol` | 未命中 reasons 为第一个挡住的叶子 |
 | `scale_in` | `¬vol_dry ∧ ¬w_bias ∧ ¬w_slope ∧ ¬weekly_bear ∧ ((pullback_vol ∧ ¬chase) ∨ plat_break ∨ w_macd_golden)` | 破平台/金叉**不受** chase；回踩加仓受。`SCALE_ARM` / `scale_once` / 满槽在 `_scale_gate`，不进表达式 |
-| `exit` | `weekly_bear_confirm ∨ stop_loss ∨ atr_stop ∨ trail_stop ∨ time_force` | or 短路；清仓 reason 是 `weekly_bear_confirm` |
+| `exit` | `weekly_bear_confirm ∨ atr_stop ∨ atr_trail_stop ∨ time_force` | or 短路；主因=第一个命中叶子。`stop_loss` / `trail_stop` 叶子仍在，默认 AST 不引用 |
 | `scale_out` | `false` | **减仓未启用**。Intent 预留 `reduce`，strategy 忽略 |
 
 `weekly_bear` = 当天空头（禁开/撤买）。确认清仓用独立叶子 `weekly_bear_confirm`（读 streak）。`_update_w_bear_streak` 不进 `eval`。

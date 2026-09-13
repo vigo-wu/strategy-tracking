@@ -59,6 +59,7 @@ MODULE_ORDER = [
     "factors/lib/stop_loss.py",
     "factors/lib/atr_stop.py",
     "factors/lib/trail_stop.py",
+    "factors/lib/atr_trail_stop.py",
     "factors/lib/time_force.py",
     "factors/registry.py",
     "factors/expr.py",

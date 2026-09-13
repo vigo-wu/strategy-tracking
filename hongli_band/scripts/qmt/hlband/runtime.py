@@ -331,6 +331,12 @@ def _init_impl(C):
         _factor_param(None, "stop_loss", "pct"),
         "atr_stop=",
         _factor_param(None, "atr_stop", "k"),
+        "atr_trail=",
+        "%s/%s"
+        % (
+            _factor_param(None, "atr_trail_stop", "k1"),
+            _factor_param(None, "atr_trail_stop", "k2"),
+        ),
         "trail_arm=",
         _trail_arm(),
         "trail_tiers=",
