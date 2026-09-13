@@ -12,15 +12,29 @@ if str(HERE) not in sys.path:
 
 try:
     from grid_ui import (
+        _cell_column_mean,
+        _composite_n_diffs_map,
         _detail_metric_tone,
         _detail_window_rows,
         _detail_window_table_html,
+        _iter_detail_groups,
+        _metric_ranks,
+        _pick_composite_recommend,
+        _reorder_main_rows,
+        _sort_detail_groups,
         _stack_detail_window_rows,
     )
 except ImportError:
+    _cell_column_mean = None  # type: ignore[misc, assignment]
+    _composite_n_diffs_map = None  # type: ignore[misc, assignment]
     _detail_metric_tone = None  # type: ignore[misc, assignment]
     _detail_window_rows = None  # type: ignore[misc, assignment]
     _detail_window_table_html = None  # type: ignore[misc, assignment]
+    _iter_detail_groups = None  # type: ignore[misc, assignment]
+    _metric_ranks = None  # type: ignore[misc, assignment]
+    _pick_composite_recommend = None  # type: ignore[misc, assignment]
+    _reorder_main_rows = None  # type: ignore[misc, assignment]
+    _sort_detail_groups = None  # type: ignore[misc, assignment]
     _stack_detail_window_rows = None  # type: ignore[misc, assignment]
 
 
@@ -205,6 +219,270 @@ class GridUiDetailToneTest(unittest.TestCase):
         pf_off = {"profit_factor": {"enabled": False, "min": 1.5}}
         self.assertEqual(_detail_metric_tone("盈亏比", 0.01, pf_off), "pass")
         self.assertIsNone(_detail_metric_tone("盈亏比", -0.01, pf_off))
+
+
+def _sharpe_book(all_s: float | None, tune_s: float | None, check_s: float | None) -> dict:
+    windows: dict[str, dict] = {}
+    if all_s is not None:
+        windows["all"] = {"sharpe": all_s}
+    if tune_s is not None:
+        windows["tune"] = {"sharpe": tune_s}
+    if check_s is not None:
+        windows["check"] = {"sharpe": check_s}
+    return {"windows": windows}
+
+
+def _dd_book(all_dd: float, tune_dd: float, check_dd: float) -> dict:
+    return {
+        "windows": {
+            "all": {"max_dd": all_dd},
+            "tune": {"max_dd": tune_dd},
+            "check": {"max_dd": check_dd},
+        }
+    }
+
+
+@unittest.skipIf(
+    _cell_column_mean is None or _sort_detail_groups is None or _reorder_main_rows is None,
+    "streamlit (or grid_ui deps) not installed",
+)
+class GridUiColumnSortTest(unittest.TestCase):
+    def test_mean_skips_none_and_non_numeric(self) -> None:
+        chunk = [{"夏普": 1.0}, {"夏普": None}, {"夏普": "x"}, {"夏普": 3.0}]
+        self.assertAlmostEqual(_cell_column_mean(chunk, "夏普"), 2.0)
+        self.assertIsNone(_cell_column_mean([{"夏普": None}], "夏普"))
+
+    def test_space_off_sharpe_mean_desc(self) -> None:
+        a = _stack_detail_window_rows(
+            {"id": "a", "label": "A"}, _sharpe_book(0.2, 0.4, 0.6), space_on=False
+        )
+        b = _stack_detail_window_rows(
+            {"id": "b", "label": "B"}, _sharpe_book(1.0, 0.8, 0.6), space_on=False
+        )
+        # A mean 0.4, B mean 0.8
+        rows = a + b
+        ordered = _sort_detail_groups(rows, "夏普", True)
+        self.assertEqual([r["id"] for r in ordered], ["b"] * 3 + ["a"] * 3)
+        self.assertEqual([r["区间"] for r in ordered[:3]], ["全区间", "调参期", "验收期"])
+        asc = _sort_detail_groups(rows, "夏普", False)
+        self.assertEqual([r["id"] for r in asc], ["a"] * 3 + ["b"] * 3)
+
+    def test_space_on_holdout_pulls_mean_down(self) -> None:
+        high_tune = {
+            "windows": {
+                "all": {"sharpe": 1.0},
+                "tune": {"sharpe": 1.0},
+                "check": {"sharpe": 1.0},
+            },
+            "holdout_windows": {
+                "all": {"sharpe": 0.0},
+                "tune": {"sharpe": 0.0},
+                "check": {"sharpe": 0.0},
+            },
+        }
+        even = {
+            "windows": {
+                "all": {"sharpe": 0.8},
+                "tune": {"sharpe": 0.8},
+                "check": {"sharpe": 0.8},
+            },
+            "holdout_windows": {
+                "all": {"sharpe": 0.8},
+                "tune": {"sharpe": 0.8},
+                "check": {"sharpe": 0.8},
+            },
+        }
+        a = _stack_detail_window_rows({"id": "a", "label": "A"}, high_tune, space_on=True)
+        b = _stack_detail_window_rows({"id": "b", "label": "B"}, even, space_on=True)
+        self.assertEqual(len(a), 6)
+        # A mean 0.5, B mean 0.8
+        ordered = _sort_detail_groups(a + b, "夏普", True)
+        self.assertEqual([r["id"] for r in ordered], ["b"] * 6 + ["a"] * 6)
+        self.assertEqual(
+            [(r["篮子"], r["区间"]) for r in ordered[:6]],
+            [
+                ("调参", "全区间"),
+                ("调参", "调参期"),
+                ("调参", "验收期"),
+                ("盲测", "全区间"),
+                ("盲测", "调参期"),
+                ("盲测", "验收期"),
+            ],
+        )
+
+    def test_empty_holdout_not_treated_as_zero(self) -> None:
+        only_tune = {
+            "windows": {
+                "all": {"sharpe": 1.2},
+                "tune": {"sharpe": 1.1},
+                "check": {"sharpe": 1.0},
+            }
+        }
+        both = {
+            "windows": {
+                "all": {"sharpe": 0.6},
+                "tune": {"sharpe": 0.6},
+                "check": {"sharpe": 0.6},
+            },
+            "holdout_windows": {
+                "all": {"sharpe": 0.6},
+                "tune": {"sharpe": 0.6},
+                "check": {"sharpe": 0.6},
+            },
+        }
+        a = _stack_detail_window_rows({"id": "a", "label": "A"}, only_tune, space_on=True)
+        b = _stack_detail_window_rows({"id": "b", "label": "B"}, both, space_on=True)
+        self.assertAlmostEqual(_cell_column_mean(a, "夏普"), 1.1)
+        self.assertAlmostEqual(_cell_column_mean(b, "夏普"), 0.6)
+        ordered = _sort_detail_groups(a + b, "夏普", True)
+        self.assertEqual(ordered[0]["id"], "a")
+
+    def test_all_none_last_both_dirs(self) -> None:
+        empty = _stack_detail_window_rows(
+            {"id": "empty", "label": "空"}, {}, space_on=False
+        )
+        has = _stack_detail_window_rows(
+            {"id": "has", "label": "有"}, _sharpe_book(0.1, 0.1, 0.1), space_on=False
+        )
+        rows = empty + has
+        for desc in (True, False):
+            ordered = _sort_detail_groups(rows, "夏普", desc)
+            self.assertEqual([r["id"] for r in ordered], ["has"] * 3 + ["empty"] * 3)
+
+    def test_tie_keeps_original_order(self) -> None:
+        a = _stack_detail_window_rows(
+            {"id": "a", "label": "A"}, _sharpe_book(0.5, 0.5, 0.5), space_on=False
+        )
+        b = _stack_detail_window_rows(
+            {"id": "b", "label": "B"}, _sharpe_book(0.5, 0.5, 0.5), space_on=False
+        )
+        ordered = _sort_detail_groups(a + b, "夏普", True)
+        self.assertEqual([r["id"] for r in ordered], ["a"] * 3 + ["b"] * 3)
+
+    def test_drawdown_mean_asc_smaller_first(self) -> None:
+        a = _stack_detail_window_rows(
+            {"id": "a", "label": "A"}, _dd_book(-0.10, -0.20, -0.30), space_on=False
+        )
+        b = _stack_detail_window_rows(
+            {"id": "b", "label": "B"}, _dd_book(-0.05, -0.05, -0.05), space_on=False
+        )
+        # 表内回撤% 为绝对值：A mean 20, B mean 5
+        self.assertAlmostEqual(_cell_column_mean(a, "回撤%"), 20.0)
+        self.assertAlmostEqual(_cell_column_mean(b, "回撤%"), 5.0)
+        ordered = _sort_detail_groups(a + b, "回撤%", False)
+        self.assertEqual(ordered[0]["id"], "b")
+
+    def test_illegal_metric_keeps_order(self) -> None:
+        a = _stack_detail_window_rows(
+            {"id": "a", "label": "A"}, _sharpe_book(0.1, 0.1, 0.1), space_on=False
+        )
+        b = _stack_detail_window_rows(
+            {"id": "b", "label": "B"}, _sharpe_book(2.0, 2.0, 2.0), space_on=False
+        )
+        rows = a + b
+        self.assertEqual(_sort_detail_groups(rows, "不是列", True), rows)
+
+    def test_reorder_main_follows_detail_ids(self) -> None:
+        main = [{"id": "a", "合计": 1}, {"id": "b", "合计": 2}]
+        detail = [{"id": "b"}, {"id": "b"}, {"id": "a"}]
+        out = _reorder_main_rows(main, detail)
+        self.assertEqual([r["id"] for r in out], ["b", "a"])
+
+
+def _metric_book(
+    *,
+    sharpe: float | None = None,
+    ann: float | None = None,
+    dd_pct: float | None = None,
+    pf: float | None = None,
+) -> dict:
+    win: dict[str, float] = {}
+    if sharpe is not None:
+        win["sharpe"] = sharpe
+    if ann is not None:
+        win["avg_ann_pct"] = ann
+    if dd_pct is not None:
+        win["max_dd"] = -abs(dd_pct) / 100.0
+    if pf is not None:
+        win["profit_factor"] = pf
+    return {"windows": {"all": dict(win), "tune": dict(win), "check": dict(win)}}
+
+
+def _composite_groups(*cells: tuple[str, dict]) -> list[list[dict]]:
+    rows: list[dict] = []
+    for cid, book in cells:
+        rows.extend(
+            _stack_detail_window_rows({"id": cid, "label": cid}, book, space_on=False)
+        )
+    return _iter_detail_groups(rows)
+
+
+@unittest.skipIf(
+    _pick_composite_recommend is None
+    or _metric_ranks is None
+    or _composite_n_diffs_map is None,
+    "streamlit (or grid_ui deps) not installed",
+)
+class GridUiCompositeRecommendTest(unittest.TestCase):
+    def test_metric_ranks_ties_and_missing(self) -> None:
+        self.assertEqual(_metric_ranks([2.0, 1.0], descending=True), [1.0, 2.0])
+        self.assertEqual(_metric_ranks([1.0, 1.0], descending=True), [1.5, 1.5])
+        self.assertEqual(_metric_ranks([None, 1.0], descending=True), [2.0, 1.0])
+        self.assertEqual(_metric_ranks([30.0, 5.0], descending=False), [2.0, 1.0])
+
+    def test_all_four_better_wins(self) -> None:
+        groups = _composite_groups(
+            ("a", _metric_book(sharpe=2.0, ann=20.0, dd_pct=5.0, pf=2.5)),
+            ("b", _metric_book(sharpe=0.5, ann=1.0, dd_pct=25.0, pf=1.0)),
+        )
+        rec = _pick_composite_recommend(groups, {"a": 9, "b": 0})
+        self.assertIsNotNone(rec)
+        self.assertEqual(rec["id"], "a")
+        self.assertAlmostEqual(rec["mean_rank"], 1.0)
+
+    def test_sharpe_only_best_loses_to_other_three(self) -> None:
+        groups = _composite_groups(
+            ("a", _metric_book(sharpe=2.0, ann=1.0, dd_pct=30.0, pf=1.0)),
+            ("b", _metric_book(sharpe=1.0, ann=10.0, dd_pct=5.0, pf=2.0)),
+        )
+        rec = _pick_composite_recommend(groups)
+        self.assertIsNotNone(rec)
+        self.assertEqual(rec["id"], "b")
+        self.assertAlmostEqual(rec["mean_rank"], 1.25)
+
+    def test_missing_sharpe_still_competes(self) -> None:
+        groups = _composite_groups(
+            ("a", _metric_book(ann=20.0, dd_pct=5.0, pf=2.0)),
+            ("b", _metric_book(sharpe=0.1, ann=1.0, dd_pct=25.0, pf=1.0)),
+        )
+        rec = _pick_composite_recommend(groups)
+        self.assertIsNotNone(rec)
+        self.assertEqual(rec["id"], "a")
+        a_chunk, b_chunk = groups
+        self.assertIsNone(_cell_column_mean(a_chunk, "夏普"))
+        self.assertEqual(_metric_ranks([None, 0.1], descending=True), [2.0, 1.0])
+
+    def test_all_empty_returns_none(self) -> None:
+        groups = _composite_groups(("empty", {}))
+        self.assertIsNone(_pick_composite_recommend(groups))
+
+    def test_tie_prefers_fewer_n_diffs_current_is_zero(self) -> None:
+        book = _metric_book(sharpe=1.0, ann=10.0, dd_pct=8.0, pf=1.5)
+        groups = _composite_groups(("a", book), ("b", book))
+        rec = _pick_composite_recommend(groups, {"a": 3, "b": 1})
+        self.assertEqual(rec["id"], "b")
+        rec_cur = _pick_composite_recommend(groups, {"a": 0, "b": 2})
+        self.assertEqual(rec_cur["id"], "a")
+        nd = _composite_n_diffs_map(
+            [
+                {"id": "cur", "is_current": True, "n_diffs": 4},
+                {"id": "x", "n_diffs": 2},
+                {"id": "y"},
+            ]
+        )
+        self.assertEqual(nd["cur"], 0)
+        self.assertEqual(nd["x"], 2)
+        self.assertGreater(nd["y"], 2)
 
 
 if __name__ == "__main__":

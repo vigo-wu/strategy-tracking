@@ -241,6 +241,9 @@ def _ensure_state() -> None:
     ss.setdefault("grid_gate_win_rate_min", float(dg["win_rate"]["min"]))
     ss.setdefault("grid_gate_pf_en", bool(dg["profit_factor"]["enabled"]))
     ss.setdefault("grid_gate_pf_min", float(dg["profit_factor"]["min"]))
+    ss.setdefault("grid_sort_metric", "夏普")
+    ss.setdefault("grid_sort_dir", "降")
+    ss.setdefault("grid_sort_metric_prev", "夏普")
 
 
 def _gate_from_state() -> dict[str, Any]:
@@ -1525,6 +1528,199 @@ def _stack_detail_window_rows(
     return tune + hold
 
 
+def _cell_column_mean(chunk: list[dict[str, Any]], metric: str) -> float | None:
+    """一格该列非空数字等权平均；全空返回 None。"""
+    vals: list[float] = []
+    for row in chunk:
+        raw = row.get(metric)
+        if raw is None:
+            continue
+        try:
+            vals.append(float(raw))
+        except (TypeError, ValueError):
+            continue
+    if not vals:
+        return None
+    return sum(vals) / float(len(vals))
+
+
+_COMPOSITE_METRICS: tuple[tuple[str, bool], ...] = (
+    ("夏普", True),
+    ("几何年化%", True),
+    ("回撤%", False),
+    ("盈亏比", True),
+)
+_N_DIFFS_MISSING = 10**9
+
+
+def _detail_sort_group_size(rows: list[dict[str, Any]]) -> int:
+    if _detail_table_has_basket(rows):
+        return _DETAIL_GROUP_SIZE * 2
+    return _DETAIL_GROUP_SIZE
+
+
+def _iter_detail_groups(rows: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    if not rows:
+        return []
+    group_size = _detail_sort_group_size(rows)
+    return [rows[i : i + group_size] for i in range(0, len(rows), group_size)]
+
+
+def _metric_ranks(values: list[float | None], *, descending: bool) -> list[float]:
+    """有数的排 1..k（同值平均名次）；全空该维记 k+1。"""
+    present = [i for i, v in enumerate(values) if v is not None]
+    k = len(present)
+    worst = float(k + 1)
+    ranks = [worst] * len(values)
+    if k == 0:
+        return ranks
+    ordered = sorted(
+        present,
+        key=lambda i: float(values[i]),  # type: ignore[arg-type]
+        reverse=descending,
+    )
+    i = 0
+    while i < k:
+        j = i + 1
+        pivot = values[ordered[i]]
+        while j < k and values[ordered[j]] == pivot:
+            j += 1
+        avg = ((i + 1) + j) / 2.0
+        for t in range(i, j):
+            ranks[ordered[t]] = avg
+        i = j
+    return ranks
+
+
+def _composite_n_diffs_map(cells: list[dict[str, Any]]) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for cell in cells:
+        cid = str(cell.get("id") or "")
+        if not cid:
+            continue
+        if cell_is_current(cell):
+            out[cid] = 0
+            continue
+        raw = cell.get("n_diffs")
+        if raw is None:
+            out[cid] = _N_DIFFS_MISSING
+            continue
+        try:
+            out[cid] = int(raw)
+        except (TypeError, ValueError):
+            out[cid] = _N_DIFFS_MISSING
+    return out
+
+
+def _pick_composite_recommend(
+    groups: list[list[dict[str, Any]]],
+    n_diffs_by_id: Mapping[str, int] | None = None,
+) -> dict[str, Any] | None:
+    """不过门：四维组内名次等权平均。全空不参选。"""
+    diffs = n_diffs_by_id or {}
+    records: list[dict[str, Any]] = []
+    for idx, chunk in enumerate(groups):
+        if not chunk:
+            continue
+        means = {
+            metric: _cell_column_mean(chunk, metric) for metric, _desc in _COMPOSITE_METRICS
+        }
+        if all(v is None for v in means.values()):
+            continue
+        records.append(
+            {
+                "idx": idx,
+                "id": str(chunk[0].get("id") or ""),
+                "label": chunk[0].get("label"),
+                "means": means,
+            }
+        )
+    if not records:
+        return None
+    n_metric = len(_COMPOSITE_METRICS)
+    rank_sum = [0.0] * len(records)
+    for metric, desc in _COMPOSITE_METRICS:
+        vals = [rec["means"][metric] for rec in records]
+        for i, rk in enumerate(_metric_ranks(vals, descending=desc)):
+            rank_sum[i] += rk
+    best_i = 0
+    best_key: tuple[float, int, int] | None = None
+    for i, rec in enumerate(records):
+        mean_rank = rank_sum[i] / float(n_metric)
+        raw_nd = diffs.get(rec["id"], _N_DIFFS_MISSING)
+        try:
+            nd = int(raw_nd)
+        except (TypeError, ValueError):
+            nd = _N_DIFFS_MISSING
+        key = (mean_rank, nd, int(rec["idx"]))
+        if best_key is None or key < best_key:
+            best_key = key
+            best_i = i
+    picked = records[best_i]
+    means = picked["means"]
+    return {
+        "id": picked["id"],
+        "label": picked["label"],
+        "mean_rank": rank_sum[best_i] / float(n_metric),
+        "夏普": means["夏普"],
+        "几何年化%": means["几何年化%"],
+        "回撤%": means["回撤%"],
+        "盈亏比": means["盈亏比"],
+    }
+
+
+def _sort_detail_groups(
+    rows: list[dict[str, Any]],
+    metric: str,
+    descending: bool,
+) -> list[dict[str, Any]]:
+    """按列综合均值排整格；非法列名保持原序；缺值整格垫底。"""
+    if not rows or metric not in _DETAIL_METRIC_COLS:
+        return list(rows)
+    groups = _iter_detail_groups(rows)
+
+    def _key(chunk: list[dict[str, Any]]) -> tuple[int, float]:
+        mean = _cell_column_mean(chunk, metric)
+        if mean is None:
+            return (1, 0.0)
+        return (0, -mean if descending else mean)
+
+    groups.sort(key=_key)
+    out: list[dict[str, Any]] = []
+    for chunk in groups:
+        out.extend(chunk)
+    return out
+
+
+def _reorder_main_rows(
+    main_rows: list[dict[str, Any]],
+    detail_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """按明细组出现的 id 重排主表；明细没有的主表行追加在后。"""
+    if not main_rows:
+        return []
+    seen: list[str] = []
+    for row in detail_rows:
+        cid = str(row.get("id") or "")
+        if cid and cid not in seen:
+            seen.append(cid)
+    by_id = {str(r.get("id") or ""): r for r in main_rows}
+    used: set[str] = set()
+    out: list[dict[str, Any]] = []
+    for cid in seen:
+        row = by_id.get(cid)
+        if row is None:
+            continue
+        out.append(row)
+        used.add(cid)
+    for row in main_rows:
+        cid = str(row.get("id") or "")
+        if cid not in used:
+            out.append(row)
+            used.add(cid)
+    return out
+
+
 _DETAIL_TONE_COLS = ("夏普", "卡玛", "胜率%", "盈亏比", "几何年化%", "账户盈亏")
 _DETAIL_PASS_COLOR = "#e74c3c"
 _DETAIL_TONE_GATE_KEYS = {
@@ -1872,65 +2068,64 @@ def _render_fail_detail(notes_by_id: dict[str, Any], cells: list[dict[str, Any]]
         )
 
 
+def _default_sort_dir(metric: str) -> str:
+    return "升" if metric == "回撤%" else "降"
+
+
+def _sync_sort_dir_on_metric_change() -> None:
+    """切列时重置方向：回撤%→升，其余→降。同列不改，方便手调。"""
+    ss = st.session_state
+    raw = ss.get("grid_sort_metric")
+    metric = str(raw or "夏普")
+    if metric not in _DETAIL_METRIC_COLS:
+        metric = "夏普"
+    if raw != metric:
+        ss["grid_sort_metric"] = metric
+    prev = ss.get("grid_sort_metric_prev")
+    if prev != metric:
+        ss["grid_sort_dir"] = _default_sort_dir(metric)
+        ss["grid_sort_metric_prev"] = metric
+
+
+def _render_result_sort_bar() -> tuple[str, bool]:
+    _sync_sort_dir_on_metric_change()
+    c1, c2 = st.columns([4, 1])
+    with c1:
+        picked = st.pills(
+            "表序",
+            options=list(_DETAIL_METRIC_COLS),
+            selection_mode="single",
+            key="grid_sort_metric",
+        )
+    with c2:
+        st.radio("方向", ["降", "升"], horizontal=True, key="grid_sort_dir")
+    metric = str(picked or st.session_state.get("grid_sort_metric") or "夏普")
+    if metric not in _DETAIL_METRIC_COLS:
+        metric = "夏普"
+    descending = str(st.session_state.get("grid_sort_dir") or "降") != "升"
+    st.caption(
+        "表序按 %s 综合均值 · %s（调参/盲测 × 各区间等权；缺窗跳过）"
+        % (metric, "降" if descending else "升")
+    )
+    return metric, descending
+
+
 def _render_results() -> None:
     summary = st.session_state.get("grid_summary")
     if not isinstance(summary, dict) or not summary.get("cells"):
         return
     rec = summary.get("recommend") or {}
     rec_id = str(rec.get("id") or "").strip()
-    st.subheader("选参结论")
-    sweep_label = str(summary.get("sweep") or "").strip()
-    if sweep_label:
-        st.caption("sweep `%s`" % sweep_label)
     rec_reason = str(rec.get("reason") or "")
-    name = str(st.session_state.get("grid_sweep") or summary.get("sweep") or "").strip()
-    prog = _load_grid_progress(name) if name else None
-    if prog and done_cell_ids(prog):
-        batches = prog.get("batches") or []
-        if any(isinstance(b, dict) and str(b.get("status") or "") != "done" for b in batches):
-            st.caption("未跑完：推荐只基于已完成组；★现行若尚未跑完，相对门会跳过。")
-    if rec_id:
-        st.success("过门推荐 **%s** · %s" % (rec.get("label") or rec_id, rec_reason))
-    else:
-        st.warning(rec_reason or "无格子过门")
-    try:
-        from robust_ui import ROBUST_MODE
-        from ui_cache import UI_MODE_KEY
-
-        sweep_dir = _grid_sweep_dir(summary)
-        sum_path = sweep_dir / "summary.json"
-        can_robust = bool(rec_id) and sum_path.is_file()
-        if not rec_id:
-            st.caption("无过门推荐，不能送入实盘评估。")
-        if can_robust and st.button("送入实盘评估", key="grid_to_robust"):
-            try:
-                rel = str(sum_path.resolve().relative_to(Path(__file__).resolve().parents[3])).replace(
-                    "\\", "/"
-                )
-            except ValueError:
-                rel = str(sum_path)
-            st.session_state["robust_param_source"] = rel
-            st.session_state[UI_MODE_KEY] = ROBUST_MODE
-            st.rerun()
-    except Exception:
-        pass
     space = summary.get("asset_split") or {}
     space_on = bool(space.get("holdout_stocks") or space.get("tune_stocks"))
-    if space_on:
-        st.caption(
-            "空间隔离：主列盈亏=调参标的（展示）；过门=侧栏绝对合格线；盲测复用同一 gate 否决。"
-        )
-    else:
-        st.caption(
-            "过门=侧栏已启用的绝对合格线；排序看验收期卡玛。默认不改 config / 不 deploy。"
-        )
     win = fill_year_windows(summary)
-    main_rows: list[dict[str, Any]] = []
-    current_ids: set[str] = set()
-    detail_rows: list[dict[str, Any]] = []
     notes = rec.get("candidates") or []
     notes_by_id = {n.get("id"): n for n in notes if isinstance(n, dict)}
     cells = list(summary.get("cells") or [])
+    main_rows: list[dict[str, Any]] = []
+    current_ids: set[str] = set()
+    detail_rows: list[dict[str, Any]] = []
     for cell in cells:
         b = (cell.get("samples") or {}).get("book") or {}
         note = notes_by_id.get(cell.get("id")) or {}
@@ -1959,6 +2154,66 @@ def _render_results() -> None:
         main["是否通过"] = "否" if compact else "是"
         main_rows.append(main)
         detail_rows.extend(_stack_detail_window_rows(cell, b, space_on=space_on))
+    composite = _pick_composite_recommend(
+        _iter_detail_groups(detail_rows),
+        _composite_n_diffs_map(cells),
+    )
+
+    st.subheader("选参结论")
+    sweep_label = str(summary.get("sweep") or "").strip()
+    if sweep_label:
+        st.caption("sweep `%s`" % sweep_label)
+    name = str(st.session_state.get("grid_sweep") or summary.get("sweep") or "").strip()
+    prog = _load_grid_progress(name) if name else None
+    if prog and done_cell_ids(prog):
+        batches = prog.get("batches") or []
+        if any(isinstance(b, dict) and str(b.get("status") or "") != "done" for b in batches):
+            st.caption("未跑完：推荐只基于已完成组；★现行若尚未跑完，相对门会跳过。")
+    if rec_id:
+        st.success("过门推荐 **%s** · %s" % (rec.get("label") or rec_id, rec_reason))
+    else:
+        st.warning(rec_reason or "无格子过门")
+    if composite:
+        st.info(
+            "综合推荐 **%s** · 夏普/年化/回撤/盈亏比组内名次平均（不过门，不能送实盘评估）"
+            % (composite.get("label") or composite.get("id") or "")
+        )
+    else:
+        st.caption("无综合推荐（四项皆空）。")
+    try:
+        from robust_ui import ROBUST_MODE
+        from ui_cache import UI_MODE_KEY
+
+        sweep_dir = _grid_sweep_dir(summary)
+        sum_path = sweep_dir / "summary.json"
+        can_robust = bool(rec_id) and sum_path.is_file()
+        if not rec_id:
+            st.caption("无过门推荐，不能送入实盘评估。")
+        if can_robust and st.button("送入实盘评估", key="grid_to_robust"):
+            try:
+                rel = str(sum_path.resolve().relative_to(Path(__file__).resolve().parents[3])).replace(
+                    "\\", "/"
+                )
+            except ValueError:
+                rel = str(sum_path)
+            st.session_state["robust_param_source"] = rel
+            st.session_state[UI_MODE_KEY] = ROBUST_MODE
+            st.rerun()
+    except Exception:
+        pass
+    if space_on:
+        st.caption(
+            "空间隔离：主列盈亏=调参标的（展示）；过门=侧栏绝对合格线；盲测复用同一 gate 否决。"
+        )
+    else:
+        st.caption(
+            "过门=侧栏已启用的绝对合格线；推荐看验收期卡玛。默认不改 config / 不 deploy。"
+        )
+
+    sort_metric, sort_desc = _render_result_sort_bar()
+    detail_rows = _sort_detail_groups(detail_rows, sort_metric, sort_desc)
+    main_rows = _reorder_main_rows(main_rows, detail_rows)
+    dir_label = "降" if sort_desc else "升"
 
     df = pd.DataFrame(main_rows)
     preview_ids = {
@@ -1978,13 +2233,16 @@ def _render_results() -> None:
             % "、".join(extra_ids)
         )
     st.caption(
-        "调参期 %s–%s · 验收期 %s–%s%s · 单位：元（过门看侧栏；排序看验收卡玛）%s"
+        "调参期 %s–%s · 验收期 %s–%s%s · 单位：元"
+        "（过门看侧栏；推荐看验收卡玛；表序按 %s 综合均值 · %s）%s"
         % (
             win["tune_start"],
             win["tune_end"],
             win["check_start"],
             win["check_end"],
             " · 主列=调参标的" if space_on else "",
+            sort_metric,
+            dir_label,
             " · 浅蓝底=现行参数" if current_ids else "",
         )
     )
