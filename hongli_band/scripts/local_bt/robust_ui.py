@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping, MutableMapping
 
 import pandas as pd
 import streamlit as st
@@ -14,15 +16,32 @@ from analyze import (
     DIVIDEND_LABELS,
     DIVIDEND_TYPES,
 )
+from asset_split import DEFAULT_UNIVERSE_DIR
+from grid_progress import (
+    SPAWN_GRACE_SEC,
+    load_progress,
+    spawn_creationflags,
+    tail_text,
+    ui_worker_busy,
+    walk_progress_ratio,
+)
+from grid_run import resolve_pool_workers
 from robust_gate import default_gate, fill_gate
-from robust_run import RobustError, run_robust
+from robust_run import (
+    robust_progress_caption,
+    robust_worker_argv,
+    stop_robust_worker,
+)
 from robust_sample import sample_baskets_for_spec
 from robust_spec import (
     ROBUST_ROOT,
     YEAR_DEFAULTS,
     RobustSpecError,
+    fingerprints_match,
+    json_ready,
     resolve_overrides_from_summary,
     run_dir,
+    sampling_fingerprint,
     validate_year_windows,
 )
 from robust_summarize import summarize_run
@@ -30,8 +49,11 @@ from ui_cache import CACHE_PATH, merge_form_cache, snapshot_form_state
 
 ROBUST_MODE = "实盘评估"
 THEME = Path(__file__).resolve().parents[2]
+REPO = THEME.parent
 GRID_ROOT = THEME / "report" / "grid"
 PARAM_SOURCE_CONFIG = "现行 config（默认）"
+
+_PROGRESS_FRAG = None
 
 
 def _persist() -> None:
@@ -53,15 +75,21 @@ def _ensure_state() -> None:
     ss.setdefault("robust_n_baskets", 40)
     ss.setdefault("robust_basket_size", 10)
     ss.setdefault("robust_seed", 42)
-    ss.setdefault("robust_workers", 4)
+    ss.setdefault("robust_workers", 0)
     ss.setdefault("robust_ma_type", "EMA")
     ss.setdefault("robust_compare_div", DEFAULT_DIVIDEND_TYPE)
     ss.setdefault("robust_compound", True)
-    ss.setdefault("robust_universe", "tools/csv/none")
+    ss.setdefault("robust_universe", DEFAULT_UNIVERSE_DIR)
+    ss.setdefault("robust_full_span", False)
+    ss.setdefault("robust_eligible_n", 0)
+    ss.setdefault("robust_drawn_baskets", [])
+    ss.setdefault("robust_draw_fp", {})
+    ss.setdefault("robust_mean_jaccard", None)
     ss.setdefault("robust_param_source", PARAM_SOURCE_CONFIG)
     ss.setdefault("robust_cell_id", "")
     ss.setdefault("robust_busy", False)
-    # hard
+    ss.setdefault("robust_worker_pid", 0)
+    ss.setdefault("robust_stopping", False)
     ss.setdefault("robust_h_calmar_en", bool(dg["hard"]["calmar"]["enabled"]))
     ss.setdefault("robust_h_calmar_min", float(dg["hard"]["calmar"]["min"]))
     ss.setdefault("robust_h_dd_en", bool(dg["hard"]["max_dd"]["enabled"]))
@@ -70,7 +98,6 @@ def _ensure_state() -> None:
     ss.setdefault("robust_h_sharpe_min", float(dg["hard"]["oos_sharpe"]["min"]))
     ss.setdefault("robust_h_pf_en", bool(dg["hard"]["profit_factor"]["enabled"]))
     ss.setdefault("robust_h_pf_min", float(dg["hard"]["profit_factor"]["min"]))
-    # soft
     ss.setdefault("robust_s_wr_en", bool(dg["soft"]["win_rate"]["enabled"]))
     ss.setdefault("robust_s_wr_veto", bool(dg["soft"]["win_rate"]["veto"]))
     ss.setdefault("robust_s_wr_min", float(dg["soft"]["win_rate"]["min"]))
@@ -78,7 +105,6 @@ def _ensure_state() -> None:
     ss.setdefault("robust_s_nt_veto", bool(dg["soft"]["n_trades"]["veto"]))
     ss.setdefault("robust_s_nt_min", int(dg["soft"]["n_trades"]["min"]))
     ss.setdefault("robust_s_nt_psy", float(dg["soft"]["n_trades"]["per_stock_year_min"]))
-    # aggregate
     ss.setdefault("robust_a_pass", float(dg["aggregate"]["pass_rate_min"]))
     ss.setdefault("robust_a_calmar", float(dg["aggregate"]["median_calmar_min"]))
     ss.setdefault("robust_a_tail_pct", abs(float(dg["aggregate"]["tail_max_dd_floor"])) * 100.0)
@@ -149,7 +175,8 @@ def _current_spec() -> dict[str, Any]:
         "n_baskets": int(ss.get("robust_n_baskets") or 40),
         "basket_size": int(ss.get("robust_basket_size") or 10),
         "seed": int(ss.get("robust_seed") or 42),
-        "universe_dir": str(ss.get("robust_universe") or "tools/csv/none"),
+        "universe_dir": DEFAULT_UNIVERSE_DIR,
+        "full_span": bool(ss.get("robust_full_span")),
         "ma_type": str(ss.get("robust_ma_type") or "EMA"),
         "compare_div": str(ss.get("robust_compare_div") or DEFAULT_DIVIDEND_TYPE),
         "compound_backtest": bool(ss.get("robust_compound", True)),
@@ -167,9 +194,110 @@ def _current_spec() -> dict[str, Any]:
     return raw
 
 
+def _run_name() -> str:
+    return str(st.session_state.get("robust_run_id") or "").strip()
+
+
+def _run_path(name: str = "") -> Path:
+    return ROBUST_ROOT / str(name or _run_name() or "run")
+
+
+def _load_robust_progress(name: str = "") -> dict[str, Any] | None:
+    dest = _run_path(name)
+    if not dest.is_dir():
+        return None
+    return load_progress(dest)
+
+
+def _robust_session_busy_kwargs() -> dict[str, Any]:
+    spawned = st.session_state.get("robust_worker_spawned_at")
+    try:
+        spawned_at = float(spawned) if spawned is not None else None
+    except (TypeError, ValueError):
+        spawned_at = None
+    return {
+        "session_pid": int(st.session_state.get("robust_worker_pid") or 0),
+        "spawned_at": spawned_at,
+        "grace": SPAWN_GRACE_SEC,
+        "stopping": bool(st.session_state.get("robust_stopping")),
+    }
+
+
+def _robust_is_busy() -> bool:
+    prog = _load_robust_progress()
+    busy = ui_worker_busy(prog, **_robust_session_busy_kwargs())
+    st.session_state["robust_busy"] = bool(busy)
+    if not busy:
+        st.session_state["robust_worker_pid"] = 0
+        st.session_state.pop("robust_worker_spawned_at", None)
+        st.session_state["robust_stopping"] = False
+    return bool(busy)
+
+
+def _store_drawn(sampled: Mapping[str, Any], spec: Mapping[str, Any]) -> None:
+    st.session_state["robust_drawn_baskets"] = list(sampled.get("baskets") or [])
+    st.session_state["robust_eligible_n"] = int(sampled.get("eligible_n") or 0)
+    st.session_state["robust_mean_jaccard"] = sampled.get("mean_jaccard")
+    st.session_state["robust_draw_fp"] = dict(
+        sampled.get("sampling_fingerprint") or sampling_fingerprint(spec)
+    )
+
+
+def _drawn_valid(spec: Mapping[str, Any]) -> bool:
+    baskets = st.session_state.get("robust_drawn_baskets") or []
+    fp = st.session_state.get("robust_draw_fp")
+    if not baskets or not isinstance(fp, dict) or not fp:
+        return False
+    return fingerprints_match(fp, sampling_fingerprint(spec))
+
+
+def _ensure_drawn(spec: dict[str, Any], *, reshuffle: bool) -> str:
+    if not reshuffle and _drawn_valid(spec):
+        spec["baskets"] = list(st.session_state.get("robust_drawn_baskets") or [])
+        spec["sampling_fingerprint"] = dict(st.session_state.get("robust_draw_fp") or {})
+        return "session"
+    sampled = sample_baskets_for_spec(spec, reshuffle=True)
+    _store_drawn(sampled, spec)
+    spec["baskets"] = list(sampled.get("baskets") or [])
+    spec["sampling_fingerprint"] = dict(sampled.get("sampling_fingerprint") or {})
+    return "drawn"
+
+
+def _begin_run_request(ss: MutableMapping[str, Any], *, reshuffle: bool = False) -> None:
+    ss["robust_action"] = "reshuffle" if reshuffle else "run"
+
+
+def _begin_pause_request(ss: MutableMapping[str, Any]) -> None:
+    ss["robust_action"] = "pause"
+
+
+def _begin_resume_request(ss: MutableMapping[str, Any]) -> None:
+    ss["robust_action"] = "resume"
+
+
+def _mark_start() -> None:
+    _begin_run_request(st.session_state, reshuffle=False)
+
+
+def _mark_reshuffle() -> None:
+    _begin_run_request(st.session_state, reshuffle=True)
+
+
+def _mark_pause() -> None:
+    _begin_pause_request(st.session_state)
+
+
+def _mark_resume() -> None:
+    _begin_resume_request(st.session_state)
+
+
+def _mark_summarize() -> None:
+    st.session_state["robust_action"] = "summarize"
+
+
 def render_robust_sidebar() -> None:
     _ensure_state()
-    busy = bool(st.session_state.get("robust_busy"))
+    busy = _robust_is_busy()
     st.caption("锁定网格参数后，随机抽组合回放，看能不能上实盘。默认不改 config。")
     st.text_input("run_id", key="robust_run_id", disabled=busy, persist_state="session")
     y1, y2 = st.columns(2)
@@ -212,8 +340,44 @@ def render_robust_sidebar() -> None:
     st.number_input("组合组数 N", min_value=1, max_value=200, step=1, key="robust_n_baskets", disabled=busy, persist_state="session")
     st.number_input("每组只数 K", min_value=1, max_value=50, step=1, key="robust_basket_size", disabled=busy, persist_state="session")
     st.number_input("seed", min_value=0, max_value=2_147_483_647, step=1, key="robust_seed", disabled=busy, persist_state="session")
-    st.number_input("进程数", min_value=0, max_value=16, step=1, key="robust_workers", disabled=busy, persist_state="session")
-    st.text_input("宇宙目录", key="robust_universe", disabled=busy, persist_state="session")
+    st.caption("宇宙：`%s`（与参数网格相同）。改 N/K/seed/年份/全区间后须再点抽取。" % DEFAULT_UNIVERSE_DIR)
+    st.checkbox(
+        "只抽全区间有行情",
+        key="robust_full_span",
+        disabled=busy,
+        persist_state="session",
+    )
+    st.caption("勾选后：起始年年内已有第一根、且行情接到宇宙最末日。")
+    if st.button("抽取", disabled=busy, key="robust_draw"):
+        _draw_clicked()
+    n_b = len(st.session_state.get("robust_drawn_baskets") or [])
+    k = int(st.session_state.get("robust_basket_size") or 0)
+    st.caption(
+        "合格池 %s · 已抽 %s 组 × %s 只 · 平均重叠 %s"
+        % (
+            st.session_state.get("robust_eligible_n") or "—",
+            n_b or "—",
+            k or "—",
+            st.session_state.get("robust_mean_jaccard") if n_b else "—",
+        )
+    )
+    if n_b:
+        with st.expander("已抽各组", expanded=False):
+            for b in st.session_state.get("robust_drawn_baskets") or []:
+                st.code("%s  %s" % (b.get("id"), ", ".join(b.get("stocks") or [])))
+
+    st.number_input(
+        "并行进程数（0=自动=min(N, CPU)；1=串行）",
+        min_value=0,
+        max_value=16,
+        step=1,
+        key="robust_workers",
+        disabled=busy,
+        persist_state="session",
+    )
+    n_preview = int(st.session_state.get("robust_n_baskets") or 40)
+    pool_n = resolve_pool_workers(int(st.session_state.get("robust_workers") or 0), n_preview)
+    st.caption("将开 %s 路（%s 组）" % (pool_n, n_preview))
     st.selectbox("均线", options=["EMA", "SMA"], key="robust_ma_type", disabled=busy, persist_state="session")
     st.selectbox(
         "复权",
@@ -265,10 +429,221 @@ def _list_history() -> list[Path]:
     return sorted([p for p in ROBUST_ROOT.iterdir() if p.is_dir()], key=lambda x: x.stat().st_mtime, reverse=True)
 
 
+def _draw_clicked() -> None:
+    try:
+        spec = _current_spec()
+        validate_year_windows(spec)
+        sampled = sample_baskets_for_spec(spec, reshuffle=True)
+        _store_drawn(sampled, spec)
+        st.session_state["robust_flash"] = "已抽取 %s 组 × %s 只（合格池 %s）" % (
+            sampled.get("n_baskets"),
+            sampled.get("basket_size"),
+            sampled.get("eligible_n"),
+        )
+        _persist()
+    except Exception as e:
+        st.session_state["robust_flash"] = str(e)
+
+
+def _can_continue(prog: dict[str, Any] | None) -> bool:
+    if _robust_is_busy():
+        return False
+    dest = _run_path()
+    if not dest.is_dir():
+        return False
+    if (dest / "spec.json").is_file() or (dest / "freeze.json").is_file():
+        batches = (prog or {}).get("batches") or []
+        if batches and all(isinstance(b, dict) and str(b.get("status") or "") == "done" for b in batches):
+            return False
+        return True
+    return False
+
+
+def _spawn_robust_worker(dest: Path, spec_file: Path, *, reshuffle: bool) -> None:
+    dest.mkdir(parents=True, exist_ok=True)
+    cmd = robust_worker_argv(
+        spec_path=str(spec_file),
+        workers=int(st.session_state.get("robust_workers") or 0),
+        reshuffle=bool(reshuffle),
+    )
+    log_path = dest / "worker.log"
+    log_f = open(log_path, "ab")
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(REPO),
+            stdout=log_f,
+            stderr=subprocess.STDOUT,
+            shell=False,
+            creationflags=spawn_creationflags(),
+        )
+    except Exception as e:
+        log_f.close()
+        st.error("无法启动实盘评估进程：%s" % e)
+        st.session_state["robust_busy"] = False
+        st.session_state["robust_stopping"] = False
+        return
+    log_f.close()
+    st.session_state["robust_worker_pid"] = int(proc.pid)
+    st.session_state["robust_worker_spawned_at"] = time.time()
+    st.session_state["robust_busy"] = True
+    st.session_state["robust_stopping"] = False
+    st.session_state["robust_flash"] = "已启动进程 pid=%s。进度在下方刷新。" % proc.pid
+    _persist()
+    st.rerun()
+
+
+def _handle_actions() -> None:
+    action = str(st.session_state.pop("robust_action", "") or "")
+    if not action:
+        return
+    if action == "pause":
+        dest = _run_path()
+        pid = int(st.session_state.get("robust_worker_pid") or 0)
+        if pid <= 0:
+            prog = load_progress(dest)
+            pid = int((prog or {}).get("worker_pid") or 0)
+        st.session_state["robust_stopping"] = True
+        with st.spinner("正在结束进程树…"):
+            result = stop_robust_worker(pid)
+        if not result.get("ok"):
+            st.error("进程未在时限内退出，请再点暂停。")
+            _persist()
+            return
+        st.session_state["robust_stopping"] = False
+        st.session_state["robust_busy"] = False
+        st.session_state["robust_worker_pid"] = 0
+        st.session_state.pop("robust_worker_spawned_at", None)
+        st.session_state["robust_flash"] = "已暂停：已完成组留盘，未完成组续跑会重跑。"
+        _persist()
+        st.rerun()
+        return
+    if action == "summarize":
+        _summarize_now()
+        return
+    if action == "resume":
+        if _robust_is_busy():
+            st.error("仍有 worker 在跑，请先暂停")
+            return
+        dest = _run_path()
+        spec_file = dest / "spec.json"
+        if not spec_file.is_file():
+            st.error("找不到 %s" % spec_file)
+            return
+        _spawn_robust_worker(dest, spec_file, reshuffle=False)
+        return
+    if action not in ("run", "reshuffle"):
+        return
+    if _robust_is_busy():
+        st.error("已有实盘评估在跑")
+        return
+    spec = _current_spec()
+    try:
+        validate_year_windows(spec)
+    except RobustSpecError as e:
+        st.error(str(e))
+        return
+    try:
+        how = _ensure_drawn(spec, reshuffle=action == "reshuffle")
+    except Exception as e:
+        st.error(str(e))
+        return
+    dest = run_dir(spec)
+    dest.mkdir(parents=True, exist_ok=True)
+    spec_file = dest / "spec.json"
+    spec_file.write_text(
+        json.dumps(json_ready(spec), ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    if how == "drawn":
+        st.session_state["robust_flash"] = "名单空或指纹已变，已自动抽取后再开跑。"
+    _spawn_robust_worker(dest, spec_file, reshuffle=False)
+
+
+def _sync_robust_worker_state(*, load_summary: bool = True) -> dict[str, Any] | None:
+    name = _run_name()
+    if not name:
+        return None
+    dest = _run_path(name)
+    prog = load_progress(dest)
+    live = ui_worker_busy(prog, **_robust_session_busy_kwargs())
+    was_busy = bool(st.session_state.get("robust_busy"))
+    st.session_state["robust_busy"] = bool(live)
+    if not live:
+        st.session_state["robust_worker_pid"] = 0
+        st.session_state.pop("robust_worker_spawned_at", None)
+        st.session_state["robust_stopping"] = False
+        if load_summary:
+            summary_p = dest / "summary.json"
+            if summary_p.is_file() and (was_busy or not st.session_state.get("robust_summary")):
+                try:
+                    st.session_state["robust_summary"] = json.loads(
+                        summary_p.read_text(encoding="utf-8")
+                    )
+                except Exception:
+                    pass
+        if was_busy:
+            _persist()
+    return prog
+
+
+def _render_run_status() -> None:
+    name = _run_name()
+    prog = _load_robust_progress(name) if name else None
+    busy = bool(st.session_state.get("robust_busy")) or ui_worker_busy(
+        prog, **_robust_session_busy_kwargs()
+    )
+    if not name and not busy:
+        return
+    cap = robust_progress_caption(prog) if prog else ""
+    if busy:
+        st.info("正在跑实盘评估" + (" · %s" % cap if cap else " · 正在写 progress"))
+    elif cap:
+        st.caption(cap)
+    frac, walk_tot = walk_progress_ratio(prog)
+    if walk_tot > 0:
+        st.progress(frac)
+        st.caption("walk %.1f / %s" % (float((prog or {}).get("batch_walk_done") or 0), walk_tot))
+    if name:
+        log_path = _run_path(name) / "worker.log"
+        tail = tail_text(log_path, 16)
+        if tail:
+            st.code(tail, language="text")
+
+
+def _progress_tick() -> None:
+    was = bool(st.session_state.get("robust_busy"))
+    _sync_robust_worker_state()
+    _render_run_status()
+    now = bool(st.session_state.get("robust_busy"))
+    if was != now:
+        st.rerun()
+
+
+def _call_progress_fragment() -> None:
+    global _PROGRESS_FRAG
+    if _PROGRESS_FRAG is None:
+        fn = _progress_tick
+        if hasattr(st, "fragment"):
+            try:
+                fn = st.fragment(run_every=2.0)(_progress_tick)
+            except Exception:
+                fn = _progress_tick
+        _PROGRESS_FRAG = fn
+    _PROGRESS_FRAG()
+
+
 def render_robust_mode() -> None:
     _ensure_state()
-    busy = bool(st.session_state.get("robust_busy"))
-    repo = THEME.parent
+    _handle_actions()
+    flash = st.session_state.pop("robust_flash", None)
+    if flash:
+        st.info(str(flash))
+    _sync_robust_worker_state()
+    _call_progress_fragment()
+    busy = _robust_is_busy()
+    repo = REPO
+    prog = _load_robust_progress()
 
     st.markdown("**参数来源**")
     st.caption("默认用现行 config；可选网格 summary 灌入指定格子（缺省 recommend.id）的 overrides。不改 config 文件。")
@@ -279,7 +654,6 @@ def render_robust_mode() -> None:
             rels.append(str(path.relative_to(repo)).replace("\\", "/"))
         except ValueError:
             rels.append(str(path))
-    # 网格「送入」写入的路径若不在列表则补上
     cur = str(st.session_state.get("robust_param_source") or PARAM_SOURCE_CONFIG).strip()
     if cur and cur not in rels:
         rels.append(cur)
@@ -326,12 +700,20 @@ def render_robust_mode() -> None:
         )
 
     st.markdown("**操作**")
+    resume_ok = bool(not busy and _can_continue(prog))
     with st.container(horizontal=True):
-        do_run = st.button("开跑", type="primary", disabled=busy, key="robust_run")
-        do_sum = st.button("只汇总", disabled=busy, key="robust_sum_only")
-        do_preview = st.button("预览抽篮", disabled=busy, key="robust_preview_btn")
-        do_reshuffle = st.button("重抽并开跑", disabled=busy, key="robust_reshuffle")
-    st.caption("开跑沿用 freeze 名单；「重抽并开跑」忽略旧名单。只汇总用当前侧栏门槛重算，不重跑。")
+        st.button(
+            "开跑",
+            type="primary",
+            disabled=busy,
+            key="robust_run",
+            on_click=_mark_start,
+        )
+        st.button("暂停", disabled=not busy, key="robust_pause", on_click=_mark_pause)
+        st.button("继续", disabled=not resume_ok, key="robust_resume", on_click=_mark_resume)
+        st.button("只汇总", disabled=busy, key="robust_sum_only", on_click=_mark_summarize)
+        st.button("重抽并开跑", disabled=busy, key="robust_reshuffle", on_click=_mark_reshuffle)
+    st.caption("开跑沿用已抽/freeze 名单；指纹变了会自动重抽。继续跳过已有成交表的组。只汇总用当前侧栏门槛重算。")
 
     hist = _list_history()
     if hist:
@@ -359,68 +741,23 @@ def render_robust_mode() -> None:
                 else:
                     st.warning("无 summary.json：%s" % sp)
 
-    if do_preview:
-        try:
-            raw = _current_spec()
-            sampled = sample_baskets_for_spec(raw, reshuffle=True)
-            st.session_state["robust_preview_baskets"] = sampled
-        except Exception as e:
-            st.error(str(e))
-
-    preview = st.session_state.get("robust_preview_baskets")
-    if isinstance(preview, dict):
+    preview = st.session_state.get("robust_drawn_baskets")
+    if isinstance(preview, list) and preview:
         with st.expander(
-            "抽篮预览 · 合格池 %s · 平均重叠 %s"
-            % (preview.get("eligible_n"), preview.get("mean_jaccard")),
-            expanded=True,
+            "抽篮 · 合格池 %s · 平均重叠 %s"
+            % (
+                st.session_state.get("robust_eligible_n"),
+                st.session_state.get("robust_mean_jaccard"),
+            ),
+            expanded=False,
         ):
-            rows = []
-            for b in (preview.get("baskets") or [])[:8]:
-                rows.append(
-                    {"组": b.get("id"), "标的": ", ".join(b.get("stocks") or [])}
-                )
-            if rows:
-                st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
-            st.caption("仅展示前 8 组；开跑以 freeze 为准。")
-
-    if do_run or do_reshuffle:
-        _run_now(reshuffle=bool(do_reshuffle))
-    if do_sum:
-        _summarize_now()
+            rows = [
+                {"组": b.get("id"), "标的": ", ".join(b.get("stocks") or [])}
+                for b in preview
+            ]
+            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
     _render_results()
-
-
-def _run_now(*, reshuffle: bool) -> None:
-    st.session_state["robust_busy"] = True
-    bar = st.progress(0.0)
-    status = st.empty()
-
-    def on_progress(ev: dict[str, Any]) -> None:
-        done = int(ev.get("done") or 0)
-        total = max(int(ev.get("total") or 1), 1)
-        bar.progress(min(1.0, float(done) / float(total)))
-        status.info("%s · %s/%s · %s" % (ev.get("phase"), done, total, ev.get("label") or ""))
-
-    try:
-        raw = _current_spec()
-        out = run_robust(
-            raw,
-            reshuffle=reshuffle,
-            workers=int(st.session_state.get("robust_workers") or 0),
-            on_progress=on_progress,
-        )
-        st.session_state["robust_summary"] = out
-        verd = (out.get("verdict") or {}).get("verdict")
-        status.success("完成 · %s" % verd)
-        bar.progress(1.0)
-    except (RobustSpecError, RobustError) as e:
-        st.error(str(e))
-    except Exception as e:
-        st.error("%s: %s" % (type(e).__name__, e))
-    finally:
-        st.session_state["robust_busy"] = False
-        _persist()
 
 
 def _summarize_now() -> None:

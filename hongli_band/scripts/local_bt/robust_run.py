@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import time
 import traceback
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from multiprocessing import get_context
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -25,10 +27,30 @@ if str(HERE) not in sys.path:
 
 from analyze import DEFAULT_CSV_ROOT, resolve_typed_dir  # noqa: E402
 from book_backtest import book_log_name, book_stocks_hash, run_book_backtest  # noqa: E402
+from grid_progress import (  # noqa: E402
+    STATUS_DONE,
+    STATUS_RUNNING,
+    WAIT_DEAD_SETTLE_SEC,
+    WAIT_DEAD_TIMEOUT_SEC,
+    build_progress,
+    pid_exists,
+    python_executable,
+    save_progress,
+    set_batch_status,
+    terminate_process_tree,
+    wait_until_dead,
+)
 from grid_run import (  # noqa: E402
+    WALK_PROGRESS_QUEUE_MAX,
+    WalkProgress,
+    _drain_walk_queue,
+    _emit_walk_progress,
+    _queue_put,
     assert_fingerprint_text,
     expected_fingerprint,
+    init_walk_pool,
     load_config_defaults,
+    resolve_pool_workers,
 )
 from grid_spec import overrides_has_trail_tiers  # noqa: E402
 from run import run_init_probe  # noqa: E402
@@ -40,6 +62,7 @@ from robust_spec import (  # noqa: E402
     json_ready,
     load_spec,
     run_dir,
+    sampling_fingerprint,
 )
 from robust_summarize import summarize_run  # noqa: E402
 from select_analysis import _book_overrides  # noqa: E402
@@ -89,8 +112,78 @@ def _merged_overrides(
     return out
 
 
-def run_one_basket(payload: dict[str, Any]) -> dict[str, Any]:
-    """子进程入口：跑一组固定标的连续回放。"""
+def apply_walk_progress(prog: dict[str, Any], state: WalkProgress) -> dict[str, Any]:
+    """把 WalkProgress 写进 progress.json 字段。探针不改 n_walks。"""
+    prog["batch_walk_total"] = int(state.n_walks)
+    prog["batch_walk_done"] = float(state.completed) + float(state.inflight_frac)
+    tot = int(state.n_walks)
+    prog["batch_cell_total"] = tot
+    prog["batch_cell_done"] = min(tot, max(int(state.cells_done), int(state.completed)))
+    return prog
+
+
+def robust_progress_caption(progress: Mapping[str, Any] | None) -> str:
+    if not progress:
+        return ""
+    try:
+        tot = int(progress.get("batch_walk_total") or progress.get("batch_cell_total") or 0)
+        done_cells = int(progress.get("batch_cell_done") or 0)
+        walk_done = float(progress.get("batch_walk_done") or 0)
+    except (TypeError, ValueError):
+        return ""
+    batches = progress.get("batches") or []
+    status = ""
+    if batches and isinstance(batches[0], dict):
+        status = str(batches[0].get("status") or "")
+    if tot <= 0:
+        return status or ""
+    return "已完成 %s/%s 组 · walk %.1f/%s · %s" % (
+        done_cells,
+        tot,
+        walk_done,
+        tot,
+        status or "—",
+    )
+
+
+def robust_worker_argv(
+    *,
+    spec_path: str,
+    workers: int = 0,
+    reshuffle: bool = False,
+    force_rerun: bool = False,
+    script: str | Path | None = None,
+) -> list[str]:
+    py = python_executable()
+    path = str(script or (HERE / "robust_run.py"))
+    cmd = [py, path, "--spec", str(spec_path), "--workers", str(int(workers or 0))]
+    if reshuffle:
+        cmd.append("--reshuffle")
+    if force_rerun:
+        cmd.append("--force-rerun")
+    return cmd
+
+
+def stop_robust_worker(
+    pid: int,
+    *,
+    timeout: float = WAIT_DEAD_TIMEOUT_SEC,
+) -> dict[str, Any]:
+    """杀进程树并等到退出。不标 dirty、不删 basket 目录。"""
+    pid = int(pid or 0)
+    terminate_process_tree(pid)
+    dead = wait_until_dead(pid, timeout=timeout)
+    if dead and WAIT_DEAD_SETTLE_SEC > 0:
+        time.sleep(WAIT_DEAD_SETTLE_SEC)
+        dead = not pid_exists(pid)
+    return {"ok": bool(dead)}
+
+
+def run_one_basket(
+    payload: dict[str, Any],
+    on_bar_progress: Callable[[int, int, str], None] | None = None,
+) -> dict[str, Any]:
+    """子进程入口：跑一组固定标的连续回放。payload 禁止带 callback。"""
     basket_id = str(payload["basket_id"])
     stocks = list(payload["stocks"])
     out_dir = Path(payload["out_dir"])
@@ -109,7 +202,6 @@ def run_one_basket(payload: dict[str, Any]) -> dict[str, Any]:
     csv_root = payload.get("csv_root") or DEFAULT_CSV_ROOT
     htag = book_stocks_hash(book)
     log_name = book_log_name(kind="fixed", year=start, tag=htag, end=end)
-    # isolate per basket folder; avoid name collision across baskets
     log_name = "%s_%s" % (basket_id, log_name)
     force = bool(payload.get("force_rerun"))
     log_path = out_dir / log_name
@@ -133,6 +225,7 @@ def run_one_basket(payload: dict[str, Any]) -> dict[str, Any]:
             log_name=log_name,
             quiet=True,
             overrides=overrides,
+            on_progress=on_bar_progress,
         )
         return {
             "basket_id": basket_id,
@@ -153,8 +246,132 @@ def run_one_basket(payload: dict[str, Any]) -> dict[str, Any]:
         }
 
 
+def run_basket_job(payload: dict[str, Any]) -> dict[str, Any]:
+    """模块级篮子入口（Windows spawn 可 pickle）。payload 禁止带 progress_queue。"""
+    bid = str(payload.get("basket_id") or "")
+    job_key = bid
+    _queue_put("start", bid, job_key, 0, 0, bid)
+
+    def _on_bar(done_bars: int, tot_bars: int, day: str) -> None:
+        year = str(day or "")[:4]
+        lab = "回放 %s · %s %s/%s" % (bid, year, done_bars, tot_bars)
+        _queue_put("bar", bid, job_key, done_bars, tot_bars, lab)
+
+    row = run_one_basket(payload, on_bar_progress=_on_bar)
+    row["job_key"] = job_key
+    return row
+
+
 def _year_span(spec: Mapping[str, Any]) -> tuple[str, str]:
     return "%s0101" % int(spec["year_start"]), "%s1231" % int(spec["year_end"])
+
+
+def _freeze_from_spec(spec: Mapping[str, Any]) -> dict[str, Any] | None:
+    raw = spec.get("baskets")
+    if not isinstance(raw, list) or not raw:
+        return None
+    return {
+        "baskets": raw,
+        "sampling_fingerprint": spec.get("sampling_fingerprint") or sampling_fingerprint(spec),
+        "year_start": spec.get("year_start"),
+        "year_end": spec.get("year_end"),
+        "n_baskets": spec.get("n_baskets"),
+        "basket_size": spec.get("basket_size"),
+        "seed": spec.get("seed"),
+        "full_span": spec.get("full_span"),
+    }
+
+
+def _run_baskets_serial(
+    jobs: list[dict[str, Any]],
+    state: WalkProgress,
+    on_walk: Callable[..., None] | None,
+) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    for job in jobs:
+        jk = str(job["basket_id"])
+        state.start(jk)
+        _emit_walk_progress(on_walk, state, jk, "回放 %s" % jk, phase="walk", job_key=jk)
+
+        def _on_bar(
+            done_bars: int,
+            tot_bars: int,
+            day: str,
+            _jk: str = jk,
+        ) -> None:
+            state.bar(_jk, done_bars, tot_bars)
+            year = str(day or "")[:4]
+            _emit_walk_progress(
+                on_walk,
+                state,
+                _jk,
+                "回放 %s · %s %s/%s" % (_jk, year, done_bars, tot_bars),
+                phase="walk",
+                job_key=_jk,
+            )
+
+        row = run_one_basket(job, on_bar_progress=_on_bar)
+        results.append(row)
+        state.finish(jk)
+        state.cells_done += 1
+        _emit_walk_progress(on_walk, state, jk, jk, phase="walk", job_key=jk)
+    return results
+
+
+def _run_baskets_in_pool(
+    jobs: list[dict[str, Any]],
+    pool_workers: int,
+    state: WalkProgress,
+    on_walk: Callable[..., None] | None,
+) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    if not jobs:
+        return results
+    ctx = get_context("spawn")
+    q = ctx.Queue(maxsize=WALK_PROGRESS_QUEUE_MAX)
+    last_cid, last_jk, last_label = "", "", ""
+    with ProcessPoolExecutor(
+        max_workers=int(pool_workers),
+        mp_context=ctx,
+        initializer=init_walk_pool,
+        initargs=(str(HERE), q),
+    ) as ex:
+        futs = {ex.submit(run_basket_job, job): job for job in jobs}
+        pending = set(futs)
+        while pending:
+            cid, jk, lab = _drain_walk_queue(q, state)
+            if cid:
+                last_cid, last_jk, last_label = cid, jk, lab
+            done, pending = wait(pending, timeout=0.2, return_when=FIRST_COMPLETED)
+            cid2, jk2, lab2 = _drain_walk_queue(q, state)
+            if cid2:
+                last_cid, last_jk, last_label = cid2, jk2, lab2
+            for fut in done:
+                job = futs[fut]
+                jk = str(job.get("basket_id") or "")
+                try:
+                    row = fut.result()
+                except Exception as e:
+                    row = {
+                        "basket_id": jk,
+                        "ok": False,
+                        "error": str(e),
+                        "stocks": job.get("stocks"),
+                    }
+                state.finish(jk)
+                state.cells_done += 1
+                results.append(row)
+                last_cid, last_jk, last_label = jk, jk, jk
+            _emit_walk_progress(
+                on_walk, state, last_cid, last_label, phase="walk", job_key=last_jk
+            )
+        cid3, jk3, lab3 = _drain_walk_queue(q, state)
+        if cid3:
+            last_cid, last_jk, last_label = cid3, jk3, lab3
+        _emit_walk_progress(
+            on_walk, state, last_cid, last_label, phase="walk", job_key=last_jk
+        )
+    return results
 
 
 def run_robust(
@@ -185,7 +402,7 @@ def run_robust(
         _emit(on_progress, phase="done", done=1, total=1, label="只汇总完成")
         return out
 
-    freeze_old = None if reshuffle else load_freeze(freeze_path)
+    freeze_old = None if reshuffle else (_freeze_from_spec(spec) or load_freeze(freeze_path))
     sampled = sample_baskets_for_spec(spec, reshuffle=reshuffle, freeze=freeze_old)
     n = int(sampled["n_baskets"])
     if n >= WARN_BASKETS_SOFT:
@@ -193,7 +410,6 @@ def run_robust(
 
     start, end = _year_span(spec)
     csv = str(csv_root or DEFAULT_CSV_ROOT)
-    # typed root for dividends
     try:
         csv = str(resolve_typed_dir(csv, spec["compare_div"]).parent)
     except Exception:
@@ -216,6 +432,8 @@ def run_robust(
         "eligible_n": sampled["eligible_n"],
         "mean_jaccard": sampled["mean_jaccard"],
         "universe_dir": sampled["universe_dir"],
+        "full_span": sampled.get("full_span"),
+        "sampling_fingerprint": sampled.get("sampling_fingerprint") or sampling_fingerprint(spec),
         "_overrides_meta": spec.get("_overrides_meta"),
     }
     write_freeze(freeze_path, freeze_body)
@@ -255,7 +473,6 @@ def run_robust(
         )
         return {"dry_run": True, "n_baskets": n, "root": str(root), "spec": json_ready(spec)}
 
-    # init 探针：不回放 K 线；通过后全部篮子（含第一组）再跑
     defaults = load_config_defaults()
     need_trail = overrides_has_trail_tiers(spec.get("overrides") or {})
     expected = expected_fingerprint(defaults, spec.get("overrides") or {})
@@ -267,72 +484,56 @@ def run_robust(
     except Exception as e:
         raise RobustError("探针失败: %s" % e) from e
 
-    results: list[dict[str, Any]] = []
-    rest = jobs
-    w = int(workers or 0)
-    if w <= 0:
-        w = min(4, max(1, (len(rest) or 1)))
-    done = 0
-    if rest:
+    ids = [str(j["basket_id"]) for j in jobs]
+    prog = build_progress(ids, 0, worker_pid=os.getpid())
+    set_batch_status(prog, 0, STATUS_RUNNING)
+    prog["batch_walk_total"] = n
+    prog["batch_walk_done"] = 0
+    prog["batch_cell_total"] = n
+    prog["batch_cell_done"] = 0
+    save_progress(root, prog)
+
+    state = WalkProgress(n)
+    last_hb = 0.0
+
+    def _heartbeat(force: bool = False) -> None:
+        nonlocal last_hb, prog
+        now = time.time()
+        if not force and now - last_hb < 2.0:
+            return
+        last_hb = now
+        apply_walk_progress(prog, state)
+        prog["worker_pid"] = os.getpid()
+        prog = save_progress(root, prog)
+
+    def on_walk(cid: str, done: int, tot: int, label: str, **extra: Any) -> None:
+        _heartbeat(force=False)
         _emit(
             on_progress,
-            phase="run",
-            done=0,
-            total=n,
-            label="回放 %s" % str(rest[0]["basket_id"]),
+            phase=str(extra.get("phase") or "run"),
+            done=int(done),
+            total=int(tot),
+            label=label,
+            **extra,
         )
-        if w == 1:
-            for job in rest:
-                _emit(
-                    on_progress,
-                    phase="run",
-                    done=done,
-                    total=n,
-                    label="回放 %s" % str(job["basket_id"]),
-                )
-                row = run_one_basket(job)
-                results.append(row)
-                done += 1
-                _emit(
-                    on_progress,
-                    phase="run",
-                    done=done,
-                    total=n,
-                    label=str(job["basket_id"]),
-                    extra={"ok": row.get("ok")},
-                )
-        else:
-            ctx = get_context("spawn")
-            with ProcessPoolExecutor(max_workers=w, mp_context=ctx) as ex:
-                futs = {ex.submit(run_one_basket, job): job for job in rest}
-                for fut in as_completed(futs):
-                    job = futs[fut]
-                    try:
-                        row = fut.result()
-                    except Exception as e:
-                        row = {
-                            "basket_id": job["basket_id"],
-                            "ok": False,
-                            "error": str(e),
-                            "stocks": job.get("stocks"),
-                        }
-                    results.append(row)
-                    done += 1
-                    _emit(
-                        on_progress,
-                        phase="run",
-                        done=done,
-                        total=n,
-                        label=str(job["basket_id"]),
-                        extra={"ok": row.get("ok")},
-                    )
+
+    w = resolve_pool_workers(int(workers or 0), n)
+    print("pool_workers=%s n_walks=%s" % (w, n), flush=True)
+    if w <= 1:
+        results = _run_baskets_serial(jobs, state, on_walk)
+    else:
+        results = _run_baskets_in_pool(jobs, w, state, on_walk)
+
+    apply_walk_progress(prog, state)
+    set_batch_status(prog, 0, STATUS_DONE)
+    prog["worker_pid"] = os.getpid()
+    save_progress(root, prog)
 
     n_fail = sum(1 for r in results if not r.get("ok"))
     if n_fail:
         print("WARN: %s / %s 组回放失败" % (n_fail, len(results)))
 
     _emit(on_progress, phase="summarize", done=n, total=n, label="汇总中")
-    # ensure _overrides_meta on disk spec for summarize
     summary = summarize_run(root, gate=spec.get("gate"), spec=spec)
     _emit(
         on_progress,

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from analyze import DEFAULT_DIVIDEND_TYPE, normalize_dividend_type, normalize_ma_type
-from asset_split import DEFAULT_UNIVERSE_DIR
+from asset_split import DEFAULT_UNIVERSE_DIR, _as_bool
 from grid_spec import GridSpecError, _as_year, reject_deleted_factor_keys, year_range_set
 from robust_gate import fill_gate, validate_gate
 
@@ -199,7 +199,37 @@ def fill_sampling(spec: Mapping[str, Any] | None) -> dict[str, Any]:
         "basket_size": max(1, k),
         "seed": seed,
         "universe_dir": uni,
+        "full_span": _as_bool(src.get("full_span"), False),
     }
+
+
+def sampling_fingerprint(spec: Mapping[str, Any] | None) -> dict[str, Any]:
+    src = spec if isinstance(spec, Mapping) else {}
+    sampling = fill_sampling(src)
+    try:
+        year_start = int(src.get("year_start") if src.get("year_start") is not None else YEAR_DEFAULTS["year_start"])
+    except (TypeError, ValueError):
+        year_start = YEAR_DEFAULTS["year_start"]
+    try:
+        year_end = int(src.get("year_end") if src.get("year_end") is not None else YEAR_DEFAULTS["year_end"])
+    except (TypeError, ValueError):
+        year_end = YEAR_DEFAULTS["year_end"]
+    return {
+        "year_start": year_start,
+        "year_end": year_end,
+        "n_baskets": sampling["n_baskets"],
+        "basket_size": sampling["basket_size"],
+        "seed": sampling["seed"],
+        "full_span": bool(sampling["full_span"]),
+    }
+
+
+def fingerprints_match(left: Mapping[str, Any] | None, right: Mapping[str, Any] | None) -> bool:
+    if not isinstance(left, Mapping) or not isinstance(right, Mapping):
+        return False
+    a = sampling_fingerprint(left)
+    b = sampling_fingerprint(right)
+    return a == b
 
 
 def load_spec(path: str | Path | Mapping[str, Any]) -> dict[str, Any]:

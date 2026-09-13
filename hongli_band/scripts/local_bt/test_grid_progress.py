@@ -390,6 +390,23 @@ class WorkerLivenessTest(unittest.TestCase):
                 self.assertFalse(worker_is_alive(prog))
                 self.assertTrue(worker_definitely_dead(prog))
 
+    def test_robust_run_cmdline_is_alive(self) -> None:
+        prog = {"worker_pid": 4242}
+        with patch("grid_progress.pid_exists", return_value=True):
+            with patch(
+                "grid_progress.process_cmdline",
+                return_value="py hongli_band/scripts/local_bt/robust_run.py --spec x.json",
+            ):
+                self.assertTrue(worker_is_alive(prog))
+                self.assertFalse(worker_definitely_dead(prog))
+
+    def test_grid_run_cmdline_still_alive(self) -> None:
+        prog = {"worker_pid": 4242}
+        with patch("grid_progress.pid_exists", return_value=True):
+            with patch("grid_progress.process_cmdline", return_value="py grid_run.py --resume"):
+                self.assertTrue(worker_is_alive(prog))
+                self.assertFalse(worker_definitely_dead(prog))
+
     def test_reconcile_does_not_delete_if_pid_still_up(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             dest = Path(td) / "sw"

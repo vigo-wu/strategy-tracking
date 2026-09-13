@@ -283,15 +283,20 @@ def pid_exists(pid: int) -> bool:
     return True
 
 
+def cmdline_looks_like_worker(cmd: str) -> bool:
+    text = str(cmd or "").replace("\\", "/")
+    return "grid_run.py" in text or "robust_run.py" in text
+
+
 def cmdline_looks_like_grid(cmd: str) -> bool:
-    return "grid_run.py" in str(cmd or "").replace("\\", "/")
+    return cmdline_looks_like_worker(cmd)
 
 
 def cmdline_looks_foreign(cmd: str) -> bool:
     text = str(cmd or "").strip()
     if not text:
         return False
-    return not cmdline_looks_like_grid(text)
+    return not cmdline_looks_like_worker(text)
 
 
 def _linux_cmdline(pid: int) -> str:

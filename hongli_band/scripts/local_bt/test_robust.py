@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
@@ -22,9 +23,12 @@ from robust_gate import (  # noqa: E402
 from robust_sample import draw_baskets, mean_pairwise_jaccard, sample_baskets_for_spec  # noqa: E402
 from robust_spec import (  # noqa: E402
     RobustSpecError,
+    fill_sampling,
+    fingerprints_match,
     load_spec,
     resolve_overrides,
     resolve_overrides_from_summary,
+    sampling_fingerprint,
     validate_year_windows,
 )
 from robust_summarize import window_kpi_from_trades  # noqa: E402
@@ -290,6 +294,66 @@ class TestRobustSample(unittest.TestCase):
         self.assertIsNotNone(v)
         self.assertGreater(float(v), 0.0)
 
+    def test_full_span_passed_to_eligible(self) -> None:
+        spec = {
+            "year_start": 2018,
+            "year_end": 2026,
+            "n_baskets": 2,
+            "basket_size": 2,
+            "seed": 1,
+            "full_span": True,
+        }
+        pool = ["000001.SZ", "000002.SZ", "600000.SH"]
+        with patch("robust_sample.list_eligible_stocks", return_value=pool) as mocked:
+            out = sample_baskets_for_spec(spec, reshuffle=True)
+        self.assertTrue(out["full_span"])
+        kwargs = mocked.call_args.kwargs
+        self.assertTrue(kwargs.get("full_span"))
+        self.assertEqual(kwargs.get("year_start"), 2018)
+        self.assertEqual(kwargs.get("year_end"), 2026)
+
+    def test_fingerprint_mismatch_redraws(self) -> None:
+        pool = ["000001.SZ", "000002.SZ", "600000.SH", "600519.SH"]
+        spec = {
+            "year_start": 2018,
+            "year_end": 2026,
+            "n_baskets": 2,
+            "basket_size": 2,
+            "seed": 1,
+            "full_span": False,
+        }
+        first = sample_baskets_for_spec(spec, reshuffle=True, eligible=pool)
+        freeze = {
+            "baskets": first["baskets"],
+            "sampling_fingerprint": first["sampling_fingerprint"],
+            **first["sampling_fingerprint"],
+        }
+        reused = sample_baskets_for_spec(spec, reshuffle=False, freeze=freeze, eligible=pool)
+        self.assertEqual([b["stocks"] for b in reused["baskets"]], [b["stocks"] for b in first["baskets"]])
+        changed = dict(spec)
+        changed["seed"] = 99
+        redrawn = sample_baskets_for_spec(changed, reshuffle=False, freeze=freeze, eligible=pool)
+        self.assertNotEqual(
+            [b["stocks"] for b in redrawn["baskets"]],
+            [b["stocks"] for b in first["baskets"]],
+        )
+
+    def test_fill_sampling_full_span(self) -> None:
+        self.assertFalse(fill_sampling({})["full_span"])
+        self.assertTrue(fill_sampling({"full_span": True})["full_span"])
+        fp = sampling_fingerprint(
+            {
+                "year_start": 2018,
+                "year_end": 2026,
+                "n_baskets": 3,
+                "basket_size": 2,
+                "seed": 7,
+                "full_span": True,
+            }
+        )
+        self.assertTrue(fp["full_span"])
+        self.assertFalse(fingerprints_match(fp, {**fp, "full_span": False}))
+
 
 class TestWindowKpi(unittest.TestCase):
     def test_trade_window_filter(self) -> None:
@@ -303,6 +367,67 @@ class TestWindowKpi(unittest.TestCase):
         self.assertAlmostEqual(float(kpi["win_rate"]), 50.0)
         self.assertIsNotNone(kpi["max_dd"])
         self.assertIsNotNone(kpi["calmar"])
+
+
+class TestRobustRunHelpers(unittest.TestCase):
+    def test_resolve_pool_workers_via_robust(self) -> None:
+        from robust_run import resolve_pool_workers
+
+        self.assertEqual(resolve_pool_workers(1, 40), 1)
+        self.assertGreaterEqual(resolve_pool_workers(0, 40), 2)
+        self.assertEqual(resolve_pool_workers(8, 3), 3)
+
+    def test_progress_denom_is_n_probe_excluded(self) -> None:
+        from grid_run import WalkProgress
+        from robust_run import apply_walk_progress, robust_progress_caption
+
+        state = WalkProgress(4)
+        state.probe_done = 1
+        state.probe_total = 1
+        state.finish("a")
+        state.bar("b", 50, 100)
+        prog = apply_walk_progress({"batches": [{"status": "running"}]}, state)
+        self.assertEqual(prog["batch_walk_total"], 4)
+        self.assertAlmostEqual(float(prog["batch_walk_done"]), 1.5)
+        self.assertEqual(prog["batch_cell_done"], 1)
+        cap = robust_progress_caption(prog)
+        self.assertIn("walk 1.5/4", cap)
+        self.assertIn("已完成", cap)
+        self.assertNotIn("格", cap)
+
+    def test_worker_argv_has_workers(self) -> None:
+        from robust_run import robust_worker_argv
+
+        cmd = robust_worker_argv(spec_path="x.json", workers=3, reshuffle=True)
+        self.assertIn("--workers", cmd)
+        self.assertIn("3", cmd)
+        self.assertIn("--reshuffle", cmd)
+        self.assertTrue(any(str(x).endswith("robust_run.py") for x in cmd))
+
+    def test_stop_does_not_call_dirty(self) -> None:
+        from robust_run import stop_robust_worker
+
+        with patch("robust_run.terminate_process_tree") as term:
+            with patch("robust_run.wait_until_dead", return_value=True):
+                with patch("robust_run.pid_exists", return_value=False):
+                    with patch("grid_progress.stop_worker_and_dirty") as dirty:
+                        out = stop_robust_worker(9, timeout=0.01)
+        self.assertTrue(out["ok"])
+        term.assert_called_once_with(9)
+        dirty.assert_not_called()
+
+    def test_ui_actions_do_not_run_inline(self) -> None:
+        from robust_ui import _begin_pause_request, _begin_resume_request, _begin_run_request
+
+        ss: dict = {}
+        _begin_run_request(ss, reshuffle=False)
+        self.assertEqual(ss["robust_action"], "run")
+        _begin_run_request(ss, reshuffle=True)
+        self.assertEqual(ss["robust_action"], "reshuffle")
+        _begin_pause_request(ss)
+        self.assertEqual(ss["robust_action"], "pause")
+        _begin_resume_request(ss)
+        self.assertEqual(ss["robust_action"], "resume")
 
 
 if __name__ == "__main__":

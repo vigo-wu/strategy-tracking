@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from asset_split import list_eligible_stocks
-from robust_spec import RobustSpecError, fill_sampling
+from robust_spec import RobustSpecError, fill_sampling, fingerprints_match, sampling_fingerprint
 
 
 def draw_baskets(
@@ -58,33 +58,41 @@ def sample_baskets_for_spec(
     sampling = fill_sampling(spec)
     n, k, seed = sampling["n_baskets"], sampling["basket_size"], sampling["seed"]
     uni = sampling["universe_dir"]
+    full_span = bool(sampling["full_span"])
+    want_fp = sampling_fingerprint(spec)
 
     frozen = None
     if not reshuffle and isinstance(freeze, Mapping):
-        raw = freeze.get("baskets")
-        if isinstance(raw, list) and raw:
-            frozen = []
-            for row in raw:
-                if isinstance(row, Mapping) and row.get("stocks"):
-                    stocks = [str(x).strip().upper() for x in row["stocks"] if str(x).strip()]
-                elif isinstance(row, (list, tuple)):
-                    stocks = [str(x).strip().upper() for x in row if str(x).strip()]
-                else:
-                    continue
-                if stocks:
-                    frozen.append(sorted(set(stocks)))
-            if frozen and any(len(b) != k for b in frozen):
-                frozen = None
-            if frozen and len(frozen) != n:
-                # allow freeze n to win if reshuffle off
-                n = len(frozen)
-                sampling["n_baskets"] = n
+        freeze_fp = freeze.get("sampling_fingerprint")
+        if not isinstance(freeze_fp, Mapping):
+            freeze_fp = sampling_fingerprint(freeze)
+        if fingerprints_match(want_fp, freeze_fp):
+            raw = freeze.get("baskets")
+            if isinstance(raw, list) and raw:
+                frozen = []
+                for row in raw:
+                    if isinstance(row, Mapping) and row.get("stocks"):
+                        stocks = [str(x).strip().upper() for x in row["stocks"] if str(x).strip()]
+                    elif isinstance(row, (list, tuple)):
+                        stocks = [str(x).strip().upper() for x in row if str(x).strip()]
+                    else:
+                        continue
+                    if stocks:
+                        frozen.append(sorted(set(stocks)))
+                if frozen and any(len(b) != k for b in frozen):
+                    frozen = None
+                if frozen and len(frozen) != n:
+                    n = len(frozen)
+                    sampling["n_baskets"] = n
+        else:
+            frozen = None
 
     if eligible is None:
         eligible = list_eligible_stocks(
             uni,
             year_start=int(spec.get("year_start") or 2018),
             year_end=int(spec.get("year_end") or 2026),
+            full_span=full_span,
         )
     if frozen:
         baskets = frozen
@@ -97,9 +105,11 @@ def sample_baskets_for_spec(
         "n_baskets": len(rows),
         "basket_size": k,
         "seed": seed,
+        "full_span": full_span,
         "eligible_n": len(eligible),
         "baskets": rows,
         "mean_jaccard": mean_pairwise_jaccard([r["stocks"] for r in rows]),
+        "sampling_fingerprint": want_fp,
     }
 
 
