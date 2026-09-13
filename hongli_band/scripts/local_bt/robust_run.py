@@ -112,14 +112,41 @@ def _merged_overrides(
     return out
 
 
-def apply_walk_progress(prog: dict[str, Any], state: WalkProgress) -> dict[str, Any]:
+def apply_walk_progress(
+    prog: dict[str, Any],
+    state: WalkProgress,
+    *,
+    phase: str = "",
+    label: str = "",
+) -> dict[str, Any]:
     """把 WalkProgress 写进 progress.json 字段。探针不改 n_walks。"""
     prog["batch_walk_total"] = int(state.n_walks)
     prog["batch_walk_done"] = float(state.completed) + float(state.inflight_frac)
     tot = int(state.n_walks)
     prog["batch_cell_total"] = tot
     prog["batch_cell_done"] = min(tot, max(int(state.cells_done), int(state.completed)))
+    prog["n_running"] = int(state.n_running)
+    if phase:
+        prog["phase"] = str(phase)
+    if label:
+        prog["label"] = str(label)
     return prog
+
+
+def _caption_label(progress: Mapping[str, Any], status: str) -> str:
+    label = str(progress.get("label") or "").strip()
+    if label:
+        return label
+    phase = str(progress.get("phase") or "")
+    try:
+        tot = int(progress.get("batch_walk_total") or 0)
+    except (TypeError, ValueError):
+        tot = 0
+    if phase == "probe":
+        return "探针 init"
+    if phase == "start_pool":
+        return "启动 %s 路" % tot
+    return status or "—"
 
 
 def robust_progress_caption(progress: Mapping[str, Any] | None) -> str:
@@ -129,20 +156,54 @@ def robust_progress_caption(progress: Mapping[str, Any] | None) -> str:
         tot = int(progress.get("batch_walk_total") or progress.get("batch_cell_total") or 0)
         done_cells = int(progress.get("batch_cell_done") or 0)
         walk_done = float(progress.get("batch_walk_done") or 0)
+        n_running = int(progress.get("n_running") or 0)
     except (TypeError, ValueError):
         return ""
     batches = progress.get("batches") or []
     status = ""
     if batches and isinstance(batches[0], dict):
         status = str(batches[0].get("status") or "")
+    tail = _caption_label(progress, status)
     if tot <= 0:
-        return status or ""
-    return "已完成 %s/%s 组 · walk %.1f/%s · %s" % (
+        return tail or status or ""
+    return "已完成 %s/%s 组 · walk %.1f/%s · %s 路 · %s" % (
         done_cells,
         tot,
         walk_done,
         tot,
-        status or "—",
+        n_running,
+        tail,
+    )
+
+
+def print_walk_line(
+    *,
+    job_key: str,
+    state: WalkProgress,
+    phase: str,
+    label: str,
+) -> None:
+    """对齐网格 CLI：有 callback 也打 stdout（Popen 进 worker.log）。"""
+    jk = str(job_key or "robust")
+    lab = str(label or "")
+    n = int(state.n_walks)
+    if phase == "probe":
+        print(
+            "[%s] 探针 %s/%s %s"
+            % (jk, int(state.probe_done), max(int(state.probe_total), 1), lab or "探针 init"),
+            flush=True,
+        )
+        return
+    print(
+        "[%s] %.1f/%s walk · %s 路 %s"
+        % (
+            jk,
+            float(state.completed) + float(state.inflight_frac),
+            n,
+            int(state.n_running),
+            lab,
+        ),
+        flush=True,
     )
 
 
@@ -473,6 +534,59 @@ def run_robust(
         )
         return {"dry_run": True, "n_baskets": n, "root": str(root), "spec": json_ready(spec)}
 
+    ids = [str(j["basket_id"]) for j in jobs]
+    prog = build_progress(ids, 0, worker_pid=os.getpid())
+    set_batch_status(prog, 0, STATUS_RUNNING)
+    state = WalkProgress(n)
+    last_hb = 0.0
+
+    def _heartbeat(
+        force: bool = False,
+        *,
+        phase: str = "",
+        label: str = "",
+        job_key: str = "",
+    ) -> None:
+        nonlocal last_hb, prog
+        now = time.time()
+        try:
+            prev_n = int(prog.get("n_running") or 0)
+        except (TypeError, ValueError):
+            prev_n = 0
+        next_n = int(state.n_running)
+        next_phase = str(phase or "")
+        prev_phase = str(prog.get("phase") or "")
+        changed = next_n != prev_n or (bool(next_phase) and next_phase != prev_phase)
+        if not force and not changed and now - last_hb < 2.0:
+            return
+        last_hb = now
+        apply_walk_progress(prog, state, phase=phase, label=label)
+        prog["worker_pid"] = os.getpid()
+        prog = save_progress(root, prog)
+        print_walk_line(
+            job_key=str(job_key or "robust"),
+            state=state,
+            phase=str(prog.get("phase") or phase or "walk"),
+            label=str(label or prog.get("label") or ""),
+        )
+
+    def on_walk(cid: str, done: int, tot: int, label: str, **extra: Any) -> None:
+        _heartbeat(
+            force=False,
+            phase=str(extra.get("phase") or "walk"),
+            label=str(label or ""),
+            job_key=str(extra.get("job_key") or cid or ""),
+        )
+        _emit(
+            on_progress,
+            phase=str(extra.get("phase") or "run"),
+            done=int(done),
+            total=int(tot),
+            label=label,
+            **extra,
+        )
+
+    _heartbeat(force=True, phase="probe", label="探针 init", job_key="robust")
     defaults = load_config_defaults()
     need_trail = overrides_has_trail_tiers(spec.get("overrides") or {})
     expected = expected_fingerprint(defaults, spec.get("overrides") or {})
@@ -483,42 +597,12 @@ def run_robust(
         assert_fingerprint_text(text, expected, need_trail=need_trail, source=str(probe_log))
     except Exception as e:
         raise RobustError("探针失败: %s" % e) from e
-
-    ids = [str(j["basket_id"]) for j in jobs]
-    prog = build_progress(ids, 0, worker_pid=os.getpid())
-    set_batch_status(prog, 0, STATUS_RUNNING)
-    prog["batch_walk_total"] = n
-    prog["batch_walk_done"] = 0
-    prog["batch_cell_total"] = n
-    prog["batch_cell_done"] = 0
-    save_progress(root, prog)
-
-    state = WalkProgress(n)
-    last_hb = 0.0
-
-    def _heartbeat(force: bool = False) -> None:
-        nonlocal last_hb, prog
-        now = time.time()
-        if not force and now - last_hb < 2.0:
-            return
-        last_hb = now
-        apply_walk_progress(prog, state)
-        prog["worker_pid"] = os.getpid()
-        prog = save_progress(root, prog)
-
-    def on_walk(cid: str, done: int, tot: int, label: str, **extra: Any) -> None:
-        _heartbeat(force=False)
-        _emit(
-            on_progress,
-            phase=str(extra.get("phase") or "run"),
-            done=int(done),
-            total=int(tot),
-            label=label,
-            **extra,
-        )
+    _heartbeat(force=True, phase="probe", label="探针 init", job_key="robust")
 
     w = resolve_pool_workers(int(workers or 0), n)
     print("pool_workers=%s n_walks=%s" % (w, n), flush=True)
+    start_lab = "启动 %s 路" % w
+    _heartbeat(force=True, phase="start_pool", label=start_lab, job_key="robust")
     if w <= 1:
         results = _run_baskets_serial(jobs, state, on_walk)
     else:

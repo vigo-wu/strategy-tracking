@@ -390,10 +390,67 @@ class TestRobustRunHelpers(unittest.TestCase):
         self.assertEqual(prog["batch_walk_total"], 4)
         self.assertAlmostEqual(float(prog["batch_walk_done"]), 1.5)
         self.assertEqual(prog["batch_cell_done"], 1)
+        self.assertEqual(prog["n_running"], 1)
         cap = robust_progress_caption(prog)
         self.assertIn("walk 1.5/4", cap)
         self.assertIn("已完成", cap)
+        self.assertIn("1 路", cap)
         self.assertNotIn("格", cap)
+
+    def test_apply_walk_progress_keeps_phase_label(self) -> None:
+        from grid_run import WalkProgress
+        from robust_run import apply_walk_progress
+
+        state = WalkProgress(3)
+        prog = apply_walk_progress(
+            {"phase": "probe", "label": "探针 init"},
+            state,
+        )
+        self.assertEqual(prog["n_running"], 0)
+        self.assertEqual(prog["phase"], "probe")
+        self.assertEqual(prog["label"], "探针 init")
+        apply_walk_progress(prog, state, phase="start_pool", label="启动 2 路")
+        self.assertEqual(prog["phase"], "start_pool")
+        self.assertEqual(prog["label"], "启动 2 路")
+
+    def test_caption_probe_not_bare_running(self) -> None:
+        from robust_run import robust_progress_caption
+
+        cap = robust_progress_caption(
+            {
+                "batch_walk_total": 5,
+                "batch_walk_done": 0,
+                "batch_cell_done": 0,
+                "n_running": 0,
+                "phase": "probe",
+                "batches": [{"status": "running"}],
+            }
+        )
+        self.assertIn("walk 0.0/5", cap)
+        self.assertIn("0 路", cap)
+        self.assertIn("探针 init", cap)
+        self.assertFalse(cap.endswith("running"))
+
+    def test_print_walk_line_grid_format(self) -> None:
+        from io import StringIO
+
+        from grid_run import WalkProgress
+        from robust_run import print_walk_line
+
+        state = WalkProgress(5)
+        state.start("basket_001")
+        buf = StringIO()
+        with patch("sys.stdout", buf):
+            print_walk_line(
+                job_key="basket_001",
+                state=state,
+                phase="walk",
+                label="回放 basket_001",
+            )
+        line = buf.getvalue()
+        self.assertIn("0.0/5 walk", line)
+        self.assertIn("1 路", line)
+        self.assertIn("回放 basket_001", line)
 
     def test_worker_argv_has_workers(self) -> None:
         from robust_run import robust_worker_argv

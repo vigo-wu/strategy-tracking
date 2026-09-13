@@ -28,7 +28,7 @@ description: >-
 5. **整次 GO**：`pass_rate` ∧ 中位卡玛 ∧ P10 回撤。
 6. **默认不改 config / 不 deploy / 不写 BOOK_STOCKS**。
 7. **一层组池**：`--workers` / 侧栏进程数 = 全局进程数。`0` → `min(N, CPU)`；`1` 串行；`≥2` 铺开全部未完成组。禁止嵌套进程池。进度 = `(已完成组 + 在跑 bar 分数) / N`，探针不占分母。
-8. **UI 后台进程**：`Popen` `robust_run.py`，读 `progress.json`。暂停杀进程树，**已完成组留盘**，禁止套用网格 dirty 删目录。继续靠成交表缓存跳过已完成组。
+8. **UI 后台进程**：`Popen` `robust_run.py`，读 `progress.json`。caption 含路数/阶段；探针与启池先写盘。暂停杀进程树，**已完成组留盘**，禁止套用网格 dirty 删目录。继续靠成交表缓存跳过已完成组。
 9. **抽标与网格同资格**：宇宙 `tools/csv/none`，`list_eligible_stocks`（回测年起止，可选 `full_span`）。语义仍是 N 组 × K 只、组可重叠，不是 tune/holdout。改 N/K/seed/年份/`full_span` 须再抽；名单空或指纹变了则开跑自动抽。
 
 ## 窗内 KPI
