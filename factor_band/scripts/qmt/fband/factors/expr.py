@@ -78,6 +78,39 @@ def _recipe_explain(expr, ctx):
     return False, _recipe_block_reasons(expr, ctx)
 
 
+def _recipe_leaf_ids(expr):
+    """四个槽位 AST 里的叶子 id。False/None/True 无叶子。"""
+    if expr is False or expr is None or expr is True:
+        return set()
+    if isinstance(expr, str):
+        return {expr}
+    if not isinstance(expr, (list, tuple)) or not expr:
+        return set()
+    op = expr[0]
+    if op in ("and", "or", "not"):
+        out = set()
+        for node in expr[1:]:
+            out |= _recipe_leaf_ids(node)
+        return out
+    if isinstance(op, str):
+        return {op}
+    return set()
+
+
+def _recipe_compute_leaves(recipe=None):
+    """启用叶子 + 特例：weekly_bear_confirm→weekly_bear；scale_in 非空→scale_arm。"""
+    rec = recipe if recipe is not None else (globals().get("RECIPE") or {})
+    used = set()
+    for slot in ("entry", "scale_in", "exit", "scale_out"):
+        used |= _recipe_leaf_ids(rec.get(slot))
+    if "weekly_bear_confirm" in used:
+        used.add("weekly_bear")
+    scale_in = rec.get("scale_in")
+    if scale_in is not False and scale_in is not None:
+        used.add("scale_arm")
+    return used
+
+
 def _recipe_not_leaves(expr):
     """顶层 and 下的 ["not", leaf] 叶子 id。不走进 or 子树。"""
     if not isinstance(expr, (list, tuple)) or not expr:

@@ -74,37 +74,38 @@ SCALE_LOTS = True
 RECIPE = {
     "entry": [
         "and",
-        ["not", "chase"],
-        ["not", "vol_dry"],
-        ["not", "w_bias"],
-        ["not", "w_slope"],
-        ["not", "weekly_bear"],
+        # ["not", "chase"],
+        # ["not", "vol_dry"],
+        # ["not", "w_bias"],
+        # ["not", "w_slope"],
+        # ["not", "weekly_bear"],
         "above_ema",
         "keltner_vol",
     ],
-    "scale_in": [
-        "and",
-        ["not", "vol_dry"],
-        ["not", "w_bias"],
-        ["not", "w_slope"],
-        ["not", "weekly_bear"],
-        "above_ema",
-        [
-            "or",
-            ["and", "keltner_vol", ["not", "chase"]],
-            "plat_break",
-            "w_macd_golden",
-        ],
-        "scale_arm",
-    ],
+    "scale_in": False,
+    # [
+    #     "and",
+    #     ["not", "vol_dry"],
+    #     ["not", "w_bias"],
+    #     ["not", "w_slope"],
+    #     ["not", "weekly_bear"],
+    #     "above_ema",
+    #     [
+    #         "or",
+    #         ["and", "keltner_vol", ["not", "chase"]],
+    #         "plat_break",
+    #         "w_macd_golden",
+    #     ],
+    #     "scale_arm",
+    # ],
     "exit": [
         "or",
-        "weekly_bear_confirm",
+        # "weekly_bear_confirm",
         # "stop_loss",
         "atr_stop",
         # "trail_stop",
         "atr_trail_stop",
-        "time_force",
+        # "time_force",
     ],
     "scale_out": False,
     "structure": {
@@ -3429,11 +3430,8 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
 
 
 def _ohlcv_need_1d():
-    raw_plat = _factor_param(None, "plat_break", "lookback")
-    try:
-        plat_n = int(20 if raw_plat is None else raw_plat)
-    except (TypeError, ValueError):
-        plat_n = 20
+    need = _market_need()
+    parts = [3]
     d_ma = _structure_windows()["d_ma"]
     try:
         mid_n = int(d_ma.get("mid") or 0)
@@ -3447,59 +3445,80 @@ def _ohlcv_need_1d():
         trend_n = int(d_ma.get("trend") or 0)
     except (TypeError, ValueError):
         trend_n = 0
-    confirm_n = _vol_pullback_confirm_need()
-    raw_vn = _factor_param(None, "pullback_vol", "vol_n")
-    raw_dn = _factor_param(None, "vol_dry", "n")
-    raw_kvn = _factor_param(None, "keltner_vol", "vol_n")
-    raw_kvc = _factor_param(None, "keltner_vol", "confirm_days")
-    try:
-        vol_n = int(10 if raw_vn is None else raw_vn)
-    except (TypeError, ValueError):
-        vol_n = 10
-    try:
-        dry_n = int(20 if raw_dn is None else raw_dn)
-    except (TypeError, ValueError):
-        dry_n = 20
-    try:
-        kc_vol_n = int(10 if raw_kvn is None else raw_kvn)
-    except (TypeError, ValueError):
-        kc_vol_n = 10
-    try:
-        kc_confirm = int(2 if raw_kvc is None else raw_kvc)
-    except (TypeError, ValueError):
-        kc_confirm = 2
-    kc_confirm = max(1, kc_confirm)
-    vol_pb_need = vol_n + max(0, confirm_n - 1)
-    kc_vol_need = kc_vol_n + max(0, kc_confirm - 1)
-    try:
-        atr_n = int(_structure_windows()["atr"]["n"] or 0)
-    except (TypeError, ValueError, KeyError):
-        atr_n = 0
-    try:
-        kc = _structure_windows()["keltner"]
-        kc_ema_n = int(kc.get("ema_n") or 0)
-        kc_atr_n = int(kc.get("atr_n") or 0)
-    except (TypeError, ValueError, KeyError):
-        kc_ema_n = 0
-        kc_atr_n = 0
-    return max(
-        mid_n if mid_n > 0 else 0,
-        slow_n if slow_n > 0 else 0,
-        trend_n if trend_n > 0 else 0,
-        vol_pb_need,
-        kc_vol_need,
-        dry_n,
-        plat_n + 2,
-        atr_n if atr_n > 0 else 0,
-        kc_ema_n if kc_ema_n > 0 else 0,
-        kc_atr_n if kc_atr_n > 0 else 0,
-    ) + 10
+    if "d_ma_mid" in need and mid_n > 0:
+        parts.append(mid_n)
+    if "d_ma_slow" in need and slow_n > 0:
+        parts.append(slow_n)
+    if "d_ma_trend" in need and trend_n > 0:
+        parts.append(trend_n)
+    if "vol_pb" in need:
+        confirm_n = _vol_pullback_confirm_need()
+        raw_vn = _factor_param(None, "pullback_vol", "vol_n")
+        try:
+            vol_n = int(10 if raw_vn is None else raw_vn)
+        except (TypeError, ValueError):
+            vol_n = 10
+        parts.append(vol_n + max(0, confirm_n - 1))
+    if "vol_dry" in need:
+        raw_dn = _factor_param(None, "vol_dry", "n")
+        try:
+            dry_n = int(20 if raw_dn is None else raw_dn)
+        except (TypeError, ValueError):
+            dry_n = 20
+        if dry_n > 0:
+            parts.append(dry_n)
+    if "vol_kc" in need:
+        raw_kvn = _factor_param(None, "keltner_vol", "vol_n")
+        raw_kvc = _factor_param(None, "keltner_vol", "confirm_days")
+        try:
+            kc_vol_n = int(10 if raw_kvn is None else raw_kvn)
+        except (TypeError, ValueError):
+            kc_vol_n = 10
+        try:
+            kc_confirm = int(2 if raw_kvc is None else raw_kvc)
+        except (TypeError, ValueError):
+            kc_confirm = 2
+        kc_confirm = max(1, kc_confirm)
+        parts.append(kc_vol_n + max(0, kc_confirm - 1))
+    if "atr" in need:
+        try:
+            atr_n = int(_structure_windows()["atr"]["n"] or 0)
+        except (TypeError, ValueError, KeyError):
+            atr_n = 0
+        if atr_n > 0:
+            parts.append(atr_n)
+    if "keltner" in need:
+        try:
+            kc = _structure_windows()["keltner"]
+            kc_ema_n = int(kc.get("ema_n") or 0)
+            kc_atr_n = int(kc.get("atr_n") or 0)
+        except (TypeError, ValueError, KeyError):
+            kc_ema_n = 0
+            kc_atr_n = 0
+        if kc_ema_n > 0:
+            parts.append(kc_ema_n)
+        if kc_atr_n > 0:
+            parts.append(kc_atr_n)
+    if "plat" in need:
+        raw_plat = _factor_param(None, "plat_break", "lookback")
+        try:
+            plat_n = int(20 if raw_plat is None else raw_plat)
+        except (TypeError, ValueError):
+            plat_n = 20
+        parts.append(plat_n + 2)
+    return max(parts) + 10
 
 
-def _ohlcv_need_1w():
+def _ohlcv_need_1w_bars():
     # 55 = 原 W_MA_SLOW 暖机地板，不是均线周期
     win = _structure_windows()
     return max(int(win["w_ma"]["life"]), int(win["macd"]["slow"]) + int(win["macd"]["signal"]), 55) + 5
+
+
+def _ohlcv_need_1w():
+    if "weekly" not in _market_need():
+        return 0
+    return _ohlcv_need_1w_bars()
 
 
 def _prefetch_watch_ohlcv(C, stocks):
@@ -3580,7 +3599,8 @@ def _prefetch_watch_ohlcv(C, stocks):
         return n_rpc
 
     rpc += _fill(period_d, count_d, end_d, need_d, "d1")
-    rpc += _fill("1w", count_w, end_w, need_w, "w1")
+    if need_w > 0:
+        rpc += _fill("1w", count_w, end_w, need_w, "w1")
     print(
         _strategy_tag(),
         "ohlcv prefetch groups=%s rpc=%s n=%s"
@@ -3607,7 +3627,7 @@ def _get_ohlcv_1d(C, stock):
 
 
 def _get_ohlcv_1w(C, stock):
-    need = _ohlcv_need_1w()
+    need = _ohlcv_need_1w_bars()
     return _get_ohlcv_period(
         C,
         stock,
@@ -3735,6 +3755,56 @@ def _structure_apply_global(params):
         cur.update(incoming)
 
 
+_MARKET_TAGS = frozenset(
+    {
+        "d_ma_mid",
+        "d_ma_slow",
+        "d_ma_trend",
+        "vol_pb",
+        "vol_dry",
+        "vol_kc",
+        "atr",
+        "keltner",
+        "weekly",
+        "plat",
+    }
+)
+
+_LEAF_MARKET_NEED = {
+    "pullback_vol": frozenset({"d_ma_mid", "d_ma_slow", "vol_pb"}),
+    "chase": frozenset(),
+    "vol_dry": frozenset({"d_ma_mid", "vol_dry"}),
+    "w_bias": frozenset({"weekly"}),
+    "w_slope": frozenset({"weekly"}),
+    "weekly_bear": frozenset({"weekly"}),
+    "weekly_bear_confirm": frozenset({"weekly"}),
+    "keltner_vol": frozenset({"keltner", "vol_kc"}),
+    "above_ema": frozenset({"d_ma_trend"}),
+    "plat_break": frozenset({"plat"}),
+    "w_macd_golden": frozenset({"weekly"}),
+    "scale_arm": frozenset({"weekly"}),
+    "stop_loss": frozenset(),
+    "atr_stop": frozenset({"atr"}),
+    "trail_stop": frozenset(),
+    "atr_trail_stop": frozenset({"atr"}),
+    "time_force": frozenset({"d_ma_slow"}),
+}
+
+
+def _market_need(recipe=None):
+    """启用叶子对应的 ctx / 暖机标签。未知 AST id → 全标签。"""
+    walk = globals().get("_recipe_compute_leaves")
+    if not callable(walk):
+        return set(_MARKET_TAGS)
+    out = set()
+    for fid in walk(recipe):
+        tags = _LEAF_MARKET_NEED.get(str(fid))
+        if tags is None:
+            return set(_MARKET_TAGS)
+        out |= set(tags)
+    return out
+
+
 def _vol_pullback_confirm_need():
     """最少 1：当天缩量即可；勿用 `x or 2`（0 会被当成缺省翻成 2）。"""
     raw = _factor_param(None, "pullback_vol", "confirm_days")
@@ -3837,7 +3907,7 @@ def _weekly_bull_from_detail(detail):
     return (m5 > m10) and (d0 > 0) and (h0 > 0) and ma30_ok
 
 
-def _factor_daily_features(closes, volumes):
+def _factor_daily_features(closes, volumes, need=None):
     detail = {
         "ma20": None,
         "ma60": None,
@@ -3855,8 +3925,10 @@ def _factor_daily_features(closes, volumes):
         "v10": None,
         "v20": None,
     }
-    if closes is None or volumes is None:
+    if closes is None:
         return False, detail
+    if need is None:
+        need = _market_need()
     d_ma = _structure_windows()["d_ma"]
     try:
         mid_n = int(d_ma.get("mid") or 0)
@@ -3873,36 +3945,51 @@ def _factor_daily_features(closes, volumes):
     detail["mid_n"] = mid_n
     detail["slow_n"] = slow_n
     detail["trend_n"] = trend_n
-    ma20 = _ema(closes, mid_n) if mid_n > 0 else None
-    ma60 = _ema(closes, slow_n) if slow_n > 0 else None
-    ma_trend = _ema(closes, trend_n) if trend_n > 0 else None
-    raw_vn = _factor_param(None, "pullback_vol", "vol_n")
-    raw_dn = _factor_param(None, "vol_dry", "n")
-    try:
-        vol_n = int(10 if raw_vn is None else raw_vn)
-    except (TypeError, ValueError):
-        vol_n = 10
-    try:
-        dry_n = int(20 if raw_dn is None else raw_dn)
-    except (TypeError, ValueError):
-        dry_n = 20
-    vol10 = _sma(volumes, vol_n)
-    vol20 = _sma(volumes, dry_n)
-    if vol10 is None or vol20 is None:
-        return False, detail
+    ma20 = (
+        _ema(closes, mid_n)
+        if ("d_ma_mid" in need and mid_n > 0)
+        else None
+    )
+    ma60 = (
+        _ema(closes, slow_n)
+        if ("d_ma_slow" in need and slow_n > 0)
+        else None
+    )
+    ma_trend = (
+        _ema(closes, trend_n)
+        if ("d_ma_trend" in need and trend_n > 0)
+        else None
+    )
+    vol10 = None
+    vol20 = None
+    if volumes is not None:
+        if "vol_pb" in need:
+            raw_vn = _factor_param(None, "pullback_vol", "vol_n")
+            try:
+                vol_n = int(10 if raw_vn is None else raw_vn)
+            except (TypeError, ValueError):
+                vol_n = 10
+            vol10 = _sma(volumes, vol_n) if vol_n > 0 else None
+        if "vol_dry" in need:
+            raw_dn = _factor_param(None, "vol_dry", "n")
+            try:
+                dry_n = int(20 if raw_dn is None else raw_dn)
+            except (TypeError, ValueError):
+                dry_n = 20
+            vol20 = _sma(volumes, dry_n) if dry_n > 0 else None
     i = len(closes) - 1
-    vol_need = _vol_pullback_confirm_need()
+    vol_need = _vol_pullback_confirm_need() if "vol_pb" in need else 1
     detail["vol_need"] = vol_need
     detail["i"] = i
-    if i < max(2, vol_need):
+    if i < 0:
         return False, detail
     price = float(closes[i])
-    vol = float(volumes[i])
+    vol = float(volumes[i]) if volumes is not None else None
     m20 = _last_valid(ma20, i) if ma20 is not None else None
     m60 = _last_valid(ma60, i) if ma60 is not None else None
     m_trend = _last_valid(ma_trend, i) if ma_trend is not None else None
-    v10 = _last_valid(vol10, i)
-    v20 = _last_valid(vol20, i)
+    v10 = _last_valid(vol10, i) if vol10 is not None else None
+    v20 = _last_valid(vol20, i) if vol20 is not None else None
     detail.update(
         {
             "ma20": m20,
@@ -3918,7 +4005,7 @@ def _factor_daily_features(closes, volumes):
             "volumes": volumes,
         }
     )
-    return True, detail
+    return i >= 2, detail
 
 
 def _build_factor_ctx(
@@ -3930,15 +4017,22 @@ def _build_factor_ctx(
     price=None,
     state=None,
     clock=None,
+    need=None,
 ):
-    ready, daily = _factor_daily_features(closes, volumes)
+    if need is None:
+        need = _market_need()
+    ready, daily = _factor_daily_features(closes, volumes, need=need)
     if price is None:
         price = daily.get("price")
     try:
         atr_n = int(_structure_windows()["atr"]["n"] or 0)
     except (TypeError, ValueError, KeyError):
         atr_n = 0
-    atr_arr = _calc_atr(highs, lows, closes, atr_n) if atr_n > 0 else None
+    atr_arr = (
+        _calc_atr(highs, lows, closes, atr_n)
+        if ("atr" in need and atr_n > 0)
+        else None
+    )
     atr = _last_valid(atr_arr) if atr_arr is not None else None
     try:
         kc_win = _structure_windows()["keltner"]
@@ -3947,8 +4041,17 @@ def _build_factor_ctx(
     except (TypeError, ValueError, KeyError):
         kc_ema_n = 0
         kc_atr_n = 0
-    kc_mid_arr = _ema(closes, kc_ema_n) if kc_ema_n > 0 and closes is not None else None
-    kc_atr_arr = _calc_atr(highs, lows, closes, kc_atr_n) if kc_atr_n > 0 else None
+    want_kc = "keltner" in need
+    kc_mid_arr = (
+        _ema(closes, kc_ema_n)
+        if want_kc and kc_ema_n > 0 and closes is not None
+        else None
+    )
+    kc_atr_arr = (
+        _calc_atr(highs, lows, closes, kc_atr_n)
+        if want_kc and kc_atr_n > 0
+        else None
+    )
     kc_mid = _last_valid(kc_mid_arr) if kc_mid_arr is not None else None
     kc_atr = _last_valid(kc_atr_arr) if kc_atr_arr is not None else None
     market = {
@@ -4844,6 +4947,39 @@ def _recipe_explain(expr, ctx):
     if hit:
         return True, reasons
     return False, _recipe_block_reasons(expr, ctx)
+
+
+def _recipe_leaf_ids(expr):
+    """四个槽位 AST 里的叶子 id。False/None/True 无叶子。"""
+    if expr is False or expr is None or expr is True:
+        return set()
+    if isinstance(expr, str):
+        return {expr}
+    if not isinstance(expr, (list, tuple)) or not expr:
+        return set()
+    op = expr[0]
+    if op in ("and", "or", "not"):
+        out = set()
+        for node in expr[1:]:
+            out |= _recipe_leaf_ids(node)
+        return out
+    if isinstance(op, str):
+        return {op}
+    return set()
+
+
+def _recipe_compute_leaves(recipe=None):
+    """启用叶子 + 特例：weekly_bear_confirm→weekly_bear；scale_in 非空→scale_arm。"""
+    rec = recipe if recipe is not None else (globals().get("RECIPE") or {})
+    used = set()
+    for slot in ("entry", "scale_in", "exit", "scale_out"):
+        used |= _recipe_leaf_ids(rec.get(slot))
+    if "weekly_bear_confirm" in used:
+        used.add("weekly_bear")
+    scale_in = rec.get("scale_in")
+    if scale_in is not False and scale_in is not None:
+        used.add("scale_arm")
+    return used
 
 
 def _recipe_not_leaves(expr):
@@ -7991,7 +8127,9 @@ def _scale_gate(w_detail=None, price=None, ctx=None):
             "market": {"w_detail": w_detail or {}, "close": price},
             "state": {},
         }
-    if not _factor_hit("scale_arm", fctx):
+    compute = globals().get("_recipe_compute_leaves")
+    leaves = compute() if callable(compute) else set()
+    if "scale_arm" in leaves and (not _factor_hit("scale_arm", fctx)):
         return False, "scale_arm"
     return True, ""
 
@@ -9062,11 +9200,15 @@ def _handle_stock(C, ctx):
         return
     opens_d, highs_d, lows_d, closes_d, vols_d = ohlcv_d
 
-    ohlcv_w = _get_ohlcv_1w(C, A.stock)
-    if ohlcv_w is None:
-        _live_heartbeat("ohlcv_1w_none")
-        return
-    _ow, _hw, _lw, closes_w, _vw = ohlcv_w
+    compute_leaves = _recipe_compute_leaves()
+    need_weekly = "weekly" in _market_need()
+    closes_w = None
+    if need_weekly:
+        ohlcv_w = _get_ohlcv_1w(C, A.stock)
+        if ohlcv_w is None:
+            _live_heartbeat("ohlcv_1w_none")
+            return
+        _ow, _hw, _lw, closes_w, _vw = ohlcv_w
 
     open_px = float(opens_d[-1])
     # v1.10 误把开盘兜底写成 confirmed=今日，会挡收盘确认；盘中执行时段自动清掉
@@ -9109,7 +9251,10 @@ def _handle_stock(C, ctx):
         closes_s = _drop_forming_bar(closes_d)
         vols_s = _drop_forming_bar(vols_d)
         closes_ws = closes_w
-        if closes_s is None or len(closes_s) < 3 or closes_ws is None or len(closes_ws) < 3:
+        if closes_s is None or len(closes_s) < 3:
+            _live_heartbeat("ohlcv_confirm_short")
+            return
+        if need_weekly and (closes_ws is None or len(closes_ws) < 3):
             _live_heartbeat("ohlcv_confirm_short")
             return
         sig_day_daily = prev_closed_day
@@ -9133,8 +9278,12 @@ def _handle_stock(C, ctx):
     if bt:
         _bt_recover_position(now=now, last=float(closes_d[-1]))
 
-    w_detail = _weekly_market_features(closes_ws)
-    weekly_bull = _weekly_bull_from_detail(w_detail)
+    if need_weekly:
+        w_detail = _weekly_market_features(closes_ws)
+        weekly_bull = _weekly_bull_from_detail(w_detail)
+    else:
+        w_detail = {}
+        weekly_bull = False
     fctx = _build_factor_ctx(
         closes_s,
         vols_s,
@@ -9144,12 +9293,18 @@ def _handle_stock(C, ctx):
         price,
         clock={"sig_day": sig_day_daily, "track_bear": False},
     )
-    weekly_bear = _factor_hit("weekly_bear", fctx)
+    weekly_bear = False
+    if "weekly_bear" in compute_leaves:
+        weekly_bear = _factor_hit("weekly_bear", fctx)
     # 清仓二次确认只在 bt / confirm / 开盘兜底累计；盘中 exec 不改 streak
     track_bear = (not live_cc) or (phase == "confirm") or bool(need_fallback)
-    w_bear_confirmed, w_bear_n = _update_w_bear_streak(
-        weekly_bear, sig_day_weekly, track=track_bear
-    )
+    if "weekly_bear_confirm" in compute_leaves:
+        w_bear_confirmed, w_bear_n = _update_w_bear_streak(
+            weekly_bear, sig_day_weekly, track=track_bear
+        )
+    else:
+        w_bear_confirmed = False
+        w_bear_n = int(getattr(A, "_w_bear_streak", 0) or 0)
     fctx = _factor_ctx_bind_state(
         fctx,
         w_bear_streak=w_bear_n,
@@ -9278,7 +9433,7 @@ def _handle_stock(C, ctx):
             "hold=%s nlot=%s ret=%s pe=%s px=%s bt_held=%s avail=%s"
             % (
                 len(closes_s),
-                len(closes_ws),
+                0 if closes_ws is None else len(closes_ws),
                 price,
                 sig_day_daily,
                 sig_day_weekly,
@@ -9315,7 +9470,7 @@ def _handle_stock(C, ctx):
             day=day,
             hhmm=hhmm,
             n1d=len(closes_s),
-            n1w=len(closes_ws),
+            n1w=0 if closes_ws is None else len(closes_ws),
             close=round(price, 6),
             sig_d=sig_day_daily,
             sig_w=sig_day_weekly,

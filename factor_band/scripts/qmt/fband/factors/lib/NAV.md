@@ -46,7 +46,7 @@
 | `_trail_tier_params` `_trail_stop_hit` | `trail_stop.py` | 阶梯止盈 |
 | `_trail_arm` `_time_force_*` | `time_force.py` | 时间成本让路读 `time_force.arm`；`_trail_arm` 只给 init `trail_arm=` |
 
-`_update_w_bear_streak` 在 `strategy.py`，不进 `eval`。
+`_update_w_bear_streak` 在 `strategy.py`，不进 `eval`。仅当四个槽位含 `weekly_bear_confirm` 时更新；卸下后不重置 STATE 里的旧 streak。
 
 ---
 

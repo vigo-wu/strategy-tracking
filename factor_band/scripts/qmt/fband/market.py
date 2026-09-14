@@ -555,11 +555,8 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
 
 
 def _ohlcv_need_1d():
-    raw_plat = _factor_param(None, "plat_break", "lookback")
-    try:
-        plat_n = int(20 if raw_plat is None else raw_plat)
-    except (TypeError, ValueError):
-        plat_n = 20
+    need = _market_need()
+    parts = [3]
     d_ma = _structure_windows()["d_ma"]
     try:
         mid_n = int(d_ma.get("mid") or 0)
@@ -573,59 +570,80 @@ def _ohlcv_need_1d():
         trend_n = int(d_ma.get("trend") or 0)
     except (TypeError, ValueError):
         trend_n = 0
-    confirm_n = _vol_pullback_confirm_need()
-    raw_vn = _factor_param(None, "pullback_vol", "vol_n")
-    raw_dn = _factor_param(None, "vol_dry", "n")
-    raw_kvn = _factor_param(None, "keltner_vol", "vol_n")
-    raw_kvc = _factor_param(None, "keltner_vol", "confirm_days")
-    try:
-        vol_n = int(10 if raw_vn is None else raw_vn)
-    except (TypeError, ValueError):
-        vol_n = 10
-    try:
-        dry_n = int(20 if raw_dn is None else raw_dn)
-    except (TypeError, ValueError):
-        dry_n = 20
-    try:
-        kc_vol_n = int(10 if raw_kvn is None else raw_kvn)
-    except (TypeError, ValueError):
-        kc_vol_n = 10
-    try:
-        kc_confirm = int(2 if raw_kvc is None else raw_kvc)
-    except (TypeError, ValueError):
-        kc_confirm = 2
-    kc_confirm = max(1, kc_confirm)
-    vol_pb_need = vol_n + max(0, confirm_n - 1)
-    kc_vol_need = kc_vol_n + max(0, kc_confirm - 1)
-    try:
-        atr_n = int(_structure_windows()["atr"]["n"] or 0)
-    except (TypeError, ValueError, KeyError):
-        atr_n = 0
-    try:
-        kc = _structure_windows()["keltner"]
-        kc_ema_n = int(kc.get("ema_n") or 0)
-        kc_atr_n = int(kc.get("atr_n") or 0)
-    except (TypeError, ValueError, KeyError):
-        kc_ema_n = 0
-        kc_atr_n = 0
-    return max(
-        mid_n if mid_n > 0 else 0,
-        slow_n if slow_n > 0 else 0,
-        trend_n if trend_n > 0 else 0,
-        vol_pb_need,
-        kc_vol_need,
-        dry_n,
-        plat_n + 2,
-        atr_n if atr_n > 0 else 0,
-        kc_ema_n if kc_ema_n > 0 else 0,
-        kc_atr_n if kc_atr_n > 0 else 0,
-    ) + 10
+    if "d_ma_mid" in need and mid_n > 0:
+        parts.append(mid_n)
+    if "d_ma_slow" in need and slow_n > 0:
+        parts.append(slow_n)
+    if "d_ma_trend" in need and trend_n > 0:
+        parts.append(trend_n)
+    if "vol_pb" in need:
+        confirm_n = _vol_pullback_confirm_need()
+        raw_vn = _factor_param(None, "pullback_vol", "vol_n")
+        try:
+            vol_n = int(10 if raw_vn is None else raw_vn)
+        except (TypeError, ValueError):
+            vol_n = 10
+        parts.append(vol_n + max(0, confirm_n - 1))
+    if "vol_dry" in need:
+        raw_dn = _factor_param(None, "vol_dry", "n")
+        try:
+            dry_n = int(20 if raw_dn is None else raw_dn)
+        except (TypeError, ValueError):
+            dry_n = 20
+        if dry_n > 0:
+            parts.append(dry_n)
+    if "vol_kc" in need:
+        raw_kvn = _factor_param(None, "keltner_vol", "vol_n")
+        raw_kvc = _factor_param(None, "keltner_vol", "confirm_days")
+        try:
+            kc_vol_n = int(10 if raw_kvn is None else raw_kvn)
+        except (TypeError, ValueError):
+            kc_vol_n = 10
+        try:
+            kc_confirm = int(2 if raw_kvc is None else raw_kvc)
+        except (TypeError, ValueError):
+            kc_confirm = 2
+        kc_confirm = max(1, kc_confirm)
+        parts.append(kc_vol_n + max(0, kc_confirm - 1))
+    if "atr" in need:
+        try:
+            atr_n = int(_structure_windows()["atr"]["n"] or 0)
+        except (TypeError, ValueError, KeyError):
+            atr_n = 0
+        if atr_n > 0:
+            parts.append(atr_n)
+    if "keltner" in need:
+        try:
+            kc = _structure_windows()["keltner"]
+            kc_ema_n = int(kc.get("ema_n") or 0)
+            kc_atr_n = int(kc.get("atr_n") or 0)
+        except (TypeError, ValueError, KeyError):
+            kc_ema_n = 0
+            kc_atr_n = 0
+        if kc_ema_n > 0:
+            parts.append(kc_ema_n)
+        if kc_atr_n > 0:
+            parts.append(kc_atr_n)
+    if "plat" in need:
+        raw_plat = _factor_param(None, "plat_break", "lookback")
+        try:
+            plat_n = int(20 if raw_plat is None else raw_plat)
+        except (TypeError, ValueError):
+            plat_n = 20
+        parts.append(plat_n + 2)
+    return max(parts) + 10
 
 
-def _ohlcv_need_1w():
+def _ohlcv_need_1w_bars():
     # 55 = 原 W_MA_SLOW 暖机地板，不是均线周期
     win = _structure_windows()
     return max(int(win["w_ma"]["life"]), int(win["macd"]["slow"]) + int(win["macd"]["signal"]), 55) + 5
+
+
+def _ohlcv_need_1w():
+    if "weekly" not in _market_need():
+        return 0
+    return _ohlcv_need_1w_bars()
 
 
 def _prefetch_watch_ohlcv(C, stocks):
@@ -706,7 +724,8 @@ def _prefetch_watch_ohlcv(C, stocks):
         return n_rpc
 
     rpc += _fill(period_d, count_d, end_d, need_d, "d1")
-    rpc += _fill("1w", count_w, end_w, need_w, "w1")
+    if need_w > 0:
+        rpc += _fill("1w", count_w, end_w, need_w, "w1")
     print(
         _strategy_tag(),
         "ohlcv prefetch groups=%s rpc=%s n=%s"
@@ -733,7 +752,7 @@ def _get_ohlcv_1d(C, stock):
 
 
 def _get_ohlcv_1w(C, stock):
-    need = _ohlcv_need_1w()
+    need = _ohlcv_need_1w_bars()
     return _get_ohlcv_period(
         C,
         stock,

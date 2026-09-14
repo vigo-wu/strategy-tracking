@@ -262,7 +262,9 @@ def _scale_gate(w_detail=None, price=None, ctx=None):
             "market": {"w_detail": w_detail or {}, "close": price},
             "state": {},
         }
-    if not _factor_hit("scale_arm", fctx):
+    compute = globals().get("_recipe_compute_leaves")
+    leaves = compute() if callable(compute) else set()
+    if "scale_arm" in leaves and (not _factor_hit("scale_arm", fctx)):
         return False, "scale_arm"
     return True, ""
 
@@ -1333,11 +1335,15 @@ def _handle_stock(C, ctx):
         return
     opens_d, highs_d, lows_d, closes_d, vols_d = ohlcv_d
 
-    ohlcv_w = _get_ohlcv_1w(C, A.stock)
-    if ohlcv_w is None:
-        _live_heartbeat("ohlcv_1w_none")
-        return
-    _ow, _hw, _lw, closes_w, _vw = ohlcv_w
+    compute_leaves = _recipe_compute_leaves()
+    need_weekly = "weekly" in _market_need()
+    closes_w = None
+    if need_weekly:
+        ohlcv_w = _get_ohlcv_1w(C, A.stock)
+        if ohlcv_w is None:
+            _live_heartbeat("ohlcv_1w_none")
+            return
+        _ow, _hw, _lw, closes_w, _vw = ohlcv_w
 
     open_px = float(opens_d[-1])
     # v1.10 误把开盘兜底写成 confirmed=今日，会挡收盘确认；盘中执行时段自动清掉
@@ -1380,7 +1386,10 @@ def _handle_stock(C, ctx):
         closes_s = _drop_forming_bar(closes_d)
         vols_s = _drop_forming_bar(vols_d)
         closes_ws = closes_w
-        if closes_s is None or len(closes_s) < 3 or closes_ws is None or len(closes_ws) < 3:
+        if closes_s is None or len(closes_s) < 3:
+            _live_heartbeat("ohlcv_confirm_short")
+            return
+        if need_weekly and (closes_ws is None or len(closes_ws) < 3):
             _live_heartbeat("ohlcv_confirm_short")
             return
         sig_day_daily = prev_closed_day
@@ -1404,8 +1413,12 @@ def _handle_stock(C, ctx):
     if bt:
         _bt_recover_position(now=now, last=float(closes_d[-1]))
 
-    w_detail = _weekly_market_features(closes_ws)
-    weekly_bull = _weekly_bull_from_detail(w_detail)
+    if need_weekly:
+        w_detail = _weekly_market_features(closes_ws)
+        weekly_bull = _weekly_bull_from_detail(w_detail)
+    else:
+        w_detail = {}
+        weekly_bull = False
     fctx = _build_factor_ctx(
         closes_s,
         vols_s,
@@ -1415,12 +1428,18 @@ def _handle_stock(C, ctx):
         price,
         clock={"sig_day": sig_day_daily, "track_bear": False},
     )
-    weekly_bear = _factor_hit("weekly_bear", fctx)
+    weekly_bear = False
+    if "weekly_bear" in compute_leaves:
+        weekly_bear = _factor_hit("weekly_bear", fctx)
     # 清仓二次确认只在 bt / confirm / 开盘兜底累计；盘中 exec 不改 streak
     track_bear = (not live_cc) or (phase == "confirm") or bool(need_fallback)
-    w_bear_confirmed, w_bear_n = _update_w_bear_streak(
-        weekly_bear, sig_day_weekly, track=track_bear
-    )
+    if "weekly_bear_confirm" in compute_leaves:
+        w_bear_confirmed, w_bear_n = _update_w_bear_streak(
+            weekly_bear, sig_day_weekly, track=track_bear
+        )
+    else:
+        w_bear_confirmed = False
+        w_bear_n = int(getattr(A, "_w_bear_streak", 0) or 0)
     fctx = _factor_ctx_bind_state(
         fctx,
         w_bear_streak=w_bear_n,
@@ -1549,7 +1568,7 @@ def _handle_stock(C, ctx):
             "hold=%s nlot=%s ret=%s pe=%s px=%s bt_held=%s avail=%s"
             % (
                 len(closes_s),
-                len(closes_ws),
+                0 if closes_ws is None else len(closes_ws),
                 price,
                 sig_day_daily,
                 sig_day_weekly,
@@ -1586,7 +1605,7 @@ def _handle_stock(C, ctx):
             day=day,
             hhmm=hhmm,
             n1d=len(closes_s),
-            n1w=len(closes_ws),
+            n1w=0 if closes_ws is None else len(closes_ws),
             close=round(price, 6),
             sig_d=sig_day_daily,
             sig_w=sig_day_weekly,

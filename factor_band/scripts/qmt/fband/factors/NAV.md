@@ -17,10 +17,10 @@
 
 | 文件 | 符号（主） | 做什么 |
 | :--- | :--- | :--- |
-| [ctx.py](ctx.py) | `_factor_param` `_factor_params_apply_global` `_structure_windows` `_structure_apply_global` `_weekly_market_features` `_build_factor_ctx` `_factor_ctx_bind_state` | 组 `ctx = {market, state, clock}`；读 `RECIPE.factor_params` / `RECIPE.structure`；周线 MA/MACD；日线量均、趋势 EMA、威尔德 ATR 与肯特纳中轨/带宽 ATR 预计算。`weekly_bull` 只在这里算，仅日志 |
+| [ctx.py](ctx.py) | `_factor_param` `_factor_params_apply_global` `_structure_windows` `_structure_apply_global` `_LEAF_MARKET_NEED` `_market_need` `_weekly_market_features` `_build_factor_ctx` `_factor_ctx_bind_state` | 组 `ctx = {market, state, clock}`；按启用叶子闸预计算（日线 EMA/量均、ATR、肯特纳、周线 MA/MACD）。`daily_ready` = 日线 `closes` 且 `i>=2`。`weekly_bull` 只在这里算，仅日志 |
 | [catalog.py](catalog.py) | `LEAVES` `_leaves_factor_params` | 叶子登记 / 默认阈值 / 网格轴元数据；整表写入 `RECIPE.factor_params`（`weekly_bear` / `above_ema` 无键） |
 | [registry.py](registry.py) | `_factor_registry` `_factor_eval` `_factor_hit` | 按 `LEAVES` 取 `_factor_eval_<id>`；缺函数启动时报错 |
-| [expr.py](expr.py) | `_recipe_hit` | `and` / `or` / `not`；`False`/`None` = 恒假 |
+| [expr.py](expr.py) | `_recipe_hit` `_recipe_leaf_ids` `_recipe_compute_leaves` | `and` / `or` / `not`；`False`/`None` = 恒假；启用叶子 + `weekly_bear_confirm` / `scale_in` 特例 |
 | [slots.py](slots.py) | `_eval_*_slot` `_eval_recipe_slots` `_recipe_fingerprint` | 四个槽位 → `{hit, reasons, detail}`；reasons 用叶子 id |
 | [intent.py](intent.py) | `_arbitrate_intent` | `{side, target: open\|add\|flat\|reduce, lot_ids?, frac?, reasons[]}`。优先级写死：`flat > reduce > add > open` |
 
@@ -64,7 +64,7 @@ config.py
 ## 加因子 / 改 Recipe
 
 1. [catalog.py](catalog.py) 的 `LEAVES` 加一行：`label` / `group` / `params`（`default` 类型与现行默认配置一致；无阈值叶子不要写空 `{}` 进表）。网格轴序用 `params[].axis`。
-2. `lib/<id>.py` 写 `_factor_eval_<id>(ctx) → (bool, detail)`，阈值读 `_factor_param(ctx, id, key)`（运行时 `RECIPE.factor_params`），**不写死数字、不做成配置表达式**。均线/MACD/ATR/肯特纳窗读 `_structure_windows()`（`RECIPE.structure`）。
+2. `lib/<id>.py` 写 `_factor_eval_<id>(ctx) → (bool, detail)`，阈值读 `_factor_param(ctx, id, key)`（运行时 `RECIPE.factor_params`），**不写死数字、不做成配置表达式**。均线/MACD/ATR/肯特纳窗读 `_structure_windows()`（`RECIPE.structure`）。在 `_LEAF_MARKET_NEED` 登记预计算标签（漏登记则 catalog 单测红；未知 AST id 运行时按全标签算）。
 3. 默认盘要启用：改 `config.RECIPE` 四个槽位的条件抽象语法树引用该 id。不要手改 `registry` / `MODULE_ORDER` / `grid_spec` 白名单。
 4. 网格覆盖仍是 `overrides.factor_params` / `overrides.structure`，由 `_factor_params_apply_global` / `_structure_apply_global` 按段再按 key 合并。新序列仍改 `indicators/` + `ctx.py`。
 5. 不要改 `_handle` 才能加叶子；仓位门槛不要写进布尔式。

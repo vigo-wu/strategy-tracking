@@ -60,7 +60,7 @@
 
 ## 加完自检
 
-- `LEAVES` id ↔ `lib/<id>.py` ↔ `_factor_eval_<id>`
+- `LEAVES` id ↔ `lib/<id>.py` ↔ `_factor_eval_<id>` ↔ `_LEAF_MARKET_NEED`
 - 四个槽位 AST 里出现的 id ⊆ `LEAVES`（启用 ⊆ 登记）
 - 无阈值因子不在 `factor_params`
 - 新因子轴出现在 `catalog_ids()`；新结构轴出现在 `STRUCTURE_KEYS`

@@ -543,64 +543,24 @@ def _patch_fast_ohlcv(ns: dict) -> None:
         return tup
 
     def _get_ohlcv_1d(C, stock):
-        rec = ns.get("RECIPE") or {}
-        fp = rec.get("factor_params") or {}
-        st = rec.get("structure") or {}
-        plat = fp.get("plat_break") or {}
-        pull = fp.get("pullback_vol") or {}
-        dry = fp.get("vol_dry") or {}
-        d_ma = st.get("d_ma") or {}
-        try:
-            plat_n = int(plat.get("lookback") or 20)
-        except (TypeError, ValueError):
-            plat_n = 20
-        try:
-            mid_n = int(d_ma.get("mid") or 0)
-        except (TypeError, ValueError):
-            mid_n = 0
-        try:
-            slow_n = int(d_ma.get("slow") or 0)
-        except (TypeError, ValueError):
-            slow_n = 0
-        try:
-            confirm_n = int(pull.get("confirm_days") or 1)
-        except (TypeError, ValueError):
-            confirm_n = 1
-        try:
-            vol_n = int(pull.get("vol_n") or 0)
-        except (TypeError, ValueError):
-            vol_n = 0
-        try:
-            dry_n = int(dry.get("n") or 0)
-        except (TypeError, ValueError):
-            dry_n = 0
-        vol_pb_need = vol_n + max(0, confirm_n - 1)
-        need = max(
-            mid_n if mid_n > 0 else 0,
-            slow_n if slow_n > 0 else 0,
-            vol_pb_need,
-            dry_n,
-            plat_n + 2,
-        ) + 10
+        need_fn = ns.get("_ohlcv_need_1d")
+        if callable(need_fn):
+            need = int(need_fn() or 0)
+        else:
+            need = 13
         period = getattr(ns.get("A"), "period", "1d")
         return _ohlcv_from_ctx(
             C, period, int(ns.get("OHLC_COUNT") or 180), need, "d1", stock=stock
         )
 
     def _get_ohlcv_1w(C, stock):
-        # 55 = 原 W_MA_SLOW 暖机地板，不是均线周期
-        st = ((ns.get("RECIPE") or {}).get("structure") or {})
-        w_ma = st.get("w_ma") or {}
-        macd = st.get("macd") or {}
-        try:
-            life = int(w_ma.get("life") or 0)
-        except (TypeError, ValueError):
-            life = 0
-        try:
-            macd_need = int(macd.get("slow") or 0) + int(macd.get("signal") or 0)
-        except (TypeError, ValueError):
-            macd_need = 0
-        need = max(life, macd_need, 55) + 5
+        need_fn = ns.get("_ohlcv_need_1w")
+        if callable(need_fn):
+            need = int(need_fn() or 0)
+        else:
+            need = 0
+        if need <= 0:
+            return None
         return _ohlcv_from_ctx(
             C, "1w", int(ns.get("WEEKLY_OHLC_COUNT") or 120), need, "w1", stock=stock
         )

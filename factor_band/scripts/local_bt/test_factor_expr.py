@@ -296,9 +296,13 @@ class FactorParamsTests(unittest.TestCase):
         volumes = [float(i + 1) for i in range(30)]
         try:
             self._set_fp("pullback_vol", "vol_n", 5)
-            _ready5, d5 = ns["_factor_daily_features"](closes, volumes)
+            _ready5, d5 = ns["_factor_daily_features"](
+                closes, volumes, need={"vol_pb"}
+            )
             self._set_fp("pullback_vol", "vol_n", 10)
-            _ready10, d10 = ns["_factor_daily_features"](closes, volumes)
+            _ready10, d10 = ns["_factor_daily_features"](
+                closes, volumes, need={"vol_pb"}
+            )
             self.assertNotEqual(d5.get("v10"), d10.get("v10"))
         finally:
             self._set_fp("pullback_vol", "vol_n", orig)

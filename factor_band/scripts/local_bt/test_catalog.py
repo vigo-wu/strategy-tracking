@@ -121,7 +121,7 @@ class CatalogContractTests(unittest.TestCase):
         self.assertEqual(fp, _EXPECTED_FP)
 
     def test_recipe_fingerprint_unchanged(self) -> None:
-        self.assertEqual(recipe_fingerprint({}), "2f366c24")
+        self.assertEqual(recipe_fingerprint({}), "77f177f1")
 
     def test_catalog_axis_order(self) -> None:
         ids = list(catalog_ids())
@@ -216,6 +216,10 @@ class CatalogContractTests(unittest.TestCase):
         self.assertEqual(ns["_reason_label"]("weekly_bear", "buy"), "周线空头禁开")
         self.assertEqual(ns["_reason_label"]("weekly_bear", "sell"), "周线转空强制清仓")
         self.assertEqual(ns["_reason_label"]("skip_add_bar", "sell"), "加仓成交后当日不评卖")
+
+    def test_leaf_market_need_covers_leaves(self) -> None:
+        ns = _exec_bundle()
+        self.assertEqual(set(ns["_LEAF_MARKET_NEED"]), set(ns["LEAVES"]))
 
 
 if __name__ == "__main__":

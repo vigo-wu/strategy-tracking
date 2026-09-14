@@ -115,7 +115,7 @@ LEAVES = {
         "params": {
             "k": {
                 "default": 2.0,
-                "percent": True,
+                "percent": False,
                 "abbrev": "kvk",
                 "label": "通道倍数",
                 "axis": 10,

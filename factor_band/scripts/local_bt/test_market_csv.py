@@ -1793,14 +1793,11 @@ class FastOhlcvPatchTests(unittest.TestCase):
         fast_d = ns["_get_ohlcv_1d"](ctx, "600350.SH")
         fast_w = ns["_get_ohlcv_1w"](ctx, "600350.SH")
         self.assertIsNotNone(fast_d)
-        self.assertIsNotNone(fast_w)
-        self.assertGreaterEqual(len(ns["A"]._ohlcv_cache), 2)
+        self.assertIsNone(fast_w)
+        self.assertGreaterEqual(len(ns["A"]._ohlcv_cache), 1)
         self.assertEqual(len(fast_d[3]), len(orig_d[3]))
-        self.assertEqual(len(fast_w[3]), len(orig_w[3]))
         self.assertTrue(np.allclose(np.asarray(fast_d[3], dtype=float), np.asarray(orig_d[3], dtype=float)))
-        self.assertTrue(np.allclose(np.asarray(fast_w[3], dtype=float), np.asarray(orig_w[3], dtype=float)))
         self.assertAlmostEqual(float(fast_d[3][-1]), float(orig_d[3][-1]))
-        self.assertAlmostEqual(float(fast_w[3][-1]), float(orig_w[3][-1]))
 
     def test_patched_ohlcv_cache_hit_period_and_end(self):
         from mock_qmt import MockContext, _as_tag
@@ -1836,19 +1833,18 @@ class FastOhlcvPatchTests(unittest.TestCase):
         w1 = ns["_get_ohlcv_1w"](ctx, "600350.SH")
         w2 = ns["_get_ohlcv_1w"](ctx, "600350.SH")
         self.assertIsNotNone(d1)
-        self.assertIsNotNone(w1)
+        self.assertIsNone(w1)
         self.assertIs(d1, d2)
         self.assertIs(w1, w2)
-        self.assertNotEqual(len(d1[3]), len(w1[3]))
-        self.assertEqual(n["calls"], 2)
+        self.assertEqual(n["calls"], 1)
         keys = list(ns["A"]._ohlcv_cache)
         periods = {k[1] for k in keys if isinstance(k, tuple) and len(k) >= 2}
         self.assertIn("1d", periods)
-        self.assertIn("1w", periods)
+        self.assertNotIn("1w", periods)
         ctx.barpos = 0
         d3 = ns["_get_ohlcv_1d"](ctx, "600350.SH")
         self.assertIsNotNone(d3)
-        self.assertGreater(n["calls"], 2)
+        self.assertGreater(n["calls"], 1)
         self.assertIsNot(d3, d1)
 
 
@@ -2159,17 +2155,18 @@ class OhlcvPrefetchCacheTests(unittest.TestCase):
         calls.clear()
         ns["_prefetch_watch_ohlcv"](ctx, codes)
         batch = [c for c in calls if len(c["spec"]["stocks"]) >= 2]
-        self.assertEqual(len(batch), 2)
-        self.assertEqual({c["spec"]["period"] for c in batch}, {"1d", "1w"})
+        self.assertEqual(len(batch), 1)
+        self.assertEqual({c["spec"]["period"] for c in batch}, {"1d"})
         for c in batch:
             self.assertFalse(c["kwargs"].get("subscribe", True))
             self.assertEqual(c["spec"]["stocks"], codes)
         n_after_prefetch = len(calls)
         cached_d = ns["_get_ohlcv_1d"](ctx, codes[0])
-        cached_w = ns["_get_ohlcv_1w"](ctx, codes[0])
         self.assertEqual(len(calls), n_after_prefetch)
+        cached_w = ns["_get_ohlcv_1w"](ctx, codes[0])
         self.assertIsNotNone(cached_d)
         self.assertIsNotNone(cached_w)
+        self.assertGreater(len(calls), n_after_prefetch)
         self.assertTrue(
             np.allclose(
                 np.asarray(cached_d[3], dtype=float),
@@ -2194,7 +2191,7 @@ class OhlcvPrefetchCacheTests(unittest.TestCase):
         codes = ["600028.SH", "600188.SH"]
         ns["_prefetch_watch_ohlcv"](ctx, codes)
         singles = [c for c in calls if len(c["spec"]["stocks"]) == 1]
-        self.assertGreaterEqual(len(singles), 4)
+        self.assertGreaterEqual(len(singles), 2)
         hit_d = ns["_get_ohlcv_1d"](ctx, codes[0])
         self.assertIsNotNone(hit_d)
         n = len(calls)
