@@ -151,8 +151,8 @@ scale_out: false
 
 | 卖点 | 条件 | 日志码 |
 | :--- | :--- | :--- |
-| ① ATR 止损 | 收盘 ≤ **该笔**成本 − `atr_stop.k`×ATR（当前 `k=2`、`atr.n=14`）；`atr.n<=0` 或 `k<=0` 关 | `atr_stop` |
-| ② ATR 移动止盈 | **该笔**峰值相对成本 > `atr_trail_stop.k1`×ATR 武装（当前 `k1=2`）：收盘 ≤ 成本（保本）或峰值回撤 ≥ `k2`×ATR（当前 `k2=2`）；`k1<=0` 整条关；`k2<=0` 只保本 | `atr_trail_stop` |
+| ① ATR 止损 | 收盘 ≤ **该笔**成本 − `atr_stop.k`×ATR（当前 `k=2.0`、`atr.n=14`）；`atr.n<=0` 或 `k<=0` 关 | `atr_stop` |
+| ② ATR 移动止盈 | **该笔**峰值相对成本 > `atr_trail_stop.k1`×ATR 武装（当前 `k1=2.0`）：收盘 ≤ 成本（保本）或峰值回撤 ≥ `k2`×ATR（当前 `k2=2.0`）；`k1<=0` 整条关；`k2<=0` 只保本 | `atr_trail_stop` |
 | ③ 智能时间 | **该笔**持仓 **> `time_force.bars`**（当前 30）日：破日线 MA60 → 强制平仓；仍站上 MA60 且峰值浮盈 **< `time_force.arm`**（当前 3%）→ **立即强制平仓**；峰值已达门槛 → **不按日历强平**，交给 ATR 移动止盈 / 破 MA60 / 周线转空。`arm<=0` 关让路；`d_ma.slow<=0` 慢线地板不存在则整条不触发 | `time_force` |
 | 兜底 | 周线转空且连续 `weekly_bear_confirm.days` 日 | `weekly_bear_confirm` |
 
@@ -242,9 +242,9 @@ scale_out: false
 | `plat_break.break_buf` | `0.0` | 突破缓冲：收盘须站上平台高 × `(1+buf)`（`factor_params`） |
 | `w_macd_golden.hist_expand` | `1.2` | 上周金叉时本周红柱须放大至 1.2 倍（`factor_params`） |
 | `stop_loss.pct` | `0.08` | 硬止损（相对该笔成本；`factor_params`；默认 exit 不引用） |
-| `atr_stop.k` | `2` | ATR 止损倍数：收盘 ≤ 成本 − k×ATR（`factor_params`）；`<=0` 关 |
-| `atr_trail_stop.k1` | `2` | ATR 移动武装：峰值相对成本 > k1×ATR（`factor_params`）；`<=0` 整条关 |
-| `atr_trail_stop.k2` | `2` | ATR 移动回撤：已武装且峰值回撤 ≥ k2×ATR（`factor_params`）；`<=0` 只保本 |
+| `atr_stop.k` | `2.0` | ATR 止损倍数：收盘 ≤ 成本 − k×ATR（`factor_params`，浮点，可扫 `1.5`）；`<=0` 关 |
+| `atr_trail_stop.k1` | `2.0` | ATR 移动武装：峰值相对成本 > k1×ATR（`factor_params`，浮点）；`<=0` 整条关 |
+| `atr_trail_stop.k2` | `2.0` | ATR 移动回撤：已武装且峰值回撤 ≥ k2×ATR（`factor_params`，浮点）；`<=0` 只保本 |
 | `chase.max_pct` | `0.05` | 追高禁开（`factor_params`） |
 | `LIVE_CLOSE_CONFIRM` | `True` | 收盘确认 + 开盘兜底 |
 | `SIGNAL_CONFIRM_START/END` | `145630` / `150000` | 用当日近似完整 K 确认信号；须早于尾盘成交 |

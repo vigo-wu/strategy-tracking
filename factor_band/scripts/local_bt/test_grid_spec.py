@@ -204,6 +204,7 @@ class GridSpecTest(unittest.TestCase):
 
         defaults = load_config_defaults()
         self.assertEqual(infer_kind("atr_trail_stop.k1", 1, defaults), "tighten")
+        self.assertEqual(infer_kind("atr_trail_stop.k1", 1.5, defaults), "tighten")
         self.assertEqual(infer_kind("atr_trail_stop.k2", 3, defaults), "loosen")
         self.assertEqual(infer_kind("atr_trail_stop.k1", 0, defaults), "off")
         self.assertEqual(infer_kind("time_force.arm", 0.01, defaults), "loosen")
@@ -260,12 +261,15 @@ class GridSpecTest(unittest.TestCase):
         self.assertEqual(arm.dtype, "percent")
         self.assertEqual(arm.abbrev, "tfa")
         self.assertEqual(arm.kind_mode, "exit")
+        ask = next(p for p in param_catalog() if p.id == "atr_stop.k")
+        self.assertEqual(ask.dtype, "float")
+        self.assertEqual(ask.abbrev, "ask")
         k1 = next(p for p in param_catalog() if p.id == "atr_trail_stop.k1")
-        self.assertEqual(k1.dtype, "int")
+        self.assertEqual(k1.dtype, "float")
         self.assertEqual(k1.abbrev, "atk1")
         self.assertEqual(k1.kind_mode, "exit")
         k2 = next(p for p in param_catalog() if p.id == "atr_trail_stop.k2")
-        self.assertEqual(k2.dtype, "int")
+        self.assertEqual(k2.dtype, "float")
         self.assertEqual(k2.abbrev, "atk2")
         self.assertNotEqual(k2.dtype, "percent")
 
@@ -280,6 +284,23 @@ class GridSpecTest(unittest.TestCase):
         self.assertEqual(parse_scan_values("stop_loss.pct", "6% 10%"), [0.06, 0.10])
         self.assertEqual(parse_scan_values("stop_loss.pct", "6%,10%"), [0.06, 0.10])
         self.assertEqual(parse_scan_values("chase.max_pct", "3 7"), [0.03, 0.07])
+
+    def test_atr_multiplier_float_scan(self) -> None:
+        from grid_run import load_config_defaults
+
+        self.assertAlmostEqual(parse_scan_token("atr_stop.k", "1.5"), 1.5)
+        self.assertEqual(parse_scan_values("atr_stop.k", "1.5,2,2.5"), [1.5, 2.0, 2.5])
+        self.assertEqual(parse_scan_values("atr_trail_stop.k1", "1.5 2.0"), [1.5, 2.0])
+        self.assertEqual(parse_scan_values("atr_trail_stop.k2", "1.5"), [1.5])
+        self.assertEqual(family_token("atr_stop.k", 1.5), "ask1p5")
+        self.assertEqual(family_token("atr_trail_stop.k1", 1.5), "atk11p5")
+        defaults = load_config_defaults()
+        cells = build_cells({"atr_stop.k": [1.5, 2.0]}, defaults)
+        by = {c["id"]: c for c in cells}
+        self.assertEqual(by["ask1p5"]["overrides"]["factor_params"]["atr_stop"]["k"], 1.5)
+        self.assertFalse(by["ask1p5"]["is_current"])
+        self.assertEqual(by["ask1p5"]["kind"], "tighten")
+        self.assertTrue(by["ask2"]["is_current"])
 
     def test_cartesian_stop_and_chase(self) -> None:
         cells = build_cells(

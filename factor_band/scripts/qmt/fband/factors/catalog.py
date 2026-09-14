@@ -182,7 +182,7 @@ LEAVES = {
         "group": "exit",
         "params": {
             "k": {
-                "default": 2,
+                "default": 2.0,
                 "percent": False,
                 "abbrev": "ask",
                 "label": "ATR止损倍数",
@@ -215,7 +215,7 @@ LEAVES = {
         "group": "exit",
         "params": {
             "k1": {
-                "default": 2,
+                "default": 2.0,
                 "percent": False,
                 "abbrev": "atk1",
                 "label": "ATR移动武装",
@@ -224,7 +224,7 @@ LEAVES = {
                 "axis": 5,
             },
             "k2": {
-                "default": 2,
+                "default": 2.0,
                 "percent": False,
                 "abbrev": "atk2",
                 "label": "ATR移动回撤",

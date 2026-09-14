@@ -46,8 +46,8 @@ _EXPECTED_FP = {
     },
     "w_macd_golden": {"hist_expand": 1.2},
     "stop_loss": {"pct": 0.08},
-    "atr_stop": {"k": 2},
-    "atr_trail_stop": {"k1": 2, "k2": 2},
+    "atr_stop": {"k": 2.0},
+    "atr_trail_stop": {"k1": 2.0, "k2": 2.0},
     "trail_stop": {
         "tiers": [
             [0.03, 0.06, 0.015, None],
@@ -118,7 +118,7 @@ class CatalogContractTests(unittest.TestCase):
         self.assertEqual(fp, _EXPECTED_FP)
 
     def test_recipe_fingerprint_unchanged(self) -> None:
-        self.assertEqual(recipe_fingerprint({}), "f20c4472")
+        self.assertEqual(recipe_fingerprint({}), "23b3e414")
 
     def test_catalog_axis_order(self) -> None:
         ids = list(catalog_ids())
