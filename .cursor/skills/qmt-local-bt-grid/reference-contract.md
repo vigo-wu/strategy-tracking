@@ -8,13 +8,13 @@
    - `_exec_bundle()` 之后注入 `overrides`（写进 exec 得到的 `ns`）。
    - `init()` 之后再注入一次（防止 `_apply_panel` 把资金/开关打回默认）。
    - 建议包装 `_apply_panel`：面板应用完立即再写 `overrides`，这样 init 日志指纹才是格子值。
-   - 因子阈值写 `overrides.factor_params`（如 `stop_loss.pct`）；结构窗写 `overrides.structure`（如 `d_ma.mid`）；资金仍写顶层 `CASH_RATIO`。顶层旧键 / 顶层点路径直接报错。hlband 因子轴元数据来自 `factors/catalog.py` 的 `LEAVES`；overrides 形态不改。
+   - 因子阈值写 `overrides.factor_params`（如 `stop_loss.pct`）；`RECIPE.structure` 指标周期窗写 `overrides.structure`（如 `d_ma.mid`）；资金仍写顶层 `CASH_RATIO`。顶层旧键 / 顶层点路径直接报错。hlband 因子轴元数据来自 `factors/catalog.py` 的 `LEAVES`；overrides 形态不改。
    - `out_dir` 由调用方指定；批量 payload 带 `overrides` 透传到子进程。
 2. **隔离产物目录**：`report/grid/<sweep>/<cell>/<sample>/<div>/`。禁止写回基线 `report/<div>/`。
 3. **init 指纹**（写进同一份 log，供 runner 校验）
    - 必有：`stop=`、`time_force_bars=`（若策略有这两项）。
    - `time_force_min_ret=` = `time_force.arm`（标签名不改；不要从 trail 档1 推）。
-   - 扫阶梯止盈：`trail_arm=` = `trail_stop.tiers` 档 1 的 `peak_lo`（与让路脱钩）；另打 compact `trail_tiers=` JSON，探针按整表相等（起步相同、giveback 不同也要能抓到）。
+   - 扫阶梯止盈：`trail_arm=` = `trail_stop.tiers` 档 1 的 `peak_lo`（与让路脱钩）；另打 compact `trail_tiers=` JSON，参数指纹预检按整表相等（起步相同、giveback 不同也要能抓到）。
 4. **主样本 walk**：默认 config `BOOK_STOCKS` 一段 `run_book_backtest`（`year_start0101`–`year_end1231`）。`asset_split.mode=random_from_csv` 时调参 / 盲测 **各一段**（名单写入 `freeze.json` / `spec.json`；CSV 仍用 `csv_for`）。禁止 stock×年独立 10 万账户，禁止 `tune∪holdout` 同一钱包。
 5. **空间隔离（可选）**：`asset_split` 见 skill 示例 `stop_loss_space.json`。选参主 KPI 仅 tune 股；holdout × 验收年复用 `gate` 否决（无覆盖不得过门）。
 6. **过门 `gate`**：绝对合格线（可逐项禁用）+ 可选相对 base + 可选卡玛同向；指标用 `windows.check.*`；排序用验收期卡玛 Δ。写入 spec/freeze/summary；只汇总可 `--gate-json` / 侧栏覆盖。
@@ -50,11 +50,11 @@ JSON 可序列化。元组在 JSON 里用数组；`null` = Python `None`。
 
 ## 格子之间
 
-- **一层全局 walk 池**：探针在主进程串行；通过后把**当前组**各格 walk 铺平进同一个 `ProcessPool`（最多 2 段/格：tune + holdout）。禁止格间池再套格内池；禁止一次把全部格子丢进同一池。
+- **全局单层多进程池**：参数指纹预检在主进程串行；通过后把**当前组**各格 walk 铺平进同一个 `ProcessPool`（最多 2 段/格：tune + holdout）。禁止格间池再套格内池；禁止一次把全部格子丢进同一池。
 - `--workers<=0`：`min(本组 n_cells × n_jobs, CPU)`；`1` 全串行；`>=2` 为池大小（只夹 walk 数，不夹 16）。
-- `--batch-size` / `--resume` / `progress.json`：组级检查点。`done` 跳过；`dirty` 或杀进程留下的 `running` 整组删目录后重跑。暂停须等进程退出再删目录。cmdline 证明已死或 pid 不存在才自动 dirty。`--resume` 不 prune。summarize 只收已 done 的 cell id。
+- `--batch-size` / `--resume` / `progress.json`：组级检查点。`done` 跳过；`dirty` 或杀进程留下的 `running` 整组删目录后重跑。UI 暂停须杀进程树后用操作系统命令行双重核对 pid，确认退出再标 dirty / 删目录，避免残留进程导致误删。cmdline 证明已死或 pid 不存在才自动 dirty。`--resume` 不 prune。summarize 只收已 done 的 cell id。
 - 每格写 `cell_meta.json`（`overrides`、kind、walk 数）。
-- 每格先跑 **init 探针**（dummy context，不回放 K 线），指纹不对则**停止整个 sweep**。通过后该格全部 walk 再跑（第一段不再兼探针）。
+- 每格先跑 **参数指纹预检**（Dummy Context Check，不回放 K 线），指纹不对则**停止整个 sweep**。通过后该格全部 walk 再跑（第一段不再兼预检）。
 - 资金：`compound_backtest=True`，`wallet_cash=TRADE_BUDGET`；`BUDGET_BASE` / `CASH_RATIO` 跟现行 config。
 
 ## summarize 口径
@@ -71,10 +71,10 @@ JSON 可序列化。元组在 JSON 里用数组；`null` = Python `None`。
 
 写出 `<theme>/report/grid/<sweep>/summary.json`。选参规则见 SKILL.md，不要在 summarize 里改 `config.py`。
 
-## 新主题最小增量
+## 新策略接入网格 5 项 Checklist
 
-1. `run.py`：`overrides` 注入 + 任意 `out_dir`（`init` 打出 `stop=` / `time_force_bars=` / `trail_arm=` / `trail_tiers=` JSON）。
-2. `book_backtest.py`：`run_book_backtest` 接受 `overrides`，资金键 `compound_backtest` / `wallet_cash`。
-3. 跟踪池 `BOOK_STOCKS`（主样本组合 walk）。
-4. 在主题 `scripts/local_bt/grid_run.py` 里提供 book walk 列表（不是 stock×年）。
-5. init 日志带指纹字段。
+1. **`overrides` 注入**：`run.py` 在 `_exec_bundle()` 之后与 `init()` 之后各写一次（防止 `_apply_panel` 把资金/开关打回默认）；`book_backtest.py` 的 `run_book_backtest` 接受 `overrides`，资金键 `compound_backtest` / `wallet_cash`。
+2. **隔离产物目录**：`report/grid/<sweep>/<cell>/<sample>/<div>/`。禁止写回基线 `report/<div>/`。`out_dir` 由调用方指定。
+3. **init 指纹字段**：同一份 log 打出 `stop=` / `time_force_bars=` / `trail_arm=` / `trail_tiers=` JSON（标签名不改）。参数指纹预检按这些字段校验。
+4. **主样本 walk 限制**：默认 `BOOK_STOCKS` 一段 `run_book_backtest`。`asset_split.mode=random_from_csv` 时调参 / 盲测各一段。禁止 stock×年独立账户，禁止 `tune∪holdout` 同一钱包。主题 `grid_run.py` 提供 book walk 列表（不是 stock×年）。
+5. **全局单层多进程池 / 禁止嵌套**：格间池不得再套格内池；一次只提交一组。参数指纹预检在主进程串行通过后再铺 walk。

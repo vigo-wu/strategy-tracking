@@ -1,7 +1,7 @@
 # 红利板块波段策略：周线定方向，日线找买卖点
 
 **主题目录**：`hongli_band/`｜**版本**：v1.70｜**形态**：单仓骨架 / 分笔多仓｜**运行**：国金 QMT 终端模型（见 §5）；本地 CSV 回放（见 §6）  
-**参数默认值**：`hongli_band/scripts/qmt/hlband/config.py`（文档以该文件为准）。因子数字真源是 `RECIPE.factor_params`；均线/MACD/ATR 窗真源是 `RECIPE.structure`。实盘在「模型交易 → 新建/编辑策略交易」面板只覆盖开关 / 资金基数 / 固定金额 / 可部署比例 / 加仓开关（`hlband/panel.xml`）；编辑器回测无注入时用 config。买点窗口、时间成本、加仓细节、`SCALE_LOTS`、阶梯止盈 `trail_stop.tiers`、结构窗、`BOOK_STOCKS` 子配置 / `MA_TYPE`、路径仍只在 config（因子阈值和结构窗不上屏）。
+**参数默认值**：`hongli_band/scripts/qmt/hlband/config.py`（文档以该文件为准）。因子数字的唯一可信数据源（Single Source of Truth）是 `RECIPE.factor_params`；均线/MACD/ATR 窗的唯一可信数据源是 `RECIPE.structure`。交易终端实盘环境在「模型交易 → 新建/编辑策略交易」面板只覆盖开关 / 资金基数 / 固定金额 / 可部署比例 / 加仓开关（`hlband/panel.xml`）；编辑器回测无注入时用 config。买点窗口、时间成本、加仓细节、`SCALE_LOTS`、阶梯止盈 `trail_stop.tiers`、`RECIPE.structure` 指标周期窗、`BOOK_STOCKS` 子配置 / `MA_TYPE`、路径仍只在 config（因子阈值和指标周期窗不上屏）。
 
 ---
 

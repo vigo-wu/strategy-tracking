@@ -1,14 +1,16 @@
 # Recipe 分类与布尔式
 
-配套：[架构.md](架构.md)（分层契约）、[factors/NAV.md](../../scripts/qmt/hlband/factors/NAV.md)（现网四槽真源）。
+配套：[架构.md](架构.md)（分层契约）、[factors/NAV.md](../../scripts/qmt/hlband/factors/NAV.md)（现行默认配置四个槽位的唯一可信数据源）。
 
 叶子文件：`hlband/factors/lib/<id>.py`，一 id 一文件；登记表是 `factors/catalog.py` 的 `LEAVES`。引擎在 `factors/` 根目录（`ctx` / `registry` / `expr` / `slots`）。清单见下 §7。
 
-策略四个结构槽各自持有一棵布尔表达式（Recipe）。因子无立场，只作为叶子被引用。
+策略四个槽位各自持有一棵布尔表达式（Recipe）。因子无立场，只作为叶子被引用。
 
 ---
 
-## 1. 四槽与典型形态
+## 1. 四个槽位与典型形态
+
+买入 `entry`、加仓 `scale_in`、卖出 `exit`、减仓 `scale_out` 四个槽位各自持有一棵条件抽象语法树。
 
 | 槽 | 键名（建议） | 典型形态 | 语义 |
 | :--- | :--- | :--- | :--- |
@@ -26,9 +28,9 @@
 叶子 = 因子 id（字符串）。  
 节点 = `and` / `or` / `not`。
 
-现网默认叶子是**复合原子**（见 §7），不要把 `pullback_vol` 拆进表达式。
+现行默认配置的叶子是**复合原子**（见 §7），不要把 `pullback_vol` 拆进表达式。
 
-入场（对齐现网）：
+入场（对齐现行默认配置）：
 
 ```json
 ["and",
@@ -49,7 +51,7 @@
     "plat_break", "w_macd_golden"]]
 ```
 
-细原子示例（第二期才用，现网不用）：
+细原子示例（第二期才用，现行默认配置不用）：
 
 ```json
 ["and", "near_ma", "vol_shrink"]
@@ -111,14 +113,14 @@ exit:
   # stop_loss / trail_stop 叶子仍在，默认 AST 不引用（源码注释关掉）
 
 scale_out:
-  false   # 现网无独立减仓槽
+  false   # 现行默认配置无独立减仓槽
 ```
 
 ---
 
 ## 6. 因子 ctx（行情 + 状态）
 
-`eval(ctx)` 不只吃 OHLCV。组装见 [架构.md](架构.md) §2.4。
+`eval(ctx)` 不只读取 OHLCV。组装见 [架构.md](架构.md) §2.4。
 
 | 因子 | 主要读的 state |
 | :--- | :--- |
@@ -132,9 +134,9 @@ scale_out:
 
 ---
 
-## 7. 第一期复合原子（现网叶子）
+## 7. 第一期复合原子（现行默认配置叶子）
 
-引擎可支持细原子，但现网叶子 **只登记** `catalog.LEAVES`（下表）。每个 id 对应 `hlband/factors/lib/<id>.py`。默认 exit AST 引用其中一部分（见 §5）。作者改 `LEAVES` 的 `default`；运行时阈值读 `RECIPE.factor_params`（catalog 整表写入，`_factor_param`），**没有** `STOP_LOSS` / `CHASE_MAX_PCT` 这类模块全局别名。均线/MACD/ATR 窗读 `RECIPE.structure`（`_structure_windows`），`<=0` 关条。
+引擎可支持细原子，但现行默认配置的叶子 **只登记** `catalog.LEAVES`（下表）。每个 id 对应 `hlband/factors/lib/<id>.py`。默认 exit AST 引用其中一部分（见 §5）。作者改 `LEAVES` 的 `default`；运行时阈值读 `RECIPE.factor_params`（catalog 整表写入，`_factor_param`），**没有** `STOP_LOSS` / `CHASE_MAX_PCT` 这类模块全局别名。均线/MACD/ATR 窗读 `RECIPE.structure`（`_structure_windows`），`<=0` 关条。
 
 | id | 现逻辑 | 阈值（`factor_params`） |
 | :--- | :--- | :--- |
@@ -161,28 +163,28 @@ scale_out:
 
 ## 8. 参数组
 
-作者改 `factors/catalog.py` 的 `LEAVES`；运行时读 `RECIPE.factor_params`（catalog 用 defaults 整表写入，不要给 `weekly_bear` 写空 `{}`）。四槽 AST / `structure` 仍手写在 `config.RECIPE`。叶子只读表，不读同名全局。没有 `STOP_LOSS` / `D_MA_MID` 别名。
+作者改 `factors/catalog.py` 的 `LEAVES`；运行时读 `RECIPE.factor_params`（catalog 用 defaults 整表写入，不要给 `weekly_bear` 写空 `{}`）。四个槽位的条件抽象语法树 / `structure` 仍手写在 `config.RECIPE`。叶子只读表，不读同名全局。没有 `STOP_LOSS` / `D_MA_MID` 别名。
 
-加普通因子：`LEAVES` + `lib/<id>.py` + 必要时改四槽 AST。不要手改 `registry` / `MODULE_ORDER` / `grid_spec` 白名单。公式仍留在 `lib/`，不做成配置字符串。
+加普通因子：`LEAVES` + `lib/<id>.py` + 必要时改四个槽位的条件抽象语法树。不要手改 `registry` / `MODULE_ORDER` / `grid_spec` 白名单。公式仍留在 `lib/`，不做成配置字符串。
 
 | 住哪 | 例子 | 说明 |
 | :--- | :--- | :--- |
-| `RECIPE` 四槽 AST | `entry` / `scale_in` / `exit` / `scale_out` | 无数字；默认盘启用写这里 |
+| `RECIPE` 四个槽位 AST | `entry` / `scale_in` / `exit` / `scale_out` | 无数字；默认盘启用写这里 |
 | `catalog.LEAVES` → `RECIPE.factor_params` | `stop_loss.pct`、`atr_stop.k`、`atr_trail_stop.k1` / `k2`、`time_force.arm`、`chase.max_pct`、`trail_stop.tiers` | 作者改 `LEAVES`；运行时 `_factor_param` |
 | `RECIPE.structure` | 见下表 | 均线/MACD/ATR **窗**；`_structure_windows` |
 | 算法（不是窗） | `MA_TYPE`、`BOOK_STOCKS[].ma_type` | SMA/EMA；不上 `structure` |
 | 仓位 / 资金全局 | `SCALE_ARM`、`CASH_RATIO`、`TRADE_BUDGET` | 不上表、不上因子面板 |
 
-`RECIPE.structure` 现网字面量（`<=0` 关该条均线/ATR；MACD 三窗都应 >0）：
+`RECIPE.structure` 现行默认配置字面量（`<=0` 关该条均线/ATR；MACD 三窗都应 >0）：
 
-| 段 | 键 | 现网 | 用途 |
+| 段 | 键 | 现行默认 | 用途 |
 | :--- | :--- | :--- | :--- |
 | `d_ma` | `mid` / `slow` | 20 / 60 | 日线回踩/无量阴跌；慢线还是 time_force 地板 |
 | `w_ma` | `fast` / `mid` / `life` | 5 / 13 / 34 | 周线快/中/生命线；`mid` 仅日志 `weekly_bull` |
 | `macd` | `fast` / `slow` / `signal` | 12 / 26 / 9 | 周线 DIF/DEA/柱 |
 | `atr` | `n` | 14 | 日线威尔德 ATR；`<=0` 关 `atr_stop` / `atr_trail_stop` |
 
-读窗：调用方先 `_structure_windows()`，再把 `n` 传给 `_price_ma` / `_calc_macd`（三窗必传）/ `_calc_atr`。缺键用上表数字字面量。网格覆盖 `_structure_apply_global`，按段再按 key 合并。QMT 暖机（`market._ohlcv_need_*`）走 `_structure_windows()`；local_bt `run.py` 读裸表，缺键当 0——现网字面量齐全时两者一致。
+读取指标周期窗：调用方先 `_structure_windows()`，再把 `n` 传给 `_price_ma` / `_calc_macd`（三窗必传）/ `_calc_atr`。缺键用上表数字字面量。网格覆盖 `_structure_apply_global`，按段再按 key 合并。QMT 暖机（`market._ohlcv_need_*`）走 `_structure_windows()`；local_bt `run.py` 读裸表，缺键当 0——现行默认配置字面量齐全时两者一致。
 
 网格：因子轴元数据（分组 / 短名 / percent / kind）来自 `LEAVES`；轴 id 仍是点路径（`stop_loss.pct` / `atr_stop.k` / `atr_trail_stop.k1` / `k2` / `time_force.arm` / `d_ma.mid` / `atr.n`）；短 id 如 `dmm15` / `ask` / `atk1` / `atk2` / `tfa` / `atr`。`atr_trail_stop.k1` / `k2` **不是**百分比轴。格子 `overrides` 形态不变，必须写成：
 
@@ -195,8 +197,8 @@ scale_out:
 {"structure": {"atr": {"n": 14}}}
 ```
 
-顶层旧键（`STOP_LOSS` / `D_MA_MID`）或顶层点路径（`stop_loss.pct` / `d_ma.mid`）都直接报错。面板只上模拟下单 / 资金 / 加仓开关，因子阈值和结构窗不上屏。
+顶层旧键（`STOP_LOSS` / `D_MA_MID`）或顶层点路径（`stop_loss.pct` / `d_ma.mid`）都直接报错。面板只上模拟下单 / 资金 / 加仓开关，因子阈值和指标周期窗不上屏。
 
-`recipe=` 指纹：表达式 + 折进表的 `factor_params` + `structure`。apply 之后再算，`overrides` 袋为空。默认哈希会随 payload 增 `structure` 而变；探针用 `expected_fingerprint` 重算，不要对历史 `report/grid/` 档案里的旧哈希。两份拷贝：`factors/slots.py` 与 `local_bt/grid_spec.py`。
+`recipe=` 指纹：表达式 + 折进表的 `factor_params` + `structure`。apply 之后再算，`overrides` 袋为空。默认哈希会随 payload 增 `structure` 而变；参数指纹预检用 `expected_fingerprint` 重算，不要对历史 `report/grid/` 档案里的旧哈希。两份拷贝：`factors/slots.py` 与 `local_bt/grid_spec.py`。
 
 仓位不做 sizing 分栏，也不做全因子 `2^n` 开关。优先扫命名数值轴，见 `qmt-local-bt-grid`。

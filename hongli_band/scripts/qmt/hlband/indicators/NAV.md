@@ -2,7 +2,7 @@
 
 只做序列变换，算一次。无立场、无持仓、不读现金 / pending。
 
-**契约真源**：[docs/架构重构/架构.md](../../../../docs/架构重构/架构.md) §2.3。  
+**契约的唯一可信数据源**：[docs/架构重构/架构.md](../../../../docs/架构重构/架构.md) §2.3。  
 **下游**：组装进 [../factors/NAV.md](../factors/NAV.md) 的 `ctx.market`。  
 **拼接**：[`../_deploy_qmt_gbk.py`](../../_deploy_qmt_gbk.py) `MODULE_ORDER`（片段禁止互 `import`）。
 
@@ -35,7 +35,7 @@ indicators/util.py → sma.py → ema.py → macd.py → atr.py → price_ma.py
 
 ## 加指标
 
-1. 本目录一指标一文件，只吃序列、产出序列（或纯工具）。
+1. 本目录一指标一文件，仅接受行情序列作为输入、产出序列（或纯工具）。
 2. 在 `_deploy_qmt_gbk.py` 的 `MODULE_ORDER` 插入（有依赖的放后面）。
 3. `python hongli_band/scripts/qmt/_deploy_qmt_gbk.py`，`compile` 成功。
 4. 不要新建根上的 `indicators.py`（会和本目录重名）。

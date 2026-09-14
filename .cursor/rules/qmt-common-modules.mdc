@@ -10,19 +10,20 @@ alwaysApply: true
 ## 必须
 
 - 策略逻辑放在 `<主题>/scripts/qmt/<简名>/` 片段；基础设施用 `common:` / `common:single:`
-- 用 `_deploy_qmt_gbk.py` + `qmt_common._deploy_lib` 拼接；改完立即 deploy
+- 只改策略片段 / `panel.xml`，再经 `_deploy_qmt_gbk.py` + `qmt_common._deploy_lib` 拼接部署；改完立即 deploy
 - 终端「新建策略交易」参数面板按 `.cursor/skills/qmt-param-panel`（仓库 `panel.xml` → `formulaLayout/<入口>.xml`）
 - `DRY_RUN=True` 默认；`STATE_FILE` 绝对路径（多实例不同主图用 `{stock}` / 按标的分文件）；`handlebar` 调 `_refresh_mode`
 - 日志前缀用 `STRATEGY_NAME` / `_strategy_tag()`
 
 ## 禁止
 
-- 手改 `qmt_terminal_*.py`、QMT `python\` 下 GBK 文件、或 `python\formulaLayout\` 下 XML
+- **禁止**手改 `qmt_terminal_*.py`、QMT `python\` 下 GBK 文件、或 `python\formulaLayout\` 下 XML；只改策略片段 / `panel.xml`，再经 `_deploy_qmt_gbk.py` 拼接部署
 - 片段间 `import`；在策略里重写 pending / T+1 / `series_from_ex` / mode 暖机
-- 用 `__file__` 定位状态文件；多实盘实例共用同一 STATE JSON（串标的）
+- 用 `__file__` 定位状态文件
+- **【重大风险警告】** 多个实盘运行实例严禁共用同一个状态文件（STATE JSON），否则会导致不同交易标的（Stock）的持仓与订单数据发生相互覆盖和串线污染。须使用绝对路径，并按 `{stock}` 或分文件隔离
 - 片段内重复 `import datetime/numpy`（preamble 已有）
-- 单仓/双浮仓 MODULE_ORDER 混用（错接 `single/orders` 与自研浮仓 orders）
-- 同标的多仓去接双浮仓 `orders.py`；应留在 `common:single` + `SCALE_LOTS`
+- **禁止**把 `common:single/orders` 与双浮仓自研 `orders.py` 写进同一套 `MODULE_ORDER`；混接会导致成交回填、可卖股数、底仓语义错位
+- 同标的多仓须留在 `common:single` + `SCALE_LOTS`，禁止为此去接双浮仓 `orders.py`
 
 ## 改哪里
 

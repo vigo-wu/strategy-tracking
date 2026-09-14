@@ -28,7 +28,7 @@
 
 日志 / 成交主因直接用叶子 id（`chase`、`vol_dry`、`w_bias`、`w_slope`、`weekly_bear_confirm`）。当天空头禁开仍是 `weekly_bear`。历史 log 里的 `*_skip` / 清仓 `weekly_bear` 由选股/summarize 兼容读取。
 
-不要拆 `pullback_vol` 为 `near_ma & vol_shrink`（现网复合原子）。`weekly_bull` 不是因子。
+不要拆 `pullback_vol` 为 `near_ma & vol_shrink`（现行默认配置的复合原子）。`weekly_bull` 不是因子。
 
 ---
 
@@ -53,10 +53,10 @@
 | :--- | :--- |
 | 复权 OHLCV、已算均线/MACD/ATR、成本、峰值、持仓日、当前 lot、`w_bear_streak` | 现金、全池账本、pending、T+1、`passorder` |
 
-`eval` 约定只读。例外：`time_force` 为对齐现网，命中「武装让路」时仍会写 `time_force_trend_skip`（与旧 `_time_force_hit` 相同）。不要把新的写盘塞进其它叶子。
+`eval` 约定只读。例外：`time_force` 为对齐现行默认配置，命中「武装让路」时仍会写 `time_force_trend_skip`（与旧 `_time_force_hit` 相同）。不要把新的写盘塞进其它叶子。
 
 ---
 
 ## 加叶子
 
-`catalog.LEAVES` + `lib/<id>.py` + 默认盘要启用时改四槽 AST。lib 拼包顺序跟 `LEAVES`；不要手改 `registry` / `MODULE_ORDER` / `grid_spec` 白名单。步骤见 [../NAV.md](../NAV.md)。
+`catalog.LEAVES` + `lib/<id>.py` + 默认盘要启用时改四个槽位的条件抽象语法树。lib 拼包顺序跟 `LEAVES`；不要手改 `registry` / `MODULE_ORDER` / `grid_spec` 白名单。步骤见 [../NAV.md](../NAV.md)。

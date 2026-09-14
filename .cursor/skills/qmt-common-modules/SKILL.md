@@ -14,7 +14,7 @@ description: >-
 国金终端脚本**必须**用 `scripts/qmt_common` + 策略片段拼接，**禁止**再写整文件复制粘贴基础设施。
 
 联调踩坑仍走 [qmt-model-script](../qmt-model-script/SKILL.md) / [reference-pitfalls.md](../qmt-model-script/reference-pitfalls.md)。  
-模块清单真源：[scripts/qmt_common/NAV.md](../../../scripts/qmt_common/NAV.md)。  
+模块清单的唯一可信数据源：[scripts/qmt_common/NAV.md](../../../scripts/qmt_common/NAV.md)。  
 布局与模板：[reference-layout.md](reference-layout.md)。  
 终端「新建策略交易」参数面板：[qmt-param-panel](../qmt-param-panel/SKILL.md)（仓库 `panel.xml` → `formulaLayout`）。
 
@@ -22,11 +22,11 @@ description: >-
 
 ## 硬性约束（违反即错）
 
-1. **禁止**跨片段 `import`；只靠 `_deploy_qmt_gbk.py` 的 `MODULE_ORDER` 拼接。
-2. **禁止**手改 `qmt_terminal_*.py`、QMT `python\` 下 GBK 产物、以及 `python\formulaLayout\` XML；只改片段 / `panel.xml` 后 re-deploy。
+1. **禁止**跨片段 `import`；只靠 `_deploy_qmt_gbk.py` 的 `MODULE_ORDER` 拼接。**禁止**把 `common:single/orders` 与双浮仓自研 `orders.py` 写进同一套顺序；混接会导致成交回填、可卖股数、底仓语义错位。
+2. **禁止**手改 `qmt_terminal_*.py`、QMT `python\` 下 GBK 产物、以及 `python\formulaLayout\` XML；只改策略片段 / `panel.xml`，再经 `_deploy_qmt_gbk.py` 拼接部署。
 3. **禁止**在策略里复制 `_process_pending` / `_bt_roll_t1` / `_series_from_ex` / `_refresh_mode` / `_broker_position` 等已进 common 的逻辑。
 4. **禁止** `__file__` 定 STATE 路径；用绝对路径 `STATE_FILE`（基路径或含 `{stock}`）。
-5. **多模型实例挂不同主图**：单仓必须按标的分状态文件。`common:single/state_io` 会把 `A.stock` 写入路径（`{stock}` 占位或自动后缀 `_513530_SH`）。**禁止**假定「同一策略脚本 + 同一 `STATE_FILE` 字符串」可安全并行多标的；否则后写覆盖、加载 `state stock mismatch`。双浮仓自研 `state_io` 同样须按标的隔离。详见 [reference-pitfalls §2.1](../qmt-model-script/reference-pitfalls.md)。
+5. **【重大风险警告】** 多个实盘运行实例严禁共用同一个状态文件（STATE JSON），否则会导致不同交易标的（Stock）的持仓与订单数据发生相互覆盖和串线污染。单仓必须按标的分状态文件。`common:single/state_io` 会把 `A.stock` 写入路径（`{stock}` 占位或自动后缀 `_513530_SH`）。**禁止**假定「同一策略脚本 + 同一 `STATE_FILE` 字符串」可安全并行多标的。双浮仓自研 `state_io` 同样须按标的隔离。详见 [reference-pitfalls §2.1](../qmt-model-script/reference-pitfalls.md)。
 6. 片段内**不要**再写 `import datetime/json/os/numpy`（preamble 已有，deploy 会剥）。
 7. 源码 UTF-8；部署 GBK；字符须可 GBK 编码。
 8. 改完必须跑该主题 `python .../_deploy_qmt_gbk.py` 且 `compile` 成功。

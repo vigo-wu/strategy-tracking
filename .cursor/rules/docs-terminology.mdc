@@ -1,0 +1,37 @@
+---
+description: 写改现行文档、规则、技能与架构图须用规范术语；禁止黑话回潮；对齐代码，不照搬不准确的替换
+alwaysApply: true
+---
+
+# 文档表述规范
+
+写或改 `.cursor/rules/`、`.cursor/skills/qmt-*`、`hongli_band` 主分支现行文档（含 [`docs/架构重构/策略架构.drawio`](hongli_band/docs/架构重构/策略架构.drawio)）时，用语**对齐代码**。禁止口语/黑话回潮。
+
+不改：`.cursor/plans/`、`optimize/`、`docs/归档/`、`report/`、`文档表述优化.md`。不单独为改文档 deploy。契约变了仍按 `.cursor/rules/hlband-docs-sync.mdc`。
+
+## 术语（禁止用左栏）
+
+| 禁止 | 改用 |
+| :--- | :--- |
+| 同一回合 | 在同一次变更中同步修改（不强制 git commit） |
+| 现网文档 / 现网 md | 主分支现行文档 |
+| 现网（默认 Recipe / 数字） | 现行默认配置 |
+| 现网（QMT 终端） | 交易终端实盘环境 |
+| 结构窗 | `RECIPE.structure` 指标周期窗 |
+| 读窗 | 通过 `_structure_windows()` 读取指标周期窗 |
+| 参数真源 / 窗真源 | 唯一可信数据源（Single Source of Truth） |
+| 硬切 / 覆盖硬切 | 拒绝旧顶层键（不兼容 / Breaking Change）。**不等于** `overrides` |
+| 吃参数 | 读取/接受参数 |
+| 吃序列 | 仅接受行情序列作为输入 |
+| 探针 / init 探针 | 参数指纹预检（Dummy Context Check） |
+| 一层全局 walk 池 | 全局单层多进程池 |
+| 四槽 AST | 买入 `entry`、加仓 `scale_in`、卖出 `exit`、减仓 `scale_out` 四个槽位的条件抽象语法树（**没有** Risk 槽） |
+| 串标的 | 不同交易标的的持仓与订单相互覆盖、串线污染 |
+| 专线 | `strategy.py` / `ctx.py` 中的特例逻辑 |
+| 不要用错 / 不是同一条路 | 一票否决 / 禁止行为 |
+
+代码键名保持原样。禁止把「现行默认配置」和「交易终端实盘环境」混用。四个槽位首次出现须展开全名。函数名用代码标记。
+
+## 收工
+
+`rg` 本次改过的现行文件：不应再出现上表左栏。架构图与 [`架构.md`](hongli_band/docs/架构重构/架构.md) 一并改。

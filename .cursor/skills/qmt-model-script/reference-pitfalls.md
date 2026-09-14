@@ -51,7 +51,7 @@ STATE_FILE = r"D:\tradingStrategy\hlband_{stock}.json"
 
 ---
 
-## 2.1 多模型实例共用一个 STATE 文件 → 状态串标的 / pending 丢失
+## 2.1 多模型实例共用一个 STATE 文件 → 持仓与订单串线污染 / pending 丢失
 
 **现象**
 

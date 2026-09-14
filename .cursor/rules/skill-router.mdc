@@ -16,20 +16,21 @@ alwaysApply: true
 | 网格回测、最优参数、实跑扫参、STOP_LOSS/TRAIL/TIME_FORCE 确认 | `.cursor/skills/qmt-local-bt-grid/SKILL.md` |
 | 实盘评估、随机组合回放、能否上实盘、稳健门（参数锁定后） | `.cursor/skills/qmt-local-bt-robust/SKILL.md` |
 | 加/删因子、登记、启用、卸下、除名、加减指标、catalog、LEAVES、`indicators/` | `.cursor/skills/qmt-hlband-extend/SKILL.md` |
-| 改 RECIPE / 结构窗 / 网格覆盖形态 / 读窗 API | 先改代码，再按 `.cursor/rules/hlband-docs-sync.mdc` 同步现网文档 |
+| 改 RECIPE / `RECIPE.structure` 指标周期窗 / 网格覆盖形态 / `_structure_windows()` | 先改代码，再按 `.cursor/rules/hlband-docs-sync.mdc` 同步主分支现行文档 |
 
-## 叠加（不是二选一）
+## 叠加（可同时适用，不是互斥）
 
 - **新建/重构国金终端模块**：`qmt-model-script` + `qmt-common-modules`
 - **加减 HlBand 指标/因子**：`qmt-hlband-extend`；deploy 仍跟 `qmt-common-modules`；参数契约变了跟 `hlband-docs-sync`
+- **写/改现行文档、规则、技能、架构图**：用语跟 `docs-terminology`；契约同步仍跟 `hlband-docs-sync`
 - **终端改参 UI**：`qmt-param-panel`；deploy/拼接仍跟 `qmt-common-modules`
 - **QMT API 手册**（非工作流 skill）：需要 API 细节时再读 `.cursor/skills/qmt-skill/`（无 `SKILL.md`）
 
-## 不要用错
+## 动手前必读 / 一票否决
 
-- 改 `qmt_terminal_*.py` / 终端 GBK / `formulaLayout` XML → 禁止；走片段 + deploy
-- 「回测报告」= 解析 QMT log 画图；「过拟合检验」= 对收益序列做 DSR/PBO，不是同一条路
-- `qmt-backtest-report` 只读日志画图，不改策略、不 deploy
-- 「网格 / 最优参数 / 实跑扫参」= 真实 local_bt 重跑（`qmt-local-bt-grid`），不是 MAE 反事实，也不是 DSR/PBO
-- 「实盘评估 / 随机组合 / 能否上实盘」= 参数锁定后的组合稳健门（`qmt-local-bt-robust`），不是网格选参，也不是选股 WF
-- 「加因子 / 新指标」= HlBand 登记或启用因子、或加 `indicators/`（`qmt-hlband-extend`），不是正交化，也不是 QuantSkills 工厂
+- **禁止**手改 `qmt_terminal_*.py`、终端 GBK、`formulaLayout` XML；只改策略片段后经 `_deploy_qmt_gbk.py` 拼接部署
+- **禁止**把「回测报告」（解析 QMT log 画图，`qmt-backtest-report`）与「过拟合检验」（对收益序列做 DSR/PBO）当成同一流程
+- **禁止**用 `qmt-backtest-report` 改策略或 deploy；该技能只读日志画图
+- **禁止**用 MAE 反事实或 DSR/PBO 当作网格 / 最优参数 / 实跑扫参结论；必须走真实 local_bt 重跑（`qmt-local-bt-grid`）
+- **禁止**把「实盘评估 / 随机组合 / 能否上实盘」当成网格选参或选股 walk-forward；那是参数锁定后的组合稳健门（`qmt-local-bt-robust`）
+- **禁止**把「加因子 / 新指标」当成正交化或 QuantSkills 工厂；须走 HlBand 登记或启用因子、或加 `indicators/`（`qmt-hlband-extend`）
