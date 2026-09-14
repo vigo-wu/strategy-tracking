@@ -1,6 +1,6 @@
 # MAE 反事实 vs 真实 local_bt
 
-固定买入路径的反事实（`stop_loss_mae.py` / `trail_tiers_mae.py` / `time_force_mae.py`）**不能**当作选参结论。本文件记下 hongli_band 本轮对照，Agent 需要解释「为什么必须实跑」时再读。
+固定买入路径的反事实（`stop_loss_mae.py` / `trail_tiers_mae.py` / `time_force_mae.py`）**不能**当作选参结论。本文件记下 factor_band 本轮对照，Agent 需要解释「为什么必须实跑」时再读。
 
 口径（当时）：主样本 = 冻结的每年均线 winner（约 40 只 × 年）；预算 10 万/账户/年；IS=2018–2022，OOS=2023–2026。
 
@@ -15,7 +15,7 @@
 
 放宽或关闭某条出场规则时，MAE 只是在原买入路径上把平仓日往后推。真实回放里，持仓多拿几天会改变：后续是否加仓、其它卖点是否先触发、下一笔开仓的日期与成本。这些路径改动不会出现在固定买入的反事实里，所以「放宽看起来更好」常常是高估，甚至符号相反。必须用完整 local_bt 重跑才能下结论。
 
-## 本轮数字（hongli_band）
+## 本轮数字（factor_band）
 
 ### STOP_LOSS
 

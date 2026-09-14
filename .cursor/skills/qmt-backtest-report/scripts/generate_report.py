@@ -2,7 +2,7 @@
 """QMT 回测日志 → 成交表 + 权益曲线 + 持仓着色 K 线 + Markdown 报告。
 
 用法:
-  python generate_report.py --theme hongli_band
+  python generate_report.py --theme factor_band
   python generate_report.py --log path/to/log.txt --out-dir path/to/dir --tag HlBand
 
 盈亏真源优先：<主题>/report/QMT终端操作明细.csv（引擎成交价/盈亏）；
@@ -1142,7 +1142,7 @@ def resolve_theme(theme: str) -> Path:
 
 def main(argv: list[str] | None = None):
     ap = argparse.ArgumentParser(description="QMT backtest log → report artifacts")
-    ap.add_argument("--theme", help="主题目录名或路径，如 hongli_band")
+    ap.add_argument("--theme", help="主题目录名或路径，如 factor_band")
     ap.add_argument("--log", help="log.txt 路径")
     ap.add_argument("--out-dir", help="输出目录；默认 <主题>/report/")
     ap.add_argument(

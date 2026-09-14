@@ -43,11 +43,11 @@ description: >-
 ## 怎么跑
 
 ```bash
-python hongli_band/scripts/local_bt/robust_run.py --spec .cursor/skills/qmt-local-bt-robust/examples/robust_default.json --dry-run
-python hongli_band/scripts/local_bt/app.py   # 模式「实盘评估」
+python factor_band/scripts/local_bt/robust_run.py --spec .cursor/skills/qmt-local-bt-robust/examples/robust_default.json --dry-run
+python factor_band/scripts/local_bt/app.py   # 模式「实盘评估」
 ```
 
-产物：`hongli_band/report/robust/<run_id>/`（`summary.json` / `freeze.json` / `progress.json` / `basket_XXX/`）。
+产物：`factor_band/report/robust/<run_id>/`（`summary.json` / `freeze.json` / `progress.json` / `basket_XXX/`）。
 
 网格结果页可点「送入实盘评估」。
 

@@ -3,7 +3,7 @@
 
 用法（仓库根目录）::
 
-  python .cursor/skills/qmt-local-bt-grid/scripts/summarize.py --sweep-dir hongli_band/report/grid/stop_loss_confirm
+  python .cursor/skills/qmt-local-bt-grid/scripts/summarize.py --sweep-dir factor_band/report/grid/stop_loss_confirm
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[3]
-LOCAL_BT = REPO / "hongli_band" / "scripts" / "local_bt"
+LOCAL_BT = REPO / "factor_band" / "scripts" / "local_bt"
 
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))

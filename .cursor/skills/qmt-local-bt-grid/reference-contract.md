@@ -1,6 +1,6 @@
 # 主题接入契约
 
-仓库里目前只有 `hongli_band` 实现了 `scripts/local_bt/`。新主题按本节接上后再扩 runner，不要把 hlband 路径写进 SKILL 正文当唯一实现说明。
+仓库里目前只有 `factor_band` 实现了 `scripts/local_bt/`。新主题按本节接上后再扩 runner，不要把 fband 路径写进 SKILL 正文当唯一实现说明。
 
 ## 主题必须提供
 
@@ -8,7 +8,7 @@
    - `_exec_bundle()` 之后注入 `overrides`（写进 exec 得到的 `ns`）。
    - `init()` 之后再注入一次（防止 `_apply_panel` 把资金/开关打回默认）。
    - 建议包装 `_apply_panel`：面板应用完立即再写 `overrides`，这样 init 日志指纹才是格子值。
-   - 因子阈值写 `overrides.factor_params`（如 `stop_loss.pct`）；`RECIPE.structure` 指标周期窗写 `overrides.structure`（如 `d_ma.mid`）；资金仍写顶层 `CASH_RATIO`。顶层旧键 / 顶层点路径直接报错。hlband 因子轴元数据来自 `factors/catalog.py` 的 `LEAVES`；overrides 形态不改。
+   - 因子阈值写 `overrides.factor_params`（如 `stop_loss.pct`）；`RECIPE.structure` 指标周期窗写 `overrides.structure`（如 `d_ma.mid`）；资金仍写顶层 `CASH_RATIO`。顶层旧键 / 顶层点路径直接报错。fband 因子轴元数据来自 `factors/catalog.py` 的 `LEAVES`；overrides 形态不改。
    - `out_dir` 由调用方指定；批量 payload 带 `overrides` 透传到子进程。
 2. **隔离产物目录**：`report/grid/<sweep>/<cell>/<sample>/<div>/`。禁止写回基线 `report/<div>/`。
 3. **init 指纹**（写进同一份 log，供 runner 校验）

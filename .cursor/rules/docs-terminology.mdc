@@ -5,9 +5,9 @@ alwaysApply: true
 
 # 文档表述规范
 
-写或改 `.cursor/rules/`、`.cursor/skills/qmt-*`、`hongli_band` 主分支现行文档（含 [`docs/架构重构/策略架构.drawio`](hongli_band/docs/架构重构/策略架构.drawio)）时，用语**对齐代码**。禁止口语/黑话回潮。
+写或改 `.cursor/rules/`、`.cursor/skills/qmt-*`、`factor_band` 主分支现行文档（含 [`docs/架构重构/策略架构.drawio`](factor_band/docs/架构重构/策略架构.drawio)）时，用语**对齐代码**。禁止口语/黑话回潮。
 
-不改：`.cursor/plans/`、`optimize/`、`docs/归档/`、`report/`、`文档表述优化.md`。不单独为改文档 deploy。契约变了仍按 `.cursor/rules/hlband-docs-sync.mdc`。
+不改：`.cursor/plans/`、`optimize/`、`docs/归档/`、`report/`、`文档表述优化.md`。不单独为改文档 deploy。契约变了仍按 `.cursor/rules/fband-docs-sync.mdc`。
 
 ## 术语（禁止用左栏）
 
@@ -34,4 +34,4 @@ alwaysApply: true
 
 ## 收工
 
-`rg` 本次改过的现行文件：不应再出现上表左栏。架构图与 [`架构.md`](hongli_band/docs/架构重构/架构.md) 一并改。
+`rg` 本次改过的现行文件：不应再出现上表左栏。架构图与 [`架构.md`](factor_band/docs/架构重构/架构.md) 一并改。

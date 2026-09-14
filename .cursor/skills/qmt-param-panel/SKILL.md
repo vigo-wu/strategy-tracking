@@ -24,7 +24,7 @@ XML 字段与控件：[reference-xml.md](reference-xml.md)
 ## 硬性约束（违反即错）
 
 1. **源在仓库**：`<主题>/scripts/qmt/<简名>/panel.xml`。禁止手改 `QMT\python\formulaLayout\`。
-2. **文件名 = 入口 stem**：deploy 到 `HlBand.py` 就必须有 `formulaLayout/HlBand.xml`。多 TARGET 就拷多份同内容、不同文件名。
+2. **文件名 = 入口 stem**：deploy 到 `FactorBand.py` 就必须有 `formulaLayout/FactorBand.xml`。多 TARGET 就拷多份同内容、不同文件名。
 3. **`bind` 是 Python 标识符**（ASCII，如 `panel_dry_run`）。`name` 才是中文显示名。`bind` 全局唯一。
 4. **禁止多个 `<control>`**：全部 `item` 放进同一个 `<variable>`。终端只渲染第一组。
 5. **禁止**在 `config.py` 顶格读面板变量（注入在函数内才可见）。

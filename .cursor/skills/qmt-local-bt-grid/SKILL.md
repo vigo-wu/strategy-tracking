@@ -72,19 +72,19 @@ Agent 输出：过门推荐一句。不要把 MAE 数字写进推荐。
 - [ ] 8. 一句过门推荐；默认不改 config / 不 deploy
 ```
 
-## 怎么跑（hongli_band 首个实现）
+## 怎么跑（factor_band 首个实现）
 
 仓库根目录。其它主题未接 `scripts/local_bt/` 前不要把路径写死成唯一实现。
 
 ```bash
-python hongli_band/scripts/local_bt/grid_run.py --spec .cursor/skills/qmt-local-bt-grid/examples/stop_loss.json
-python hongli_band/scripts/local_bt/grid_run.py --spec path/to/cells.json --batch-size 10
-python hongli_band/scripts/local_bt/grid_run.py --resume --sweep-dir hongli_band/report/grid/<sweep>
-python hongli_band/scripts/local_bt/grid_run.py --spec .cursor/skills/qmt-local-bt-grid/examples/stop_loss_space.json --reshuffle
-python .cursor/skills/qmt-local-bt-grid/scripts/summarize.py --sweep-dir hongli_band/report/grid/<sweep>
+python factor_band/scripts/local_bt/grid_run.py --spec .cursor/skills/qmt-local-bt-grid/examples/stop_loss.json
+python factor_band/scripts/local_bt/grid_run.py --spec path/to/cells.json --batch-size 10
+python factor_band/scripts/local_bt/grid_run.py --resume --sweep-dir factor_band/report/grid/<sweep>
+python factor_band/scripts/local_bt/grid_run.py --spec .cursor/skills/qmt-local-bt-grid/examples/stop_loss_space.json --reshuffle
+python .cursor/skills/qmt-local-bt-grid/scripts/summarize.py --sweep-dir factor_band/report/grid/<sweep>
 ```
 
-`grid_run.py` 结束时会调 summarize，写出 `hongli_band/report/grid/<sweep>/summary.json`（`report/` 已 gitignore）。
+`grid_run.py` 结束时会调 summarize，写出 `factor_band/report/grid/<sweep>/summary.json`（`report/` 已 gitignore）。
 
 | 参数 | 含义 |
 | :--- | :--- |
@@ -105,7 +105,7 @@ python .cursor/skills/qmt-local-bt-grid/scripts/summarize.py --sweep-dir hongli_
 
 ```json
 {
-  "theme": "hongli_band",
+  "theme": "factor_band",
   "sweep": "stop_loss_confirm",
   "compare_div": "front_ratio",
   "year_start": 2018,
@@ -124,7 +124,7 @@ python .cursor/skills/qmt-local-bt-grid/scripts/summarize.py --sweep-dir hongli_
 
 空间隔离示例见 `examples/stop_loss_space.json`（`asset_split.mode=random_from_csv`，宇宙默认 `tools/csv/none`）。
 
-`kind`：`base` / `tighten` / `loosen` / `off` / `other`（`id=base` 仅兼容旧 spec）。扫描生成的格子用 token id；等于 config 时 `is_current=true`。因子轴元数据（入场/出场/加仓分组、短名、percent、`kind`/`off`）来自 `hongli_band/scripts/qmt/hlband/factors/catalog.py` 的 `LEAVES`，不要手改 `grid_spec` 白名单。因子/结构轴 id 仍是点路径（如 `stop_loss.pct`、`atr_stop.k`、`atr_trail_stop.k1` / `k2`、`time_force.arm`、`d_ma.mid`、`atr.n`）；格子 `overrides` 形态不变，写成 `{"factor_params": {"stop_loss": {"pct": 0.06}}}`、`{"factor_params": {"atr_stop": {"k": 2}}}`、`{"factor_params": {"atr_trail_stop": {"k1": 2}}}`、`{"factor_params": {"time_force": {"arm": 0.03}}}` 或 `{"structure": {"d_ma": {"mid": 15}}}` / `{"structure": {"atr": {"n": 14}}}`。`atr_trail_stop.k1` / `k2` 不是百分比轴。资金仍是顶层全局名（`CASH_RATIO`）。顶层旧键（`STOP_LOSS` / `D_MA_MID`）和顶层点路径（`stop_loss.pct` / `d_ma.mid`）都直接报错。
+`kind`：`base` / `tighten` / `loosen` / `off` / `other`（`id=base` 仅兼容旧 spec）。扫描生成的格子用 token id；等于 config 时 `is_current=true`。因子轴元数据（入场/出场/加仓分组、短名、percent、`kind`/`off`）来自 `factor_band/scripts/qmt/fband/factors/catalog.py` 的 `LEAVES`，不要手改 `grid_spec` 白名单。因子/结构轴 id 仍是点路径（如 `stop_loss.pct`、`atr_stop.k`、`atr_trail_stop.k1` / `k2`、`time_force.arm`、`d_ma.mid`、`atr.n`）；格子 `overrides` 形态不变，写成 `{"factor_params": {"stop_loss": {"pct": 0.06}}}`、`{"factor_params": {"atr_stop": {"k": 2}}}`、`{"factor_params": {"atr_trail_stop": {"k1": 2}}}`、`{"factor_params": {"time_force": {"arm": 0.03}}}` 或 `{"structure": {"d_ma": {"mid": 15}}}` / `{"structure": {"atr": {"n": 14}}}`。`atr_trail_stop.k1` / `k2` 不是百分比轴。资金仍是顶层全局名（`CASH_RATIO`）。顶层旧键（`STOP_LOSS` / `D_MA_MID`）和顶层点路径（`stop_loss.pct` / `d_ma.mid`）都直接报错。
 
 ## 已知限制（继承 `run_book_backtest`）
 

@@ -1,0 +1,10361 @@
+#coding:gbk
+# 由 _deploy_qmt_gbk.py 自动生成；请勿手改。请编辑策略片段与 scripts/qmt_common/ 后重新部署。
+import datetime
+import json
+import os
+import traceback
+
+import numpy as np
+
+
+# === fband/config.py ===
+# ===================== 用户配置 =====================
+# True=只打日志不下单；回测/实盘真下单前务必确认
+DRY_RUN = False
+
+ACCOUNT_ID = "39953913"
+ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
+
+# 跟踪池仓位（实盘）。全池最多 BOOK_LOT_MAX 笔（开仓+加仓合计）。
+# 第 1 笔开仓：大仓空则 LOT_OPEN_FRAC×cap。第 2 笔：LOT_ADD_FRAC×cap（加仓或其它标的开仓）。
+# 第 3 笔：金额吃剩余可部署资金；book_frac 仍记空档（0.50 / 0.30 / 剩余档）。
+# 同标的一轮只加一次；加过仓后该只须全平才能再开。卖掉大仓由其他空仓标的开仓补回。
+# cap = CASH_RATIO * 基数。BUDGET_BASE=equity：基数=E_s=总资产-非白名单股票市值；
+# BUDGET_BASE=fixed：基数=TRADE_BUDGET（不读其它市值）。
+# k / book_mv 只统计 BOOK_STOCKS。N = 集合/字典长度。实盘单实例监视全池并写账本；回测用 TRADE_BUDGET。
+# 形态：code 集合，或 code → 配置字典。ma_type（EMA|SMA）；dividend_type 见下方复权注释。
+# 简写兼容：value 写成 "SMA" 视为 {"ma_type": "SMA"}；旧纯字符串 tuple 仍认作白名单。
+BOOK_STOCKS = {
+    "600938.SH",
+    "603259.SH",
+    "601615.SH",
+    "603659.SH",
+    "002001.SZ",
+    "600350.SH",
+    "601857.SH",
+}
+
+# 单实例共享信号账本（不是 STATE_FILE；禁止按标的分文件）
+BOOK_FILE = r"D:\HlBandV7\hlband_book.json"
+# 资金基数：equity=总资产减其它股票市值；fixed=下面 TRADE_BUDGET。面板下拉会写成中文，代码归一成这两值。
+BUDGET_BASE = "equity"
+# 可部署比例（相对所选基数）；其余留作 T+1 / 废单重试
+CASH_RATIO = 0.90
+# 全池同时最多几笔（开仓+加仓）。第 4 笔不下。
+BOOK_LOT_MAX = 3
+# 开仓：大仓空档用 50%；大仓已在且不是最后一槽则新开走 30%。
+LOT_OPEN_FRAC = 0.50
+# 第二笔（加仓或其它标的开仓）30%。全池最后一槽不锁此值，改吃剩余资金（约 20% cap）。
+# 大仓空且只剩 1 个槽时不加仓，留给开仓补大仓（该笔会吃剩余，约等于 50%）。
+LOT_ADD_FRAC = 0.30
+# 固定金额（元）：实盘 BUDGET_BASE=fixed 时的基数；编辑器回测袖子也用此值（回测不乘 CASH_RATIO）
+TRADE_BUDGET = 100000.0
+
+# ---- 周线过滤（跨周期；主图仍是日线）----
+# 价格均线缺省：EMA 或 SMA（大小写不敏感）。BOOK_STOCKS[code].ma_type 优先；
+# 缺省/非法回落本常量。只作用于周/日价格均线；成交量均量始终 SMA；MACD 仍用 EMA。
+MA_TYPE = "EMA"
+# 周/日均线周期、MACD 窗与 ATR 窗在 RECIPE.structure（字面量）。
+# 日线：中线→回踩/无量阴跌；慢线→回踩支撑 + 时间成本地板。<=0 关该条。
+# 周线：快/生命线（5/34）；mid=13 仅日志多头。取数 need 另钳原 MA55 暖机地板。
+# ATR：威尔德平滑窗 atr.n；<=0 关 atr_stop。
+
+# 盈利后加仓门槛（仓位层，不进 factor_params）：
+#   峰值浮盈 >= SCALE_ARM，且该笔已持仓 >= SCALE_ARM_BARS 日
+#   回踩加仓仍受 chase；破平台/金叉不受
+#   执行日若已触发卖点则取消加仓
+# SCALE_ONCE_PER_ROUND：同一轮只加一次
+# SCALE_W_HIST_MIN：周线 MACD 柱低于此值不加；None 关闭
+# SCALE_LOTS=True：每笔独立成本/峰值/止盈
+SCALE_ENABLE = True
+SCALE_ONCE_PER_ROUND = True
+SCALE_ARM = 0.03
+SCALE_ARM_BARS = 8
+SCALE_W_HIST_MIN = -0.01
+SCALE_LOTS = True
+
+# 默认 Recipe：四槽布尔式。因子数字在 factors/catalog.py（写入 factor_params）；
+# 均线/MACD/ATR 窗真源 structure。SCALE_ARM 等仓位门槛不进表。
+# scale_out 恒 false：减仓未启用。
+RECIPE = {
+    "entry": [
+        "and",
+        ["not", "chase"],
+        ["not", "vol_dry"],
+        ["not", "w_bias"],
+        ["not", "w_slope"],
+        ["not", "weekly_bear"],
+        "pullback_vol",
+    ],
+    "scale_in": [
+        "and",
+        ["not", "vol_dry"],
+        ["not", "w_bias"],
+        ["not", "w_slope"],
+        ["not", "weekly_bear"],
+        [
+            "or",
+            ["and", "pullback_vol", ["not", "chase"]],
+            "plat_break",
+            "w_macd_golden",
+        ],
+    ],
+    "exit": [
+        "or",
+        "weekly_bear_confirm",
+        # "stop_loss",
+        "atr_stop",
+        # "trail_stop",
+        "atr_trail_stop",
+        "time_force",
+    ],
+    "scale_out": False,
+    "structure": {
+        # 日线中/慢均线；<=0 关该条
+        "d_ma": {"mid": 20, "slow": 60},
+        # 周线快/中/生命线；mid 仅日志 weekly_bull
+        "w_ma": {"fast": 5, "mid": 13, "life": 34},
+        # MACD DIF/DEA/柱
+        "macd": {"fast": 12, "slow": 26, "signal": 9},
+        # 日线威尔德 ATR；<=0 关 atr_stop / atr_trail_stop
+        "atr": {"n": 14},
+    },
+}
+
+# 策略交易面板 bind → 模块常量。因子阈值不上屏（改 catalog.LEAVES）。
+# 只上屏：开关 / 资金基数 / 固定金额 / 可部署比例 / 加仓开关。
+PANEL_BINDS = (
+    ("panel_dry_run", "DRY_RUN", "bool"),
+    ("panel_budget_base", "BUDGET_BASE", "str"),
+    ("panel_budget", "TRADE_BUDGET", "float"),
+    ("panel_cash_ratio", "CASH_RATIO", "float"),
+    ("panel_scale", "SCALE_ENABLE", "bool"),
+)
+
+# ---- 行情与运行 ----
+# 主图周期；周线另拉 1w 跨周期
+PERIOD = "1d"
+# 日/周 K 拉取根数（须覆盖最慢均线 + 指标暖机）
+OHLC_COUNT = 180
+WEEKLY_OHLC_COUNT = 120
+
+# 实盘只在最新一根 bar 决策；回测逐 bar 扫
+LIVE_ONLY_LAST_BAR = True
+# 实盘：SIGNAL_CONFIRM_* 用当日近似完整日/周 K 确认信号并挂起；
+# PENDING_EXEC_* 尾盘窗按现价/收盘价成交（避免隔夜跳空）；确认可早于成交。
+# 错过尾盘则保留到下一交易日 OPEN_EXEC_* 开盘窗按开盘价成交。
+# 若收盘窗未跑到，开盘对「上一根已收盘日」兜底评估并挂起（同日开盘窗可成交）。
+# 判定：confirmed_eval_day < 上一完整交易日 且今日尚未 fallback
+# 周线：bt/confirm/开盘一律丢掉未收盘周（对齐 QMT 回测 0000 原生 1w；周五仍看上周）
+# 日线开盘仍去未收盘日 K
+LIVE_CLOSE_CONFIRM = True
+# 信号 pending 主成交窗：连续竞价尾盘限价（买挂卖一 / 卖挂买一）。
+# 截止后进入收盘集合竞价，本窗不再报单；错过则次日开盘窗补。
+PENDING_EXEC_START = "145640"
+PENDING_EXEC_END = "145700"
+# 隔夜残留 / 开盘兜底：错过尾盘时次日开盘窗按开盘价补成交
+OPEN_EXEC_START = "093000"
+OPEN_EXEC_END = "094500"
+# 收盘确认信号时窗（与尾盘成交窗重叠；盘后仍可确认，成交则等到次日开盘窗）
+# 确认须早于尾盘成交（先打卡再成交）
+SIGNAL_CONFIRM_START = "145630"
+SIGNAL_CONFIRM_END = "150000"
+# 账本冻结：收盘跟尾盘成交窗起点（勿单独改）；开盘保留打卡缓冲（可改）
+BOOK_FREEZE_CLOSE = PENDING_EXEC_START
+BOOK_FREEZE_OPEN = "093030"
+# 实盘决策时窗（HHmmss）：盘中处理券商 pending / 心跳；信号成交见 PENDING_EXEC_* / OPEN_EXEC_*
+# START 是「策略醒着」，不要绑 OPEN_EXEC_START（推迟补单窗不应睡过 09:30 pending）
+DECISION_START = "093000"
+DECISION_END = SIGNAL_CONFIRM_END
+# 实盘心跳/状态行间隔（秒）；空仓与持仓无新信号沿时均按此节流
+LIVE_HEARTBEAT_SEC = 300
+# 实盘取数：window=确认窗/开盘兜底才拉日+周，盘中只 pending；always=决策窗内每次当确认窗
+LIVE_OHLCV_POLICY = "window"
+
+# 行情复权（传给 get_market_data_ex 的 dividend_type）
+# 优先 BOOK_STOCKS[code].dividend_type；缺键/非法回落本常量。不上屏。
+#   follow       跟随主图 / 公式「基本信息 → 复权方式」
+#   none         不复权
+#   front        前复权（价差）
+#   back         后复权（价差）
+#   front_ratio  等比前复权（池外/未写字段的缺省）
+#   back_ratio   等比后复权
+DIVIDEND_TYPE = "front_ratio"
+
+# download_history_data 最长回溯（自然日）；回测暖机用
+HIST_MAX_LOOKBACK_DAYS = 800
+DOWNLOAD_HIST_LIVE = False
+DOWNLOAD_HIST_BACKTEST = True
+
+# pending 委托超时/孤儿清理（秒）
+PENDING_TIMEOUT_SEC = 180
+PENDING_ORPHAN_SEC = 60
+
+# QMT 模型无 __file__；状态绝对路径（含 {stock}，宇宙循环按票分文件）
+#   513530.SH → ...\hlband_513530_SH.json
+STATE_FILE = r"D:\HlBandV7\hlband_{stock}.json"
+# 实盘结构化日志根目录；落盘为 LOG_DIR/<stock_tag>/{tag}_events.jsonl 等
+# 空字符串关闭落盘（仍保留终端 print）
+LOG_DIR = r"D:\HlBandV7\logs"
+# True=回测也写日志（默认关，避免回测刷爆磁盘）
+LOG_IN_BACKTEST = False
+
+STRATEGY_NAME = "HlBandV7"
+STRATEGY_VER = "v1.70"
+# =======================================================
+
+# 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
+_ORDER_FILLED = (56, 8)
+_ORDER_DEAD = (54, 57, 53, 5, 6, 9)
+
+_VALID_PERIODS = (
+    "1m", "3m", "5m", "15m", "30m", "1h", "1d", "1w", "1mon", "1q", "1hy", "1y",
+)
+
+# === fband/factors/catalog.py ===
+# 叶子登记 / 默认阈值 / 网格轴元数据。运行时写入 RECIPE.factor_params。
+# 文件名 = id；_factor_eval_<id> 在 lib/<id>.py。
+
+LEAVES = {
+    "pullback_vol": {
+        "label": "买点1-缩量回踩强支撑",
+        "group": "entry",
+        "params": {
+            "tol": {
+                "default": 0.025,
+                "percent": True,
+                "abbrev": "mt",
+                "label": "回踩容差",
+                "axis": 0,
+            },
+            "ratio": {
+                "default": 0.9,
+                "percent": True,
+                "abbrev": "vpr",
+                "label": "缩量回踩比例",
+                "axis": 1,
+            },
+            "vol_n": {
+                "default": 10,
+                "percent": False,
+                "abbrev": "vpn",
+                "label": "缩量窗口",
+                "axis": 2,
+            },
+            "confirm_days": {
+                "default": 2,
+                "percent": False,
+                "abbrev": "vpc",
+                "label": "缩量确认日",
+                "axis": 3,
+            },
+        },
+    },
+    "chase": {
+        "label": "追高过滤跳过",
+        "group": "entry",
+        "params": {
+            "max_pct": {
+                "default": 0.05,
+                "percent": True,
+                "abbrev": "ch",
+                "label": "追高禁开",
+                "axis": 6,
+            },
+        },
+    },
+    "vol_dry": {
+        "label": "无量阴跌禁开",
+        "group": "entry",
+        "params": {
+            "ratio": {
+                "default": 0.60,
+                "percent": True,
+                "abbrev": "vdr",
+                "label": "无量阴跌比例",
+                "axis": 4,
+            },
+            "n": {
+                "default": 20,
+                "percent": False,
+                "abbrev": "vdn",
+                "label": "无量窗口",
+                "axis": 5,
+            },
+        },
+    },
+    "w_bias": {
+        "label": "周线高位乖离禁开",
+        "group": "entry",
+        "params": {
+            "hard": {
+                "default": 0.08,
+                "percent": True,
+                "abbrev": "wb",
+                "label": "周线高位禁开",
+                "axis": 7,
+            },
+        },
+    },
+    "w_slope": {
+        "label": "低位周线MA34未连升禁开",
+        "group": "entry",
+        "params": {
+            "low": {
+                "default": 0.02,
+                "percent": True,
+                "abbrev": "wl",
+                "label": "低位乖离",
+                "axis": 8,
+            },
+            "slope_weeks": {
+                "default": 2,
+                "percent": False,
+                "abbrev": "ws",
+                "label": "低位斜率周数",
+                "axis": 9,
+            },
+        },
+    },
+    "weekly_bear": {
+        "label": "周线转空强制清仓",
+        "label_buy": "周线空头禁开",
+        "group": "entry",
+        "params": {},
+    },
+    "weekly_bear_confirm": {
+        "label": "周线转空强制清仓",
+        "group": "exit",
+        "params": {
+            "days": {
+                "default": 2,
+                "percent": False,
+                "abbrev": "wbc",
+                "label": "周线空确认日",
+                "axis": 3,
+            },
+        },
+    },
+    "plat_break": {
+        "label": "加仓-日线突破前期平台",
+        "group": "scale",
+        "params": {
+            "lookback": {
+                "default": 20,
+                "percent": False,
+                "abbrev": "spl",
+                "label": "平台回看",
+                "axis": 0,
+            },
+            "max_range": {
+                "default": 0.10,
+                "percent": True,
+                "abbrev": "spr",
+                "label": "平台振幅",
+                "axis": 1,
+            },
+            "break_buf": {
+                "default": 0.0,
+                "percent": False,
+                "abbrev": "spb",
+                "label": "平台突破缓冲",
+                "axis": 2,
+            },
+        },
+    },
+    "w_macd_golden": {
+        "label": "加仓-周线MACD金叉柱放大",
+        "group": "scale",
+        "params": {
+            "hist_expand": {
+                "default": 1.2,
+                "percent": False,
+                "abbrev": "she",
+                "label": "金叉柱放大",
+                "axis": 3,
+            },
+        },
+    },
+    "stop_loss": {
+        "label": "硬止损",
+        "group": "exit",
+        "params": {
+            "pct": {
+                "default": 0.08,
+                "percent": True,
+                "abbrev": "sl",
+                "label": "止损",
+                "kind": "smaller_tighten",
+                "off": None,
+                "axis": 0,
+            },
+        },
+    },
+    "atr_stop": {
+        "label": "ATR止损",
+        "group": "exit",
+        "params": {
+            "k": {
+                "default": 2,
+                "percent": False,
+                "abbrev": "ask",
+                "label": "ATR止损倍数",
+                "kind": "smaller_tighten",
+                "off": "le0",
+                "axis": 4,
+            },
+        },
+    },
+    "trail_stop": {
+        "label": "卖点1-移动止盈回撤",
+        "group": "exit",
+        "params": {
+            "tiers": {
+                "default": [
+                    [0.03, 0.06, 0.015, None],
+                    [0.06, 0.10, 0.03, 0.03],
+                    [0.10, None, 0.04, None],
+                ],
+                "percent": False,
+                "abbrev": "tt",
+                "label": "阶梯止盈",
+                "kind": "trail_tiers",
+                "axis": 1,
+            },
+        },
+    },
+    "atr_trail_stop": {
+        "label": "ATR移动止盈",
+        "group": "exit",
+        "params": {
+            "k1": {
+                "default": 2,
+                "percent": False,
+                "abbrev": "atk1",
+                "label": "ATR移动武装",
+                "kind": "smaller_tighten",
+                "off": "le0",
+                "axis": 5,
+            },
+            "k2": {
+                "default": 2,
+                "percent": False,
+                "abbrev": "atk2",
+                "label": "ATR移动回撤",
+                "kind": "smaller_tighten",
+                "off": "le0",
+                "axis": 6,
+            },
+        },
+    },
+    "time_force": {
+        "label": "卖点2-时间成本智能平仓",
+        "group": "exit",
+        "params": {
+            "bars": {
+                "default": 30,
+                "percent": False,
+                "abbrev": "tfb",
+                "label": "时间成本 BARS",
+                "kind": "smaller_tighten",
+                "off": "le0",
+                "axis": 2,
+            },
+            "arm": {
+                "default": 0.03,
+                "percent": True,
+                "abbrev": "tfa",
+                "label": "时间成本让路",
+                "kind": "smaller_loosen",
+                "off": "le0",
+                "axis": 7,
+            },
+        },
+    },
+}
+
+
+def _leaves_factor_params(leaves=None):
+    table = {}
+    src = LEAVES if leaves is None else leaves
+    for fid, leaf in src.items():
+        params = (leaf or {}).get("params") or {}
+        if not params:
+            continue
+        block = {}
+        for key, spec in params.items():
+            block[key] = spec["default"]
+        table[fid] = block
+    return table
+
+
+_rec = globals().get("RECIPE")
+if isinstance(_rec, dict):
+    _rec["factor_params"] = _leaves_factor_params()
+
+# === qmt_common/ctx.py ===
+# 作用: 全局运行时对象与手数工具
+# 主要符号: A, _S, _lot
+# 前置: 策略 config（可选 STRATEGY_NAME）
+class _S(object):
+    pass
+
+
+A = _S()
+
+
+def _lot(price, budget):
+    if price is None or price <= 0 or budget <= 0:
+        return 0
+    return int(budget // (price * 100)) * 100
+
+
+def _strategy_tag():
+    return str(globals().get("STRATEGY_NAME") or "QMT")
+
+
+# 实盘落盘钩子空实现；引入 common:live_log.py 后覆盖
+def _event_log(event, **fields):
+    pass
+
+
+def _bar_log(**fields):
+    pass
+
+
+def _heartbeat_persist(text):
+    pass
+
+
+def _live_state_snapshot(data):
+    pass
+
+# === qmt_common/live_log.py ===
+# 作用: 实盘结构化日志落盘（events / bars / heartbeat / state 快照）
+# 主要符号: _event_log, _bar_log, _heartbeat_persist, _live_state_snapshot
+# 前置: LOG_DIR（绝对路径）；可选 LOG_IN_BACKTEST
+# 目录: LOG_DIR/<stock_tag>/{tag}_events.jsonl | {tag}_bars.jsonl |
+#       {tag}_heartbeat.log | state_snapshots/YYYYMMDD_HHMM.json
+# 覆盖 ctx 中的同名空实现
+def _live_log_stock_tag():
+    stock = str(getattr(A, "stock", "") or "").strip()
+    if not stock:
+        return ""
+    return (
+        stock.replace(".", "_")
+        .replace("/", "_")
+        .replace("\\", "_")
+        .replace(":", "_")
+        .replace(" ", "")
+    )
+
+
+def _live_log_enabled():
+    base = str(globals().get("LOG_DIR") or "").strip()
+    if not base:
+        return False
+    if getattr(A, "is_backtest", False) and (not bool(globals().get("LOG_IN_BACKTEST"))):
+        return False
+    return True
+
+
+def _live_log_root():
+    base = str(globals().get("LOG_DIR") or "").strip()
+    tag = _live_log_stock_tag() or "_unknown"
+    return os.path.join(base, tag)
+
+
+def _live_log_file_tag():
+    raw = _strategy_tag()
+    return (
+        str(raw or "QMT")
+        .replace(".", "_")
+        .replace("/", "_")
+        .replace("\\", "_")
+        .replace(":", "_")
+        .replace(" ", "_")
+    )
+
+
+def _live_log_paths():
+    root = _live_log_root()
+    ft = _live_log_file_tag()
+    return {
+        "root": root,
+        "events": os.path.join(root, "%s_events.jsonl" % ft),
+        "bars": os.path.join(root, "%s_bars.jsonl" % ft),
+        "heartbeat": os.path.join(root, "%s_heartbeat.log" % ft),
+        "snap_dir": os.path.join(root, "state_snapshots"),
+    }
+
+
+def _live_log_mkdir(path):
+    d = os.path.dirname(path)
+    if d and (not os.path.isdir(d)):
+        os.makedirs(d)
+
+
+def _live_json_safe(obj):
+    if obj is None or isinstance(obj, (bool, int, float, str)):
+        return obj
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            out[str(k)] = _live_json_safe(v)
+        return out
+    if isinstance(obj, (list, tuple)):
+        return [_live_json_safe(x) for x in obj]
+    if isinstance(obj, set):
+        return sorted([_live_json_safe(x) for x in obj])
+    try:
+        if isinstance(obj, datetime.datetime):
+            return obj.strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        pass
+    return str(obj)
+
+
+def _live_append_line(path, line):
+    _live_log_mkdir(path)
+    with open(path, "a") as f:
+        f.write(line)
+        if not line.endswith("\n"):
+            f.write("\n")
+
+
+def _live_append_jsonl(path, row):
+    line = json.dumps(_live_json_safe(row), ensure_ascii=True)
+    _live_append_line(path, line)
+
+
+def _event_log(event, **fields):
+    """一行一事写入 {tag}_events.jsonl；失败静默，不影响交易。"""
+    if not _live_log_enabled():
+        return
+    try:
+        now = datetime.datetime.now()
+        row = {
+            "ts": now.strftime("%Y-%m-%d %H:%M:%S"),
+            "tag": _strategy_tag(),
+            "ver": str(globals().get("STRATEGY_VER") or ""),
+            "stock": getattr(A, "stock", ""),
+            "event": str(event or ""),
+        }
+        for k, v in fields.items():
+            if k in row:
+                continue
+            row[k] = v
+        _live_append_jsonl(_live_log_paths()["events"], row)
+    except Exception:
+        pass
+
+
+def _bar_log(**fields):
+    """决策行抽样写入 {tag}_bars.jsonl。"""
+    if not _live_log_enabled():
+        return
+    try:
+        now = datetime.datetime.now()
+        row = {
+            "ts": now.strftime("%Y-%m-%d %H:%M:%S"),
+            "tag": _strategy_tag(),
+            "ver": str(globals().get("STRATEGY_VER") or ""),
+            "stock": getattr(A, "stock", ""),
+        }
+        for k, v in fields.items():
+            if k in row:
+                continue
+            row[k] = v
+        _live_append_jsonl(_live_log_paths()["bars"], row)
+    except Exception:
+        pass
+
+
+def _heartbeat_persist(text):
+    """心跳写入 {tag}_heartbeat.log（纯文本）。"""
+    if not _live_log_enabled():
+        return
+    try:
+        line = str(text or "").rstrip()
+        if not line:
+            return
+        _live_append_line(_live_log_paths()["heartbeat"], line)
+    except Exception:
+        pass
+
+
+def _live_state_snapshot(data):
+    """状态快照: state_snapshots/YYYYMMDD_HHMM.json（同分钟覆盖）。"""
+    if not _live_log_enabled():
+        return
+    if not isinstance(data, dict):
+        return
+    try:
+        now = datetime.datetime.now()
+        name = now.strftime("%Y%m%d_%H%M") + ".json"
+        path = os.path.join(_live_log_paths()["snap_dir"], name)
+        _live_log_mkdir(path)
+        with open(path, "w") as f:
+            json.dump(_live_json_safe(data), f, ensure_ascii=True, indent=2)
+    except Exception:
+        pass
+
+# === qmt_common/time_util.py ===
+# 作用: 时间解析与日历日差
+# 主要符号: _parse_opened_at, _hold_calendar_days
+def _parse_opened_at(s):
+    if not s:
+        return None
+    s = str(s).strip()
+    for fmt, n in (("%Y%m%d%H%M%S", 14), ("%Y-%m-%d %H:%M:%S", 19), ("%Y%m%d", 8)):
+        try:
+            return datetime.datetime.strptime(s[:n], fmt)
+        except Exception:
+            continue
+    return None
+
+
+def _hold_calendar_days(opened_at, now):
+    """当前交易日 - 买入交易日（日历日差）。"""
+    ot = opened_at if isinstance(opened_at, datetime.datetime) else _parse_opened_at(opened_at)
+    if ot is None or now is None:
+        return 0
+    return max(0, (now.date() - ot.date()).days)
+
+# === qmt_common/period.py ===
+# 作用: 周期解析与取数时间/根数
+# 主要符号: _resolve_period, _ohlc_count, _bar_end_str, _hist_start
+# 前置: config 中 PERIOD / OHLC_COUNT / HIST_MAX_LOOKBACK_DAYS / _VALID_PERIODS
+#       可选 _PERIOD_COUNT / _PERIOD_HIST_START；_bar_datetime 由 mode 提供（运行时）
+_DEFAULT_PERIOD_COUNT = {
+    "1m": 1200,
+    "3m": 800,
+    "5m": 600,
+    "15m": 400,
+    "30m": 300,
+    "1h": 240,
+    "1d": 120,
+    "1w": 100,
+    "1mon": 80,
+    "1q": 60,
+    "1hy": 40,
+    "1y": 30,
+}
+_DEFAULT_PERIOD_HIST_START = {
+    "1m": "20240101",
+    "3m": "20240101",
+    "5m": "20230101",
+    "15m": "20230101",
+    "30m": "20220101",
+    "1h": "20220101",
+    "1d": "20220101",
+    "1w": "20180101",
+    "1mon": "20150101",
+    "1q": "20100101",
+    "1hy": "20050101",
+    "1y": "20000101",
+}
+
+
+def _norm_period(p):
+    if p is None:
+        return None
+    s = str(p).strip().lower()
+    if s in ("", "follow", "none"):
+        return None
+    aliases = {
+        "day": "1d",
+        "daily": "1d",
+        "week": "1w",
+        "weekly": "1w",
+        "month": "1mon",
+        "monthly": "1mon",
+        "hour": "1h",
+        "60m": "1h",
+        "min": "1m",
+        "minute": "1m",
+    }
+    s = aliases.get(s, s)
+    valid = globals().get("_VALID_PERIODS") or tuple(_DEFAULT_PERIOD_COUNT.keys())
+    if s in valid:
+        return s
+    return None
+
+
+def _resolve_period(C, default="1d"):
+    """优先 PERIOD 配置，否则 C.period，否则 default。"""
+    cfg = _norm_period(globals().get("PERIOD"))
+    if cfg:
+        return cfg
+    chart = _norm_period(getattr(C, "period", None))
+    if chart:
+        return chart
+    return default
+
+
+def _is_intraday(period):
+    p = period or "1d"
+    if p == "1mon":
+        return False
+    return p.endswith("m") or p == "1h"
+
+
+def _ohlc_count(period):
+    oc = globals().get("OHLC_COUNT")
+    if oc and int(oc) > 0:
+        return int(oc)
+    counts = globals().get("_PERIOD_COUNT") or _DEFAULT_PERIOD_COUNT
+    return int(counts.get(period, 120))
+
+
+def _hist_start(period):
+    """下载最早 yyyymmdd；受 HIST_MAX_LOOKBACK_DAYS 钳制。"""
+    starts = globals().get("_PERIOD_HIST_START") or _DEFAULT_PERIOD_HIST_START
+    cfg = str(starts.get(period, "20220101") or "20220101")
+    days = int(globals().get("HIST_MAX_LOOKBACK_DAYS") or 0)
+    if days <= 0:
+        return cfg
+    floor = (datetime.datetime.now() - datetime.timedelta(days=days)).strftime("%Y%m%d")
+    if cfg < floor:
+        return floor
+    return cfg
+
+
+def _bar_end_str(C):
+    """get_market_data* 的 end_time：yyyymmdd 或 yyyymmddHHMMSS。"""
+    dt = _bar_datetime(C)
+    if _is_intraday(getattr(A, "period", "1d")):
+        return dt.strftime("%Y%m%d%H%M%S")
+    return dt.strftime("%Y%m%d")
+
+# === fband/state_extra.py ===
+def _state_extra_load(raw):
+    pe = raw.get("pending_entry")
+    A.pending_entry = pe if isinstance(pe, dict) else None
+    px = raw.get("pending_exit")
+    A.pending_exit = px if isinstance(px, dict) else None
+    peak = raw.get("hold_peak")
+    try:
+        A.hold_peak = float(peak) if peak is not None else None
+    except Exception:
+        A.hold_peak = None
+    try:
+        A.hold_bars = int(raw.get("hold_bars", 0) or 0)
+    except Exception:
+        A.hold_bars = 0
+    A._hold_count_day = str(raw.get("hold_count_day", "") or "")
+    gu = raw.get("time_force_grace_until")
+    try:
+        A.time_force_grace_until = None if gu is None else int(gu)
+    except Exception:
+        A.time_force_grace_until = None
+    A.time_force_trend_skip = bool(raw.get("time_force_trend_skip"))
+    A._confirmed_eval_day = str(raw.get("confirmed_eval_day", "") or "")
+    A._fallback_done_day = str(raw.get("fallback_done_day", "") or "")
+    try:
+        A._w_bear_streak = int(raw.get("w_bear_streak", 0) or 0)
+    except Exception:
+        A._w_bear_streak = 0
+    A._w_bear_last_day = str(raw.get("w_bear_last_day", "") or "")
+    A.round_scaled = bool(raw.get("round_scaled"))
+    A._skip_sell_eval_day = str(raw.get("skip_sell_eval_day", "") or "")
+    A._last_add_day = str(raw.get("last_add_day", "") or "")
+    A._last_add_signal = str(raw.get("last_add_signal", "") or "")
+    applied = raw.get("ex_rights_applied")
+    if isinstance(applied, list):
+        A.ex_rights_applied = [str(x) for x in applied if x]
+    else:
+        A.ex_rights_applied = []
+    pending = raw.get("ex_rights_allot_pending")
+    if isinstance(pending, list):
+        A.ex_rights_allot_pending = [x for x in pending if isinstance(x, dict)]
+    else:
+        A.ex_rights_allot_pending = []
+
+
+def _reset_stock_ctx():
+    """切票前清空单票字段。_load_state 无文件时不清 extra，必须先 reset 防串票。"""
+    A.position = None
+    A.lots = []
+    A.acted_day = ""
+    A.acted = set()
+    A.pending = None
+    A.pending_entry = None
+    A.pending_exit = None
+    A.hold_peak = None
+    A.hold_bars = 0
+    A._hold_count_day = ""
+    A.time_force_grace_until = None
+    A.time_force_trend_skip = False
+    A.round_scaled = False
+    A._confirmed_eval_day = ""
+    A._fallback_done_day = ""
+    A._w_bear_streak = 0
+    A._w_bear_last_day = ""
+    A._skip_sell_eval_day = ""
+    A._last_add_day = ""
+    A._last_add_signal = ""
+    A.ready_logged = False
+    A._bar_status_at = None
+    A._bar_sig_prev = None
+    A._skip_sell_eval_logged = ""
+    A._defer_log_entry_day = ""
+    A._defer_log_exit_day = ""
+    A._defer_log_book_day = ""
+    A._defer_log_wait_day = ""
+    A.bt_held = 0
+    A.bt_locked = 0
+    A.bt_lock_day = ""
+    A.bt_opened_at = ""
+    A.ex_rights_applied = []
+    A.ex_rights_allot_pending = []
+
+
+def _state_extra_save(data):
+    data["pending_entry"] = getattr(A, "pending_entry", None)
+    data["pending_exit"] = getattr(A, "pending_exit", None)
+    peak = getattr(A, "hold_peak", None)
+    data["hold_peak"] = None if peak is None else float(peak)
+    data["hold_bars"] = int(getattr(A, "hold_bars", 0) or 0)
+    data["hold_count_day"] = str(getattr(A, "_hold_count_day", "") or "")
+    gu = getattr(A, "time_force_grace_until", None)
+    data["time_force_grace_until"] = None if gu is None else int(gu)
+    data["time_force_trend_skip"] = bool(getattr(A, "time_force_trend_skip", False))
+    data["confirmed_eval_day"] = str(getattr(A, "_confirmed_eval_day", "") or "")
+    data["fallback_done_day"] = str(getattr(A, "_fallback_done_day", "") or "")
+    data["w_bear_streak"] = int(getattr(A, "_w_bear_streak", 0) or 0)
+    data["w_bear_last_day"] = str(getattr(A, "_w_bear_last_day", "") or "")
+    data["round_scaled"] = bool(getattr(A, "round_scaled", False))
+    data["skip_sell_eval_day"] = str(getattr(A, "_skip_sell_eval_day", "") or "")
+    data["last_add_day"] = str(getattr(A, "_last_add_day", "") or "")
+    data["last_add_signal"] = str(getattr(A, "_last_add_signal", "") or "")
+    applied = getattr(A, "ex_rights_applied", None)
+    data["ex_rights_applied"] = (
+        [str(x) for x in applied if x] if isinstance(applied, list) else []
+    )
+    pending = getattr(A, "ex_rights_allot_pending", None)
+    data["ex_rights_allot_pending"] = (
+        [x for x in pending if isinstance(x, dict)]
+        if isinstance(pending, list)
+        else []
+    )
+
+# === qmt_common/single/state_io.py ===
+# 作用: 单仓 JSON 状态读写（回测不落盘）
+# 主要符号: _load_state, _save_state
+# 前置: STATE_FILE, STRATEGY_VER；可选扩展字段由 _state_extra_load/_state_extra_save
+# STATE_FILE 为基路径；有 A.stock 时按标的分文件，多模型实例互不覆盖
+#   例 ...\hlband_qmt_state.json + 513530.SH → ...\hlband_qmt_state_513530_SH.json
+#   或 STATE_FILE 含 {stock} 占位符时直接替换
+def _state_stock_tag():
+    stock = str(getattr(A, "stock", "") or "").strip()
+    if not stock:
+        return ""
+    return (
+        stock.replace(".", "_")
+        .replace("/", "_")
+        .replace("\\", "_")
+        .replace(":", "_")
+        .replace(" ", "")
+    )
+
+
+def _state_path():
+    base = str(STATE_FILE or "").strip()
+    if not base:
+        return base
+    tag = _state_stock_tag()
+    if not tag:
+        return base
+    if "{stock}" in base:
+        return base.replace("{stock}", tag)
+    root, ext = os.path.splitext(base)
+    if not ext:
+        ext = ".json"
+    return root + "_" + tag + ext
+
+
+def _state_load_path():
+    """优先分标的文件；缺失时回退旧版共用 STATE_FILE（由 _load_state 再校验 stock）。"""
+    path = _state_path()
+    if path and os.path.isfile(path):
+        return path
+    legacy = str(STATE_FILE or "").strip()
+    if legacy and legacy != path and os.path.isfile(legacy):
+        return legacy
+    return path
+
+
+def _load_state(log=True):
+    if "{stock}" in str(STATE_FILE or "") and (not _state_stock_tag()):
+        return
+    A.position = None
+    A.lots = []
+    A.acted_day = ""
+    A.acted = set()
+    A.pending = None
+    path = _state_load_path()
+    if not path or not os.path.isfile(path):
+        if log:
+            print(_strategy_tag(), "state: empty (no file)", path or STATE_FILE)
+            _event_log("state_empty", path=path or STATE_FILE)
+        return
+    try:
+        with open(path, "r") as f:
+            raw = json.load(f)
+    except Exception as e:
+        print(_strategy_tag(), "state load fail", e)
+        _event_log("state_load_fail", error=str(e), path=path)
+        return
+    if not isinstance(raw, dict):
+        return
+    if str(raw.get("stock", "")) and str(raw.get("stock")) != str(getattr(A, "stock", "")):
+        print(_strategy_tag(), "state stock mismatch, ignore", raw.get("stock"), getattr(A, "stock", None))
+        _event_log(
+            "state_stock_mismatch",
+            file_stock=raw.get("stock"),
+            runtime_stock=getattr(A, "stock", None),
+            path=path,
+        )
+        return
+    pos = raw.get("position")
+    if isinstance(pos, dict) and int(pos.get("shares", 0) or 0) > 0:
+        A.position = dict(pos)
+        A.position["shares"] = int(pos["shares"])
+        A.position["price"] = float(pos.get("price", 0) or 0)
+        A.position["cost"] = float(pos.get("cost", 0) or 0)
+        A.position["opened_at"] = str(pos.get("opened_at", "") or "")
+    lots = raw.get("lots")
+    cleaned = []
+    if isinstance(lots, list):
+        for lot in lots:
+            if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) > 0:
+                cleaned.append(dict(lot))
+    A.lots = cleaned
+    A.acted_day = str(raw.get("acted_day", "") or "")
+    acted = raw.get("acted") or []
+    A.acted = set([str(x) for x in acted]) if isinstance(acted, list) else set()
+    pend = raw.get("pending")
+    A.pending = pend if isinstance(pend, dict) else None
+    extra = globals().get("_state_extra_load")
+    if callable(extra):
+        try:
+            extra(raw)
+        except Exception as e:
+            print(_strategy_tag(), "state extra load fail", e)
+            _event_log("state_extra_load_fail", error=str(e))
+    if log:
+        print(_strategy_tag(), "state loaded", "path=", path, A.position, "pending=", bool(A.pending))
+        _event_log(
+            "state_loaded",
+            path=path,
+            position=A.position,
+            pending=bool(A.pending),
+            pending_order=bool(getattr(A, "pending", None)),
+        )
+
+
+def _save_state():
+    if getattr(A, "is_backtest", False):
+        return
+    if "{stock}" in str(STATE_FILE or "") and (not _state_stock_tag()):
+        return
+    path = _state_path()
+    if not path:
+        return
+    data = {
+        "stock": getattr(A, "stock", ""),
+        "version": str(globals().get("STRATEGY_VER") or ""),
+        "position": getattr(A, "position", None),
+        "lots": list(getattr(A, "lots", None) or []) if isinstance(getattr(A, "lots", None), list) else [],
+        "acted_day": getattr(A, "acted_day", ""),
+        "acted": sorted(list(getattr(A, "acted", set()) or [])),
+        "pending": getattr(A, "pending", None),
+        "updated": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    extra = globals().get("_state_extra_save")
+    if callable(extra):
+        try:
+            extra(data)
+        except Exception as e:
+            print(_strategy_tag(), "state extra save fail", e)
+            _event_log("state_extra_save_fail", error=str(e))
+    try:
+        d = os.path.dirname(path)
+        if d and not os.path.isdir(d):
+            os.makedirs(d)
+        with open(path, "w") as f:
+            json.dump(data, f, ensure_ascii=True, indent=2)
+        _live_state_snapshot(data)
+    except Exception as e:
+        print(_strategy_tag(), "state save fail", path, e)
+        _event_log("state_save_fail", error=str(e), path=path)
+
+# === qmt_common/backtest.py ===
+# 作用: 回测影子持仓与 T+1 锁定
+# 主要符号: _bt_held_*, _bt_locked_*, _bt_roll_t1, _allow_t0
+# 说明: 仓位恢复（_bt_recover_*）由策略侧实现
+# 策略可设 ALLOW_T0=True（ETF 等当日可卖）；默认 False 保持 T+1
+def _allow_t0():
+    return bool(globals().get("ALLOW_T0", False))
+
+
+def _bt_held_vol():
+    return max(0, int(getattr(A, "bt_held", 0) or 0))
+
+
+def _bt_locked_vol():
+    return max(0, int(getattr(A, "bt_locked", 0) or 0))
+
+
+def _bt_available_vol():
+    """回测可卖：T+1 为 held-locked；ALLOW_T0 时为 held。"""
+    if _allow_t0():
+        return _bt_held_vol()
+    return max(0, _bt_held_vol() - _bt_locked_vol())
+
+
+def _bt_roll_t1(day):
+    """新日历日解锁此前买入，变为可卖。"""
+    if not getattr(A, "is_backtest", False):
+        return
+    day = str(day or "")
+    if not day:
+        return
+    if str(getattr(A, "bt_lock_day", "") or "") == day:
+        return
+    if _bt_locked_vol() > 0:
+        print(_strategy_tag(), "bt T+1 unlock day=", day, "was_locked=", _bt_locked_vol())
+    A.bt_locked = 0
+    A.bt_lock_day = day
+
+
+def _bt_held_add(vol, buy_day=None):
+    if not getattr(A, "is_backtest", False):
+        return
+    vol = max(0, int(vol))
+    A.bt_held = _bt_held_vol() + vol
+    if _allow_t0():
+        return
+    if buy_day:
+        _bt_roll_t1(str(buy_day)[:8])
+        A.bt_locked = _bt_locked_vol() + vol
+
+
+def _bt_held_set(vol):
+    if not getattr(A, "is_backtest", False):
+        return
+    A.bt_held = max(0, int(vol))
+    if A.bt_held <= 0:
+        A.bt_opened_at = ""
+        A.bt_locked = 0
+    else:
+        A.bt_locked = min(_bt_locked_vol(), A.bt_held)
+
+# === qmt_common/single/state_pos.py ===
+# 作用: 单仓 A.position 读写辅助
+# 主要符号: _has_position, _pos_shares, _pos_cost_price, _reset_day, _clear_after_sell
+def _reset_day(day):
+    if getattr(A, "acted_day", "") != day:
+        A.acted_day = day
+        A.acted = set()
+        try:
+            _save_state()
+        except Exception:
+            pass
+
+
+def _has_position():
+    pos = getattr(A, "position", None)
+    return isinstance(pos, dict) and int(pos.get("shares", 0) or 0) > 0
+
+
+def _pos_shares():
+    if not _has_position():
+        return 0
+    return int(A.position.get("shares", 0) or 0)
+
+
+def _pos_cost_price():
+    if not _has_position():
+        return 0.0
+    return float(A.position.get("price", 0) or 0)
+
+
+def _clear_after_sell(now, reason, last=None):
+    cleared = getattr(A, "position", None)
+    print(_strategy_tag(), "SELL done", reason, "last=", last, "cleared", cleared)
+    _event_log("sell_done", sell_reason=reason, last=last, cleared=cleared)
+    A.position = None
+    A.lots = []
+    A.acted.add("SELL")
+    if getattr(A, "is_backtest", False):
+        A.bt_held = 0
+        A.bt_locked = 0
+        A.bt_opened_at = ""
+    _save_state()
+
+# === qmt_common/single/lots.py ===
+# 作用: 同一标的多笔独立仓（SCALE_LOTS）；A.position 仍是合计，供经纪/T+1
+# 主要符号: _lots_enabled, _ensure_lots, _pos_lots, _lots_on_buy_fill,
+#           _lots_on_sell_fill, _order_sell(lot_ids=)
+# 默认关：未设 SCALE_LOTS 时一票一仓，行为与无本片段时相同
+# 策略可在 lot 字典上挂 hold_peak 等字段；本模块原样保留
+def _lots_enabled():
+    return bool(globals().get("SCALE_LOTS", False))
+
+
+def _scale_lots():
+    """兼容旧策略名；与 _lots_enabled 相同。"""
+    return _lots_enabled()
+
+
+def _lot_from_agg():
+    pos = getattr(A, "position", None) or {}
+    px = float(pos.get("price", 0) or 0)
+    peak = getattr(A, "hold_peak", None)
+    cp = getattr(A, "hold_close_peak", None)
+    if peak is None:
+        peak = px
+    if cp is None:
+        cp = px
+    return {
+        "id": 1,
+        "shares": int(pos.get("shares", 0) or 0),
+        "price": px,
+        "opened_at": str(pos.get("opened_at", "") or ""),
+        "hold_peak": peak,
+        "hold_close_peak": cp,
+        "hold_max_ret": float(getattr(A, "hold_max_ret", 0) or 0),
+        "hold_bars": int(getattr(A, "hold_bars", 0) or 0),
+        "hold_count_bar": str(getattr(A, "_hold_count_bar", "") or ""),
+    }
+
+
+def _ensure_lots():
+    lots = getattr(A, "lots", None)
+    cleaned = []
+    if isinstance(lots, list):
+        for lot in lots:
+            if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) > 0:
+                cleaned.append(lot)
+    if cleaned:
+        A.lots = cleaned
+        return cleaned
+    if _has_position():
+        A.lots = [_lot_from_agg()]
+        return A.lots
+    A.lots = []
+    return A.lots
+
+
+def _next_lot_id():
+    mx = 0
+    for lot in getattr(A, "lots", None) or []:
+        try:
+            mx = max(mx, int(lot.get("id") or 0))
+        except Exception:
+            pass
+    return mx + 1
+
+
+def _new_lot(shares, price, opened_at=""):
+    px = float(price) if price else 0.0
+    ot = str(opened_at or "")
+    if not ot:
+        pos = getattr(A, "position", None)
+        if isinstance(pos, dict):
+            ot = str(pos.get("opened_at") or "")
+    if not ot:
+        ot = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+    return {
+        "id": _next_lot_id(),
+        "shares": int(shares),
+        "price": px,
+        "opened_at": ot,
+        "hold_peak": px,
+        "hold_close_peak": px,
+        "hold_max_ret": 0.0,
+        "hold_bars": 0,
+        "hold_count_bar": "",
+    }
+
+
+def _sync_position_from_lots():
+    lots = []
+    for lot in getattr(A, "lots", None) or []:
+        if isinstance(lot, dict) and int(lot.get("shares", 0) or 0) > 0:
+            lots.append(lot)
+    A.lots = lots
+    if not lots:
+        A.position = None
+        return
+    total = 0
+    cost_sum = 0.0
+    ot = ""
+    for lot in lots:
+        sh = int(lot.get("shares") or 0)
+        px = float(lot.get("price") or 0)
+        total += sh
+        cost_sum += sh * px
+        if not ot:
+            ot = str(lot.get("opened_at") or "")
+    avg = (cost_sum / float(total)) if total else 0.0
+    A.position = {
+        "shares": int(total),
+        "price": float(avg),
+        "cost": round(total * avg, 2),
+        "opened_at": ot,
+        "lots": len(lots),
+    }
+    if getattr(A, "is_backtest", False):
+        held = _bt_held_vol()
+        if held <= 0 and total > 0:
+            print(_strategy_tag(), "restore bt_held from lots", total)
+            A.bt_held = total
+        elif held != total:
+            print(
+                _strategy_tag(),
+                "lots vs bt_held mismatch lots=",
+                total,
+                "held=",
+                held,
+            )
+
+
+def _mirror_hold_from_lots():
+    lots = getattr(A, "lots", None) or []
+    if not lots:
+        A.hold_peak = None
+        A.hold_close_peak = None
+        A.hold_max_ret = 0.0
+        A.hold_bars = 0
+        A._hold_count_bar = ""
+        return
+    lot = lots[0]
+    A.hold_peak = lot.get("hold_peak")
+    A.hold_close_peak = lot.get("hold_close_peak")
+    A.hold_max_ret = float(lot.get("hold_max_ret") or 0)
+    A.hold_bars = int(lot.get("hold_bars") or 0)
+    A._hold_count_bar = str(lot.get("hold_count_bar") or "")
+
+
+def _bump_lot_bars(lot, bar_tag):
+    if str(lot.get("hold_count_bar") or "") == str(bar_tag):
+        return False
+    lot["hold_bars"] = int(lot.get("hold_bars") or 0) + 1
+    lot["hold_count_bar"] = str(bar_tag)
+    return True
+
+
+def _update_lot_peaks(lot, high_px, close_px):
+    hi = float(high_px)
+    cl = float(close_px)
+    cost = float(lot.get("price") or 0)
+    changed = False
+    peak = lot.get("hold_peak")
+    if peak is None:
+        base = cost if cost > 0 else hi
+        lot["hold_peak"] = max(base, hi)
+        changed = True
+    elif hi > float(peak):
+        lot["hold_peak"] = hi
+        changed = True
+    cp = lot.get("hold_close_peak")
+    if cp is None:
+        lot["hold_close_peak"] = cl
+        changed = True
+    elif cl > float(cp):
+        lot["hold_close_peak"] = cl
+        changed = True
+    if cost > 0:
+        mx = max((cl - cost) / cost, (hi - cost) / cost)
+        prev = lot.get("hold_max_ret")
+        try:
+            prev_f = float(prev) if prev is not None else None
+        except Exception:
+            prev_f = None
+        if prev_f is None or mx > prev_f:
+            lot["hold_max_ret"] = mx
+            changed = True
+    return changed
+
+
+def _pos_lots():
+    if _lots_enabled():
+        return len(_ensure_lots())
+    pos = getattr(A, "position", None)
+    if not isinstance(pos, dict):
+        return 0
+    try:
+        return max(1, int(pos.get("lots", 1) or 1))
+    except Exception:
+        return 1
+
+
+def _lots_want_vol(lot_ids):
+    if not lot_ids:
+        return None
+    try:
+        idset = set(int(x) for x in lot_ids)
+    except Exception:
+        return None
+    total = 0
+    odd = 0
+    for lot in getattr(A, "lots", None) or []:
+        try:
+            sh = int(lot.get("shares") or 0)
+            lid = int(lot.get("id") or 0)
+        except Exception:
+            continue
+        if lid in idset:
+            total += sh
+        elif 0 < sh < 100:
+            odd += sh
+    total += odd
+    if total <= 0:
+        return None
+    return int(total)
+
+
+def _exit_is_partial(lot_ids):
+    if (not _lots_enabled()) or (not lot_ids):
+        return False
+    try:
+        idset = set(int(x) for x in lot_ids)
+    except Exception:
+        return False
+    for lot in _ensure_lots():
+        try:
+            if int(lot.get("id") or 0) not in idset:
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def _lots_on_buy_fill(px, add=False, vol=None, opened_at=""):
+    if not _lots_enabled():
+        return
+    if vol is None:
+        total = _pos_shares()
+        if getattr(A, "is_backtest", False):
+            total = max(total, _bt_held_vol())
+        have = 0
+        if add:
+            for lot in getattr(A, "lots", None) or []:
+                try:
+                    have += int(lot.get("shares") or 0)
+                except Exception:
+                    pass
+        vol = total if not add else (total - have)
+    vol = int(vol or 0)
+    if not add:
+        A.lots = []
+    elif not (getattr(A, "lots", None) or []):
+        A.lots = [_lot_from_agg()]
+        _sync_position_from_lots()
+        _mirror_hold_from_lots()
+        return
+    if vol < 100:
+        if add and not (getattr(A, "lots", None) or []):
+            A.lots = [_lot_from_agg()]
+        _sync_position_from_lots()
+        _mirror_hold_from_lots()
+        return
+    A.lots.append(_new_lot(vol, px, opened_at))
+    _sync_position_from_lots()
+    _mirror_hold_from_lots()
+    print(_strategy_tag(), "lots now n=%s" % len(A.lots), A.lots)
+    _event_log("lots_update", action="buy", add=add, lots=A.lots)
+
+
+def _lots_on_sell_fill(lot_ids, filled_vol):
+    if not _lots_enabled():
+        return
+    lots = list(getattr(A, "lots", None) or [])
+    if not lots:
+        return
+    remain_fill = int(filled_vol or 0)
+    idset = None
+    if lot_ids:
+        try:
+            idset = set(int(x) for x in lot_ids)
+        except Exception:
+            idset = None
+    new_lots = []
+    for lot in lots:
+        try:
+            lid = int(lot.get("id") or 0)
+        except Exception:
+            lid = 0
+        if idset is not None and lid not in idset:
+            new_lots.append(lot)
+            continue
+        if remain_fill <= 0:
+            new_lots.append(lot)
+            continue
+        sh = int(lot.get("shares") or 0)
+        if sh <= remain_fill:
+            remain_fill -= sh
+        else:
+            lot = dict(lot)
+            lot["shares"] = sh - remain_fill
+            remain_fill = 0
+            if int(lot["shares"]) > 0:
+                new_lots.append(lot)
+    if remain_fill > 0:
+        swept = []
+        for lot in new_lots:
+            sh = int(lot.get("shares") or 0)
+            if remain_fill > 0 and 0 < sh < 100:
+                take = min(sh, remain_fill)
+                remain_fill -= take
+                sh -= take
+                if sh <= 0:
+                    continue
+                lot = dict(lot)
+                lot["shares"] = sh
+            swept.append(lot)
+        new_lots = swept
+    A.lots = new_lots
+    _sync_position_from_lots()
+    _mirror_hold_from_lots()
+    print(_strategy_tag(), "lots now n=%s" % len(A.lots), A.lots)
+    _event_log("lots_update", action="sell", lot_ids=lot_ids, lots=A.lots)
+
+
+def _heartbeat_extra():
+    lots = getattr(A, "lots", None) or []
+    if not lots:
+        return ""
+    bits = []
+    for lot in lots:
+        try:
+            bits.append(
+                "L%s:%s@%.4f"
+                % (lot.get("id"), lot.get("shares"), float(lot.get("price") or 0))
+            )
+        except Exception:
+            pass
+    return "lots=" + ",".join(bits)
+
+# === qmt_common/single/ex_rights.py ===
+# 作用: 持仓过除权除息时缩放 cost/peak/股数，避免 trail/止损被跳空误触发
+# 主要符号: _maybe_apply_ex_rights, _clear_ex_rights_state
+# 因子: C.get_divid_factors → [红利, 送, 转, 配, 配股价, 股改, dr]
+# 配股默认未认购（股数不含 allot）；实盘 pending 延后用券商量判定认购
+_EX_ADJUSTED_DIV = (
+    "follow",
+    "front",
+    "back",
+    "front_ratio",
+    "back_ratio",
+)
+_EX_ALLOT_TIMEOUT_DAYS = 30
+_EX_LOT = 100
+
+
+def _clear_ex_rights_state():
+    A.ex_rights_applied = []
+    A.ex_rights_allot_pending = []
+
+
+def _ex_applied_list():
+    raw = getattr(A, "ex_rights_applied", None)
+    if not isinstance(raw, list):
+        A.ex_rights_applied = []
+        return A.ex_rights_applied
+    return raw
+
+
+def _ex_allot_pending_list():
+    raw = getattr(A, "ex_rights_allot_pending", None)
+    if not isinstance(raw, list):
+        A.ex_rights_allot_pending = []
+        return A.ex_rights_allot_pending
+    return raw
+
+
+def _ex_day_from_key(key):
+    """除权 dict key（ms/秒时间戳或可解析串）→ YYYYMMDD（东八区日历日）。"""
+    norm = globals().get("_norm_bar_day")
+    try:
+        ms = int(float(key))
+    except Exception:
+        if callable(norm):
+            return str(norm(key) or "")
+        s = str(key or "").strip()
+        return s[:8] if len(s) >= 8 and s[:8].isdigit() else ""
+    if ms > 10**12:
+        sec = ms / 1000.0
+    elif ms > 10**9:
+        sec = float(ms)
+    else:
+        if callable(norm):
+            return str(norm(key) or "")
+        return ""
+    try:
+        dt = datetime.datetime.utcfromtimestamp(sec) + datetime.timedelta(hours=8)
+        return dt.strftime("%Y%m%d")
+    except Exception:
+        return ""
+
+
+def _ex_open_day():
+    days = []
+    for lot in getattr(A, "lots", None) or []:
+        if not isinstance(lot, dict):
+            continue
+        ot = str(lot.get("opened_at") or "")
+        if len(ot) >= 8 and ot[:8].isdigit():
+            days.append(ot[:8])
+    pos = getattr(A, "position", None)
+    if isinstance(pos, dict):
+        ot = str(pos.get("opened_at") or "")
+        if len(ot) >= 8 and ot[:8].isdigit():
+            days.append(ot[:8])
+    if not days:
+        return ""
+    return min(days)
+
+
+def _ex_floor_lot(shares):
+    """买卖手数对齐（向下）；除权送转股数不要用这个，会吞零股。"""
+    try:
+        n = int(round(float(shares)))
+    except Exception:
+        return 0
+    if n < _EX_LOT:
+        return 0
+    return (n // _EX_LOT) * _EX_LOT
+
+
+def _ex_round_shares(shares):
+    """除权后股数：四舍五入到股，允许零股（送转常见）。"""
+    try:
+        n = int(round(float(shares)))
+    except Exception:
+        return 0
+    return max(n, 0)
+
+
+def _ex_sell_volume(want, avail):
+    """卖出量：先按 100 股取整，本笔 want 里不足一手的送转零股并进。
+    可卖本身已不足一手时，允许单独卖掉残仓（不从整手仓里拆 99 股）。"""
+    try:
+        w = int(want)
+        a = int(avail)
+    except Exception:
+        return 0
+    raw = min(w, a)
+    if raw <= 0:
+        return 0
+    vol = (raw // _EX_LOT) * _EX_LOT
+    if vol >= _EX_LOT:
+        odd = raw - vol
+        if 0 < odd < _EX_LOT:
+            vol += odd
+        return vol
+    if a < _EX_LOT:
+        return raw
+    return 0
+
+
+def _ex_parse_row(row):
+    """→ dict interest/bonus/gift/allot/allot_px/dr；非法 None。"""
+    if not isinstance(row, (list, tuple)) or len(row) < 7:
+        return None
+    try:
+        interest = float(row[0] or 0)
+        bonus = float(row[1] or 0)
+        gift = float(row[2] or 0)
+        allot = float(row[3] or 0)
+        allot_px = float(row[4] or 0)
+        dr = float(row[6] or 0)
+    except Exception:
+        return None
+    return {
+        "interest": interest,
+        "bonus": bonus,
+        "gift": gift,
+        "allot": allot,
+        "allot_px": allot_px,
+        "dr": dr,
+        "share_mul_base": 1.0 + bonus + gift,
+        "share_mul_sub": 1.0 + bonus + gift + allot,
+    }
+
+
+def _ex_skip_adjusted_backtest():
+    """回测且行情已是静态复权时跳过 STATE 缩放；PIT（none+因子）激活则不跳过。"""
+    if not getattr(A, "is_backtest", False):
+        return False
+    if bool(getattr(A, "_pit_front_active", False)):
+        return False
+    fn = globals().get("_dividend_type")
+    div = ""
+    if callable(fn):
+        try:
+            div = str(fn() or "").strip().lower()
+        except Exception:
+            div = ""
+    if not div:
+        div = str(globals().get("DIVIDEND_TYPE") or "").strip().lower()
+    if div in ("", "chart", "main"):
+        div = "follow"
+    return div in _EX_ADJUSTED_DIV
+
+
+def _divid_factors_cached(C, stock):
+    cache = getattr(A, "_divid_factors_cache", None)
+    if not isinstance(cache, dict):
+        cache = {}
+        A._divid_factors_cache = cache
+    key = str(stock or "")
+    if key in cache:
+        return cache[key]
+    out = {}
+    try:
+        raw = C.get_divid_factors(stock)
+        if isinstance(raw, dict):
+            out = raw
+    except Exception as e:
+        diag = globals().get("_diag_once")
+        if callable(diag):
+            diag("divid_factors_fail", e)
+        out = {}
+    cache[key] = out
+    return out
+
+
+def _divid_events_since(factors, open_day, applied, asof_day=""):
+    """开仓日后未应用事件，按日升序 [(day, parsed), ...]。
+    无 open_day 时只处理 asof_day 当日，避免空 applied 回放全部历史。"""
+    applied_set = set(str(x) for x in (applied or []))
+    asof = str(asof_day or "")
+    items = []
+    if not isinstance(factors, dict):
+        return items
+    for key, row in factors.items():
+        day = _ex_day_from_key(key)
+        if not day or day in applied_set:
+            continue
+        if open_day:
+            if day < open_day:
+                continue
+        elif asof:
+            if day != asof:
+                continue
+        else:
+            continue
+        if asof and day > asof:
+            continue
+        parsed = _ex_parse_row(row)
+        if not parsed:
+            continue
+        items.append((day, parsed))
+    items.sort(key=lambda x: x[0])
+    return items
+
+
+def _ex_scale_price_fields(dr):
+    if dr is None or float(dr) <= 1.0:
+        return False
+    div = float(dr)
+    changed = False
+
+    def _div_one(val):
+        if val is None:
+            return None, False
+        try:
+            v = float(val)
+        except Exception:
+            return val, False
+        if v <= 0:
+            return val, False
+        return v / div, True
+
+    peak, ok = _div_one(getattr(A, "hold_peak", None))
+    if ok:
+        A.hold_peak = peak
+        changed = True
+    cp, ok = _div_one(getattr(A, "hold_close_peak", None))
+    if ok:
+        A.hold_close_peak = cp
+        changed = True
+
+    pos = getattr(A, "position", None)
+    if isinstance(pos, dict):
+        px, ok = _div_one(pos.get("price"))
+        if ok:
+            pos["price"] = px
+            changed = True
+        c2, ok = _div_one(pos.get("cost"))
+        if ok and float(pos.get("shares") or 0) <= 0:
+            pos["cost"] = c2
+            changed = True
+        elif float(pos.get("shares") or 0) >= _EX_LOT and float(pos.get("price") or 0) > 0:
+            pos["cost"] = round(
+                float(pos["shares"]) * float(pos["price"]), 2
+            )
+
+    for lot in getattr(A, "lots", None) or []:
+        if not isinstance(lot, dict):
+            continue
+        for fld in ("price", "hold_peak", "hold_close_peak"):
+            nv, ok = _div_one(lot.get(fld))
+            if ok:
+                lot[fld] = nv
+                changed = True
+    return changed
+
+
+def _ex_scale_shares(share_mul):
+    mul = float(share_mul)
+    if abs(mul - 1.0) < 1e-12:
+        return False
+    changed = False
+    lots = getattr(A, "lots", None) or []
+    if lots and bool(globals().get("SCALE_LOTS", False)):
+        for lot in lots:
+            if not isinstance(lot, dict):
+                continue
+            old = int(lot.get("shares") or 0)
+            new = _ex_round_shares(old * mul)
+            if new != old:
+                lot["shares"] = new
+                changed = True
+        sync = globals().get("_sync_position_from_lots")
+        if callable(sync):
+            sync()
+            changed = True
+    else:
+        pos = getattr(A, "position", None)
+        if isinstance(pos, dict):
+            old = int(pos.get("shares") or 0)
+            new = _ex_round_shares(old * mul)
+            if new != old:
+                pos["shares"] = new
+                if float(pos.get("price") or 0) > 0:
+                    pos["cost"] = round(new * float(pos["price"]), 2)
+                changed = True
+    if getattr(A, "is_backtest", False):
+        for attr in ("bt_held", "bt_locked"):
+            old = int(getattr(A, attr, 0) or 0)
+            if old <= 0:
+                continue
+            new = _ex_round_shares(old * mul)
+            if new != old:
+                setattr(A, attr, new)
+                changed = True
+    return changed
+
+
+def _ex_recompute_max_ret():
+    lots = getattr(A, "lots", None) or []
+    if lots and bool(globals().get("SCALE_LOTS", False)):
+        for lot in lots:
+            if not isinstance(lot, dict):
+                continue
+            cost = float(lot.get("price") or 0)
+            peak = lot.get("hold_peak")
+            if cost > 0 and peak is not None:
+                try:
+                    lot["hold_max_ret"] = (float(peak) - cost) / cost
+                except Exception:
+                    pass
+        mir = globals().get("_mirror_hold_from_lots")
+        if callable(mir):
+            mir()
+        return
+    cost = 0.0
+    pos = getattr(A, "position", None)
+    if isinstance(pos, dict):
+        cost = float(pos.get("price") or 0)
+    peak = getattr(A, "hold_peak", None)
+    if cost > 0 and peak is not None:
+        try:
+            A.hold_max_ret = (float(peak) - cost) / cost
+        except Exception:
+            pass
+
+
+def _ex_cost_snapshot():
+    """认购加权用：聚合价 + 各 lot 价。"""
+    pos = getattr(A, "position", None)
+    agg = float(pos.get("price") or 0) if isinstance(pos, dict) else 0.0
+    lot_px = {}
+    for lot in getattr(A, "lots", None) or []:
+        if not isinstance(lot, dict):
+            continue
+        try:
+            lid = int(lot.get("id") or 0)
+        except Exception:
+            continue
+        lot_px[str(lid)] = float(lot.get("price") or 0)
+    return {"agg": agg, "lots": lot_px}
+
+
+def _ex_total_shares():
+    """优先 lots 合计；lots 空或不足一手时回落 position（SCALE_LOTS 尚未 ensure 时）。"""
+    if bool(globals().get("SCALE_LOTS", False)):
+        total = 0
+        for lot in getattr(A, "lots", None) or []:
+            if isinstance(lot, dict):
+                total += int(lot.get("shares") or 0)
+        if total >= _EX_LOT:
+            return int(total)
+    pos = getattr(A, "position", None)
+    if isinstance(pos, dict):
+        return int(pos.get("shares") or 0)
+    return 0
+
+
+def _ex_ensure_lots():
+    """SCALE_LOTS 时先从 position 重建 lots，避免除权读到空 lots。"""
+    if not bool(globals().get("SCALE_LOTS", False)):
+        return
+    fn = globals().get("_ensure_lots")
+    if callable(fn):
+        try:
+            fn()
+        except Exception:
+            pass
+
+
+def _ex_set_total_shares(new_total):
+    new_total = int(new_total)
+    lots = [x for x in (getattr(A, "lots", None) or []) if isinstance(x, dict)]
+    if lots and bool(globals().get("SCALE_LOTS", False)):
+        old_total = sum(int(x.get("shares") or 0) for x in lots)
+        if old_total <= 0:
+            return False
+        assigned = 0
+        for i, lot in enumerate(lots):
+            if i == len(lots) - 1:
+                sh = max(new_total - assigned, 0)
+            else:
+                sh = _ex_round_shares(
+                    new_total * int(lot.get("shares") or 0) / float(old_total)
+                )
+                assigned += sh
+            lot["shares"] = max(sh, 0)
+        sync = globals().get("_sync_position_from_lots")
+        if callable(sync):
+            sync()
+        return True
+    pos = getattr(A, "position", None)
+    if isinstance(pos, dict):
+        pos["shares"] = new_total
+        if float(pos.get("price") or 0) > 0:
+            pos["cost"] = round(new_total * float(pos["price"]), 2)
+        return True
+    return False
+
+
+def _ex_apply_subscribe_cost(snap, interest, allot, allot_px, share_mul_sub):
+    mul = float(share_mul_sub)
+    if mul <= 0:
+        return
+    add = float(allot) * float(allot_px)
+    interest = float(interest or 0)
+    lots = getattr(A, "lots", None) or []
+    lot_map = (snap or {}).get("lots") or {}
+    if lots and bool(globals().get("SCALE_LOTS", False)):
+        for lot in lots:
+            if not isinstance(lot, dict):
+                continue
+            lid = str(int(lot.get("id") or 0))
+            old = float(lot_map.get(lid, lot.get("price") or 0) or 0)
+            lot["price"] = (old - interest + add) / mul
+        sync = globals().get("_sync_position_from_lots")
+        if callable(sync):
+            sync()
+    else:
+        old = float((snap or {}).get("agg") or 0)
+        pos = getattr(A, "position", None)
+        if isinstance(pos, dict):
+            pos["price"] = (old - interest + add) / mul
+            sh = int(pos.get("shares") or 0)
+            if sh >= _EX_LOT:
+                pos["cost"] = round(sh * float(pos["price"]), 2)
+
+
+def _ex_apply_one_event(day, parsed, live_pending):
+    """应用单日除权（默认未认购）。返回 (changed, skipped_same_day)。"""
+    open_day = _ex_open_day()
+    if open_day and day == open_day:
+        return False, True
+    dr = float(parsed.get("dr") or 0)
+    base_mul = float(parsed.get("share_mul_base") or 1.0)
+    changed = False
+    vol0 = _ex_total_shares()
+    cost_snap = _ex_cost_snapshot()
+    px_div = dr if dr > 1.0 else (base_mul if base_mul > 1.0 else 0.0)
+    if px_div > 1.0:
+        if _ex_scale_price_fields(px_div):
+            changed = True
+    if _ex_scale_shares(base_mul):
+        changed = True
+    _ex_recompute_max_ret()
+    allot = float(parsed.get("allot") or 0)
+    if live_pending and allot > 0 and vol0 >= _EX_LOT:
+        pending = _ex_allot_pending_list()
+        pending.append(
+            {
+                "day": str(day),
+                "vol0": int(vol0),
+                "share_mul_base": base_mul,
+                "share_mul_sub": float(parsed.get("share_mul_sub") or 1.0),
+                "interest": float(parsed.get("interest") or 0),
+                "allot": allot,
+                "allot_px": float(parsed.get("allot_px") or 0),
+                "cost_snap": cost_snap,
+            }
+        )
+        A.ex_rights_allot_pending = pending
+        changed = True
+    if changed:
+        fn = globals().get("_on_ex_rights_ledger")
+        if callable(fn):
+            try:
+                fn(day, dr if dr > 1.0 else px_div, base_mul)
+            except Exception as e:
+                diag = globals().get("_diag_once")
+                if callable(diag):
+                    diag("ex_rights_ledger_fail", e)
+    return changed, False
+
+
+def _ex_natural_day_diff(day_a, day_b):
+    try:
+        a = datetime.datetime.strptime(str(day_a), "%Y%m%d")
+        b = datetime.datetime.strptime(str(day_b), "%Y%m%d")
+        return abs((b - a).days)
+    except Exception:
+        return 0
+
+
+def _ex_check_allot_pending(day):
+    """延后认购 / 超时。返回是否有变更。"""
+    pending = list(_ex_allot_pending_list())
+    if not pending:
+        return False
+    if getattr(A, "is_backtest", False):
+        return False
+    stock = str(getattr(A, "stock", "") or "")
+    broker_vol = 0
+    try:
+        fn = globals().get("_broker_position")
+        if callable(fn):
+            vol, _can, _cost = fn(stock)
+            broker_vol = int(vol or 0)
+    except Exception:
+        broker_vol = 0
+    keep = []
+    changed = False
+    for item in pending:
+        if not isinstance(item, dict):
+            continue
+        eday = str(item.get("day") or "")
+        if eday and _ex_natural_day_diff(eday, day) > int(
+            globals().get("EX_ALLOT_TIMEOUT_DAYS", _EX_ALLOT_TIMEOUT_DAYS)
+        ):
+            print(
+                _strategy_tag(),
+                "ex_rights_allot_timeout",
+                eday,
+                "asof",
+                day,
+            )
+            _event_log("ex_rights_allot_timeout", event_day=eday, day=day)
+            changed = True
+            continue
+        vol0 = int(item.get("vol0") or 0)
+        base_mul = float(item.get("share_mul_base") or 1.0)
+        sub_mul = float(item.get("share_mul_sub") or 1.0)
+        exp_unsub = _ex_round_shares(vol0 * base_mul)
+        exp_sub = _ex_round_shares(vol0 * sub_mul)
+        if broker_vol < _EX_LOT:
+            keep.append(item)
+            continue
+        d_sub = abs(broker_vol - exp_sub)
+        d_unsub = abs(broker_vol - exp_unsub)
+        if d_sub < d_unsub and d_sub <= _EX_LOT:
+            _ex_set_total_shares(broker_vol)
+            _ex_apply_subscribe_cost(
+                item.get("cost_snap"),
+                item.get("interest"),
+                item.get("allot"),
+                item.get("allot_px"),
+                sub_mul,
+            )
+            _ex_recompute_max_ret()
+            print(
+                _strategy_tag(),
+                "ex_rights_allot_subscribed",
+                eday,
+                "vol",
+                broker_vol,
+            )
+            _event_log(
+                "ex_rights_allot_subscribed",
+                event_day=eday,
+                broker_vol=broker_vol,
+                exp_sub=exp_sub,
+            )
+            changed = True
+            continue
+        if abs(broker_vol - _ex_total_shares()) >= _EX_LOT and d_unsub <= _EX_LOT:
+            if _ex_set_total_shares(broker_vol):
+                print(
+                    _strategy_tag(),
+                    "ex_rights_shares_reconcile",
+                    broker_vol,
+                )
+                _event_log(
+                    "ex_rights_shares_reconcile",
+                    broker_vol=broker_vol,
+                    event_day=eday,
+                )
+                changed = True
+        keep.append(item)
+    A.ex_rights_allot_pending = keep
+    return changed
+
+
+def _ex_reconcile_shares_live():
+    """无配股 pending 时，送转等到账后用券商量纠偏（一手容忍）。"""
+    if getattr(A, "is_backtest", False):
+        return False
+    if _ex_allot_pending_list():
+        return False
+    stock = str(getattr(A, "stock", "") or "")
+    try:
+        fn = globals().get("_broker_position")
+        if not callable(fn):
+            return False
+        vol, _can, _cost = fn(stock)
+        broker_vol = int(vol or 0)
+    except Exception:
+        return False
+    if broker_vol < _EX_LOT:
+        return False
+    cur = _ex_total_shares()
+    if abs(broker_vol - cur) < _EX_LOT:
+        return False
+    if _ex_set_total_shares(broker_vol):
+        print(_strategy_tag(), "ex_rights_shares_reconcile", broker_vol)
+        _event_log(
+            "ex_rights_shares_reconcile",
+            broker_vol=broker_vol,
+            prev=cur,
+        )
+        return True
+    return False
+
+
+def _maybe_apply_ex_rights(C, day):
+    """持仓卖点评估前调用：补做除权缩放 + 配股认购延后判定。"""
+    day = str(day or "")
+    holding = False
+    try:
+        holding = bool(_has_position())
+    except Exception:
+        holding = False
+    if not holding:
+        bt = getattr(A, "is_backtest", False)
+        if bt:
+            try:
+                holding = int(_bt_held_vol()) >= _EX_LOT
+            except Exception:
+                holding = False
+    if not holding:
+        return False
+    if _ex_skip_adjusted_backtest():
+        return False
+    stock = str(getattr(A, "stock", "") or "")
+    if not stock or C is None:
+        return False
+    _ex_ensure_lots()
+    applied = _ex_applied_list()
+    open_day = _ex_open_day()
+    factors = _divid_factors_cached(C, stock)
+    events = _divid_events_since(factors, open_day, applied, asof_day=day)
+    live_pending = not getattr(A, "is_backtest", False)
+    changed = False
+    applied_days = []
+    for eday, parsed in events:
+        ch, same = _ex_apply_one_event(eday, parsed, live_pending)
+        applied.append(eday)
+        applied_days.append(eday)
+        if ch:
+            changed = True
+        if same:
+            _event_log("ex_rights_skip_open_day", event_day=eday, open_day=open_day)
+        elif ch:
+            _event_log(
+                "ex_rights_applied",
+                event_day=eday,
+                dr=parsed.get("dr"),
+                share_mul=parsed.get("share_mul_base"),
+                allot=parsed.get("allot"),
+                allot_subscribed=False,
+            )
+            print(
+                _strategy_tag(),
+                "ex_rights_applied",
+                eday,
+                "dr=",
+                parsed.get("dr"),
+                "mul=",
+                parsed.get("share_mul_base"),
+            )
+    A.ex_rights_applied = applied
+    if _ex_check_allot_pending(day):
+        changed = True
+    if _ex_reconcile_shares_live():
+        changed = True
+    if changed or applied_days:
+        try:
+            _save_state()
+        except Exception:
+            pass
+    return changed
+
+# === qmt_common/single/bt_recover.py ===
+# 作用: 单仓回测影子仓恢复为 A.position
+def _bt_recover_position(now=None, last=None):
+    if not getattr(A, "is_backtest", False):
+        return False
+    held = _bt_held_vol()
+    if held <= 0:
+        return False
+    if _has_position():
+        return False
+    px = float(last) if last and last > 0 else 0.0
+    ot = str(getattr(A, "bt_opened_at", "") or "").strip()
+    if not ot:
+        ot = (now or datetime.datetime.now()).strftime("%Y%m%d%H%M%S")
+    A.position = {
+        "shares": held,
+        "price": px,
+        "cost": round(held * px, 2) if px > 0 else 0.0,
+        "opened_at": ot,
+    }
+    print(_strategy_tag(), "bt recover position from held", A.position)
+    fn = globals().get("_ensure_lots")
+    if callable(fn) and bool(globals().get("SCALE_LOTS")):
+        fn()
+    return True
+
+# === fband/indicators/util.py ===
+def _last_valid(arr, i=-1):
+    if arr is None:
+        return None
+    v = arr[i]
+    if v != v:
+        return None
+    return float(v)
+
+
+def _cross_down(a_prev, b_prev, a_now, b_now):
+    if None in (a_prev, b_prev, a_now, b_now):
+        return False
+    return (a_prev >= b_prev) and (a_now < b_now)
+
+
+def _cross_up(a_prev, b_prev, a_now, b_now):
+    if None in (a_prev, b_prev, a_now, b_now):
+        return False
+    return (a_prev <= b_prev) and (a_now > b_now)
+
+# === fband/indicators/sma.py ===
+def _sma(closes, n):
+    """简单均线；成交量均量固定走此函数。"""
+    c = np.asarray(closes, dtype=float)
+    n = int(n)
+    if n <= 0 or len(c) < n:
+        return None
+    out = np.full(len(c), np.nan, dtype=float)
+    cs = np.cumsum(c)
+    out[n - 1] = cs[n - 1] / float(n)
+    if len(c) > n:
+        out[n:] = (cs[n:] - cs[:-n]) / float(n)
+    return out
+
+# === fband/indicators/ema.py ===
+def _ema(closes, n):
+    """指数均线；前 n 根 SMA 播种，其后 alpha=2/(n+1) 递推。"""
+    c = np.asarray(closes, dtype=float)
+    n = int(n)
+    if n <= 0 or len(c) < n:
+        return None
+    out = np.full(len(c), np.nan, dtype=float)
+    seed = float(np.mean(c[:n]))
+    out[n - 1] = seed
+    rest = c[n:]
+    if rest.size == 0:
+        return out
+    if n == 1:
+        out[:] = c
+        return out
+    alpha = 2.0 / (n + 1.0)
+    beta = 1.0 - alpha
+    ks = np.arange(rest.size, dtype=float)
+    scaled = rest * (beta ** -ks)
+    cs = np.cumsum(scaled)
+    out[n:] = alpha * (beta ** ks) * cs + (beta ** (ks + 1.0)) * seed
+    return out
+
+# === fband/indicators/macd.py ===
+def _calc_macd(closes, fast, slow, signal):
+    """返回 (dif, dea, hist) 或 None。hist = dif - dea。三窗必传。"""
+    fast = int(fast)
+    slow = int(slow)
+    signal = int(signal)
+    c = np.asarray(closes, dtype=float)
+    if len(c) < slow + signal:
+        return None
+    ema_f = _ema(c, fast)
+    ema_s = _ema(c, slow)
+    if ema_f is None or ema_s is None:
+        return None
+    dif = ema_f - ema_s
+    start = slow - 1
+    dif_valid = dif[start:]
+    if len(dif_valid) < signal:
+        return None
+    dea_tail = _ema(dif_valid, signal)
+    if dea_tail is None:
+        return None
+    dea = np.full(len(c), np.nan, dtype=float)
+    dea[start:] = dea_tail
+    hist = dif - dea
+    return dif, dea, hist
+
+# === fband/indicators/atr.py ===
+def _true_range(highs, lows, closes):
+    """真实波幅。首根 H-L，其后 max(H-L, |H-C_prev|, |L-C_prev|)。"""
+    if highs is None or lows is None or closes is None:
+        return None
+    h = np.asarray(highs, dtype=float)
+    l = np.asarray(lows, dtype=float)
+    c = np.asarray(closes, dtype=float)
+    n = min(len(h), len(l), len(c))
+    if n <= 0:
+        return None
+    h = h[:n]
+    l = l[:n]
+    c = c[:n]
+    tr = np.full(n, np.nan, dtype=float)
+    tr[0] = h[0] - l[0]
+    for i in range(1, n):
+        tr[i] = max(h[i] - l[i], abs(h[i] - c[i - 1]), abs(l[i] - c[i - 1]))
+    return tr
+
+
+def _wilder(values, n):
+    """威尔德平滑：首值=前 n 根 SMA，其后 (prev*(n-1)+x)/n。"""
+    v = np.asarray(values, dtype=float)
+    n = int(n)
+    if n <= 0 or len(v) < n:
+        return None
+    out = np.full(len(v), np.nan, dtype=float)
+    out[n - 1] = float(np.mean(v[:n]))
+    for i in range(n, len(v)):
+        out[i] = (out[i - 1] * (n - 1) + v[i]) / float(n)
+    return out
+
+
+def _calc_atr(highs, lows, closes, n):
+    """威尔德 ATR。n 必传，不读 RECIPE；n<=0 或长度不足返回 None。"""
+    n = int(n)
+    if n <= 0:
+        return None
+    tr = _true_range(highs, lows, closes)
+    if tr is None:
+        return None
+    return _wilder(tr, n)
+
+# === fband/indicators/price_ma.py ===
+def _ma_kind():
+    """价格均线类型：优先 BOOK_STOCKS[A.stock].ma_type，否则 MA_TYPE；非法回落 EMA。"""
+    raw = None
+    stock = str(getattr(A, "stock", "") or "").strip().upper()
+    book = globals().get("BOOK_STOCKS")
+    if stock and isinstance(book, dict):
+        entry = None
+        if stock in book:
+            entry = book.get(stock)
+        else:
+            for k, v in book.items():
+                if str(k or "").strip().upper() == stock:
+                    entry = v
+                    break
+        if isinstance(entry, dict):
+            raw = entry.get("ma_type")
+        elif isinstance(entry, (str, bytes)):
+            raw = entry
+    if raw is None or str(raw or "").strip() == "":
+        raw = globals().get("MA_TYPE", "EMA")
+    kind = str(raw or "EMA").strip().upper()
+    if kind in ("SMA", "EMA"):
+        return kind
+    if not globals().get("_MA_TYPE_BAD"):
+        globals()["_MA_TYPE_BAD"] = True
+        print("%s ma_type=%s invalid, fallback EMA" % (STRATEGY_NAME, raw))
+    return "EMA"
+
+
+def _price_ma(closes, n, kind=None):
+    use = str(kind or _ma_kind()).strip().upper()
+    if use == "SMA":
+        return _sma(closes, n)
+    return _ema(closes, n)
+
+# === qmt_common/market_util.py ===
+# 作用: 行情辅助：诊断、序列解析、补历史、心跳
+# 主要符号: _diag_once, _series_from_ex, _download_hist, _live_heartbeat
+# 可选钩子: _heartbeat_extra() -> str
+def _bar_end_yyyymmdd(C):
+    dt = _bar_datetime(C)
+    return dt.strftime("%Y%m%d")
+
+
+def _diag_once(key, *msg):
+    if not hasattr(A, "_diag"):
+        A._diag = set()
+    if key in A._diag:
+        return
+    A._diag.add(key)
+    print(_strategy_tag(), "diag:", key, " ".join([str(x) for x in msg]))
+    _event_log("diag", key=str(key), msg=" ".join([str(x) for x in msg]))
+
+
+def _series_from_ex(md, stock, field):
+    """将 get_market_data_ex / get_market_data 结果解析为 float 列表。"""
+    if md is None:
+        return None
+    obj = None
+    if isinstance(md, dict) and stock in md:
+        df = md[stock]
+        if hasattr(df, "columns") and field in getattr(df, "columns", []):
+            obj = df[field]
+        elif isinstance(df, dict) and field in df:
+            obj = df[field]
+        elif hasattr(df, "__getitem__"):
+            try:
+                obj = df[field]
+            except Exception:
+                pass
+    if obj is None and isinstance(md, dict) and field in md:
+        df = md[field]
+        if hasattr(df, "columns"):
+            cols = list(df.columns)
+            if stock in cols:
+                obj = df[stock]
+            elif len(cols) == 1:
+                obj = df[cols[0]]
+            else:
+                obj = df
+        elif isinstance(df, dict) and stock in df:
+            obj = df[stock]
+        else:
+            obj = df
+    if obj is None:
+        return None
+    try:
+        vals = list(np.asarray(obj, dtype=float).reshape(-1))
+    except Exception:
+        try:
+            vals = [float(x) for x in list(obj)]
+        except Exception:
+            return None
+    out = []
+    for fv in vals:
+        try:
+            if fv != fv:  # NaN
+                continue
+            out.append(float(fv))
+        except Exception:
+            continue
+    return out
+
+
+def _download_hist(stock, period):
+    """按配置周期补本地历史（QMT 内置函数名因版本而异）。"""
+    start = _hist_start(period)
+    for fn_name in ("download_history_data", "down_history_data"):
+        fn = globals().get(fn_name)
+        if not callable(fn):
+            continue
+        try:
+            fn(stock, period, start, "")
+            print(_strategy_tag(), "downloaded history via", fn_name, period, "from", start)
+            return
+        except Exception as e:
+            print(_strategy_tag(), fn_name, "fail", period, "from", start, e)
+    print(_strategy_tag(), "download skip/unavailable period=", period, "from=", start)
+
+
+def _live_heartbeat(reason=""):
+    """周期性实盘日志，避免静默提前 return 被当成模型已停。"""
+    if getattr(A, "is_backtest", False):
+        return
+    sec = int(globals().get("LIVE_HEARTBEAT_SEC") or 0)
+    if sec <= 0:
+        return
+    now = datetime.datetime.now()
+    last = getattr(A, "_hb_at", None)
+    if last is not None and (now - last).total_seconds() < sec:
+        return
+    A._hb_at = now
+    extra = ""
+    fn = globals().get("_heartbeat_extra")
+    if callable(fn):
+        try:
+            extra = str(fn() or "")
+        except Exception:
+            extra = ""
+    print(
+        _strategy_tag(),
+        "live heartbeat",
+        now.strftime("%Y-%m-%d %H:%M:%S"),
+        "PERIOD=",
+        getattr(A, "period", "?"),
+        "stock=",
+        getattr(A, "stock", "?"),
+        extra,
+        ("reason=" + str(reason)) if reason else "",
+    )
+    _heartbeat_persist(
+        "%s live heartbeat %s PERIOD= %s stock= %s %s %s"
+        % (
+            _strategy_tag(),
+            now.strftime("%Y-%m-%d %H:%M:%S"),
+            getattr(A, "period", "?"),
+            getattr(A, "stock", "?"),
+            extra,
+            ("reason=" + str(reason)) if reason else "",
+        )
+    )
+
+# === qmt_common/pit_front.py ===
+# 作用: 回测时点前复权（PIT）— none 价 + divid factors
+# 主要符号: pit_parse_events, pit_parse_full_events, pit_adjust_ohlc, pit_adjust_ohlc_cached
+# front_ratio: P_adj(t;T) = P_raw(t) / Π{dr | t < e.day <= T}
+# front: 事件序 P <- (P - interest + allot*px) / (1+bonus+gift+allot)
+# volume 不调整
+def pit_day_from_key(key):
+    """除权 dict key → YYYYMMDD（东八区）。"""
+    norm = globals().get("_norm_bar_day")
+    try:
+        ms = int(float(key))
+    except Exception:
+        if callable(norm):
+            return str(norm(key) or "")
+        s = str(key or "").strip()
+        return s[:8] if len(s) >= 8 and s[:8].isdigit() else ""
+    if ms > 10**12:
+        sec = ms / 1000.0
+    elif ms > 10**9:
+        sec = float(ms)
+    else:
+        if callable(norm):
+            return str(norm(key) or "")
+        return ""
+    try:
+        dt = datetime.datetime.utcfromtimestamp(sec) + datetime.timedelta(hours=8)
+        return dt.strftime("%Y%m%d")
+    except Exception:
+        return ""
+
+
+def pit_mode_from_div(logical_div):
+    """logical_div → ratio|diff|""。"""
+    d = str(logical_div or "").strip().lower()
+    if d == "front_ratio":
+        return "ratio"
+    if d == "front":
+        return "diff"
+    return ""
+
+
+def pit_parse_full_events(factors_dict):
+    """factors → [(day, interest, bonus, gift, allot, allot_px, dr), ...] 升序。"""
+    out = []
+    if not isinstance(factors_dict, dict):
+        return out
+    for key, row in factors_dict.items():
+        day = pit_day_from_key(key)
+        if not day:
+            continue
+        interest = bonus = gift = allot = allot_px = 0.0
+        dr = 0.0
+        if isinstance(row, (list, tuple)) and len(row) >= 7:
+            try:
+                interest = float(row[0] or 0)
+                bonus = float(row[1] or 0)
+                gift = float(row[2] or 0)
+                allot = float(row[3] or 0)
+                allot_px = float(row[4] or 0)
+                dr = float(row[6] or 0)
+            except Exception:
+                continue
+        elif isinstance(row, (int, float)):
+            try:
+                dr = float(row)
+            except Exception:
+                continue
+        else:
+            continue
+        # 无有效调整则跳过
+        if (
+            (dr is None or dr <= 1.0)
+            and interest == 0.0
+            and bonus == 0.0
+            and gift == 0.0
+            and allot == 0.0
+        ):
+            continue
+        out.append((day, interest, bonus, gift, allot, allot_px, dr))
+    out.sort(key=lambda x: x[0])
+    return out
+
+
+def pit_parse_events(factors_dict):
+    """factors dict → [(day, dr), ...] 升序；仅 dr>1（等比路径 / 旧单测）。"""
+    out = []
+    for day, _i, _b, _g, _a, _ap, dr in pit_parse_full_events(factors_dict):
+        try:
+            d = float(dr)
+        except Exception:
+            continue
+        if d > 1.0:
+            out.append((day, d))
+    return out
+
+
+def pit_cum_dr(events, bar_day, asof_day):
+    """Π dr for events with bar_day < e.day <= asof_day；无则 1.0。
+
+    events 可为 [(day, dr), ...] 或 full 元组（取末位 dr）。
+    """
+    bd = str(bar_day or "")
+    ad = str(asof_day or "")
+    if not bd or not ad or bd > ad:
+        return 1.0
+    prod = 1.0
+    for item in events or ():
+        if not item:
+            continue
+        day = item[0]
+        dr = item[1] if len(item) == 2 else item[6]
+        if day <= bd:
+            continue
+        if day > ad:
+            break
+        try:
+            d = float(dr)
+        except Exception:
+            continue
+        if d > 1.0:
+            prod *= d
+    return prod if prod > 0 else 1.0
+
+
+def pit_apply_diff_one(price, interest, bonus, gift, allot, allot_px):
+    """单事件价差一步。"""
+    try:
+        p = float(price)
+    except Exception:
+        return price
+    try:
+        interest = float(interest or 0)
+        bonus = float(bonus or 0)
+        gift = float(gift or 0)
+        allot = float(allot or 0)
+        allot_px = float(allot_px or 0)
+    except Exception:
+        return p
+    mul = 1.0 + bonus + gift + allot
+    if mul <= 0:
+        mul = 1.0
+    return (p - interest + allot * allot_px) / mul
+
+
+def pit_cum_diff(full_events, bar_day, asof_day, price):
+    """对 price 按 (bar, asof] 内事件升序做价差逐步调整。"""
+    bd = str(bar_day or "")
+    ad = str(asof_day or "")
+    if not bd or not ad or bd > ad:
+        return price
+    p = price
+    for item in full_events or ():
+        if not item or len(item) < 7:
+            continue
+        day, interest, bonus, gift, allot, allot_px, _dr = item[:7]
+        if day <= bd:
+            continue
+        if day > ad:
+            break
+        p = pit_apply_diff_one(p, interest, bonus, gift, allot, allot_px)
+    return p
+
+
+def _pit_norm_mode(mode):
+    m = str(mode or "ratio").strip().lower()
+    if m in ("diff", "price", "front"):
+        return "diff"
+    return "ratio"
+
+
+def pit_adjust_ohlc(days, opens, highs, lows, closes, events, asof_day, mode="ratio"):
+    """按 asof_day 调整 OHLC；mode=ratio|diff。volume 调用方自理。"""
+    asof = str(asof_day or "")
+    n = len(days) if days is not None else 0
+    if n <= 0:
+        return opens, highs, lows, closes
+    mode = _pit_norm_mode(mode)
+    ev = events or ()
+    o2, h2, l2, c2 = [], [], [], []
+    for i in range(n):
+        d = str(days[i] or "")
+
+        def _one(seq):
+            if seq is None or i >= len(seq):
+                return None
+            try:
+                raw = float(seq[i])
+            except Exception:
+                return seq[i]
+            if mode == "diff":
+                return pit_cum_diff(ev, d, asof, raw)
+            mul = pit_cum_dr(ev, d, asof)
+            inv = (1.0 / mul) if mul > 0 else 1.0
+            return raw * inv
+
+        o2.append(_one(opens))
+        h2.append(_one(highs))
+        l2.append(_one(lows))
+        c2.append(_one(closes))
+    return o2, h2, l2, c2
+
+
+def pit_cache_map():
+    cache = getattr(A, "_pit_ohlc_cache", None)
+    if not isinstance(cache, dict):
+        cache = {}
+        A._pit_ohlc_cache = cache
+    return cache
+
+
+def pit_adjust_ohlc_cached(
+    stock, days, opens, highs, lows, closes, events, asof_day, mode="ratio"
+):
+    """带 (stock, asof, mode) 缓存；ratio 可 asof 增量 / 新 dr；diff 全量。"""
+    stock = str(stock or "")
+    asof = str(asof_day or "")
+    mode = _pit_norm_mode(mode)
+    cache = pit_cache_map()
+    key = (stock, asof, mode)
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
+    days = list(days or [])
+    ev = list(events or ())
+    if mode == "ratio":
+        prev_asof = None
+        for ck, _val in list(cache.items()):
+            if not (isinstance(ck, tuple) and len(ck) >= 3):
+                continue
+            st, a, m = ck[0], ck[1], ck[2]
+            if st != stock or m != "ratio":
+                continue
+            if a < asof and (prev_asof is None or a > prev_asof):
+                prev_asof = a
+        if prev_asof is not None:
+            prev = cache.get((stock, prev_asof, "ratio"))
+            if prev is not None:
+                po, ph, pl, pc = prev
+                new_prod = 1.0
+                for item in ev:
+                    if not item:
+                        continue
+                    day = item[0]
+                    dr = item[1] if len(item) == 2 else item[6]
+                    if day <= prev_asof:
+                        continue
+                    if day > asof:
+                        break
+                    try:
+                        d = float(dr)
+                    except Exception:
+                        continue
+                    if d > 1.0:
+                        new_prod *= d
+                if new_prod > 1.0 + 1e-15:
+                    inv = 1.0 / new_prod
+                    o2 = [float(x) * inv for x in po]
+                    h2 = [float(x) * inv for x in ph]
+                    l2 = [float(x) * inv for x in pl]
+                    c2 = [float(x) * inv for x in pc]
+                    if len(o2) == len(days):
+                        cache[key] = (o2, h2, l2, c2)
+                        return cache[key]
+    o2, h2, l2, c2 = pit_adjust_ohlc(
+        days, opens, highs, lows, closes, ev, asof, mode=mode
+    )
+    cache[key] = (o2, h2, l2, c2)
+    return cache[key]
+
+
+def pit_should_apply(logical_div):
+    """回测且逻辑复权为 front/front_ratio 时启用 PIT。"""
+    if not getattr(A, "is_backtest", False):
+        return False
+    d = str(logical_div or "").strip().lower()
+    return d in ("front", "front_ratio")
+
+# === fband/market.py ===
+_VALID_DIVIDEND = (
+    "follow",
+    "none",
+    "front",
+    "back",
+    "front_ratio",
+    "back_ratio",
+)
+
+
+def _norm_dividend(raw):
+    s = str(raw or "").strip().lower()
+    if s in ("", "follow", "chart", "main"):
+        return "follow"
+    return s
+
+
+def _book_dividend_raw(stock=None):
+    """BOOK_STOCKS[stock].dividend_type；无键返回 None。"""
+    if stock is None:
+        stock = str(getattr(A, "stock", "") or "").strip()
+    else:
+        stock = str(stock or "").strip()
+    cfg_fn = globals().get("_book_cfg")
+    if callable(cfg_fn):
+        entry = cfg_fn(stock)
+        if isinstance(entry, dict) and "dividend_type" in entry:
+            return entry.get("dividend_type")
+        return None
+    book = globals().get("BOOK_STOCKS")
+    if not stock or not isinstance(book, dict):
+        return None
+    key = stock.upper()
+    entry = book.get(stock)
+    if entry is None:
+        entry = book.get(key)
+    if entry is None:
+        for k, v in book.items():
+            if str(k or "").strip().upper() == key:
+                entry = v
+                break
+    if isinstance(entry, dict) and "dividend_type" in entry:
+        return entry.get("dividend_type")
+    return None
+
+
+def _dividend_type_for(stock):
+    """QMT 复权：优先 BOOK_STOCKS[code].dividend_type，否则 DIVIDEND_TYPE。"""
+    glob_raw = globals().get("DIVIDEND_TYPE")
+    book_raw = _book_dividend_raw(stock)
+    picked = book_raw
+    if picked is None or str(picked).strip() == "":
+        picked = glob_raw
+    norm = _norm_dividend(picked)
+    if norm in _VALID_DIVIDEND:
+        return norm
+    if not globals().get("_DIVIDEND_TYPE_BAD"):
+        globals()["_DIVIDEND_TYPE_BAD"] = True
+        print(
+            "%s dividend_type=%s invalid, fallback"
+            % (STRATEGY_NAME, picked)
+        )
+    glob_norm = _norm_dividend(glob_raw)
+    if glob_norm in _VALID_DIVIDEND:
+        return glob_norm
+    return "front_ratio"
+
+
+def _dividend_type():
+    return _dividend_type_for(getattr(A, "stock", ""))
+
+
+def _chart_dividend(C):
+    """主图/公式当前复权（只用于日志）。"""
+    try:
+        return str(getattr(C, "dividend_type", "") or "")
+    except Exception:
+        return ""
+
+
+def _norm_bar_day(x):
+    """行情时间戳/索引 → yyyymmdd。"""
+    if x is None:
+        return ""
+    try:
+        if hasattr(x, "strftime"):
+            return x.strftime("%Y%m%d")
+    except Exception:
+        pass
+    s = str(x).strip()
+    digits = []
+    for ch in s:
+        if ch.isdigit():
+            digits.append(ch)
+        elif digits:
+            break
+    if len(digits) >= 8:
+        return "".join(digits[:8])
+    return ""
+
+
+def _md_match_key(md, stock):
+    """在 get_market_data_ex 的 dict 上匹配 code（大小写 / 点号后缀）。"""
+    if md is None or not isinstance(md, dict):
+        return None
+    if stock in md:
+        return stock
+    want = str(stock or "").strip().upper()
+    if not want:
+        return None
+    want_nodot = want.replace(".", "")
+    found = None
+    for k in md.keys():
+        ku = str(k or "").strip().upper()
+        if ku == want:
+            return k
+        if found is None and ku.replace(".", "") == want_nodot:
+            found = k
+    return found
+
+
+def _series_from_ex_matched(md, stock, field):
+    vals = _series_from_ex(md, stock, field)
+    if vals:
+        return vals
+    k = _md_match_key(md, stock)
+    if k is not None and k != stock:
+        return _series_from_ex(md, k, field)
+    return vals
+
+
+def _days_from_ex(md, stock):
+    """从 get_market_data_ex 结果解析交易日列表（与 close 序列对齐时优先 index/time）。"""
+    if md is None:
+        return None
+    df = None
+    if isinstance(md, dict):
+        k = _md_match_key(md, stock)
+        if k is not None:
+            df = md[k]
+        elif len(md) == 1:
+            df = next(iter(md.values()))
+    if df is None:
+        return None
+    raw = None
+    if hasattr(df, "index"):
+        try:
+            raw = list(df.index)
+        except Exception:
+            raw = None
+    if (not raw) and hasattr(df, "columns"):
+        for col in ("time", "date", "datetime", "stime"):
+            try:
+                cols = getattr(df, "columns", [])
+                if col in cols:
+                    raw = list(df[col])
+                    break
+            except Exception:
+                continue
+    if not raw:
+        return None
+    out = []
+    for x in raw:
+        d = _norm_bar_day(x)
+        if d:
+            out.append(d)
+    return out if out else None
+
+
+def _get_daily_bar_days(C, stock, count=8):
+    """最近若干根日线交易日（yyyymmdd），失败返回 None。"""
+    end = _bar_end_str(C)
+    if len(end) >= 8:
+        end = end[:8]
+    fields = ["close"]
+    md = None
+    div = _api_dividend_type(stock)
+    try:
+        md = C.get_market_data_ex(
+            fields=fields,
+            stock_code=[stock],
+            period=getattr(A, "period", "1d"),
+            end_time=end,
+            count=int(count),
+            dividend_type=div,
+            fill_data=True,
+            subscribe=False,
+        )
+    except TypeError:
+        try:
+            md = C.get_market_data_ex(
+                fields,
+                [stock],
+                period=getattr(A, "period", "1d"),
+                start_time="",
+                end_time=end,
+                count=int(count),
+                dividend_type=div,
+            )
+        except Exception:
+            md = None
+    except Exception:
+        md = None
+    days = _days_from_ex(md, stock) if md is not None else None
+    return days
+
+
+def _week_monday(day):
+    s = _norm_bar_day(day)
+    if len(s) < 8:
+        return ""
+    d = datetime.datetime.strptime(s[:8], "%Y%m%d")
+    monday = d - datetime.timedelta(days=int(d.weekday()))
+    return monday.strftime("%Y%m%d")
+
+
+def _is_weekly_period(period):
+    p = str(period or "").strip().lower()
+    return p in ("1w", "week", "weekly", "w")
+
+
+def _drop_unclosed_week_ohlcv(open_, high, low, close, volume, days, end_day):
+    """丢掉 end_day 所在自然周，对齐 QMT 回测 0000 原生 1w（周五当天也不含本周）。
+
+    返回 (o,h,l,c,v, days_out)；days_out 与 OHLC 对齐，可能为 None。
+    """
+    if not close:
+        return None
+    n = len(close)
+    cur = _week_monday(end_day)
+    keep = None
+    if cur and days and len(days) == n:
+        keep = [i for i in range(n) if _week_monday(days[i]) != cur]
+    elif cur and (not getattr(A, "is_backtest", False)) and n >= 2:
+        keep = list(range(n - 1))
+        _diag_once("w1_drop_last_no_days", "end=", end_day, "n=", n)
+    if keep is None:
+        return open_, high, low, close, volume, days
+    if len(keep) < 1:
+        return None
+
+    def _take(seq):
+        if seq is None:
+            return None
+        return [seq[i] for i in keep]
+
+    days_out = _take(days) if days and len(days) == n else None
+    return (
+        _take(open_),
+        _take(high),
+        _take(low),
+        _take(close),
+        _take(volume),
+        days_out,
+    )
+
+
+def _api_dividend_type(stock):
+    """回测 front/front_ratio → 请求 none，由 PIT 调整；实盘仍 QMT front*。"""
+    logical = _dividend_type_for(stock)
+    apply = globals().get("pit_should_apply")
+    if callable(apply) and apply(logical):
+        A._pit_front_active = True
+        return "none"
+    return logical
+
+
+def _maybe_pit_ohlcv(C, stock, open_, high, low, close, volume, days, end, logical_div):
+    """对 none 原料按 asof=end 做时点前复权；空因子按 raw 用（不回退 QMT front*）。"""
+    apply = globals().get("pit_should_apply")
+    if not (callable(apply) and apply(logical_div)):
+        return open_, high, low, close, volume
+    A._pit_front_active = True
+    asof = str(end or "")[:8]
+    n = len(close) if close is not None else 0
+    if n <= 0:
+        return open_, high, low, close, volume
+    if (not days) or len(days) != n:
+        _diag_once("pit_no_days", "stock=", stock, "end=", asof, "n=", n)
+        return open_, high, low, close, volume
+    mode_fn = globals().get("pit_mode_from_div")
+    mode = mode_fn(logical_div) if callable(mode_fn) else "ratio"
+    if not mode:
+        mode = "ratio"
+    fac_fn = globals().get("_divid_factors_cached")
+    factors = None
+    if callable(fac_fn):
+        try:
+            factors = fac_fn(C, stock)
+        except Exception:
+            factors = None
+    if not isinstance(factors, dict):
+        factors = {}
+    if mode == "diff":
+        parse_fn = globals().get("pit_parse_full_events")
+        events = parse_fn(factors) if callable(parse_fn) else []
+    else:
+        parse_fn = globals().get("pit_parse_events")
+        events = parse_fn(factors) if callable(parse_fn) else []
+    if not events:
+        _diag_once("pit_no_factors", "stock=", stock, "end=", asof, "mode=", mode)
+        return open_, high, low, close, volume
+    adj = globals().get("pit_adjust_ohlc_cached")
+    if not callable(adj):
+        adj = globals().get("pit_adjust_ohlc")
+    if not callable(adj):
+        return open_, high, low, close, volume
+    try:
+        if adj is globals().get("pit_adjust_ohlc_cached"):
+            o2, h2, l2, c2 = adj(
+                stock, days, open_, high, low, close, events, asof, mode
+            )
+        else:
+            o2, h2, l2, c2 = adj(
+                days, open_, high, low, close, events, asof, mode
+            )
+    except Exception as e:
+        _diag_once("pit_adjust_fail", "stock=", stock, "mode=", mode, e)
+        return open_, high, low, close, volume
+    return o2, h2, l2, c2, volume
+
+
+def _bar_end_str(C):
+    """覆盖 period.py：实盘 end_time 跟墙钟，15:00 后仍能拉到今日 K。"""
+    period = getattr(A, "period", "1d")
+    if getattr(A, "is_backtest", False):
+        dt = _bar_datetime(C)
+        if _is_intraday(period):
+            return dt.strftime("%Y%m%d%H%M%S")
+        return dt.strftime("%Y%m%d")
+    now = datetime.datetime.now()
+    today = now.strftime("%Y%m%d")
+    chart_day = ""
+    try:
+        tag = C.get_bar_timetag(C.barpos)
+        if "timetag_to_datetime" in globals():
+            s = timetag_to_datetime(tag, "%Y%m%d%H%M%S")
+            chart_day = str(s)[:8]
+        elif tag is not None:
+            if tag > 10 ** 12:
+                chart_day = datetime.datetime.fromtimestamp(tag / 1000.0).strftime(
+                    "%Y%m%d"
+                )
+            else:
+                chart_day = datetime.datetime.fromtimestamp(tag).strftime("%Y%m%d")
+    except Exception:
+        chart_day = ""
+    end_day = today
+    if chart_day and len(str(chart_day)) >= 8:
+        end_day = max(str(chart_day)[:8], today)
+    if _is_intraday(period):
+        return now.strftime("%Y%m%d%H%M%S")
+    return end_day
+
+
+def _ohlcv_diag_key(base, stock=None):
+    if stock is None:
+        stock = getattr(A, "stock", "")
+    st = str(stock or "").replace(".", "_")
+    if st:
+        return "%s_%s" % (base, st)
+    return base
+
+
+def _ohlcv_cache_map():
+    d = getattr(A, "_ohlcv_cache", None)
+    if isinstance(d, dict):
+        return d
+    if getattr(A, "_universe_loop", False):
+        d = {}
+        A._ohlcv_cache = d
+        return d
+    return None
+
+
+def _ohlcv_cache_key(stock, period, count, end, div):
+    return (
+        str(stock or ""),
+        str(period or ""),
+        int(count),
+        str(end or ""),
+        str(div or ""),
+    )
+
+
+def _ohlcv_end_for_period(C, period):
+    end = _bar_end_str(C)
+    if period in ("1d", "1w", "1mon", "1q", "1hy", "1y"):
+        end = end[:8] if len(end) >= 8 else end
+    return end
+
+
+def _call_market_data_ex(C, fields, stocks, period, end, count, div):
+    """kwargs 优先，TypeError 再位置参数；subscribe=False。返回 (md, source, err)。"""
+    md = None
+    source = None
+    try:
+        md = C.get_market_data_ex(
+            fields=fields,
+            stock_code=stocks,
+            period=period,
+            end_time=end,
+            count=count,
+            dividend_type=div,
+            fill_data=True,
+            subscribe=False,
+        )
+        source = "get_market_data_ex"
+    except TypeError:
+        try:
+            md = C.get_market_data_ex(
+                fields,
+                stocks,
+                period=period,
+                start_time="",
+                end_time=end,
+                count=count,
+                dividend_type=div,
+            )
+            source = "get_market_data_ex/pos"
+        except Exception as e:
+            return None, None, e
+    except Exception as e:
+        return None, None, e
+    return md, source, None
+
+
+def _parse_ohlcv_tuple(md, stock, period, end):
+    """md → (o,h,l,c,v, days)；周线仍丢掉未收盘周。不打 diag。"""
+    if md is None:
+        return None
+    open_ = _series_from_ex_matched(md, stock, "open")
+    high = _series_from_ex_matched(md, stock, "high")
+    low = _series_from_ex_matched(md, stock, "low")
+    close = _series_from_ex_matched(md, stock, "close")
+    volume = _series_from_ex_matched(md, stock, "volume")
+    if not close:
+        return None
+    n = len(close)
+    if not open_ or len(open_) != n:
+        open_ = list(close)
+    if not high or len(high) != n:
+        high = list(close)
+    if not low or len(low) != n:
+        low = list(close)
+    if not volume or len(volume) != n:
+        volume = [0.0] * n
+    days = _days_from_ex(md, stock)
+    if _is_weekly_period(period):
+        trimmed = _drop_unclosed_week_ohlcv(
+            open_, high, low, close, volume, days, end
+        )
+        if trimmed is None:
+            return None
+        open_, high, low, close, volume, days = trimmed
+    return open_, high, low, close, volume, days
+
+
+def _accept_ohlcv(tup, need, diag_key, source, period, end, div, C):
+    if tup is None or not tup[3]:
+        _diag_once(
+            diag_key + "_empty",
+            "period=",
+            period,
+            "end=",
+            end,
+            "n=",
+            0,
+        )
+        return None
+    close = tup[3]
+    if len(close) < need:
+        _diag_once(
+            diag_key + "_empty",
+            "period=",
+            period,
+            "end=",
+            end,
+            "n=",
+            len(close),
+        )
+        return None
+    if np.std(np.asarray(close[-min(20, len(close)) :], dtype=float)) < 1e-8:
+        _diag_once(diag_key + "_flat", "n=", len(close), "source=", source)
+        return None
+    _diag_once(
+        diag_key + "_ok",
+        "source=",
+        source,
+        "period=",
+        period,
+        "n=",
+        len(close),
+        "end=",
+        end,
+        "last=",
+        round(float(close[-1]), 4),
+        "div=",
+        div,
+        "chart=",
+        _chart_dividend(C) or "-",
+    )
+    return tup
+
+
+def _ohlcv5_from_parsed(C, stock, parsed, end, logical_div):
+    if parsed is None:
+        return None
+    open_, high, low, close, volume, days = parsed
+    return _maybe_pit_ohlcv(
+        C, stock, open_, high, low, close, volume, days, end, logical_div
+    )
+
+
+def _get_ohlcv_period(C, stock, period, count, need, diag_key):
+    end = _ohlcv_end_for_period(C, period)
+    fields = ["open", "high", "low", "close", "volume"]
+    logical = _dividend_type_for(stock)
+    api_div = _api_dividend_type(stock)
+    cache = _ohlcv_cache_map()
+    key = _ohlcv_cache_key(stock, period, count, end, logical)
+    if cache is not None:
+        hit = cache.get(key)
+        if hit is not None and len(hit[3]) >= int(need):
+            return hit
+    md, source, err = _call_market_data_ex(
+        C, fields, [stock], period, end, count, api_div
+    )
+    if err is not None:
+        _diag_once(diag_key + "_ex_fail", err)
+    parsed = _parse_ohlcv_tuple(md, stock, period, end) if md is not None else None
+    tup = _ohlcv5_from_parsed(C, stock, parsed, end, logical)
+    if tup is None or len(tup[3]) < int(need):
+        try:
+            md2 = C.get_market_data(
+                fields,
+                stock_code=[stock],
+                period=period,
+                end_time=end,
+                count=count,
+                dividend_type=api_div,
+            )
+            source = "get_market_data"
+            parsed2 = _parse_ohlcv_tuple(md2, stock, period, end)
+            tup2 = _ohlcv5_from_parsed(C, stock, parsed2, end, logical)
+            if tup2 is not None:
+                tup = tup2
+        except Exception as e:
+            _diag_once(diag_key + "_gmd_fail", e)
+    tup = _accept_ohlcv(tup, need, diag_key, source, period, end, logical, C)
+    if tup is not None and cache is not None:
+        cache[key] = tup
+    return tup
+
+
+def _ohlcv_need_1d():
+    raw_plat = _factor_param(None, "plat_break", "lookback")
+    try:
+        plat_n = int(20 if raw_plat is None else raw_plat)
+    except (TypeError, ValueError):
+        plat_n = 20
+    d_ma = _structure_windows()["d_ma"]
+    try:
+        mid_n = int(d_ma.get("mid") or 0)
+    except (TypeError, ValueError):
+        mid_n = 0
+    try:
+        slow_n = int(d_ma.get("slow") or 0)
+    except (TypeError, ValueError):
+        slow_n = 0
+    confirm_n = _vol_pullback_confirm_need()
+    raw_vn = _factor_param(None, "pullback_vol", "vol_n")
+    raw_dn = _factor_param(None, "vol_dry", "n")
+    try:
+        vol_n = int(10 if raw_vn is None else raw_vn)
+    except (TypeError, ValueError):
+        vol_n = 10
+    try:
+        dry_n = int(20 if raw_dn is None else raw_dn)
+    except (TypeError, ValueError):
+        dry_n = 20
+    vol_pb_need = vol_n + max(0, confirm_n - 1)
+    try:
+        atr_n = int(_structure_windows()["atr"]["n"] or 0)
+    except (TypeError, ValueError, KeyError):
+        atr_n = 0
+    return max(
+        mid_n if mid_n > 0 else 0,
+        slow_n if slow_n > 0 else 0,
+        vol_pb_need,
+        dry_n,
+        plat_n + 2,
+        atr_n if atr_n > 0 else 0,
+    ) + 10
+
+
+def _ohlcv_need_1w():
+    # 55 = 原 W_MA_SLOW 暖机地板，不是均线周期
+    win = _structure_windows()
+    return max(int(win["w_ma"]["life"]), int(win["macd"]["slow"]) + int(win["macd"]["signal"]), 55) + 5
+
+
+def _prefetch_watch_ohlcv(C, stocks):
+    """按复权分组批量拉日+周；组失败或缺 key 单只回落。写入 A._ohlcv_cache。"""
+    codes = []
+    seen = set()
+    for x in stocks or []:
+        s = str(x or "").strip()
+        if (not s) or (s in seen):
+            continue
+        seen.add(s)
+        codes.append(s)
+    if not codes:
+        return
+    period_d = getattr(A, "period", "1d")
+    end_d = _ohlcv_end_for_period(C, period_d)
+    end_w = _ohlcv_end_for_period(C, "1w")
+    count_d = int(OHLC_COUNT)
+    count_w = int(WEEKLY_OHLC_COUNT)
+    need_d = _ohlcv_need_1d()
+    need_w = _ohlcv_need_1w()
+    fields = ["open", "high", "low", "close", "volume"]
+    groups = {}
+    logical_of = {}
+    for code in codes:
+        logical = _dividend_type_for(code)
+        logical_of[code] = logical
+        api_div = _api_dividend_type(code)
+        groups.setdefault(api_div, []).append(code)
+    cache = getattr(A, "_ohlcv_cache", None)
+    if not isinstance(cache, dict):
+        cache = {}
+        A._ohlcv_cache = cache
+    rpc = 0
+
+    def _fill(period, count, end, need, diag_base):
+        n_rpc = 0
+        for api_div, group in groups.items():
+            md, source, err = _call_market_data_ex(
+                C, fields, list(group), period, end, count, api_div
+            )
+            n_rpc += 1
+            missing = []
+            if err is not None or not isinstance(md, dict):
+                missing = list(group)
+            else:
+                for code in group:
+                    if _md_match_key(md, code) is None:
+                        missing.append(code)
+                        continue
+                    logical = logical_of.get(code) or _dividend_type_for(code)
+                    parsed = _parse_ohlcv_tuple(md, code, period, end)
+                    tup5 = _ohlcv5_from_parsed(C, code, parsed, end, logical)
+                    tup = _accept_ohlcv(
+                        tup5,
+                        need,
+                        _ohlcv_diag_key(diag_base, code),
+                        source or "get_market_data_ex",
+                        period,
+                        end,
+                        logical,
+                        C,
+                    )
+                    if tup is not None:
+                        cache[
+                            _ohlcv_cache_key(code, period, count, end, logical)
+                        ] = tup
+            for code in missing:
+                n_rpc += 1
+                _get_ohlcv_period(
+                    C,
+                    code,
+                    period,
+                    count,
+                    need,
+                    _ohlcv_diag_key(diag_base, code),
+                )
+        return n_rpc
+
+    rpc += _fill(period_d, count_d, end_d, need_d, "d1")
+    rpc += _fill("1w", count_w, end_w, need_w, "w1")
+    print(
+        _strategy_tag(),
+        "ohlcv prefetch groups=%s rpc=%s n=%s"
+        % (len(groups), rpc, len(codes)),
+    )
+    _event_log(
+        "ohlcv_prefetch",
+        groups=len(groups),
+        rpc=rpc,
+        n=len(codes),
+    )
+
+
+def _get_ohlcv_1d(C, stock):
+    need = _ohlcv_need_1d()
+    return _get_ohlcv_period(
+        C,
+        stock,
+        getattr(A, "period", "1d"),
+        int(OHLC_COUNT),
+        need,
+        _ohlcv_diag_key("d1", stock),
+    )
+
+
+def _get_ohlcv_1w(C, stock):
+    need = _ohlcv_need_1w()
+    return _get_ohlcv_period(
+        C,
+        stock,
+        "1w",
+        int(WEEKLY_OHLC_COUNT),
+        need,
+        _ohlcv_diag_key("w1", stock),
+    )
+
+# === fband/factors/ctx.py ===
+def _factor_tiers_as_lists(raw):
+    """trail_stop.tiers → list of lists，避免指纹把 tuple 打成字符串。"""
+    out = []
+    for row in raw or ():
+        seq = list(row)
+        while len(seq) < 4:
+            seq.append(None)
+        lo, hi, gb, fl = seq[0], seq[1], seq[2], seq[3]
+        out.append(
+            [
+                float(lo),
+                None if hi is None else float(hi),
+                float(gb),
+                None if fl is None else float(fl),
+            ]
+        )
+    return out
+
+
+def _factor_param(ctx, fid, key, default=None):
+    """ctx.params > RECIPE.factor_params。缺键用调用方 default（数字字面量）。"""
+    extra = ((ctx or {}).get("params") or {}).get(fid) or {}
+    if key in extra:
+        return extra[key]
+    rec = (globals().get("RECIPE") or {}).get("factor_params") or {}
+    block = rec.get(fid) or {}
+    if key in block:
+        return block[key]
+    return default
+
+
+def _factor_params_apply_global(params):
+    """只合进 RECIPE.factor_params，按 id 再按 key 合并。"""
+    if not isinstance(params, dict):
+        return
+    rec = globals().get("RECIPE")
+    if not isinstance(rec, dict):
+        return
+    fp = rec.get("factor_params")
+    if not isinstance(fp, dict):
+        rec["factor_params"] = {}
+        fp = rec["factor_params"]
+    for fid, incoming in params.items():
+        if not isinstance(incoming, dict):
+            continue
+        cur = fp.get(fid)
+        if not isinstance(cur, dict):
+            fp[fid] = {}
+            cur = fp[fid]
+        cur.update(incoming)
+        if fid == "trail_stop" and "tiers" in cur:
+            cur["tiers"] = _factor_tiers_as_lists(cur.get("tiers"))
+
+
+def _structure_int(block, key, default):
+    raw = (block or {}).get(key)
+    try:
+        return int(default if raw is None else raw)
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def _structure_windows():
+    """只读 RECIPE.structure。缺键用数字字面量。"""
+    rec = (globals().get("RECIPE") or {}).get("structure") or {}
+    d_ma = rec.get("d_ma") or {}
+    w_ma = rec.get("w_ma") or {}
+    macd = rec.get("macd") or {}
+    atr = rec.get("atr") or {}
+    return {
+        "d_ma": {
+            "mid": _structure_int(d_ma, "mid", 20),
+            "slow": _structure_int(d_ma, "slow", 60),
+        },
+        "w_ma": {
+            "fast": _structure_int(w_ma, "fast", 5),
+            "mid": _structure_int(w_ma, "mid", 13),
+            "life": _structure_int(w_ma, "life", 34),
+        },
+        "macd": {
+            "fast": _structure_int(macd, "fast", 12),
+            "slow": _structure_int(macd, "slow", 26),
+            "signal": _structure_int(macd, "signal", 9),
+        },
+        "atr": {
+            "n": _structure_int(atr, "n", 14),
+        },
+    }
+
+
+def _structure_apply_global(params):
+    """只合进 RECIPE.structure，按段再按 key 合并。"""
+    if not isinstance(params, dict):
+        return
+    rec = globals().get("RECIPE")
+    if not isinstance(rec, dict):
+        return
+    st = rec.get("structure")
+    if not isinstance(st, dict):
+        rec["structure"] = {}
+        st = rec["structure"]
+    for fid, incoming in params.items():
+        if not isinstance(incoming, dict):
+            continue
+        cur = st.get(fid)
+        if not isinstance(cur, dict):
+            st[fid] = {}
+            cur = st[fid]
+        cur.update(incoming)
+
+
+def _vol_pullback_confirm_need():
+    """最少 1：当天缩量即可；勿用 `x or 2`（0 会被当成缺省翻成 2）。"""
+    raw = _factor_param(None, "pullback_vol", "confirm_days")
+    try:
+        n = int(2 if raw is None else raw)
+    except Exception:
+        n = 2
+    return max(1, n)
+
+
+def _weekly_market_features(closes_w):
+    """周线 MA/MACD 进 ctx.market；不判多空。"""
+    detail = {
+        "ma5": None,
+        "ma10": None,
+        "ma30": None,
+        "dif": None,
+        "dea": None,
+        "hist": None,
+        "close": None,
+    }
+    win = _structure_windows()
+    w_ma = win["w_ma"]
+    mc = win["macd"]
+    ma5 = _price_ma(closes_w, w_ma["fast"])
+    ma10 = _price_ma(closes_w, w_ma["mid"])
+    ma30 = _price_ma(closes_w, w_ma["life"])
+    macd = _calc_macd(closes_w, mc["fast"], mc["slow"], mc["signal"])
+    if ma5 is None or ma10 is None or ma30 is None or macd is None:
+        return detail
+    dif, dea, hist = macd
+    i = len(closes_w) - 1
+    if i < 1:
+        return detail
+    c = float(closes_w[i])
+    m5 = _last_valid(ma5, i)
+    m10 = _last_valid(ma10, i)
+    m30 = _last_valid(ma30, i)
+    m30_prev = _last_valid(ma30, i - 1)
+    d0 = _last_valid(dif, i)
+    e0 = _last_valid(dea, i)
+    h0 = _last_valid(hist, i)
+    h1 = _last_valid(hist, i - 1)
+    d1 = _last_valid(dif, i - 1)
+    e1 = _last_valid(dea, i - 1)
+    d2 = _last_valid(dif, i - 2) if i >= 2 else None
+    e2 = _last_valid(dea, i - 2) if i >= 2 else None
+    golden_now = _cross_up(d1, e1, d0, e0)
+    golden_prev = _cross_up(d2, e2, d1, e1) if i >= 2 else False
+    raw_slope = _factor_param(None, "w_slope", "slope_weeks")
+    try:
+        slope_weeks = int(raw_slope if raw_slope is not None else 2)
+    except (TypeError, ValueError):
+        slope_weeks = 2
+    if not slope_weeks:
+        slope_weeks = 2
+    slope_up_n = False
+    if slope_weeks > 0 and i >= slope_weeks:
+        slope_up_n = True
+        for k in range(slope_weeks):
+            a = _last_valid(ma30, i - k)
+            b = _last_valid(ma30, i - k - 1)
+            if a is None or b is None or not (a > b):
+                slope_up_n = False
+                break
+    detail.update(
+        {
+            "ma5": m5,
+            "ma10": m10,
+            "ma30": m30,
+            "ma30_prev": m30_prev,
+            "ma30_slope_up2": slope_up_n,
+            "dif": d0,
+            "dea": e0,
+            "dif_prev": d1,
+            "dea_prev": e1,
+            "hist": h0,
+            "hist_prev": h1,
+            "macd_golden_now": golden_now,
+            "macd_golden_prev": golden_prev,
+            "close": c,
+        }
+    )
+    return detail
+
+
+def _weekly_bull_from_detail(detail):
+    """仅日志；不成因子。"""
+    if not detail:
+        return False
+    m5 = detail.get("ma5")
+    m10 = detail.get("ma10")
+    m30 = detail.get("ma30")
+    m30_prev = detail.get("ma30_prev")
+    d0 = detail.get("dif")
+    h0 = detail.get("hist")
+    if None in (m5, m10, m30, d0, h0):
+        return False
+    ma30_ok = (m30_prev is None) or (m30 >= m30_prev * 0.998)
+    return (m5 > m10) and (d0 > 0) and (h0 > 0) and ma30_ok
+
+
+def _factor_daily_features(closes, volumes):
+    detail = {
+        "ma20": None,
+        "ma60": None,
+        "vol10": None,
+        "vol20": None,
+        "vol_need": 1,
+        "vol_streak": 0,
+        "mid_n": 0,
+        "slow_n": 0,
+        "i": -1,
+        "price": None,
+        "vol": None,
+        "v10": None,
+        "v20": None,
+    }
+    if closes is None or volumes is None:
+        return False, detail
+    d_ma = _structure_windows()["d_ma"]
+    try:
+        mid_n = int(d_ma.get("mid") or 0)
+    except (TypeError, ValueError):
+        mid_n = 0
+    try:
+        slow_n = int(d_ma.get("slow") or 0)
+    except (TypeError, ValueError):
+        slow_n = 0
+    detail["mid_n"] = mid_n
+    detail["slow_n"] = slow_n
+    ma20 = _price_ma(closes, mid_n) if mid_n > 0 else None
+    ma60 = _price_ma(closes, slow_n) if slow_n > 0 else None
+    raw_vn = _factor_param(None, "pullback_vol", "vol_n")
+    raw_dn = _factor_param(None, "vol_dry", "n")
+    try:
+        vol_n = int(10 if raw_vn is None else raw_vn)
+    except (TypeError, ValueError):
+        vol_n = 10
+    try:
+        dry_n = int(20 if raw_dn is None else raw_dn)
+    except (TypeError, ValueError):
+        dry_n = 20
+    vol10 = _sma(volumes, vol_n)
+    vol20 = _sma(volumes, dry_n)
+    if vol10 is None or vol20 is None:
+        return False, detail
+    i = len(closes) - 1
+    vol_need = _vol_pullback_confirm_need()
+    detail["vol_need"] = vol_need
+    detail["i"] = i
+    if i < max(2, vol_need):
+        return False, detail
+    price = float(closes[i])
+    vol = float(volumes[i])
+    m20 = _last_valid(ma20, i) if ma20 is not None else None
+    m60 = _last_valid(ma60, i) if ma60 is not None else None
+    v10 = _last_valid(vol10, i)
+    v20 = _last_valid(vol20, i)
+    detail.update(
+        {
+            "ma20": m20,
+            "ma60": m60,
+            "vol10": vol10,
+            "vol20": vol20,
+            "price": price,
+            "vol": vol,
+            "v10": v10,
+            "v20": v20,
+            "closes": closes,
+            "volumes": volumes,
+        }
+    )
+    return True, detail
+
+
+def _build_factor_ctx(
+    closes=None,
+    volumes=None,
+    highs=None,
+    lows=None,
+    w_detail=None,
+    price=None,
+    state=None,
+    clock=None,
+):
+    ready, daily = _factor_daily_features(closes, volumes)
+    if price is None:
+        price = daily.get("price")
+    try:
+        atr_n = int(_structure_windows()["atr"]["n"] or 0)
+    except (TypeError, ValueError, KeyError):
+        atr_n = 0
+    atr_arr = _calc_atr(highs, lows, closes, atr_n) if atr_n > 0 else None
+    atr = _last_valid(atr_arr) if atr_arr is not None else None
+    market = {
+        "close": price,
+        "closes": closes,
+        "volumes": volumes,
+        "highs": highs,
+        "lows": lows,
+        "w_detail": w_detail or {},
+        "daily_ready": ready,
+        "daily_detail": daily,
+        "ma20": daily.get("ma20"),
+        "ma60": daily.get("ma60"),
+        "vol10": daily.get("vol10"),
+        "vol20": daily.get("vol20"),
+        "mid_n": daily.get("mid_n"),
+        "slow_n": daily.get("slow_n"),
+        "i": daily.get("i"),
+        "vol": daily.get("vol"),
+        "v10": daily.get("v10"),
+        "v20": daily.get("v20"),
+        "vol_need": daily.get("vol_need"),
+        "atr": atr,
+        "atr_n": atr_n,
+    }
+    return {
+        "market": market,
+        "state": dict(state or {}),
+        "clock": dict(clock or {}),
+    }
+
+
+def _factor_ctx_bind_state(ctx, **fields):
+    st = dict((ctx or {}).get("state") or {})
+    st.update(fields)
+    out = dict(ctx or {})
+    out["state"] = st
+    return out
+
+# === fband/factors/lib/pullback_vol.py ===
+def _near_ma(price, ma, tol=None):
+    if tol is None:
+        tol = _factor_param(None, "pullback_vol", "tol")
+    tol = float(tol)
+    if price is None or ma is None or ma <= 0:
+        return False
+    return abs(float(price) - float(ma)) / float(ma) <= tol
+
+
+def _factor_eval_pullback_vol(ctx):
+    market = (ctx or {}).get("market") or {}
+    if not market.get("daily_ready"):
+        return False, {"vol_streak": 0}
+    mid_n = int(market.get("mid_n") or 0)
+    slow_n = int(market.get("slow_n") or 0)
+    price = market.get("close")
+    if price is None:
+        price = market.get("daily_detail", {}).get("price")
+    m20 = market.get("ma20")
+    m60 = market.get("ma60")
+    vol10 = market.get("vol10")
+    volumes = market.get("volumes")
+    i = int(market.get("i") or 0)
+    vol_need = int(market.get("vol_need") or _vol_pullback_confirm_need())
+    near = False
+    if mid_n > 0:
+        near = near or _near_ma(price, m20)
+    if slow_n > 0:
+        near = near or _near_ma(price, m60)
+    ratio = float(_factor_param(ctx, "pullback_vol", "ratio"))
+    vol_streak = 0
+    if volumes is None or vol10 is None:
+        return False, {"vol_streak": 0, "near": near}
+    for k in range(vol_need):
+        j = i - k
+        vma = _last_valid(vol10, j)
+        vj = float(volumes[j])
+        if vma is None or vma <= 0 or vj >= vma * ratio:
+            break
+        vol_streak += 1
+    hit = bool(near and vol_streak >= vol_need)
+    return hit, {"vol_streak": vol_streak, "near": near}
+
+# === fband/factors/lib/chase.py ===
+def _factor_eval_chase(ctx):
+    market = (ctx or {}).get("market") or {}
+    if not market.get("daily_ready"):
+        return False, {}
+    closes = market.get("closes")
+    i = int(market.get("i") or 0)
+    if closes is None or i < 1:
+        return False, {}
+    price = float(market.get("close") if market.get("close") is not None else closes[i])
+    prev = float(closes[i - 1]) if closes[i - 1] else 0.0
+    if prev <= 0:
+        return False, {"prev": prev}
+    chg = (price - prev) / prev
+    return chg >= float(_factor_param(ctx, "chase", "max_pct")), {"chg": chg}
+
+# === fband/factors/lib/vol_dry.py ===
+def _factor_eval_vol_dry(ctx):
+    market = (ctx or {}).get("market") or {}
+    if not market.get("daily_ready"):
+        return False, {}
+    mid_n = int(market.get("mid_n") or 0)
+    m20 = market.get("ma20")
+    price = market.get("close")
+    v20 = market.get("v20")
+    vol = market.get("vol")
+    dry_below = (
+        mid_n > 0
+        and m20 is not None
+        and price is not None
+        and price < m20
+        and v20 is not None
+        and v20 > 0
+        and vol is not None
+        and vol < v20 * float(_factor_param(ctx, "vol_dry", "ratio"))
+    )
+    return bool(dry_below), {"dry_below": bool(dry_below)}
+
+# === fband/factors/lib/w_bias.py ===
+def _factor_eval_w_bias(ctx):
+    w_detail = ((ctx or {}).get("market") or {}).get("w_detail") or {}
+    m5 = w_detail.get("ma5")
+    m30 = w_detail.get("ma30")
+    if m5 is None or m30 is None or m30 <= 0:
+        return False, {"bias": None}
+    bias = (float(m5) - float(m30)) / float(m30)
+    return bias >= float(_factor_param(ctx, "w_bias", "hard")), {"bias": bias}
+
+# === fband/factors/lib/w_slope.py ===
+def _factor_eval_w_slope(ctx):
+    w_detail = ((ctx or {}).get("market") or {}).get("w_detail") or {}
+    m5 = w_detail.get("ma5")
+    m30 = w_detail.get("ma30")
+    if m5 is None or m30 is None or m30 <= 0:
+        return False, {"bias": None}
+    bias = (float(m5) - float(m30)) / float(m30)
+    if bias >= float(_factor_param(ctx, "w_slope", "low")):
+        return False, {"bias": bias}
+    slope_ok = bool(w_detail.get("ma30_slope_up2"))
+    return (not slope_ok), {"bias": bias, "slope_ok": slope_ok}
+
+# === fband/factors/lib/weekly_bear.py ===
+def _factor_eval_weekly_bear(ctx):
+    """当天空头（禁开/撤买）。确认清仓走 weekly_bear_confirm。"""
+    w_detail = ((ctx or {}).get("market") or {}).get("w_detail") or {}
+    c = w_detail.get("close")
+    m30 = w_detail.get("ma30")
+    d0 = w_detail.get("dif")
+    e0 = w_detail.get("dea")
+    d1 = w_detail.get("dif_prev")
+    e1 = w_detail.get("dea_prev")
+    if None in (c, m30, d0, e0):
+        return False, {}
+    death_below = _cross_down(d1, e1, d0, e0) and (d0 < 0) and (e0 < 0)
+    bear = (c < m30) or death_below
+    return bool(bear), {"death_below": bool(death_below)}
+
+# === fband/factors/lib/weekly_bear_confirm.py ===
+def _w_bear_confirm_need():
+    """最少 1：当天空头即可挂清仓；勿用 `x or 2`（0 会被当成缺省翻成 2）。"""
+    raw = _factor_param(None, "weekly_bear_confirm", "days")
+    try:
+        n = int(2 if raw is None else raw)
+    except Exception:
+        n = 2
+    return max(1, n)
+
+
+def _factor_eval_weekly_bear_confirm(ctx):
+    """连续 N 个信号日仍空头才确认清仓；读 streak，不改计数。"""
+    state = (ctx or {}).get("state") or {}
+    if "w_bear_confirmed" in state:
+        return bool(state.get("w_bear_confirmed")), {"streak": state.get("w_bear_streak")}
+    streak = int(state.get("w_bear_streak") or 0)
+    need = _w_bear_confirm_need()
+    return streak >= need, {"streak": streak, "need": need}
+
+# === fband/factors/lib/plat_break.py ===
+def _plat_window(highs, lows, lookback, end_i=None):
+    """不含 end_i 的回看窗口平台高低点；(plat_high, plat_low) 或 None。"""
+    if highs is None or lows is None:
+        return None
+    n = min(len(highs), len(lows))
+    lookback = int(lookback)
+    if lookback < 2 or n < lookback + 1:
+        return None
+    i = n - 1 if end_i is None else int(end_i)
+    if i < lookback:
+        return None
+    win_h = [float(x) for x in highs[i - lookback:i]]
+    win_l = [float(x) for x in lows[i - lookback:i]]
+    if not win_h or not win_l:
+        return None
+    plat_high = max(win_h)
+    plat_low = min(win_l)
+    if plat_high <= 0 or plat_low <= 0:
+        return None
+    return plat_high, plat_low
+
+
+def _factor_eval_plat_break(ctx):
+    market = (ctx or {}).get("market") or {}
+    closes = market.get("closes")
+    highs = market.get("highs")
+    lows = market.get("lows")
+    raw_lb = _factor_param(ctx, "plat_break", "lookback")
+    raw_rng = _factor_param(ctx, "plat_break", "max_range")
+    raw_buf = _factor_param(ctx, "plat_break", "break_buf")
+    try:
+        lookback = int(20 if raw_lb is None else raw_lb)
+    except (TypeError, ValueError):
+        lookback = 20
+    try:
+        max_range = float(0.10 if raw_rng is None else raw_rng)
+    except (TypeError, ValueError):
+        max_range = 0.10
+    try:
+        buf = float(0.0 if raw_buf is None else raw_buf)
+    except (TypeError, ValueError):
+        buf = 0.0
+    if lookback < 5 or max_range <= 0:
+        return False, {}
+    if closes is None or highs is None or lows is None:
+        return False, {}
+    n = len(closes)
+    if n < lookback + 1 or len(highs) != n or len(lows) != n:
+        return False, {}
+    if n < 2:
+        return False, {}
+    plat = _plat_window(highs, lows, lookback)
+    if plat is None:
+        return False, {}
+    plat_high, plat_low = plat
+    rng = (float(plat_high) - float(plat_low)) / float(plat_low)
+    if rng > max_range:
+        return False, {"range": rng}
+    hurdle = float(plat_high) * (1.0 + buf)
+    px = float(closes[-1])
+    prev = float(closes[-2])
+    if px <= hurdle:
+        return False, {"hurdle": hurdle}
+    if prev > hurdle:
+        return False, {"hurdle": hurdle, "prev": prev}
+    return True, {"plat_high": plat_high, "plat_low": plat_low}
+
+# === fband/factors/lib/w_macd_golden.py ===
+def _factor_eval_w_macd_golden(ctx):
+    w_detail = ((ctx or {}).get("market") or {}).get("w_detail") or {}
+    if not w_detail:
+        return False, {}
+    h0 = w_detail.get("hist")
+    h1 = w_detail.get("hist_prev")
+    if h0 is None or h1 is None:
+        return False, {}
+    hist = float(h0)
+    hist_prev = float(h1)
+    if hist <= 0 or hist <= hist_prev:
+        return False, {}
+    golden_now = bool(w_detail.get("macd_golden_now"))
+    golden_prev = bool(w_detail.get("macd_golden_prev"))
+    if not (golden_now or golden_prev):
+        return False, {}
+    if golden_now and (not golden_prev):
+        return True, {"golden_now": True}
+    raw_ratio = _factor_param(ctx, "w_macd_golden", "hist_expand")
+    try:
+        ratio = float(1.0 if raw_ratio is None else raw_ratio)
+    except (TypeError, ValueError):
+        ratio = 1.0
+    if ratio <= 1.0:
+        return True, {"ratio": ratio}
+    base = abs(hist_prev) if abs(hist_prev) > 1e-12 else hist
+    hit = hist >= base * ratio
+    return bool(hit), {"hist": hist, "hist_prev": hist_prev}
+
+# === fband/factors/lib/stop_loss.py ===
+def _factor_eval_stop_loss(ctx):
+    market = (ctx or {}).get("market") or {}
+    state = (ctx or {}).get("state") or {}
+    lot = state.get("lot") or {}
+    cost = lot.get("price")
+    if cost is None:
+        cost = state.get("cost")
+    price = market.get("close")
+    try:
+        cost = float(cost or 0)
+    except (TypeError, ValueError):
+        cost = 0.0
+    if cost <= 0 or price is None:
+        return False, {}
+    hit = float(price) <= cost * (1.0 - float(_factor_param(ctx, "stop_loss", "pct")))
+    return bool(hit), {"cost": cost, "price": float(price)}
+
+# === fband/factors/lib/atr_stop.py ===
+def _factor_eval_atr_stop(ctx):
+    """收盘 <= 成本 - k * ATR。n<=0 或 k<=0 关掉。"""
+    market = (ctx or {}).get("market") or {}
+    state = (ctx or {}).get("state") or {}
+    lot = state.get("lot") or {}
+    cost = lot.get("price")
+    if cost is None:
+        cost = state.get("cost")
+    price = market.get("close")
+    atr = market.get("atr")
+    try:
+        atr_n = int(market.get("atr_n") or 0)
+    except (TypeError, ValueError):
+        atr_n = 0
+    try:
+        k = float(_factor_param(ctx, "atr_stop", "k"))
+    except (TypeError, ValueError):
+        k = 0.0
+    try:
+        cost = float(cost or 0)
+    except (TypeError, ValueError):
+        cost = 0.0
+    if atr_n <= 0 or k <= 0 or cost <= 0 or price is None or atr is None:
+        return False, {}
+    try:
+        atr = float(atr)
+    except (TypeError, ValueError):
+        return False, {}
+    if atr <= 0:
+        return False, {}
+    hit = float(price) <= cost - k * atr
+    return bool(hit), {"cost": cost, "price": float(price), "atr": atr, "k": k}
+
+# === fband/factors/lib/trail_stop.py ===
+def _trail_tier_params(max_profit, tiers=None):
+    """按峰值浮盈选档，返回 (giveback, profit_floor)；未达起步档则 (None, None)。"""
+    mp = float(max_profit)
+    if tiers is None:
+        tiers = _factor_param(None, "trail_stop", "tiers")
+    for lo, hi, giveback, floor in tiers or ():
+        if mp < float(lo):
+            continue
+        if hi is not None and mp >= float(hi):
+            continue
+        fl = None if floor is None else float(floor)
+        return float(giveback), fl
+    return None, None
+
+
+def _trail_stop_hit(price, cost, peak=None, tiers=None):
+    """阶梯移动止盈：峰值浮盈落档后，回撤超容忍 或 跌破利润底线。"""
+    if cost is None or cost <= 0:
+        return False
+    if peak is None:
+        peak = getattr(A, "hold_peak", None)
+    if peak is None or peak <= 0:
+        return False
+    max_profit = (float(peak) - float(cost)) / float(cost)
+    giveback_lim, profit_floor = _trail_tier_params(max_profit, tiers=tiers)
+    if giveback_lim is None:
+        return False
+    giveback = (float(peak) - float(price)) / float(peak)
+    if giveback > giveback_lim:
+        return True
+    if profit_floor is not None:
+        cur_profit = (float(price) - float(cost)) / float(cost)
+        if cur_profit < profit_floor:
+            return True
+    return False
+
+
+def _factor_eval_trail_stop(ctx):
+    market = (ctx or {}).get("market") or {}
+    state = (ctx or {}).get("state") or {}
+    lot = state.get("lot") or {}
+    cost = lot.get("price")
+    if cost is None:
+        cost = state.get("cost")
+    peak = lot.get("hold_peak")
+    if peak is None:
+        peak = state.get("hold_peak")
+    price = market.get("close")
+    try:
+        cost = float(cost or 0)
+    except (TypeError, ValueError):
+        cost = 0.0
+    if price is None:
+        return False, {}
+    tiers = _factor_param(ctx, "trail_stop", "tiers")
+    return bool(_trail_stop_hit(price, cost, peak=peak, tiers=tiers)), {
+        "cost": cost,
+        "peak": peak,
+    }
+
+# === fband/factors/lib/atr_trail_stop.py ===
+def _factor_eval_atr_trail_stop(ctx):
+    """峰值相对成本 > k1*ATR 武装：收盘<=成本 或 峰值回撤>=k2*ATR。"""
+    market = (ctx or {}).get("market") or {}
+    state = (ctx or {}).get("state") or {}
+    lot = state.get("lot") or {}
+    cost = lot.get("price")
+    if cost is None:
+        cost = state.get("cost")
+    peak = lot.get("hold_peak")
+    if peak is None:
+        peak = state.get("hold_peak")
+    price = market.get("close")
+    atr = market.get("atr")
+    try:
+        atr_n = int(market.get("atr_n") or 0)
+    except (TypeError, ValueError):
+        atr_n = 0
+    try:
+        k1 = float(_factor_param(ctx, "atr_trail_stop", "k1"))
+    except (TypeError, ValueError):
+        k1 = 0.0
+    try:
+        k2 = float(_factor_param(ctx, "atr_trail_stop", "k2"))
+    except (TypeError, ValueError):
+        k2 = 0.0
+    try:
+        cost = float(cost or 0)
+    except (TypeError, ValueError):
+        cost = 0.0
+    if atr_n <= 0 or k1 <= 0 or cost <= 0 or price is None or atr is None:
+        return False, {}
+    if peak is None:
+        return False, {}
+    try:
+        peak = float(peak)
+        atr = float(atr)
+    except (TypeError, ValueError):
+        return False, {}
+    if peak <= 0 or atr <= 0:
+        return False, {}
+    if not (peak - cost > k1 * atr):
+        return False, {"cost": cost, "peak": peak, "atr": atr, "armed": False}
+    px = float(price)
+    be = px <= cost
+    giveback = False
+    if k2 > 0:
+        giveback = (peak - px) >= k2 * atr
+    hit = bool(be or giveback)
+    return hit, {
+        "cost": cost,
+        "price": px,
+        "peak": peak,
+        "atr": atr,
+        "k1": k1,
+        "k2": k2,
+        "armed": True,
+        "breakeven": bool(be),
+        "giveback": bool(giveback),
+    }
+
+# === fband/factors/lib/time_force.py ===
+def _trail_arm():
+    """trail_stop 档 1 起步 peak_lo；只给 init trail_arm=，不给 time_force 让路。"""
+    tiers = _factor_param(None, "trail_stop", "tiers")
+    try:
+        return float(tiers[0][0])
+    except (IndexError, TypeError, ValueError):
+        return None
+
+
+def _time_force_min_ret(ctx=None):
+    """time_force.arm；缺省 0.03。<=0 关让路。"""
+    raw = _factor_param(ctx, "time_force", "arm", 0.03)
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _time_force_peak_ret(lot):
+    if lot is None:
+        mx = float(getattr(A, "hold_max_ret", 0) or 0)
+        peak = getattr(A, "hold_peak", None)
+        cost = _pos_cost_price()
+    else:
+        try:
+            mx = float(lot.get("hold_max_ret") or 0)
+        except Exception:
+            mx = 0.0
+        peak = lot.get("hold_peak")
+        cost = float(lot.get("price") or 0)
+    if peak and cost and float(cost) > 0:
+        mx = max(mx, (float(peak) - float(cost)) / float(cost))
+    return mx
+
+
+def _time_force_already_skip(lot):
+    if lot is None:
+        return bool(getattr(A, "time_force_trend_skip", False))
+    return bool(lot.get("time_force_trend_skip"))
+
+
+def _time_force_mark_skip(lot, peak_ret, hold_bars, m60):
+    if lot is None:
+        A.time_force_trend_skip = True
+        lid = None
+    else:
+        lot["time_force_trend_skip"] = True
+        lid = lot.get("id")
+    print(
+        "%s time_force skip trend peak=%.2f%% ma60=%.4f hold=%s lot=%s"
+        % (STRATEGY_NAME, float(peak_ret) * 100.0, m60, hold_bars, lid)
+    )
+    _event_log(
+        "time_force_skip_trend",
+        peak_ret=peak_ret,
+        ma60=m60,
+        hold_bars=hold_bars,
+        lot_id=lid,
+    )
+    _save_state()
+
+
+def _time_force_hit(price, closes, hold_bars, lot=None, ctx=None):
+    """智能时间成本：持仓 > time_force.bars 后评估出场。
+    bars<=0 关闭整条规则。
+    d_ma.slow<=0 时慢线地板不存在，同样不触发（BARS 仍独立）。
+    收盘破日线慢均线 → 立即强制平仓。
+    仍站上慢线时：峰值浮盈已达 time_force.arm 则不按日历强平；
+    从未武装的死钱仓立即强平。"""
+    try:
+        raw_bars = _factor_param(ctx, "time_force", "bars")
+        bars_lim = int(raw_bars)
+    except (TypeError, ValueError):
+        bars_lim = 0
+    if bars_lim <= 0:
+        return False
+    try:
+        slow_n = int(_structure_windows()["d_ma"]["slow"] or 0)
+    except (TypeError, ValueError):
+        slow_n = 0
+    if slow_n <= 0:
+        return False
+    if hold_bars is None or int(hold_bars) <= bars_lim:
+        return False
+    ma60_arr = _price_ma(closes, slow_n)
+    if ma60_arr is None:
+        return False
+    i = len(closes) - 1
+    ma60 = _last_valid(ma60_arr, i)
+    if ma60 is None or price is None:
+        return False
+    px = float(price)
+    m60 = float(ma60)
+
+    if px < m60:
+        return True
+
+    min_ret = _time_force_min_ret(ctx)
+    peak_ret = _time_force_peak_ret(lot)
+    already = _time_force_already_skip(lot)
+    if min_ret > 0 and (already or peak_ret >= min_ret):
+        if not already:
+            _time_force_mark_skip(lot, peak_ret, hold_bars, m60)
+        return False
+
+    return True
+
+
+def _factor_eval_time_force(ctx):
+    market = (ctx or {}).get("market") or {}
+    state = (ctx or {}).get("state") or {}
+    lot = state.get("lot")
+    closes = market.get("closes")
+    price = market.get("close")
+    if lot is None:
+        hold_bars = state.get("hold_bars")
+        if hold_bars is None:
+            hold_bars = getattr(A, "hold_bars", 0)
+    else:
+        hold_bars = lot.get("hold_bars", 0)
+    return bool(_time_force_hit(price, closes, hold_bars, lot=lot, ctx=ctx)), {}
+
+# === fband/factors/registry.py ===
+def _factor_registry():
+    out = {}
+    missing = []
+    leaves = globals().get("LEAVES") or {}
+    for fid in leaves:
+        key = str(fid)
+        fn = globals().get("_factor_eval_" + key)
+        if callable(fn):
+            out[key] = fn
+        else:
+            missing.append(key)
+    if missing:
+        raise RuntimeError("LEAVES 缺 _factor_eval_: %s" % ",".join(missing))
+    return out
+
+
+_factor_registry()
+
+
+def _factor_eval(fid, ctx):
+    fn = _factor_registry().get(str(fid or ""))
+    if fn is None:
+        return False, {}
+    ok, detail = fn(ctx)
+    return bool(ok), detail or {}
+
+
+def _factor_hit(fid, ctx):
+    ok, _detail = _factor_eval(fid, ctx)
+    return bool(ok)
+
+# === fband/factors/expr.py ===
+def _recipe_hit(expr, ctx):
+    """hit(and/or/not)；叶子 = 因子 id。False/None = 恒假。"""
+    if expr is False or expr is None:
+        return False, []
+    if expr is True:
+        return True, []
+    if isinstance(expr, str):
+        ok, _detail = _factor_eval(expr, ctx)
+        return bool(ok), [expr] if ok else []
+    if not isinstance(expr, (list, tuple)) or not expr:
+        return False, []
+    op = expr[0]
+    if op == "not":
+        if len(expr) < 2:
+            return False, []
+        ok, _rs = _recipe_hit(expr[1], ctx)
+        return (not ok), []
+    if op == "and":
+        reasons = []
+        for node in expr[1:]:
+            ok, rs = _recipe_hit(node, ctx)
+            if not ok:
+                return False, []
+            reasons.extend(rs)
+        return True, reasons
+    if op == "or":
+        for node in expr[1:]:
+            ok, rs = _recipe_hit(node, ctx)
+            if ok:
+                return True, rs
+        return False, []
+    ok, _detail = _factor_eval(op, ctx)
+    return bool(ok), [op] if ok else []
+
+
+def _recipe_block_reasons(expr, ctx):
+    """未命中时第一个挡住的叶子。["not","chase"] 失败 → chase。"""
+    if expr is False or expr is None or expr is True:
+        return []
+    if isinstance(expr, str):
+        ok, _detail = _factor_eval(expr, ctx)
+        return [] if ok else [expr]
+    if not isinstance(expr, (list, tuple)) or not expr:
+        return []
+    op = expr[0]
+    if op == "not":
+        if len(expr) < 2:
+            return []
+        inner = expr[1]
+        ok, rs = _recipe_hit(inner, ctx)
+        if not ok:
+            return []
+        if isinstance(inner, str):
+            return [inner]
+        return list(rs) if rs else []
+    if op == "and":
+        for node in expr[1:]:
+            ok, _rs = _recipe_hit(node, ctx)
+            if not ok:
+                return _recipe_block_reasons(node, ctx)
+        return []
+    if op == "or":
+        for node in expr[1:]:
+            rs = _recipe_block_reasons(node, ctx)
+            if rs:
+                return rs
+        return []
+    ok, _detail = _factor_eval(op, ctx)
+    return [] if ok else [op]
+
+
+def _recipe_explain(expr, ctx):
+    """命中用 _recipe_hit 的 reasons；未命中用第一个挡住的叶子。"""
+    hit, reasons = _recipe_hit(expr, ctx)
+    if hit:
+        return True, reasons
+    return False, _recipe_block_reasons(expr, ctx)
+
+
+def _recipe_not_leaves(expr):
+    """顶层 and 下的 ["not", leaf] 叶子 id。不走进 or 子树。"""
+    if not isinstance(expr, (list, tuple)) or not expr:
+        return []
+    if expr[0] == "and":
+        out = []
+        for node in expr[1:]:
+            if (
+                isinstance(node, (list, tuple))
+                and len(node) >= 2
+                and node[0] == "not"
+                and isinstance(node[1], str)
+            ):
+                out.append(node[1])
+        return out
+    if expr[0] == "not" and len(expr) >= 2 and isinstance(expr[1], str):
+        return [expr[1]]
+    return []
+
+# === fband/factors/slots.py ===
+def _copy_nested_table(src):
+    out = {}
+    for fid, block in (src or {}).items():
+        if isinstance(block, dict):
+            out[str(fid)] = dict(block)
+        else:
+            out[str(fid)] = block
+    return out
+
+
+def _merge_nested_table(dst, incoming):
+    if not isinstance(incoming, dict):
+        return dst
+    for fid, block in incoming.items():
+        if not isinstance(block, dict):
+            continue
+        cur = dst.get(str(fid))
+        if not isinstance(cur, dict):
+            cur = {}
+            dst[str(fid)] = cur
+        cur.update(block)
+    return dst
+
+
+def _fold_tables_for_fingerprint(fp_src, st_src, overrides):
+    """深合并 overrides.factor_params / structure。overrides 袋保持空（apply 后再算指纹）。"""
+    fp = {}
+    for fid, block in (fp_src or {}).items():
+        if isinstance(block, dict):
+            copied = dict(block)
+            if "tiers" in copied:
+                copied["tiers"] = _factor_tiers_as_lists(copied.get("tiers"))
+            fp[str(fid)] = copied
+        else:
+            fp[str(fid)] = block
+    st = _copy_nested_table(st_src)
+    ov = dict(overrides or {})
+    incoming = ov.get("factor_params")
+    if isinstance(incoming, dict):
+        for fid, block in incoming.items():
+            if not isinstance(block, dict):
+                continue
+            cur = fp.get(str(fid))
+            if not isinstance(cur, dict):
+                cur = {}
+                fp[str(fid)] = cur
+            cur.update(block)
+            if str(fid) == "trail_stop" and "tiers" in cur:
+                cur["tiers"] = _factor_tiers_as_lists(cur.get("tiers"))
+    _merge_nested_table(st, ov.get("structure") if isinstance(ov.get("structure"), dict) else {})
+    leftover = {}
+    return fp, st, leftover
+
+
+def _recipe_fingerprint(overrides=None, recipe=None):
+    """表达式 + 折进表的阈值 + structure；不扫全因子开关。"""
+    rec = recipe if recipe is not None else (globals().get("RECIPE") or {})
+    fp, st, leftover = _fold_tables_for_fingerprint(
+        rec.get("factor_params") or {}, rec.get("structure") or {}, overrides
+    )
+    payload = {
+        "entry": rec.get("entry"),
+        "exit": rec.get("exit"),
+        "factor_params": fp,
+        "structure": st,
+        "overrides": leftover,
+        "scale_in": rec.get("scale_in"),
+        "scale_out": rec.get("scale_out"),
+    }
+    text = json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":")
+    )
+    h = 2166136261
+    for ch in text:
+        h ^= ord(ch)
+        h = (h * 16777619) & 0xFFFFFFFF
+    return "%08x" % h
+
+
+def _slot_result(hit, reasons=None, detail=None, extra=None):
+    out = {"hit": bool(hit), "reasons": list(reasons or []), "detail": detail or {}}
+    if extra:
+        out.update(extra)
+    return out
+
+
+def _eval_entry_slot(ctx, expr=None):
+    recipe = globals().get("RECIPE") or {}
+    tree = expr if expr is not None else recipe.get("entry")
+    hit, reasons = _recipe_explain(tree, ctx)
+    return _slot_result(hit, reasons)
+
+
+def _eval_scale_in_slot(ctx, expr=None):
+    recipe = globals().get("RECIPE") or {}
+    tree = expr if expr is not None else recipe.get("scale_in")
+    hit, reasons = _recipe_explain(tree, ctx)
+    return _slot_result(hit, reasons)
+
+
+def _eval_exit_slot(ctx, expr=None):
+    recipe = globals().get("RECIPE") or {}
+    tree = expr if expr is not None else recipe.get("exit")
+    if tree is False or tree is None:
+        return _slot_result(False)
+    hit, reasons = _recipe_hit(tree, ctx)
+    return _slot_result(hit, reasons)
+
+
+def _eval_scale_out_slot(ctx, expr=None):
+    recipe = globals().get("RECIPE") or {}
+    tree = expr if expr is not None else recipe.get("scale_out")
+    if tree is False or tree is None:
+        return _slot_result(False)
+    hit, reasons = _recipe_hit(tree, ctx)
+    return _slot_result(hit, reasons)
+
+
+def _eval_recipe_slots(ctx):
+    recipe = globals().get("RECIPE") or {}
+    return {
+        "entry": _eval_entry_slot(ctx, recipe.get("entry")),
+        "scale_in": _eval_scale_in_slot(ctx, recipe.get("scale_in")),
+        "exit": _eval_exit_slot(ctx, recipe.get("exit")),
+        "scale_out": _eval_scale_out_slot(ctx, recipe.get("scale_out")),
+    }
+
+# === fband/factors/intent.py ===
+def _intent_blank():
+    return {
+        "side": None,
+        "target": None,
+        "lot_ids": None,
+        "frac": None,
+        "reasons": [],
+        "shares": 0,
+    }
+
+
+def _intent_pack(side, target, reasons=None, lot_ids=None, frac=None, shares=0):
+    return {
+        "side": side,
+        "target": target,
+        "lot_ids": list(lot_ids) if lot_ids else None,
+        "frac": frac,
+        "reasons": list(reasons or []),
+        "shares": int(shares or 0),
+    }
+
+
+def _arbitrate_intent(
+    entry=None,
+    scale_in=None,
+    exit_slot=None,
+    scale_out=None,
+    scale_gate_ok=False,
+    holding=False,
+    lot_ids=None,
+    shares=0,
+):
+    """仓位仲裁。优先级写死：flat > reduce > add > open。"""
+    entry = entry or {}
+    scale_in = scale_in or {}
+    exit_slot = exit_slot or {}
+    scale_out = scale_out or {}
+    if holding and exit_slot.get("hit"):
+        return _intent_pack(
+            "sell",
+            "flat",
+            exit_slot.get("reasons"),
+            lot_ids,
+            shares=shares,
+        )
+    if holding and scale_out.get("hit"):
+        return _intent_pack(
+            "sell",
+            "reduce",
+            scale_out.get("reasons"),
+            lot_ids,
+            frac=scale_out.get("frac"),
+            shares=shares,
+        )
+    if holding and scale_in.get("hit") and scale_gate_ok:
+        return _intent_pack("buy", "add", scale_in.get("reasons"))
+    if (not holding) and entry.get("hit"):
+        return _intent_pack("buy", "open", entry.get("reasons"))
+    return _intent_blank()
+
+# === qmt_common/mode.py ===
+# 作用: 回测/实盘模式、暖机切换、K 线时间
+# 主要符号: _refresh_mode, _is_backtest, _bar_datetime
+# 钩子: _load_state；可选 _reconcile_with_broker
+def _is_backtest(C):
+    return bool(getattr(C, "do_back_test", False))
+
+
+def _on_mode_switch_to_live(C):
+    """暖机结束: 切到实盘语义（STATE / pending / 墙钟）。"""
+    print(
+        _strategy_tag(),
+        "mode switch backtest -> live",
+        "raw_do_back_test=",
+        getattr(A, "do_back_test_raw", None),
+        "barpos=",
+        getattr(C, "barpos", None),
+    )
+    _event_log(
+        "mode_switch",
+        direction="backtest_to_live",
+        raw_do_back_test=getattr(A, "do_back_test_raw", None),
+        barpos=getattr(C, "barpos", None),
+    )
+    A.ready_logged = False
+    A._hb_at = None
+    try:
+        _load_state()
+    except Exception as e:
+        print(_strategy_tag(), "live switch load_state fail", e)
+        _event_log("live_switch_load_state_fail", error=str(e))
+    if not hasattr(A, "pending"):
+        A.pending = None
+    recon = globals().get("_reconcile_with_broker")
+    if callable(recon):
+        try:
+            recon()
+        except Exception as e:
+            print(_strategy_tag(), "live switch reconcile fail", e)
+            _event_log("live_switch_reconcile_fail", error=str(e))
+
+
+def _refresh_mode(C):
+    """每根 K 刷新 A.is_backtest。
+
+    国金模型交易常先以 do_back_test=True 暖机历史，
+    再进入同一根最新 K 做实时，而标志可能仍为 True。
+    追赶规则: 今日最新 K 上 barpos 不变的第 2 次及以后调用 => 实盘。
+    """
+    prev = getattr(A, "is_backtest", None)
+    raw = bool(getattr(C, "do_back_test", False))
+    A.do_back_test_raw = raw
+    use_bt = raw
+    if raw:
+        try:
+            if C.is_last_bar():
+                bp = int(getattr(C, "barpos", 0) or 0)
+                last_bp = int(getattr(A, "_mode_last_bp", -1))
+                hits = int(getattr(A, "_mode_same_bp_hits", 0) or 0)
+                if bp == last_bp and bp >= 0:
+                    hits += 1
+                else:
+                    hits = 0
+                A._mode_last_bp = bp
+                A._mode_same_bp_hits = hits
+                bar_day = _bar_datetime(C).strftime("%Y%m%d")
+                today = datetime.datetime.now().strftime("%Y%m%d")
+                if bar_day == today and hits >= 1:
+                    use_bt = False
+        except Exception:
+            pass
+    else:
+        A._mode_same_bp_hits = 0
+
+    A.is_backtest = use_bt
+    if prev is True and (not use_bt):
+        _on_mode_switch_to_live(C)
+    elif prev is False and use_bt:
+        print(_strategy_tag(), "mode switch live -> backtest raw=", raw)
+        _event_log("mode_switch", direction="live_to_backtest", raw=raw)
+    return use_bt
+
+
+def _bar_datetime(C):
+    """回测用 K 线时间；实盘用墙钟。
+
+    注意: 若调用方已判定实盘，可直接用 datetime.now()；
+    本函数在无法解析 timetag 时回退墙钟。
+    """
+    try:
+        tag = C.get_bar_timetag(C.barpos)
+        if "timetag_to_datetime" in globals():
+            s = timetag_to_datetime(tag, "%Y%m%d%H%M%S")
+            return datetime.datetime.strptime(str(s), "%Y%m%d%H%M%S")
+        if tag > 10**12:
+            return datetime.datetime.fromtimestamp(tag / 1000.0)
+        return datetime.datetime.fromtimestamp(tag)
+    except Exception:
+        return datetime.datetime.now()
+
+# === qmt_common/broker_base.py ===
+# 作用: 资金/持仓查询（只读券商账本）
+# 主要符号: _available_cash, _broker_position, _can_use_vol
+# 说明: _max_sell_vol / 底仓隔离由策略或 single/broker 提供
+def _available_cash():
+    if getattr(A, "is_backtest", False):
+        return 10**9
+    try:
+        accs = get_trade_detail_data(A.acct, A.acct_type, "account")
+    except Exception as e:
+        _diag_once("cash_fail", e)
+        return None
+    if not accs:
+        print(_strategy_tag(), "account not login", A.acct)
+        _event_log("account_not_login", acct=A.acct)
+        return None
+    return float(accs[0].m_dAvailable)
+
+
+def _pos_code(p):
+    return str(getattr(p, "m_strInstrumentID", "") or "") + "." + str(
+        getattr(p, "m_strExchangeID", "") or ""
+    )
+
+
+def _broker_position(stock):
+    """返回标的 (总量, 可卖, 成本价)；无持仓则 (0,0,0)。"""
+    if getattr(A, "is_backtest", False) or DRY_RUN:
+        return 0, 0, 0.0
+    try:
+        positions = get_trade_detail_data(A.acct, A.acct_type, "position")
+    except Exception as e:
+        print(_strategy_tag(), "position query fail", e)
+        _event_log("position_query_fail", error=str(e), query_stock=stock)
+        return 0, 0, 0.0
+    if not positions:
+        return 0, 0, 0.0
+    for p in positions:
+        if _pos_code(p) != stock:
+            continue
+        vol = int(getattr(p, "m_nVolume", 0) or 0)
+        can = int(getattr(p, "m_nCanUseVolume", 0) or 0)
+        cost = 0.0
+        for attr in ("m_dOpenPrice", "m_dCostPrice", "m_dAvgPrice"):
+            v = getattr(p, attr, None)
+            if v is not None:
+                try:
+                    cost = float(v)
+                    if cost > 0:
+                        break
+                except Exception:
+                    pass
+        return vol, can, cost
+    return 0, 0, 0.0
+
+
+def _can_use_vol(stock):
+    if getattr(A, "is_backtest", False) or DRY_RUN:
+        return 10**9
+    _vol, can, _cost = _broker_position(stock)
+    return int(can)
+
+# === qmt_common/single/broker.py ===
+# 作用: 单仓可卖上限（T+1 / can_use）
+# 主要符号: _max_sell_vol, _dry_t1_sellable
+def _dry_t1_sellable(want, now):
+    """DRY_RUN 可卖: 默认禁止同日历日卖出当日买入仓; ALLOW_T0 则放行。"""
+    want = int(want)
+    if want <= 0:
+        return 0
+    if not _has_position():
+        return 0
+    if _allow_t0():
+        return want
+    ot = _parse_opened_at(A.position.get("opened_at"))
+    if ot is not None and now is not None and ot.date() == now.date():
+        return 0
+    return want
+
+
+def _max_sell_vol(now=None):
+    """最多可卖股数; 默认 T+1, ALLOW_T0 时回测/DRY 不锁当日仓. skip 时调用方绝不清仓."""
+    want = _pos_shares()
+    if getattr(A, "is_backtest", False):
+        if now is not None:
+            _bt_roll_t1(now.strftime("%Y%m%d"))
+        want = max(want, _bt_held_vol())
+        return max(0, min(want, _bt_available_vol()))
+    if want <= 0:
+        return 0
+    if DRY_RUN:
+        return _dry_t1_sellable(want, now or datetime.datetime.now())
+    broker_vol, can, _cost = _broker_position(A.stock)
+    return max(0, min(want, int(can), int(broker_vol)))
+
+# === qmt_common/orders_pending.py ===
+# 作用: 委托查询、撤单、pending 生命周期
+# 主要符号: _process_pending, _deal_fill, _try_cancel_order, _new_remark
+# 钩子(策略必须提供): _pending_on_buy_fill(pend, vol, px)
+#                     _pending_on_sell_fill(pend, now, vol, px)
+#                     _save_state
+def _deal_fill(remark, stock):
+    """汇总匹配 remark+标的 的成交 -> (量, 均价)。"""
+    vol = 0
+    notional = 0.0
+    try:
+        deals = get_trade_detail_data(A.acct, A.acct_type, "deal")
+    except Exception as e:
+        print(_strategy_tag(), "deal query fail", e)
+        _event_log("deal_query_fail", error=str(e))
+        return 0, 0.0
+    if not deals:
+        return 0, 0.0
+    for d in deals:
+        if str(getattr(d, "m_strRemark", "") or "") != remark:
+            continue
+        code = getattr(d, "m_strInstrumentID", "") + "." + getattr(d, "m_strExchangeID", "")
+        if code != stock:
+            continue
+        v = int(getattr(d, "m_nVolume", 0) or 0)
+        px = float(getattr(d, "m_dPrice", 0) or 0)
+        if v > 0:
+            vol += v
+            notional += v * px
+    avg = (notional / float(vol)) if vol > 0 else 0.0
+    return vol, avg
+
+
+def _find_order(remark, stock):
+    try:
+        orders = get_trade_detail_data(A.acct, A.acct_type, "order")
+    except Exception as e:
+        print(_strategy_tag(), "order query fail", e)
+        _event_log("order_query_fail", error=str(e))
+        return None
+    if not orders:
+        return None
+    hit = None
+    for od in orders:
+        if str(getattr(od, "m_strRemark", "") or "") != remark:
+            continue
+        code = getattr(od, "m_strInstrumentID", "") + "." + getattr(od, "m_strExchangeID", "")
+        if code != stock:
+            continue
+        hit = od
+    return hit
+
+
+def _order_traded_vol(od):
+    if od is None:
+        return 0
+    for attr in ("m_nVolumeTraded", "m_nDealVolume", "m_nTradedVolume"):
+        v = getattr(od, attr, None)
+        if v is not None:
+            try:
+                return int(v)
+            except Exception:
+                pass
+    return 0
+
+
+def _order_sys_id(od):
+    if od is None:
+        return None
+    for attr in ("m_strOrderSysID", "m_strOrderID", "m_nOrderID", "m_nRef"):
+        v = getattr(od, attr, None)
+        if v is None or v == "" or v == 0:
+            continue
+        return v
+    return None
+
+
+def _try_cancel_order(od, C):
+    """尽力通过 QMT 内置撤单（API 名因版本而异）。"""
+    oid = _order_sys_id(od)
+    if oid is None:
+        print(_strategy_tag(), "cancel skip: no order id")
+        _event_log("cancel_skip", reason="no_order_id")
+        return False
+    for fn_name in ("cancel", "cancel_order", "cancelorder"):
+        fn = globals().get(fn_name)
+        if not callable(fn):
+            continue
+        try:
+            fn(oid, A.acct, A.acct_type, C)
+            print(_strategy_tag(), "cancel via", fn_name, oid)
+            _event_log("cancel", via=fn_name, oid=str(oid))
+            return True
+        except TypeError:
+            try:
+                fn(oid, A.acct, A.acct_type)
+                print(_strategy_tag(), "cancel via", fn_name, "(3arg)", oid)
+                _event_log("cancel", via=fn_name, oid=str(oid), argc=3)
+                return True
+            except Exception as e:
+                print(_strategy_tag(), fn_name, "fail", e)
+                _event_log("cancel_fail", via=fn_name, error=str(e), oid=str(oid))
+        except Exception as e:
+            print(_strategy_tag(), fn_name, "fail", e)
+            _event_log("cancel_fail", via=fn_name, error=str(e), oid=str(oid))
+    print(_strategy_tag(), "cancel unavailable; keep waiting, oid=", oid)
+    _event_log("cancel_unavailable", oid=str(oid))
+    return False
+
+
+def _clear_pending(reason=""):
+    pend = getattr(A, "pending", None)
+    if pend:
+        print(_strategy_tag(), "pending clear", reason, pend.get("remark"))
+        _event_log(
+            "pending_clear",
+            reason=reason,
+            remark=pend.get("remark"),
+            side=pend.get("side"),
+            intent=pend.get("intent"),
+            vol=pend.get("vol"),
+        )
+    A.pending = None
+    _save_state()
+
+
+def _new_remark(tag, side, vol):
+    ts = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+    return "%s %s %s %s x%d %s" % (_strategy_tag(), side, tag, A.stock, int(vol), ts)
+
+
+def _process_pending(C, now):
+    """实盘: 处理 pending；超时先撤；仅终态清空。仍阻塞则返回 True。"""
+    pend = getattr(A, "pending", None)
+    if not pend:
+        return False
+    if getattr(A, "is_backtest", False) or DRY_RUN:
+        A.pending = None
+        return False
+
+    remark = str(pend.get("remark", "") or "")
+    stock = str(pend.get("stock", A.stock) or A.stock)
+    side = str(pend.get("side", "") or "")
+    intent = str(pend.get("intent", "") or "")
+    target = int(pend.get("vol", 0) or 0)
+    submitted = _parse_opened_at(pend.get("submitted_at"))
+    age = 0.0
+    if submitted is not None and now is not None:
+        age = (now - submitted).total_seconds()
+
+    deal_vol, deal_avg = _deal_fill(remark, stock)
+    od = _find_order(remark, stock)
+    status = int(getattr(od, "m_nOrderStatus", -1) or -1) if od is not None else -1
+    traded = max(deal_vol, _order_traded_vol(od))
+    px = deal_avg if deal_avg > 0 else float(pend.get("price_hint", 0) or 0)
+    cancel_req = bool(pend.get("cancel_requested"))
+
+    print(
+        _strategy_tag(),
+        "pending check",
+        intent,
+        "deal=",
+        deal_vol,
+        "traded=",
+        traded,
+        "status=",
+        status,
+        "age=%.0fs" % age,
+        "cancel_req=",
+        cancel_req,
+    )
+    _event_log(
+        "pending_check",
+        intent=intent,
+        side=side,
+        deal=deal_vol,
+        traded=traded,
+        status=status,
+        age_sec=int(age),
+        cancel_req=cancel_req,
+        target=target,
+        remark=remark,
+    )
+
+    filled = globals().get("_ORDER_FILLED") or (56, 8)
+    dead = globals().get("_ORDER_DEAD") or (54, 57, 53, 5, 6, 9)
+    odd_sell = str(side) != "buy" and 0 < target < 100
+    min_ok = 1 if odd_sell else 100
+    done_fill = traded >= target and target >= min_ok
+    status_filled = status in filled
+    status_dead = status in dead
+
+    if done_fill or (status_filled and traded >= min_ok):
+        use_vol = traded if traded >= min_ok else deal_vol
+        if side == "buy":
+            _pending_on_buy_fill(pend, use_vol, px)
+        else:
+            _pending_on_sell_fill(pend, now, use_vol, px)
+        _clear_pending("filled")
+        return False
+
+    if status_dead:
+        if traded >= min_ok:
+            if side == "buy":
+                _pending_on_buy_fill(pend, traded, px)
+            else:
+                _pending_on_sell_fill(pend, now, traded, px)
+            _clear_pending("dead-partial")
+        else:
+            _clear_pending("rejected/cancelled")
+        return False
+
+    timeout = float(globals().get("PENDING_TIMEOUT_SEC") or 180)
+    orphan = float(globals().get("PENDING_ORPHAN_SEC") or 60)
+    if age >= timeout:
+        if not cancel_req:
+            if od is not None:
+                _try_cancel_order(od, C)
+            else:
+                print(_strategy_tag(), "pending timeout, order not visible yet")
+                _event_log("pending_timeout", remark=remark, intent=intent, age_sec=int(age))
+            pend["cancel_requested"] = True
+            pend["cancel_at"] = (now or datetime.datetime.now()).strftime("%Y%m%d%H%M%S")
+            A.pending = pend
+            _save_state()
+            return True
+        cancel_at = _parse_opened_at(pend.get("cancel_at"))
+        cancel_age = 0.0
+        if cancel_at is not None and now is not None:
+            cancel_age = (now - cancel_at).total_seconds()
+        if od is None and cancel_age >= orphan:
+            print(_strategy_tag(), "pending orphan clear (no order after cancel wait)")
+            _event_log(
+                "pending_orphan",
+                remark=remark,
+                intent=intent,
+                cancel_age_sec=int(cancel_age),
+            )
+            _clear_pending("orphan")
+            return False
+        return True
+
+    return True
+
+# === qmt_common/single/orders.py ===
+# 作用: 单仓买卖委托与成交落地
+# 主要符号: _order_buy, _order_sell, _apply_buy_fill, _apply_sell_fill
+# 钩子实现: _pending_on_buy_fill / _pending_on_sell_fill
+# 预算: TRADE_BUDGET；可选 TRADE_BUDGET_BY_STOCK[A.stock]；可选 CASH_RATIO
+# add=True: 已有仓上加仓；SCALE_LOTS 时记独立笔，否则均价合并（默认仍一票一仓）
+# 实盘尾盘成交窗：限价 prType=11，买挂卖一、卖挂买一；不开涨跌停、不按收盘集合竞价价吃单。
+# 开盘窗仍用 14/-1 市价。回测路径不变。
+def _try_lots_buy(px, add, vol, opened_at):
+    if not bool(globals().get("SCALE_LOTS")):
+        return
+    fn = globals().get("_lots_on_buy_fill")
+    if callable(fn):
+        fn(px, add=add, vol=vol, opened_at=opened_at)
+
+
+def _trade_budget_cap():
+    """单笔预算上限：优先 TRADE_BUDGET_BY_STOCK[A.stock]，否则 TRADE_BUDGET。"""
+    stock = str(getattr(A, "stock", "") or "").strip()
+    by_stock = globals().get("TRADE_BUDGET_BY_STOCK") or {}
+    if stock and isinstance(by_stock, dict) and stock in by_stock:
+        try:
+            return float(by_stock[stock] or 0)
+        except Exception:
+            pass
+    return float(globals().get("TRADE_BUDGET") or 0)
+
+
+def _buy_budget(cash):
+    budget = _trade_budget_cap()
+    if getattr(A, "is_backtest", False) or DRY_RUN:
+        return budget if budget > 0 else 0.0
+    ratio = float(globals().get("CASH_RATIO") or 0)
+    if cash is None or cash <= 0:
+        return budget
+    if ratio > 0:
+        by_ratio = float(cash) * ratio
+        return min(budget, by_ratio) if budget > 0 else by_ratio
+    return budget
+
+
+def _apply_buy_fill(vol, price, opened_at, **extra):
+    vol = int(vol)
+    price = float(price) if price and price > 0 else 0.0
+    if vol < 100:
+        return
+    add = bool(extra.pop("add", False))
+    ot = str(opened_at or "").strip()
+    if not ot:
+        ot = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+    if add and _has_position():
+        old_s = _pos_shares()
+        old_px = _pos_cost_price()
+        new_s = old_s + vol
+        new_px = (old_s * old_px + vol * price) / float(new_s)
+        pos = dict(A.position)
+        pos["shares"] = int(new_s)
+        pos["price"] = float(new_px)
+        pos["cost"] = round(new_s * new_px, 2)
+        pos["lots"] = int(pos.get("lots", 1) or 1) + 1
+        A.position = pos
+        A.acted.add("BUY")
+        buy_day = ot[:8] if len(ot) >= 8 else None
+        _bt_held_add(vol, buy_day=buy_day)
+        _try_lots_buy(price, True, vol, ot)
+        _save_state()
+        print(
+            _strategy_tag(),
+            "BUY add filled",
+            {
+                "add_shares": vol,
+                "price": price,
+                "lots": pos["lots"],
+                "total": new_s,
+                "avg": new_px,
+            },
+        )
+        _event_log(
+            "buy_add_filled",
+            add_shares=vol,
+            price=price,
+            lots=pos["lots"],
+            total=new_s,
+            avg=new_px,
+        )
+        return
+    pos = {
+        "shares": vol,
+        "price": price,
+        "cost": round(vol * price, 2),
+        "opened_at": ot,
+        "lots": 1,
+    }
+    for k, v in extra.items():
+        if v is not None:
+            pos[k] = v
+    A.position = pos
+    A.acted.add("BUY")
+    if getattr(A, "is_backtest", False):
+        A.bt_opened_at = ot
+    buy_day = ot[:8] if len(ot) >= 8 else None
+    _bt_held_add(vol, buy_day=buy_day)
+    _try_lots_buy(price, False, vol, ot)
+    _save_state()
+    print(_strategy_tag(), "BUY filled", A.position)
+    _event_log("buy_filled", position=A.position, vol=vol, price=price, opened_at=ot)
+
+
+def _apply_sell_fill(now, reason, last_hint, filled_vol, mark_half=False, lot_ids=None):
+    """卖出成交后清空或缩减持仓. 仅按实际成交量改状态.
+    不足一手的送转残仓保留，不按 95% 误清；SCALE_LOTS + lot_ids 按笔减仓。"""
+    want = _pos_shares()
+    if getattr(A, "is_backtest", False):
+        want = max(want, _bt_held_vol())
+    filled_vol = int(filled_vol)
+    if filled_vol <= 0:
+        return
+    partial_lots = False
+    if bool(globals().get("SCALE_LOTS")) and lot_ids:
+        fn = globals().get("_exit_is_partial")
+        if callable(fn):
+            partial_lots = bool(fn(lot_ids))
+    if (not partial_lots) and filled_vol >= want and want > 0:
+        _clear_after_sell(now, reason, last=last_hint)
+        if mark_half:
+            A.acted.add("HALF")
+            _save_state()
+        return
+    remain = max(0, want - filled_vol)
+    print(_strategy_tag(), "partial sell fill", filled_vol, "remain~", remain)
+    _event_log(
+        "partial_sell_fill",
+        reason=reason,
+        filled_vol=filled_vol,
+        remain=remain,
+        last=last_hint,
+        lot_ids=lot_ids,
+    )
+    _bt_held_set(remain)
+    lots_fn = globals().get("_lots_on_sell_fill")
+    if bool(globals().get("SCALE_LOTS")) and callable(lots_fn):
+        lots_fn(lot_ids, filled_vol)
+    elif A.position:
+        A.position["shares"] = remain
+    if remain <= 0 or not _has_position():
+        _clear_after_sell(now, str(reason) + "/partial", last=last_hint)
+    else:
+        if mark_half:
+            A.acted.add("HALF")
+        acted = getattr(A, "acted", None)
+        if isinstance(acted, set):
+            acted.discard("SELL")
+        _save_state()
+
+
+def _pending_on_buy_fill(pend, vol, px):
+    extra = pend.get("extra_pos") if isinstance(pend.get("extra_pos"), dict) else {}
+    _apply_buy_fill(vol, px, pend.get("opened_at") or pend.get("submitted_at"), **extra)
+
+
+def _pending_on_sell_fill(pend, now, vol, px):
+    intent = str(pend.get("intent", "") or "")
+    last_hint = pend.get("last_hint")
+    if last_hint is None:
+        last_hint = px
+    mark_half = bool(pend.get("mark_half"))
+    lot_ids = pend.get("lot_ids")
+    _apply_sell_fill(now, intent, last_hint, vol, mark_half=mark_half, lot_ids=lot_ids)
+
+
+def _in_live_close_exec(now):
+    """是否处于实盘尾盘成交窗（PENDING_EXEC_*）。"""
+    if getattr(A, "is_backtest", False):
+        return False
+    now_s = (now or datetime.datetime.now()).strftime("%H%M%S")
+    fn = globals().get("_in_close_exec_window")
+    if callable(fn):
+        try:
+            return bool(fn(now_s))
+        except Exception:
+            pass
+    start = str(globals().get("PENDING_EXEC_START") or "")
+    end = str(globals().get("PENDING_EXEC_END") or "")
+    if start and end:
+        return start <= now_s < end
+    return False
+
+
+def _round_order_px(stock, px):
+    px = float(px or 0)
+    if px <= 0:
+        return 0.0
+    code = str(stock or "").split(".")[0]
+    if len(code) == 6 and code[:1] in ("1", "5"):
+        return round(px + 1e-12, 3)
+    return round(px + 1e-12, 2)
+
+
+def _tick_field(obj, names):
+    if obj is None:
+        return 0.0
+    for name in names:
+        if isinstance(obj, dict):
+            raw = obj.get(name)
+        else:
+            raw = getattr(obj, name, None)
+        if raw is None or raw == "":
+            continue
+        try:
+            v = float(raw)
+        except Exception:
+            continue
+        if v > 0:
+            return v
+    return 0.0
+
+
+def _seq_first_px(val):
+    if val is None or val == "":
+        return 0.0
+    if isinstance(val, (list, tuple)):
+        if not val:
+            return 0.0
+        try:
+            return float(val[0] or 0)
+        except Exception:
+            return 0.0
+    try:
+        return float(val)
+    except Exception:
+        return 0.0
+
+
+def _get_stock_tick(C, stock):
+    ticks = None
+    if C is not None:
+        for meth in ("get_full_tick", "get_tick"):
+            fn = getattr(C, meth, None)
+            if not callable(fn):
+                continue
+            try:
+                ticks = fn([stock])
+            except Exception:
+                ticks = None
+            if ticks:
+                break
+    if ticks is None:
+        gfn = globals().get("get_full_tick")
+        if callable(gfn):
+            try:
+                ticks = gfn([stock])
+            except Exception:
+                ticks = None
+    if isinstance(ticks, dict):
+        t = ticks.get(stock)
+        if t is None:
+            t = ticks.get(str(stock).split(".")[0])
+        return t
+    return ticks
+
+
+def _level1_px(t, array_names, scalar_names):
+    if t is None:
+        return 0.0
+    for name in array_names:
+        if isinstance(t, dict):
+            raw = t.get(name)
+        else:
+            raw = getattr(t, name, None)
+        px = _seq_first_px(raw)
+        if px > 0:
+            return px
+    return _tick_field(t, scalar_names)
+
+
+def _live_opponent_px(C, side, fallback):
+    """买=卖一，卖=买一；取不到则回落 last。"""
+    t = _get_stock_tick(C, getattr(A, "stock", ""))
+    if str(side) == "buy":
+        raw = _level1_px(
+            t,
+            ("askPrice", "askPrices", "ask", "asks"),
+            ("askPrice1", "ask1", "AskPrice1", "askPr1", "m_dAskPrice"),
+        )
+        kind = "ask1"
+    else:
+        raw = _level1_px(
+            t,
+            ("bidPrice", "bidPrices", "bid", "bids"),
+            ("bidPrice1", "bid1", "BidPrice1", "bidPr1", "m_dBidPrice"),
+        )
+        kind = "bid1"
+    if raw <= 0:
+        raw = float(fallback or 0)
+        kind = "last"
+    px = _round_order_px(getattr(A, "stock", ""), raw)
+    return px, kind
+
+
+def _passorder_live(C, side, vol, last_px, msg, now):
+    """实盘报单。尾盘窗限价挂卖一/买一；其余仍市价。"""
+    vol = int(vol)
+    last_px = float(last_px or 0)
+    if _in_live_close_exec(now):
+        px, kind = _live_opponent_px(C, side, last_px)
+        if px > 0:
+            code = A.buy_code if str(side) == "buy" else A.sell_code
+            print(
+                _strategy_tag(),
+                "passorder quote-limit",
+                side,
+                kind,
+                "pr=11",
+                "px=",
+                px,
+                "last=",
+                last_px,
+                "vol=",
+                vol,
+            )
+            _event_log(
+                "passorder_quote_limit",
+                side=side,
+                kind=kind,
+                pr_type=11,
+                px=px,
+                last=last_px,
+                vol=vol,
+            )
+            passorder(code, 1101, A.acct, A.stock, 11, px, vol, _strategy_tag(), 2, msg, C)
+            return px
+    code = A.buy_code if str(side) == "buy" else A.sell_code
+    qt = 1
+    force_qt = getattr(A, "_force_quicktrade", None)
+    if force_qt is not None:
+        try:
+            qt = int(force_qt)
+        except Exception:
+            qt = 1
+    passorder(code, 1101, A.acct, A.stock, 14, -1, vol, _strategy_tag(), qt, msg, C)
+    return last_px
+
+
+def _order_buy(C, price, now, budget=None, add=False, **extra_pos):
+    """提交买入. DRY 即时; 回测 passorder+即时; 实盘 pending 至成交.
+    add=True 允许在已有仓上加仓；SCALE_LOTS 时每笔独立，否则均价合并。默认仍一票一仓。"""
+    if getattr(A, "pending", None):
+        print(_strategy_tag(), "buy skip: pending active")
+        _event_log("buy_skip", reason="pending_active")
+        return False
+    holding_now = _has_position() or (
+        getattr(A, "is_backtest", False) and _bt_held_vol() > 0
+    )
+    if holding_now and not add:
+        print(_strategy_tag(), "buy skip: already holding")
+        _event_log("buy_skip", reason="already_holding")
+        return False
+    if add and not holding_now:
+        add = False
+    if (not add) and ("BUY" in getattr(A, "acted", set())):
+        return False
+
+    if budget is None:
+        cash = _available_cash()
+        budget = _buy_budget(cash)
+    vol = _lot(price, budget)
+    if vol < 100:
+        print(_strategy_tag(), "buy skip lot", "price=", price, "budget=", budget)
+        _event_log("buy_skip", reason="lot", price=price, budget=budget)
+        return False
+    cash = _available_cash()
+    freeze_px = float(price or 0)
+    if (not getattr(A, "is_backtest", False)) and (not DRY_RUN) and _in_live_close_exec(now):
+        prot, _kind = _live_opponent_px(C, "buy", price)
+        if prot > freeze_px:
+            freeze_px = prot
+    if cash is not None and freeze_px > 0 and cash < freeze_px * vol:
+        vol = _lot(freeze_px, cash)
+        if vol < 100:
+            print(_strategy_tag(), "buy skip cash", cash)
+            _event_log("buy_skip", reason="cash", cash=cash, price=price, freeze_px=freeze_px)
+            return False
+
+    extra_pos = dict(extra_pos or {})
+    if add:
+        extra_pos["add"] = True
+    ot = (now or datetime.datetime.now()).strftime("%Y%m%d%H%M%S")
+    msg = _new_remark("BUY", "ADD" if add else "BUY", vol)
+    print(("[DRY] " if DRY_RUN else "") + msg, "@", price)
+    if DRY_RUN:
+        _apply_buy_fill(vol, price, ot, **extra_pos)
+        return True
+    try:
+        _passorder_live(C, "buy", vol, price, msg, now)
+    except Exception as e:
+        print(_strategy_tag(), "passorder BUY fail", e)
+        _event_log("passorder_fail", side="buy", error=str(e), vol=vol, price=price)
+        return False
+    if getattr(A, "is_backtest", False):
+        _apply_buy_fill(vol, price, ot, **extra_pos)
+        return True
+    A.pending = {
+        "remark": msg,
+        "side": "buy",
+        "intent": "BUY",
+        "vol": int(vol),
+        "stock": A.stock,
+        "price_hint": float(price),
+        "opened_at": ot,
+        "submitted_at": ot,
+        "cancel_requested": False,
+        "extra_pos": extra_pos or {},
+    }
+    _save_state()
+    print(_strategy_tag(), "BUY submitted", vol, msg)
+    _event_log("buy_submitted", vol=vol, price=price, remark=msg, dry_run=False)
+    return True
+
+
+def _order_sell(C, reason, price, now, want_vol=None, mark_half=False, lot_ids=None):
+    """提交卖出. T+1: 下单量不超过可卖; skip 绝不清仓.
+    lot_ids: SCALE_LOTS 时指定要平的笔；部分笔自动 mark_half。"""
+    if getattr(A, "pending", None):
+        print(_strategy_tag(), "sell skip: pending active")
+        _event_log("sell_skip", reason="pending_active", sell_reason=reason)
+        return False
+    if not _has_position() and not (getattr(A, "is_backtest", False) and _bt_held_vol() > 0):
+        return False
+    if lot_ids:
+        fn = globals().get("_exit_is_partial")
+        if callable(fn) and fn(lot_ids):
+            mark_half = True
+        if want_vol is None:
+            wv = globals().get("_lots_want_vol")
+            if callable(wv):
+                want_vol = wv(lot_ids)
+    if (not mark_half) and ("SELL" in getattr(A, "acted", set())):
+        return False
+
+    want = int(want_vol) if want_vol is not None else _pos_shares()
+    if getattr(A, "is_backtest", False):
+        want = max(want, _bt_held_vol()) if want_vol is None else want
+    if want <= 0:
+        return False
+
+    avail = _max_sell_vol(now)
+    vol_fn = globals().get("_ex_sell_volume")
+    if callable(vol_fn):
+        vol = int(vol_fn(want, avail) or 0)
+    else:
+        raw = int(min(want, avail))
+        vol = (raw // 100) * 100
+        if vol <= 0 and 0 < raw < 100 and int(avail) < 100:
+            vol = raw
+    if vol <= 0:
+        if getattr(A, "is_backtest", False):
+            print(
+                _strategy_tag(),
+                "sell skip T+1",
+                reason,
+                "avail=",
+                avail,
+                "held=",
+                _bt_held_vol(),
+                "locked=",
+                _bt_locked_vol(),
+                "want=",
+                want,
+            )
+            _event_log(
+                "sell_skip",
+                reason="t1_bt",
+                sell_reason=reason,
+                avail=avail,
+                held=_bt_held_vol(),
+                locked=_bt_locked_vol(),
+                want=want,
+            )
+        elif DRY_RUN:
+            print(
+                _strategy_tag(),
+                "[DRY] sell skip T+1",
+                reason,
+                "want=",
+                want,
+                "sellable=",
+                avail,
+            )
+            _event_log(
+                "sell_skip",
+                reason="t1_dry",
+                sell_reason=reason,
+                want=want,
+                sellable=avail,
+            )
+        else:
+            broker_vol, can, _cost = _broker_position(A.stock)
+            print(
+                _strategy_tag(),
+                "sell skip T+1/live",
+                reason,
+                "can_use=",
+                can,
+                "broker=",
+                broker_vol,
+                "want=",
+                want,
+            )
+            _event_log(
+                "sell_skip",
+                reason="t1_live",
+                sell_reason=reason,
+                can_use=can,
+                broker=broker_vol,
+                want=want,
+            )
+        return False
+
+    msg = _new_remark(reason or "SELL", "SELL", vol)
+    print(("[DRY] " if DRY_RUN else "") + msg, "@", price)
+    if DRY_RUN:
+        _apply_sell_fill(now, reason, price, vol, mark_half=mark_half, lot_ids=lot_ids)
+        return True
+    try:
+        _passorder_live(C, "sell", vol, price, msg, now)
+    except Exception as e:
+        print(_strategy_tag(), "passorder SELL fail", e)
+        _event_log(
+            "passorder_fail",
+            side="sell",
+            error=str(e),
+            vol=vol,
+            price=price,
+            sell_reason=reason,
+        )
+        return False
+    if getattr(A, "is_backtest", False):
+        _apply_sell_fill(now, reason, price, vol, mark_half=mark_half, lot_ids=lot_ids)
+        return True
+    A.pending = {
+        "remark": msg,
+        "side": "sell",
+        "intent": reason or "SELL",
+        "vol": int(vol),
+        "stock": A.stock,
+        "price_hint": float(price),
+        "last_hint": price,
+        "submitted_at": (now or datetime.datetime.now()).strftime("%Y%m%d%H%M%S"),
+        "cancel_requested": False,
+        "mark_half": bool(mark_half),
+        "lot_ids": list(lot_ids) if lot_ids else None,
+    }
+    _save_state()
+    print(_strategy_tag(), "SELL submitted", vol, reason, msg)
+    _event_log(
+        "sell_submitted",
+        vol=vol,
+        price=price,
+        sell_reason=reason,
+        remark=msg,
+        dry_run=False,
+    )
+    return True
+
+# === fband/budget.py ===
+# 覆盖 common:single/orders._buy_budget。实盘共享账本：前两笔 50%/30%，第三笔吃剩余；回测 TRADE_BUDGET×档位。
+# 勿改 scripts/qmt_common/single/orders.py。
+def _dynamic_budget_on():
+    if getattr(A, "is_backtest", False):
+        return False
+    return True
+
+
+def _equal_split_on():
+    return _dynamic_budget_on()
+
+
+def _norm_code(code):
+    return str(code or "").strip().upper()
+
+
+def _book_entry_normalize(val):
+    """把 BOOK_STOCKS 的 value 规范成 dict。str → {ma_type: str}；其它非 dict → {}。"""
+    if isinstance(val, dict):
+        return dict(val)
+    if isinstance(val, (str, bytes)):
+        s = str(val or "").strip()
+        if s:
+            return {"ma_type": s}
+        return {}
+    return {}
+
+
+def _book_stock_map():
+    """解析 BOOK_STOCKS → {norm_code: cfg_dict}。兼容 dict / 旧纯字符串序列。"""
+    out = {}
+    raw = globals().get("BOOK_STOCKS")
+    if raw is None:
+        return out
+    if isinstance(raw, dict):
+        for k, v in raw.items():
+            code = _norm_code(k)
+            if not code:
+                continue
+            out[code] = _book_entry_normalize(v)
+        return out
+    try:
+        seq = list(raw)
+    except Exception:
+        return out
+    for x in seq:
+        if isinstance(x, (list, tuple)) and len(x) >= 1:
+            code = _norm_code(x[0])
+            cfg = _book_entry_normalize(x[1] if len(x) >= 2 else {})
+        else:
+            code = _norm_code(x)
+            cfg = {}
+        if code:
+            out[code] = cfg
+    return out
+
+
+def _book_stock_set():
+    return set(_book_stock_map().keys())
+
+
+def _book_cfg(stock):
+    """当前标的在 BOOK_STOCKS 中的子配置；不在池则 {}。"""
+    ncode = _norm_code(stock)
+    if not ncode:
+        return {}
+    return dict(_book_stock_map().get(ncode) or {})
+
+
+def _code_in_book(code):
+    ncode = _norm_code(code)
+    if not ncode:
+        return False
+    s = _book_stock_set()
+    if not s:
+        return True
+    return ncode in s
+
+
+def _cfg_book_n():
+    n_list = len(_book_stock_set())
+    if n_list > 0:
+        return n_list
+    return 3
+
+
+def _cfg_cash_ratio():
+    try:
+        v = float(globals().get("CASH_RATIO") or 0.95)
+    except Exception:
+        v = 0.95
+    if v <= 0:
+        return 0.95
+    if v > 1.0:
+        return 1.0
+    return v
+
+
+def _norm_budget_base(raw):
+    s = str(raw or "").strip()
+    sl = s.lower()
+    if sl in ("fixed", "fix") or s == "固定金额":
+        return "fixed"
+    return "equity"
+
+
+def _cfg_budget_base():
+    return _norm_budget_base(globals().get("BUDGET_BASE"))
+
+
+def _cfg_budget_base_fixed():
+    return _cfg_budget_base() == "fixed"
+
+
+def _fixed_sleeve_amount():
+    """全池固定基数：只读 TRADE_BUDGET，不走按标的覆盖。"""
+    try:
+        v = float(globals().get("TRADE_BUDGET") or 0)
+    except Exception:
+        v = 0.0
+    if v > 0:
+        return v
+    return 0.0
+
+
+def _cfg_book_lot_max():
+    try:
+        n = int(globals().get("BOOK_LOT_MAX") or 3)
+    except Exception:
+        n = 3
+    return max(1, n)
+
+
+def _cfg_lot_open_frac():
+    try:
+        v = float(globals().get("LOT_OPEN_FRAC") or 0.50)
+    except Exception:
+        v = 0.50
+    if v <= 0:
+        v = 0.50
+    if v > 1.0:
+        v = 1.0
+    return v
+
+
+def _cfg_lot_add_frac():
+    try:
+        v = float(globals().get("LOT_ADD_FRAC") or 0.30)
+    except Exception:
+        v = 0.30
+    if v <= 0:
+        v = 0.30
+    if v > 1.0:
+        v = 1.0
+    return v
+
+
+def _cfg_lot_rest_frac():
+    rest = 1.0 - _cfg_lot_open_frac() - _cfg_lot_add_frac()
+    if rest < 0:
+        return 0.0
+    return rest
+
+
+def _slot_targets():
+    open_f = _cfg_lot_open_frac()
+    add_f = _cfg_lot_add_frac()
+    rest = _cfg_lot_rest_frac()
+    max_n = _cfg_book_lot_max()
+    if max_n <= 1:
+        return [open_f]
+    if max_n == 2:
+        return [open_f, add_f]
+    targets = [open_f, add_f, rest]
+    if max_n > 3:
+        targets = targets + [add_f] * (max_n - 3)
+    return targets
+
+
+def _frac_is_big(v):
+    try:
+        return abs(float(v) - _cfg_lot_open_frac()) < 0.02
+    except Exception:
+        return False
+
+
+def _frac_is_add(v):
+    try:
+        return abs(float(v) - _cfg_lot_add_frac()) < 0.02
+    except Exception:
+        return False
+
+
+def _vacant_rank(v):
+    if _frac_is_big(v):
+        return 0
+    if _frac_is_add(v):
+        return 1
+    return 2
+
+
+def _vacant_sort(vacant):
+    vacant = list(vacant or [])
+    vacant.sort(key=_vacant_rank)
+    return vacant
+
+
+def _snap_book_frac(raw, cap=0.0, mv=0.0, lot_id=1):
+    """把金额或旧字段收成 0.50 / 0.30 / 剩余档。旧 0.25 收到 0.30。"""
+    try:
+        x = float(raw)
+    except Exception:
+        x = None
+    if x is not None and x > 0:
+        if x > 1.0 + 1e-9:
+            if cap and cap > 0:
+                x = x / float(cap)
+            else:
+                x = _cfg_lot_add_frac()
+        targets = []
+        for t in _slot_targets()[:3]:
+            dup = False
+            for s in targets:
+                if abs(s - t) < 1e-12:
+                    dup = True
+                    break
+            if not dup:
+                targets.append(t)
+        if not targets:
+            return _cfg_lot_add_frac()
+        best = targets[0]
+        best_d = abs(x - best)
+        add_f = _cfg_lot_add_frac()
+        for t in targets[1:]:
+            d = abs(x - t)
+            if d < best_d - 1e-12:
+                best, best_d = t, d
+            elif abs(d - best_d) < 1e-12:
+                if abs(t - add_f) < 0.02:
+                    best = t
+                    best_d = d
+        return best
+    if cap and cap > 0 and mv and mv > 0:
+        return _snap_book_frac(float(mv) / float(cap), cap=0.0)
+    try:
+        lid = int(lot_id or 1)
+    except Exception:
+        lid = 1
+    if lid <= 1:
+        return _cfg_lot_open_frac()
+    return _cfg_lot_add_frac()
+
+
+def _lot_row_from_dict(lot):
+    if not isinstance(lot, dict):
+        return None
+    try:
+        sh = int(lot.get("shares") or 0)
+    except Exception:
+        sh = 0
+    if sh < 100:
+        return None
+    try:
+        px = float(lot.get("price") or 0)
+    except Exception:
+        px = 0.0
+    try:
+        lid = int(lot.get("id") or 0)
+    except Exception:
+        lid = 0
+    raw_frac = lot.get("book_frac")
+    return {
+        "id": lid,
+        "mv": float(sh) * float(px) if px > 0 else 0.0,
+        "frac": raw_frac,
+        "shares": sh,
+    }
+
+
+def _lots_from_state_raw(raw):
+    if not isinstance(raw, dict):
+        return "", []
+    stock = _norm_code(raw.get("stock") or "")
+    rows = []
+    lots = raw.get("lots")
+    if isinstance(lots, list):
+        for lot in lots:
+            row = _lot_row_from_dict(lot)
+            if row:
+                rows.append(row)
+    if rows:
+        return stock, rows
+    pos = raw.get("position")
+    if isinstance(pos, dict):
+        try:
+            vol = int(pos.get("shares") or 0)
+        except Exception:
+            vol = 0
+        try:
+            px = float(pos.get("price") or 0)
+        except Exception:
+            px = 0.0
+        if vol >= 100 and px > 0:
+            rows.append({"id": 1, "mv": float(vol) * float(px), "frac": None, "shares": vol})
+    return stock, rows
+
+
+def _state_glob_lots():
+    """各图 STATE → {stock: [lot_row,...]}。"""
+    out = {}
+    base = str(globals().get("STATE_FILE") or "").strip()
+    if not base or "{stock}" not in base:
+        return out
+    folder = os.path.dirname(base)
+    fname = os.path.basename(base)
+    mid = fname.find("{stock}")
+    if mid < 0:
+        return out
+    pre = fname[:mid]
+    post = fname[mid + len("{stock}"):]
+    book_name = os.path.basename(_book_path() or "")
+    try:
+        names = os.listdir(folder) if folder else []
+    except Exception:
+        return out
+    for fn in names:
+        if book_name and fn == book_name:
+            continue
+        if not (fn.startswith(pre) and fn.endswith(post)):
+            continue
+        path = os.path.join(folder, fn) if folder else fn
+        try:
+            raw = json.loads(open(path, "r").read())
+        except Exception:
+            continue
+        stock, rows = _lots_from_state_raw(raw)
+        if stock and rows:
+            out[stock] = rows
+    return out
+
+
+def _collect_book_lot_rows(held=None):
+    """池内各笔。本图内存仓覆盖 STATE。held 有市值但无分笔时补 1 笔。"""
+    rows_by = _state_glob_lots()
+    mine = _norm_code(getattr(A, "stock", ""))
+    live = []
+    for lot in getattr(A, "lots", None) or []:
+        row = _lot_row_from_dict(lot)
+        if row:
+            live.append(row)
+    if mine:
+        if live:
+            rows_by[mine] = live
+        elif not _has_position():
+            rows_by[mine] = []
+    if held:
+        for code, mv in held.items():
+            st = _norm_code(code)
+            if not st or not _code_in_book(st):
+                continue
+            try:
+                v = float(mv or 0)
+            except Exception:
+                v = 0.0
+            if v <= 1e-6:
+                continue
+            if st not in rows_by or not rows_by.get(st):
+                rows_by[st] = [{"id": 1, "mv": v, "frac": None, "shares": 0}]
+    kept = {}
+    for st, rows in rows_by.items():
+        code = _norm_code(st)
+        if code and _code_in_book(code):
+            kept[code] = rows
+    return kept
+
+
+def _finalize_lot_fracs(rows_by, cap):
+    out = {}
+    for stock, rows in (rows_by or {}).items():
+        nxt = []
+        for row in rows or []:
+            item = dict(row)
+            item["frac"] = _snap_book_frac(
+                item.get("frac"),
+                cap=cap,
+                mv=item.get("mv") or 0,
+                lot_id=item.get("id") or 1,
+            )
+            nxt.append(item)
+        out[_norm_code(stock)] = nxt
+    return out
+
+
+def _occupied_fracs(rows_by):
+    out = []
+    for rows in (rows_by or {}).values():
+        for row in rows or []:
+            out.append(float(row.get("frac") or 0))
+    return out
+
+
+def _book_n_held_live(held=None):
+    if getattr(A, "is_backtest", False):
+        n = 0
+        for lot in getattr(A, "lots", None) or []:
+            if isinstance(lot, dict) and int(lot.get("shares") or 0) >= 100:
+                n += 1
+        return int(n)
+    rows = _collect_book_lot_rows(held)
+    n = 0
+    for recs in rows.values():
+        n += len(recs or [])
+    return int(n)
+
+
+def _book_scale_blocked():
+    """全池满 3 笔，或大仓空且只剩 1 槽（留给开仓）。"""
+    n_held = _book_n_held_live()
+    if n_held >= _cfg_book_lot_max():
+        return True, "book_lot_cap"
+    if getattr(A, "is_backtest", False):
+        if _chart_next_frac(False) <= 1e-9:
+            return True, "scale_cap"
+        return False, ""
+    rows = _finalize_lot_fracs(_collect_book_lot_rows(), 0)
+    occupied = _occupied_fracs(rows)
+    vacant = _vacant_slots(occupied)
+    slots_left = _cfg_book_lot_max() - len(occupied)
+    if _vacant_has_big(vacant) and slots_left <= 1:
+        return True, "scale_cap"
+    return False, ""
+
+
+def _vacant_slots(occupied):
+    targets = _slot_targets()
+    used = [False] * len(targets)
+    for raw in occupied or []:
+        f = _snap_book_frac(raw)
+        matched = None
+        for i, t in enumerate(targets):
+            if used[i]:
+                continue
+            if abs(t - f) < 0.02:
+                matched = i
+                break
+        if matched is None:
+            best_i = None
+            best_d = None
+            for i, t in enumerate(targets):
+                if used[i]:
+                    continue
+                d = abs(t - f)
+                if best_i is None or d < best_d - 1e-12:
+                    best_i, best_d = i, d
+                elif abs(d - best_d) < 1e-12:
+                    if _frac_is_big(targets[best_i]) and (not _frac_is_big(t)):
+                        best_i, best_d = i, d
+            matched = best_i
+        if matched is not None:
+            used[matched] = True
+    vacant = [targets[i] for i in range(len(targets)) if not used[i]]
+    return _vacant_sort(vacant)
+
+
+def _vacant_has_big(vacant):
+    for v in vacant or []:
+        if _frac_is_big(v):
+            return True
+    return False
+
+
+def _vacant_has_small(vacant):
+    for v in vacant or []:
+        if not _frac_is_big(v):
+            return True
+    return False
+
+
+def _take_vacant(vacant, want_big):
+    vacant = list(vacant or [])
+    idx = None
+    for i, v in enumerate(vacant):
+        if want_big and _frac_is_big(v):
+            idx = i
+            break
+        if (not want_big) and (not _frac_is_big(v)):
+            idx = i
+            break
+    if idx is None:
+        return None, vacant
+    got = vacant.pop(idx)
+    return got, vacant
+
+
+def _rank_buy_intents(intents, vacant):
+    need_big = _vacant_has_big(vacant)
+    ranked = list(intents or [])
+
+    def key(it):
+        add = 1 if it.get("add") else 0
+        if need_big:
+            pri = add
+        else:
+            pri = 0 if add else 1
+        return (pri, str(it.get("hhmmss") or ""), str(it.get("stock") or ""))
+
+    ranked.sort(key=key)
+    return ranked
+
+
+def _remainder_frac(occupied):
+    """已占用档位之后，相对 cap 还剩多少（第三笔用）。"""
+    s = 0.0
+    for raw in occupied or []:
+        s += float(_snap_book_frac(raw) or 0)
+    left = 1.0 - s
+    if left < 0:
+        return 0.0
+    return left
+
+
+def _chart_next_frac(opening):
+    """回测/非均分：本图下一笔占 TRADE_BUDGET 的比例。最后一槽吃剩余。"""
+    opening = bool(opening)
+    sleeve = float(_trade_budget_cap() or 0)
+    live = []
+    for lot in getattr(A, "lots", None) or []:
+        row = _lot_row_from_dict(lot)
+        if row:
+            live.append(row)
+    mine = _norm_code(getattr(A, "stock", "")) or "_"
+    rows_by = _finalize_lot_fracs({mine: live}, sleeve)
+    occupied = _occupied_fracs(rows_by)
+    vacant = _vacant_slots(occupied)
+    n_held = len(occupied)
+    slots_left = _cfg_book_lot_max() - n_held
+    if slots_left <= 0:
+        return 0.0
+    if (not opening) and _vacant_has_big(vacant) and slots_left <= 1:
+        return 0.0
+    if slots_left <= 1:
+        return _remainder_frac(occupied)
+    if opening:
+        if _vacant_has_big(vacant):
+            return _cfg_lot_open_frac()
+        if _vacant_has_small(vacant):
+            return _cfg_lot_add_frac()
+        return 0.0
+    if _vacant_has_small(vacant):
+        return _cfg_lot_add_frac()
+    return 0.0
+
+
+def _buy_budget_fixed(cash):
+    """回测：TRADE_BUDGET × 本图下一档。"""
+    budget = _trade_budget_cap()
+    opening = not (
+        _has_position()
+        or (getattr(A, "is_backtest", False) and _bt_held_vol() > 0)
+    )
+    frac = _chart_next_frac(opening)
+    lot = float(budget or 0) * float(frac or 0)
+    if lot < 0:
+        lot = 0.0
+    if getattr(A, "is_backtest", False) or DRY_RUN:
+        return lot
+    ratio = float(globals().get("CASH_RATIO") or 0)
+    if cash is None or cash <= 0:
+        return lot
+    if ratio > 0:
+        by_ratio = float(cash) * ratio
+        return min(lot, by_ratio) if lot > 0 else 0.0
+    return lot
+
+
+def _pos_row_mv(p, vol):
+    mv = 0.0
+    raw_mv = getattr(p, "m_dMarketValue", None)
+    if raw_mv is not None:
+        try:
+            mv = float(raw_mv)
+        except Exception:
+            mv = 0.0
+    if mv <= 0:
+        last = getattr(p, "m_dLastPrice", None)
+        if last is None:
+            last = getattr(p, "m_dOpenPrice", None)
+        try:
+            if last is not None and float(last) > 0:
+                mv = float(last) * float(vol)
+        except Exception:
+            mv = 0.0
+    return float(mv or 0)
+
+
+def _query_broker_book():
+    """白名单持股只数与市值；同时给出其它股票市值。失败则回落本地账本。"""
+    stock = _norm_code(getattr(A, "stock", ""))
+    out = {
+        "ok": False,
+        "k": 0,
+        "k_other": 0,
+        "book_mv": 0.0,
+        "other_mv": 0.0,
+        "name_mv": 0.0,
+        "name_vol": 0,
+        "held": {},
+        "src": "",
+    }
+    if getattr(A, "is_backtest", False):
+        return out
+    try:
+        positions = get_trade_detail_data(A.acct, A.acct_type, "position")
+    except Exception as e:
+        print(_strategy_tag(), "book query fail, try local", e)
+        _event_log("book_query_fail", error=str(e))
+        return _query_local_book(stock)
+    if positions is None:
+        return _query_local_book(stock)
+    k = 0
+    k_other = 0
+    book_mv = 0.0
+    other_mv = 0.0
+    name_mv = 0.0
+    name_vol = 0
+    held = {}
+    for p in positions:
+        try:
+            vol = int(getattr(p, "m_nVolume", 0) or 0)
+        except Exception:
+            vol = 0
+        if vol < 100:
+            continue
+        code = _norm_code(_pos_code(p))
+        mv = _pos_row_mv(p, vol)
+        if _code_in_book(code):
+            k += 1
+            book_mv += mv
+            held[code] = mv
+            if code == _norm_code(stock):
+                name_mv = mv
+                name_vol = vol
+        else:
+            k_other += 1
+            other_mv += mv
+    out["ok"] = True
+    out["k"] = int(k)
+    out["k_other"] = int(k_other)
+    out["book_mv"] = float(book_mv)
+    out["other_mv"] = float(other_mv)
+    out["name_mv"] = float(name_mv)
+    out["name_vol"] = int(name_vol)
+    out["held"] = held
+    out["src"] = "broker"
+    _broker_cache_save(held, k, book_mv, other_mv, k_other)
+    return out
+
+
+def _broker_cache_save(held, k, book_mv, other_mv=0.0, k_other=0):
+    data = _book_load()
+    if not isinstance(data, dict):
+        data = {}
+    data["broker"] = {
+        "ts": datetime.datetime.now().strftime("%Y%m%d %H%M%S"),
+        "held": dict(held or {}),
+        "k": int(k or 0),
+        "k_other": int(k_other or 0),
+        "book_mv": float(book_mv or 0),
+        "other_mv": float(other_mv or 0),
+    }
+    _book_save(data)
+
+
+def _held_from_state_raw(raw):
+    """一份 STATE JSON -> (stock, mv, vol)。"""
+    if not isinstance(raw, dict):
+        return "", 0.0, 0
+    stock = str(raw.get("stock") or "")
+    stock = _norm_code(stock)
+    pos = raw.get("position")
+    vol = 0
+    px = 0.0
+    if isinstance(pos, dict):
+        try:
+            vol = int(pos.get("shares") or 0)
+        except Exception:
+            vol = 0
+        try:
+            px = float(pos.get("price") or 0)
+        except Exception:
+            px = 0.0
+    if vol < 100:
+        vol = 0
+        lots = raw.get("lots")
+        if isinstance(lots, list):
+            for lot in lots:
+                if not isinstance(lot, dict):
+                    continue
+                try:
+                    sh = int(lot.get("shares") or 0)
+                except Exception:
+                    sh = 0
+                if sh < 100:
+                    continue
+                vol += sh
+                try:
+                    px = float(lot.get("price") or px or 0)
+                except Exception:
+                    pass
+    if vol < 100 or px <= 0:
+        return stock, 0.0, 0
+    return stock, float(vol) * float(px), int(vol)
+
+
+def _state_glob_held():
+    """读各图 STATE_FILE，得到 {stock: mv}。"""
+    held = {}
+    base = str(globals().get("STATE_FILE") or "").strip()
+    if not base or "{stock}" not in base:
+        return held
+    folder = os.path.dirname(base)
+    fname = os.path.basename(base)
+    mid = fname.find("{stock}")
+    if mid < 0:
+        return held
+    pre = fname[:mid]
+    post = fname[mid + len("{stock}"):]
+    book_name = os.path.basename(_book_path() or "")
+    try:
+        names = os.listdir(folder) if folder else []
+    except Exception:
+        return held
+    for fn in names:
+        if book_name and fn == book_name:
+            continue
+        if not (fn.startswith(pre) and fn.endswith(post)):
+            continue
+        path = os.path.join(folder, fn) if folder else fn
+        try:
+            raw = json.loads(open(path, "r").read())
+        except Exception:
+            continue
+        stock, mv, _vol = _held_from_state_raw(raw)
+        if stock and mv > 1e-6:
+            held[stock] = mv
+    return held
+
+
+def _query_local_book(stock):
+    """持仓查询失败：上次券商快照 + 各图 STATE + 本图内存仓。"""
+    out = {
+        "ok": False,
+        "k": 0,
+        "k_other": 0,
+        "book_mv": 0.0,
+        "other_mv": 0.0,
+        "name_mv": 0.0,
+        "name_vol": 0,
+        "held": {},
+        "src": "local",
+    }
+    data = _book_load()
+    cache = data.get("broker") if isinstance(data.get("broker"), dict) else None
+    held = {}
+    if cache and isinstance(cache.get("held"), dict):
+        for code, mv in cache.get("held").items():
+            try:
+                v = float(mv or 0)
+            except Exception:
+                v = 0.0
+            if v > 1e-6 and _code_in_book(code):
+                held[_norm_code(code)] = v
+    other_mv = 0.0
+    k_other = 0
+    if cache:
+        try:
+            other_mv = float(cache.get("other_mv") or 0)
+        except Exception:
+            other_mv = 0.0
+        try:
+            k_other = int(cache.get("k_other") or 0)
+        except Exception:
+            k_other = 0
+    for code, mv in _state_glob_held().items():
+        if _code_in_book(code):
+            held[_norm_code(code)] = mv
+    name_vol = 0
+    if _has_position():
+        sh = _pos_shares()
+        px = _pos_cost_price()
+        if sh >= 100 and px > 0:
+            held[_norm_code(stock)] = float(sh) * float(px)
+            name_vol = int(sh)
+    if (not held) and (cache is None):
+        print(_strategy_tag(), "book local empty, skip buy")
+        _event_log("book_local_empty")
+        return out
+    book_mv = 0.0
+    k = 0
+    for mv in held.values():
+        book_mv += float(mv or 0)
+        k += 1
+    name_mv = float(held.get(_norm_code(stock)) or 0)
+    out["ok"] = True
+    out["k"] = int(k)
+    out["k_other"] = int(k_other)
+    out["book_mv"] = float(book_mv)
+    out["other_mv"] = float(other_mv)
+    out["name_mv"] = name_mv
+    out["name_vol"] = int(name_vol)
+    out["held"] = held
+    print(
+        "%s book fallback local k=%s k_other=%s book_mv=%.0f other_mv=%.0f name_mv=%.0f cache=%s"
+        % (STRATEGY_NAME, k, k_other, book_mv, other_mv, name_mv, bool(cache))
+    )
+    _event_log(
+        "book_fallback_local",
+        k=k,
+        k_other=k_other,
+        book_mv=book_mv,
+        other_mv=other_mv,
+        name_mv=name_mv,
+        names=list(held.keys()),
+        has_cache=bool(cache),
+    )
+    return out
+
+
+def _account_equity(cash, book_mv, other_mv=0.0):
+    """E_s = 总资产 - 其它股票市值；失败则现金 + 池内市值。"""
+    if getattr(A, "is_backtest", False):
+        return None
+    try:
+        accs = get_trade_detail_data(A.acct, A.acct_type, "account")
+        if accs:
+            raw = getattr(accs[0], "m_dTotalAsset", None)
+            if raw is not None and float(raw) > 0:
+                es = float(raw) - float(other_mv or 0)
+                if es > 0:
+                    return es
+    except Exception as e:
+        print(_strategy_tag(), "equity query fail", e)
+        _event_log("equity_query_fail", error=str(e))
+    try:
+        c = float(cash or 0)
+    except Exception:
+        c = 0.0
+    return c + float(book_mv or 0)
+
+
+def _sleeve_equity(cash, book_mv, other_mv=0.0):
+    """可部署基数：fixed 用 TRADE_BUDGET；否则 E_s。"""
+    if _cfg_budget_base_fixed():
+        v = _fixed_sleeve_amount()
+        if v > 0:
+            return v
+        return None
+    return _account_equity(cash, book_mv, other_mv)
+
+
+def _empty_fill_snap():
+    return {
+        "E": 0.0,
+        "N": _cfg_book_n(),
+        "k": 0,
+        "k_after": 0,
+        "k_other": 0,
+        "empty": 0,
+        "reserve": 0.0,
+        "lot": 0.0,
+        "book_mv": 0.0,
+        "other_mv": 0.0,
+        "name_mv": 0.0,
+        "cap": 0.0,
+        "acct_room": 0.0,
+        "name_room": 0.0,
+        "opening": False,
+        "cash": 0.0,
+        "why": "",
+        "n_buy": 0,
+        "split": 0.0,
+        "fill_cap": 0.0,
+        "name_lim": 0.0,
+        "scale_lim": 0.0,
+        "rsv_empty": False,
+        "fill_res": False,
+        "frac": 0.0,
+        "n_held": 0,
+        "vacant": "",
+        "src": "",
+        "base": "",
+    }
+
+
+def _name_room(lim, mv):
+    try:
+        left = float(lim or 0) - float(mv or 0)
+    except Exception:
+        left = 0.0
+    if left < 0:
+        return 0.0
+    return left
+
+
+def _book_path():
+    return str(globals().get("BOOK_FILE") or "").strip()
+
+
+def _book_window_id(now_s):
+    s = str(now_s or "")
+    open_s = _cfg_hhmmss("OPEN_EXEC_START", "093000")
+    open_e = _cfg_hhmmss("OPEN_EXEC_END", "094500")
+    conf_s = _cfg_hhmmss("SIGNAL_CONFIRM_START", "145600")
+    close_e = _cfg_hhmmss("PENDING_EXEC_END", "145700")
+    if open_s <= s < open_e:
+        return "open"
+    if conf_s <= s <= close_e:
+        return "close"
+    return ""
+
+
+def _book_freeze_s(window):
+    if window == "open":
+        return str(globals().get("BOOK_FREEZE_OPEN") or "093030")
+    return str(
+        globals().get("BOOK_FREEZE_CLOSE")
+        or globals().get("PENDING_EXEC_START")
+        or "145640"
+    )
+
+
+def _book_load():
+    path = _book_path()
+    if not path:
+        return {}
+    try:
+        raw = open(path, "r").read()
+    except Exception:
+        return {}
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return data
+
+
+def _book_save(data):
+    path = _book_path()
+    if not path:
+        return False
+    text = json.dumps(data, ensure_ascii=False)
+    tmp = path + ".tmp." + str(os.getpid())
+    try:
+        fh = open(tmp, "w")
+        fh.write(text)
+        fh.close()
+        os.replace(tmp, path)
+        return True
+    except Exception as e:
+        print(_strategy_tag(), "book save fail", e)
+        _event_log("book_save_fail", error=str(e))
+        try:
+            os.remove(tmp)
+        except Exception:
+            pass
+        return False
+
+
+def _sell_fracs_from_exit():
+    px = getattr(A, "pending_exit", None)
+    if not isinstance(px, dict):
+        return []
+    ids = px.get("lot_ids") or []
+    try:
+        idset = set(int(x) for x in ids)
+    except Exception:
+        idset = set()
+    out = []
+    for lot in getattr(A, "lots", None) or []:
+        if not isinstance(lot, dict):
+            continue
+        try:
+            lid = int(lot.get("id") or 0)
+        except Exception:
+            lid = 0
+        if idset and lid not in idset:
+            continue
+        if not idset:
+            continue
+        row = _lot_row_from_dict(lot)
+        if not row:
+            continue
+        out.append(_snap_book_frac(row.get("frac"), mv=row.get("mv"), lot_id=lid))
+    return out
+
+
+def _book_checkin(
+    day,
+    window,
+    now_s,
+    buy=False,
+    add=False,
+    sell=False,
+    sell_all=False,
+    n_lots=0,
+    round_scaled=False,
+    sell_fracs=None,
+):
+    """本图写入共享账本一条打卡。"""
+    if not _equal_split_on():
+        return
+    if not window:
+        return
+    stock = _norm_code(getattr(A, "stock", ""))
+    if not stock:
+        return
+    data = _book_load()
+    broker_keep = data.get("broker") if isinstance(data.get("broker"), dict) else None
+    if str(data.get("day") or "") != str(day) or str(data.get("window") or "") != str(window):
+        data = {"day": str(day), "window": str(window), "names": {}}
+        if broker_keep:
+            data["broker"] = broker_keep
+    names = data.get("names")
+    if not isinstance(names, dict):
+        names = {}
+        data["names"] = names
+    rec = {
+        "checkin": True,
+        "buy": bool(buy),
+        "add": bool(add),
+        "sell": bool(sell),
+        "sell_all": bool(sell_all),
+        "hhmmss": str(now_s or ""),
+        "n_lots": int(n_lots or 0),
+        "round_scaled": bool(round_scaled),
+    }
+    if sell_fracs:
+        rec["sell_fracs"] = [float(x) for x in sell_fracs]
+    names[stock] = rec
+    _book_save(data)
+
+
+def _sync_signal_book(day, now_s, buy_sig, scale_sig, holding, sell_ok):
+    if not _equal_split_on():
+        return
+    window = _book_window_id(now_s)
+    if not window:
+        return
+    pe = getattr(A, "pending_entry", None)
+    px = getattr(A, "pending_exit", None)
+    sell = bool(isinstance(px, dict) or sell_ok)
+    buy = bool(isinstance(pe, dict)) or bool(buy_sig) or (bool(scale_sig) and bool(holding))
+    add = False
+    if isinstance(pe, dict) and pe.get("add"):
+        add = True
+    elif scale_sig and holding:
+        add = True
+    if sell:
+        buy = False
+        add = False
+    sell_all = False
+    if isinstance(px, dict):
+        reasons = px.get("reasons") or []
+        flatten = _is_weekly_flatten(px.get("reason"), reasons)
+        if (not px.get("lot_ids")) or flatten:
+            sell_all = True
+    n_lots = 0
+    for lot in getattr(A, "lots", None) or []:
+        if isinstance(lot, dict) and int(lot.get("shares") or 0) >= 100:
+            n_lots += 1
+    _book_checkin(
+        day,
+        window,
+        now_s,
+        buy=buy,
+        add=add,
+        sell=sell,
+        sell_all=sell_all,
+        n_lots=n_lots,
+        round_scaled=bool(getattr(A, "round_scaled", False)),
+        sell_fracs=_sell_fracs_from_exit() if sell else None,
+    )
+
+
+def _book_is_frozen(now_s, data=None):
+    if not _equal_split_on():
+        return True
+    window = _book_window_id(now_s)
+    if not window:
+        return False
+    if data is None:
+        data = _book_load()
+    if str(data.get("window") or "") != window:
+        data = {}
+    names = data.get("names") if isinstance(data.get("names"), dict) else {}
+    n_ok = 0
+    for stock, rec in names.items():
+        if not _code_in_book(stock):
+            continue
+        if isinstance(rec, dict) and rec.get("checkin"):
+            n_ok += 1
+    if n_ok >= _cfg_book_n():
+        return True
+    return str(now_s or "") >= _book_freeze_s(window)
+
+
+def _book_buy_intents(data, now_s):
+    """冻结后纳入均分的买单。超时打卡不计入。"""
+    window = str(data.get("window") or "")
+    names = data.get("names") if isinstance(data.get("names"), dict) else {}
+    n_ok = 0
+    for stock, rec in names.items():
+        if not _code_in_book(stock):
+            continue
+        if isinstance(rec, dict) and rec.get("checkin"):
+            n_ok += 1
+    frozen_by_n = n_ok >= _cfg_book_n()
+    freeze_s = _book_freeze_s(window)
+    frozen_by_time = str(now_s or "") >= freeze_s
+    cutoff = "999999" if frozen_by_n else freeze_s
+    intents = []
+    sells = []
+    for stock, rec in names.items():
+        if not isinstance(rec, dict) or (not rec.get("checkin")):
+            continue
+        hh = str(rec.get("hhmmss") or "")
+        if hh > cutoff:
+            continue
+        if rec.get("sell"):
+            fracs = rec.get("sell_fracs") or []
+            sells.append((str(stock), bool(rec.get("sell_all")), list(fracs), str(rec.get("hhmmss") or "")))
+        if rec.get("buy") and (not rec.get("sell")):
+            intents.append(
+                {
+                    "stock": str(stock),
+                    "add": bool(rec.get("add")),
+                    "hhmmss": str(rec.get("hhmmss") or ""),
+                }
+            )
+    return intents, sells
+
+
+def _apply_virtual_sells(rows_by, held, cash_v, sells):
+    rows_by = dict(rows_by or {})
+    held = dict(held or {})
+    try:
+        cash_v = float(cash_v or 0)
+    except Exception:
+        cash_v = 0.0
+    for item in sells or []:
+        stock = _norm_code(item[0] if item else "")
+        sell_all = bool(item[1]) if item and len(item) > 1 else False
+        fracs = list(item[2]) if item and len(item) > 2 else []
+        if not stock:
+            continue
+        rows = list(rows_by.get(stock) or [])
+        if sell_all:
+            mv = 0.0
+            for r in rows:
+                mv += float(r.get("mv") or 0)
+            if mv <= 1e-6:
+                mv = float(held.get(stock) or 0)
+            cash_v += mv
+            held.pop(stock, None)
+            rows_by[stock] = []
+            continue
+        want = [_snap_book_frac(x) for x in fracs]
+        if not want:
+            if rows:
+                rows = sorted(
+                    rows,
+                    key=lambda r: _vacant_rank(r.get("frac")),
+                )
+                dropped = rows.pop(0)
+                cash_v += float(dropped.get("mv") or 0)
+            left_mv = 0.0
+            for r in rows:
+                left_mv += float(r.get("mv") or 0)
+            if left_mv > 1e-6:
+                held[stock] = left_mv
+            else:
+                held.pop(stock, None)
+            rows_by[stock] = rows
+            continue
+        remain = []
+        for r in rows:
+            f = _snap_book_frac(r.get("frac"))
+            hit = None
+            for i, w in enumerate(want):
+                if abs(w - f) < 0.02:
+                    hit = i
+                    break
+            if hit is None:
+                remain.append(r)
+            else:
+                cash_v += float(r.get("mv") or 0)
+                want.pop(hit)
+        rows_by[stock] = remain
+        left_mv = 0.0
+        for r in remain:
+            left_mv += float(r.get("mv") or 0)
+        if left_mv > 1e-6:
+            held[stock] = left_mv
+        else:
+            held.pop(stock, None)
+    return rows_by, held, cash_v
+
+
+def _allocate_equal(cash, now_s):
+    """返回 (lots_by_stock, snap_base)。无券商且无本地账本时 why=book_fail。"""
+    snap = _empty_fill_snap()
+    broker = _query_broker_book()
+    if not broker.get("ok"):
+        snap["why"] = "book_fail"
+        return {}, snap
+    held = {}
+    for code, mv in (broker.get("held") or {}).items():
+        try:
+            v = float(mv or 0)
+        except Exception:
+            v = 0.0
+        if v > 1e-6:
+            held[_norm_code(code)] = v
+    data = _book_load()
+    intents, sells = _book_buy_intents(data, now_s)
+    clean_intents = []
+    for it in intents:
+        if not _code_in_book(it.get("stock")):
+            continue
+        clean_intents.append(
+            {
+                "stock": _norm_code(it.get("stock")),
+                "add": bool(it.get("add")),
+                "hhmmss": str(it.get("hhmmss") or ""),
+            }
+        )
+    intents = clean_intents
+    clean_sells = []
+    for item in sells:
+        st = _norm_code(item[0] if item else "")
+        if not _code_in_book(st):
+            continue
+        sa = bool(item[1]) if item and len(item) > 1 else False
+        fracs = list(item[2]) if item and len(item) > 2 else []
+        clean_sells.append((st, sa, fracs))
+    sells = clean_sells
+    cash_v = 0.0
+    try:
+        cash_v = float(cash) if cash is not None else 0.0
+    except Exception:
+        cash_v = 0.0
+    other_mv = float(broker.get("other_mv") or 0)
+    equity = _sleeve_equity(cash, float(broker.get("book_mv") or 0), other_mv)
+    ratio = _cfg_cash_ratio()
+    n = _cfg_book_n()
+    stock = _norm_code(getattr(A, "stock", ""))
+    cap_guess = ratio * float(equity) if equity and equity > 0 else 0.0
+    rows_by = _finalize_lot_fracs(_collect_book_lot_rows(held), cap_guess)
+    rows_by, held, cash_v = _apply_virtual_sells(rows_by, held, cash_v, sells)
+    book_mv = 0.0
+    for mv in held.values():
+        book_mv += float(mv or 0)
+    if sells and (not _cfg_budget_base_fixed()):
+        equity = cash_v + book_mv
+    k = len([1 for mv in held.values() if float(mv or 0) > 1e-6])
+    n_new = 0
+    for it in intents:
+        st = it.get("stock")
+        if float(held.get(st) or 0) <= 1e-6:
+            n_new += 1
+    k_after = k + n_new
+    empty = max(0, n - k_after)
+    reserve = 0.0
+    name_mv = float(held.get(stock) or 0)
+    snap.update(
+        {
+            "N": n,
+            "k": k,
+            "k_after": k_after,
+            "k_other": int(broker.get("k_other") or 0),
+            "empty": empty,
+            "reserve": reserve,
+            "book_mv": book_mv,
+            "other_mv": other_mv,
+            "name_mv": name_mv,
+            "cash": cash_v,
+            "n_buy": len(intents),
+            "opening": name_mv <= 1e-6,
+            "rsv_empty": False,
+            "fill_res": False,
+            "base": _cfg_budget_base(),
+        }
+    )
+    if equity is None or equity <= 0:
+        snap["why"] = "no_E"
+        return {}, snap
+    cap = ratio * float(equity)
+    name_lim = cap
+    scale_lim = cap
+    rows_by = _finalize_lot_fracs(rows_by, cap)
+    occupied = _occupied_fracs(rows_by)
+    vacant = _vacant_slots(occupied)
+    n_held = len(occupied)
+    slots_left = _cfg_book_lot_max() - n_held
+    free = cap - book_mv
+    if free < 0:
+        free = 0.0
+    free = min(free, cash_v)
+    lots = {}
+    fracs_by = {}
+    why_by = {}
+    ranked = _rank_buy_intents(intents, vacant)
+    remain_free = free
+    remain_vacant = list(vacant)
+    remain_slots = slots_left
+    for it in ranked:
+        st = it.get("stock")
+        is_add = bool(it.get("add"))
+        why_hit = ""
+        frac = 0.0
+        if remain_slots <= 0:
+            why_hit = "book_lot_cap"
+        elif is_add:
+            if _vacant_has_big(remain_vacant) and remain_slots <= 1:
+                why_hit = "scale_cap"
+            elif not _vacant_has_small(remain_vacant):
+                why_hit = "book_lot_cap"
+            else:
+                frac, remain_vacant = _take_vacant(remain_vacant, False)
+                frac = float(frac or 0)
+        else:
+            if _vacant_has_big(remain_vacant):
+                frac, remain_vacant = _take_vacant(remain_vacant, True)
+            elif _vacant_has_small(remain_vacant):
+                frac, remain_vacant = _take_vacant(remain_vacant, False)
+            else:
+                why_hit = "book_lot_cap"
+            frac = float(frac or 0)
+        lot = 0.0
+        last_slot = remain_slots <= 1
+        # 最后一槽：金额吃 cap-已占用-现金限制；book_frac 仍用本档 frac。
+        if frac > 0 and remain_free > 1e-6:
+            lim = scale_lim if is_add else name_lim
+            room = _name_room(lim, float(held.get(st) or 0) + float(lots.get(st) or 0))
+            if last_slot:
+                lot = min(remain_free, room)
+            else:
+                lot = min(frac * cap, remain_free, room)
+            if lot < 0:
+                lot = 0.0
+            if lot > 0:
+                lots[st] = float(lots.get(st) or 0) + lot
+                remain_free -= lot
+                remain_slots -= 1
+                # 金额可吃剩余；档位标签仍用空档 0.50/0.30/剩余档，避免 snap 把第三笔收成大仓。
+                fracs_by[st] = frac
+            else:
+                why_hit = "scale_cap" if is_add else "buy_cap"
+                if frac:
+                    remain_vacant.insert(0, frac)
+                    remain_vacant = _vacant_sort(remain_vacant)
+        elif frac > 0:
+            why_hit = "scale_cap" if is_add else "buy_cap"
+            remain_vacant.insert(0, frac)
+            remain_vacant = _vacant_sort(remain_vacant)
+        if why_hit:
+            why_by[st] = why_hit
+    my_add = False
+    for it in intents:
+        if _norm_code(it.get("stock")) == stock and it.get("add"):
+            my_add = True
+    my_lot = float(lots.get(stock) or 0)
+    my_frac = float(fracs_by.get(stock) or 0)
+    my_why = str(why_by.get(stock) or "")
+    if my_lot > 1e-6:
+        my_why = "split"
+    elif not my_why:
+        if remain_slots <= 0 or n_held >= _cfg_book_lot_max():
+            my_why = "book_lot_cap"
+        elif my_add:
+            my_why = "scale_cap"
+        else:
+            my_why = "buy_cap" if intents else "split"
+    fill_cap = my_frac * cap if my_frac > 0 else 0.0
+    n_buy = len(intents) if intents else 0
+    snap.update(
+        {
+            "E": float(equity),
+            "cap": cap,
+            "acct_room": remain_free,
+            "name_room": _name_room(name_lim if not my_add else scale_lim, name_mv + my_lot),
+            "name_lim": name_lim,
+            "scale_lim": scale_lim,
+            "fill_cap": fill_cap,
+            "lot": my_lot,
+            "split": (free / float(n_buy)) if n_buy else 0.0,
+            "n_buy": n_buy,
+            "why": my_why or "split",
+            "src": str(broker.get("src") or "broker"),
+            "frac": my_frac,
+            "n_held": n_held,
+            "vacant": ",".join(["%.2f" % float(x) for x in vacant]),
+            "base": _cfg_budget_base(),
+        }
+    )
+    return lots, snap
+
+
+def _fill_budget_snapshot(cash, opening=None):
+    snap = _empty_fill_snap()
+    if opening is None:
+        opening = not (
+            _has_position()
+            or (getattr(A, "is_backtest", False) and _bt_held_vol() > 0)
+        )
+    opening = bool(opening)
+    if not _dynamic_budget_on():
+        frac = _chart_next_frac(opening)
+        lot = float(_buy_budget_fixed(cash) or 0)
+        snap["lot"] = lot
+        snap["frac"] = frac
+        snap["opening"] = opening
+        try:
+            snap["n_held"] = int(_pos_lots() or 0)
+        except Exception:
+            snap["n_held"] = 0
+        snap["why"] = "fixed" if lot > 1e-6 else "book_lot_cap"
+        return snap
+    now = datetime.datetime.now()
+    now_s = now.strftime("%H%M%S")
+    if _equal_split_on():
+        if not _book_is_frozen(now_s):
+            snap["why"] = "wait"
+            return snap
+        _lots, snap = _allocate_equal(cash, now_s)
+        snap["opening"] = bool(opening)
+        return snap
+    book = _query_broker_book()
+    if not book.get("ok"):
+        snap["why"] = "book_fail"
+        return snap
+    book_mv = float(book.get("book_mv") or 0)
+    other_mv = float(book.get("other_mv") or 0)
+    name_mv = float(book.get("name_mv") or 0)
+    name_vol = int(book.get("name_vol") or 0)
+    k = int(book.get("k") or 0)
+    name_on_book = name_vol >= 100
+    if opening is None:
+        opening = (not name_on_book) and (not _has_position())
+    opening = bool(opening)
+    if opening and (not name_on_book):
+        k_after = k + 1
+    else:
+        k_after = k
+    n = _cfg_book_n()
+    empty = max(0, n - k_after)
+    reserve = 0.0
+    equity = _sleeve_equity(cash, book_mv, other_mv)
+    try:
+        cash_v = float(cash) if cash is not None else 0.0
+    except Exception:
+        cash_v = 0.0
+    snap.update(
+        {
+            "N": n,
+            "k": k,
+            "k_after": k_after,
+            "k_other": int(book.get("k_other") or 0),
+            "empty": empty,
+            "reserve": reserve,
+            "book_mv": book_mv,
+            "other_mv": other_mv,
+            "name_mv": name_mv,
+            "opening": opening,
+            "cash": cash_v,
+            "rsv_empty": False,
+            "fill_res": False,
+            "base": _cfg_budget_base(),
+        }
+    )
+    if equity is None or equity <= 0:
+        snap["why"] = "no_E"
+        return snap
+    ratio = _cfg_cash_ratio()
+    cap = ratio * float(equity)
+    name_lim = cap
+    scale_lim = cap
+    frac = _chart_next_frac(opening)
+    fill_cap = float(frac) * cap
+    if opening:
+        name_room = _name_room(name_lim, name_mv)
+        acct_room = cap - book_mv - reserve
+    else:
+        name_room = _name_room(scale_lim, name_mv)
+        acct_room = cap - book_mv
+    lot = min(acct_room, name_room, cash_v, fill_cap)
+    if lot < 0:
+        lot = 0.0
+    why = "fill"
+    if lot <= 1e-6:
+        if frac <= 1e-9:
+            why = "scale_cap" if not opening else "book_lot_cap"
+        else:
+            why = "buy_cap" if opening else "scale_cap"
+    snap.update(
+        {
+            "E": float(equity),
+            "cap": cap,
+            "acct_room": acct_room,
+            "name_room": name_room,
+            "name_lim": name_lim,
+            "scale_lim": scale_lim,
+            "fill_cap": fill_cap,
+            "lot": lot,
+            "frac": frac,
+            "why": why,
+            "src": str(book.get("src") or "broker"),
+            "base": _cfg_budget_base(),
+        }
+    )
+    return snap
+
+
+def _log_fill_budget(snap, tag=""):
+    snap = snap or {}
+    print(
+        "%s fill%s E=%.0f N=%s k=%s k_other=%s reserve=%.0f lot=%.0f fill_cap=%.0f "
+        "name_lim=%.0f scale_lim=%.0f book_mv=%.0f other_mv=%.0f name_mv=%.0f "
+        "n_buy=%s n_held=%s frac=%.2f vacant=%s split=%.0f why=%s src=%s base=%s"
+        % (
+            STRATEGY_NAME,
+            (" " + str(tag)) if tag else "",
+            float(snap.get("E") or 0),
+            snap.get("N"),
+            snap.get("k"),
+            snap.get("k_other"),
+            float(snap.get("reserve") or 0),
+            float(snap.get("lot") or 0),
+            float(snap.get("fill_cap") or 0),
+            float(snap.get("name_lim") or 0),
+            float(snap.get("scale_lim") or 0),
+            float(snap.get("book_mv") or 0),
+            float(snap.get("other_mv") or 0),
+            float(snap.get("name_mv") or 0),
+            snap.get("n_buy"),
+            snap.get("n_held"),
+            float(snap.get("frac") or 0),
+            snap.get("vacant") or "-",
+            float(snap.get("split") or 0),
+            snap.get("why") or "-",
+            snap.get("src") or "-",
+            snap.get("base") or _cfg_budget_base(),
+        )
+    )
+    _event_log(
+        "fill_budget",
+        tag=str(tag or ""),
+        E=snap.get("E"),
+        N=snap.get("N"),
+        k=snap.get("k"),
+        k_after=snap.get("k_after"),
+        k_other=snap.get("k_other"),
+        reserve=snap.get("reserve"),
+        lot=snap.get("lot"),
+        book_mv=snap.get("book_mv"),
+        other_mv=snap.get("other_mv"),
+        name_mv=snap.get("name_mv"),
+        empty=snap.get("empty"),
+        opening=snap.get("opening"),
+        why=snap.get("why"),
+        n_buy=snap.get("n_buy"),
+        n_held=snap.get("n_held"),
+        frac=snap.get("frac"),
+        vacant=snap.get("vacant"),
+        fill_cap=snap.get("fill_cap"),
+        name_lim=snap.get("name_lim"),
+        scale_lim=snap.get("scale_lim"),
+        src=snap.get("src"),
+        base=snap.get("base") or _cfg_budget_base(),
+    )
+
+
+def _fill_room_ok(price=None, opening=None):
+    """额度是否够买至少 100 股。why=buy_cap / scale_cap / wait / book_fail。"""
+    cash = _available_cash()
+    snap = _fill_budget_snapshot(cash, opening=opening)
+    why0 = str(snap.get("why") or "")
+    if why0 in ("wait", "book_fail", "no_E"):
+        return False, why0, snap
+    lot = float(snap.get("lot") or 0)
+    is_open = bool(opening) if opening is not None else bool(snap.get("opening"))
+    if why0 in ("book_lot_cap", "scale_cap", "buy_cap") and lot <= 1e-6:
+        return False, why0, snap
+    why = "buy_cap" if is_open else "scale_cap"
+    if lot <= 0:
+        return False, why, snap
+    if price is not None:
+        try:
+            px = float(price)
+        except Exception:
+            px = 0.0
+        if px > 0 and _lot(px, lot) < 100:
+            return False, why, snap
+    return True, "", snap
+
+
+def _buy_budget(cash):
+    """覆盖 common：实盘分档；回测回落 TRADE_BUDGET。"""
+    if not _dynamic_budget_on():
+        return _buy_budget_fixed(cash)
+    snap = _fill_budget_snapshot(cash)
+    if str(snap.get("why") or "") in ("wait", "book_fail", "no_E"):
+        return 0.0
+    lot = float(snap.get("lot") or 0)
+    return lot if lot > 0 else 0.0
+
+
+def _heartbeat_extra():
+    parts = []
+    watch = getattr(A, "watch", None)
+    if watch:
+        parts.append("watch=%s" % len(watch))
+        parts.append("chart=%s" % (getattr(A, "chart_stock", "") or "-"))
+        parts.append("drive=%s" % (getattr(A, "_drive", "") or "timer"))
+        parts.append("work=%s" % (getattr(A, "_live_work", "") or "-"))
+    lots = getattr(A, "lots", None) or []
+    if lots:
+        bits = []
+        for lot in lots:
+            try:
+                bits.append(
+                    "L%s:%s@%.4f"
+                    % (lot.get("id"), lot.get("shares"), float(lot.get("price") or 0))
+                )
+            except Exception:
+                pass
+        if bits:
+            parts.append("lots=" + ",".join(bits))
+    if _dynamic_budget_on():
+        try:
+            cash = _available_cash()
+            snap = _fill_budget_snapshot(cash)
+            parts.append(
+                "E=%.0f N=%s k=%s k_other=%s reserve=%.0f lot=%.0f fill_cap=%.0f "
+                "name_lim=%.0f scale_lim=%.0f book_mv=%.0f other_mv=%.0f name_mv=%.0f "
+                "n_buy=%s n_held=%s frac=%.2f vacant=%s why=%s src=%s base=%s"
+                % (
+                    float(snap.get("E") or 0),
+                    snap.get("N"),
+                    snap.get("k"),
+                    snap.get("k_other"),
+                    float(snap.get("reserve") or 0),
+                    float(snap.get("lot") or 0),
+                    float(snap.get("fill_cap") or 0),
+                    float(snap.get("name_lim") or 0),
+                    float(snap.get("scale_lim") or 0),
+                    float(snap.get("book_mv") or 0),
+                    float(snap.get("other_mv") or 0),
+                    float(snap.get("name_mv") or 0),
+                    snap.get("n_buy"),
+                    snap.get("n_held"),
+                    float(snap.get("frac") or 0),
+                    snap.get("vacant") or "-",
+                    snap.get("why") or "-",
+                    snap.get("src") or "-",
+                    snap.get("base") or _cfg_budget_base(),
+                )
+            )
+        except Exception:
+            pass
+    return " ".join(parts)
+
+# === fband/strategy.py ===
+def _bar_hhmm(dt):
+    if dt is None:
+        return "0000"
+    return dt.strftime("%H%M")
+
+
+def _bar_hhmmss(dt):
+    if dt is None:
+        return "000000"
+    return dt.strftime("%H%M%S")
+
+
+def _bar_tag(dt):
+    if dt is None:
+        return ""
+    return dt.strftime("%Y%m%d%H%M%S")
+
+
+def _eval_weekly(closes_w):
+    """返回 (bull, bear, detail)。bull 仅日志；bear = 当天空头叶子。"""
+    detail = _weekly_market_features(closes_w)
+    bull = _weekly_bull_from_detail(detail)
+    bear = _factor_hit("weekly_bear", {"market": {"w_detail": detail}})
+    return bull, bear, detail
+
+
+def _update_w_bear_streak(weekly_bear, sig_day, track):
+    """
+    连续 N 个信号日仍周线空头才确认清仓。
+    track=False（实盘盘中 exec）不改计数，避免半成品 K 抖动。
+    返回 (force_empty, streak)。
+    """
+    need = _w_bear_confirm_need()
+    sig_day = str(sig_day or "")
+    streak = int(getattr(A, "_w_bear_streak", 0) or 0)
+    last = str(getattr(A, "_w_bear_last_day", "") or "")
+    if not track:
+        return bool(weekly_bear) and streak >= need, streak
+    if not sig_day:
+        return False, streak
+
+    prev_streak = streak
+    prev_last = last
+    changed = False
+
+    if sig_day == last:
+        # 同一信号日：confirm 窗内可能先空后翻多（或相反），须跟最终电平
+        if weekly_bear:
+            if streak <= 0:
+                streak = 1
+                changed = True
+        else:
+            if streak > 0:
+                streak = 0
+                changed = True
+    elif weekly_bear:
+        if streak > 0 and last and sig_day > last:
+            streak = streak + 1
+        else:
+            streak = 1
+        changed = True
+    else:
+        streak = 0
+        changed = True
+
+    A._w_bear_streak = int(streak)
+    A._w_bear_last_day = sig_day
+    if changed or (sig_day != prev_last):
+        if not getattr(A, "is_backtest", False):
+            _save_state()
+        if weekly_bear and (streak != prev_streak or sig_day != prev_last):
+            print(
+                "%s w_bear streak=%d/%d day=%s"
+                % (STRATEGY_NAME, streak, need, sig_day)
+            )
+            _event_log(
+                "w_bear_streak",
+                streak=streak,
+                need=need,
+                signal_day=sig_day,
+            )
+        elif (not weekly_bear) and prev_streak:
+            print(
+                "%s w_bear streak reset day=%s (was %d)"
+                % (STRATEGY_NAME, sig_day, prev_streak)
+            )
+            _event_log(
+                "w_bear_streak_reset",
+                signal_day=sig_day,
+                was=prev_streak,
+            )
+    return streak >= need, streak
+
+
+def _is_weekly_flatten(reason=None, reasons=None):
+    """清仓周空：新码 weekly_bear_confirm，盘上旧 pending 仍可能是 weekly_bear。"""
+    codes = ("weekly_bear_confirm", "weekly_bear")
+    if reason and str(reason) in codes:
+        return True
+    for r in reasons or ():
+        if str(r) in codes:
+            return True
+    return False
+
+
+def _scale_in_gate_hit(ctx):
+    """执行日撤买：RECIPE.scale_in 顶层 not 叶子任一为真。"""
+    recipe = globals().get("RECIPE") or {}
+    for fid in _recipe_not_leaves(recipe.get("scale_in")):
+        if _factor_hit(fid, ctx):
+            return fid
+    return None
+
+
+def _bind_exit_ctx(base_ctx, lot=None, cost=None, hold_peak=None, hold_bars=None):
+    fields = {}
+    if lot is not None:
+        fields["lot"] = lot
+        if cost is None:
+            cost = lot.get("price")
+        if hold_peak is None:
+            hold_peak = lot.get("hold_peak")
+        if hold_bars is None:
+            hold_bars = lot.get("hold_bars")
+    if cost is not None:
+        fields["cost"] = cost
+    if hold_peak is not None:
+        fields["hold_peak"] = hold_peak
+    if hold_bars is not None:
+        fields["hold_bars"] = hold_bars
+    return _factor_ctx_bind_state(base_ctx, **fields)
+
+
+def _update_hold_peak(high_px, cost):
+    """持仓期跟踪最高价（移动止盈用）。"""
+    hi = float(high_px)
+    peak = getattr(A, "hold_peak", None)
+    if peak is None:
+        base = float(cost) if cost and cost > 0 else hi
+        A.hold_peak = max(base, hi)
+        changed = True
+    elif hi > float(peak):
+        A.hold_peak = hi
+        changed = True
+    else:
+        changed = False
+    if cost and float(cost) > 0:
+        mx = (float(A.hold_peak) - float(cost)) / float(cost)
+        prev = float(getattr(A, "hold_max_ret", 0) or 0)
+        if mx > prev:
+            A.hold_max_ret = mx
+            changed = True
+    return changed
+
+
+def _lot_from_agg():
+    pos = getattr(A, "position", None) or {}
+    px = float(pos.get("price", 0) or 0)
+    peak = getattr(A, "hold_peak", None)
+    if peak is None:
+        peak = px
+    cost = px if px > 0 else 0.0
+    mx = 0.0
+    if cost > 0 and peak is not None:
+        mx = (float(peak) - cost) / cost
+    return {
+        "id": 1,
+        "shares": int(pos.get("shares", 0) or 0),
+        "price": px,
+        "opened_at": str(pos.get("opened_at", "") or ""),
+        "hold_peak": peak,
+        "hold_close_peak": peak,
+        "hold_max_ret": mx,
+        "hold_bars": int(getattr(A, "hold_bars", 0) or 0),
+        "hold_count_bar": str(getattr(A, "_hold_count_day", "") or ""),
+        "time_force_trend_skip": bool(getattr(A, "time_force_trend_skip", False)),
+    }
+
+
+def _mirror_hold_from_lots():
+    lots = getattr(A, "lots", None) or []
+    if not lots:
+        A.hold_peak = None
+        A.hold_close_peak = None
+        A.hold_max_ret = 0.0
+        A.hold_bars = 0
+        A._hold_count_bar = ""
+        A._hold_count_day = ""
+        A.time_force_grace_until = None
+        A.time_force_trend_skip = False
+        return
+    lot = lots[0]
+    A.hold_peak = lot.get("hold_peak")
+    A.hold_close_peak = lot.get("hold_close_peak")
+    A.hold_max_ret = float(lot.get("hold_max_ret") or 0)
+    A.hold_bars = int(lot.get("hold_bars") or 0)
+    tag = str(lot.get("hold_count_bar") or "")
+    A._hold_count_bar = tag
+    A._hold_count_day = tag
+    A.time_force_grace_until = None
+    A.time_force_trend_skip = bool(lot.get("time_force_trend_skip"))
+
+
+def _infer_round_scaled():
+    """旧状态无 round_scaled 时：剩余笔 id>1 或同时 >=2 笔，视为本轮已加过仓。"""
+    if _lots_enabled():
+        mx = 0
+        n = 0
+        for lot in getattr(A, "lots", None) or []:
+            if not isinstance(lot, dict):
+                continue
+            try:
+                sh = int(lot.get("shares") or 0)
+            except Exception:
+                sh = 0
+            if sh < 100:
+                continue
+            n += 1
+            try:
+                mx = max(mx, int(lot.get("id") or 0))
+            except Exception:
+                pass
+        return n >= 2 or mx > 1
+    pos = getattr(A, "position", None) or {}
+    try:
+        return int(pos.get("lots", 1) or 1) >= 2
+    except Exception:
+        return False
+
+
+def _round_scaled_now():
+    if bool(getattr(A, "round_scaled", False)):
+        return True
+    if not _infer_round_scaled():
+        return False
+    A.round_scaled = True
+    try:
+        _save_state()
+    except Exception:
+        pass
+    return True
+
+
+def _scale_peak_ret():
+    mx = 0.0
+    armed_bars = 0
+    arm = float(globals().get("SCALE_ARM") or 0)
+    if arm <= 0:
+        arm = 0.03
+    if _lots_enabled():
+        for lot in _ensure_lots():
+            try:
+                ret = float(lot.get("hold_max_ret") or 0)
+            except Exception:
+                ret = 0.0
+            bars = int(lot.get("hold_bars") or 0)
+            if ret > mx:
+                mx = ret
+            if ret >= arm and bars > armed_bars:
+                armed_bars = bars
+        if mx <= 0:
+            peak = getattr(A, "hold_peak", None)
+            cost = _pos_cost_price()
+            if peak and cost > 0:
+                mx = (float(peak) - float(cost)) / float(cost)
+            armed_bars = int(getattr(A, "hold_bars", 0) or 0)
+        return mx, armed_bars
+    peak = getattr(A, "hold_peak", None)
+    cost = _pos_cost_price()
+    if peak and cost > 0:
+        mx = (float(peak) - float(cost)) / float(cost)
+    armed_bars = int(getattr(A, "hold_bars", 0) or 0)
+    return mx, armed_bars
+
+
+def _scale_gate(w_detail=None, price=None):
+    """加仓门槛：(ok, why)。why 仅失败时有值。"""
+    if not bool(globals().get("SCALE_ENABLE")):
+        return False, "scale_off"
+    sh = _pos_shares()
+    if getattr(A, "is_backtest", False):
+        sh = max(sh, _bt_held_vol())
+    if sh < 100:
+        return False, "scale_no_pos"
+    if bool(globals().get("SCALE_ONCE_PER_ROUND", True)) and _round_scaled_now():
+        return False, "scale_once"
+    blocked, why_b = _book_scale_blocked()
+    if blocked:
+        return False, why_b or "book_lot_cap"
+    arm = float(globals().get("SCALE_ARM") or 0)
+    if arm <= 0:
+        arm = 0.03
+    mx, armed_bars = _scale_peak_ret()
+    if mx < arm:
+        return False, "scale_arm"
+    need_bars = int(globals().get("SCALE_ARM_BARS") or 0)
+    if need_bars > 0 and armed_bars < need_bars:
+        return False, "scale_bars"
+    hist_min = globals().get("SCALE_W_HIST_MIN")
+    if hist_min is not None and w_detail is not None:
+        h = w_detail.get("hist")
+        if h is not None and float(h) < float(hist_min):
+            return False, "scale_w_hist"
+    return True, ""
+
+
+def _scale_ready(w_detail=None):
+    ok, _why = _scale_gate(w_detail)
+    return ok
+
+
+def _eval_lot_sell(price, closes, lot, highs=None, lows=None, base_ctx=None):
+    if base_ctx is None:
+        base_ctx = _build_factor_ctx(
+            closes,
+            None,
+            highs,
+            lows,
+            {},
+            price,
+            state={
+                "w_bear_streak": int(getattr(A, "_w_bear_streak", 0) or 0),
+            },
+        )
+    ctx = _bind_exit_ctx(base_ctx, lot=lot)
+    slot = _eval_exit_slot(ctx)
+    return bool(slot.get("hit")), list(slot.get("reasons") or [])
+
+
+def _collect_lot_exits(base_ctx, price, closes, highs=None, lows=None):
+    lots = _ensure_lots()
+    if not lots:
+        return False, [], [], 0
+    exits = []
+    for lot in lots:
+        ok, reasons = _eval_lot_sell(
+            price, closes, lot, highs=highs, lows=lows, base_ctx=base_ctx
+        )
+        if ok:
+            exits.append((lot, reasons))
+    if not exits:
+        return False, [], [], 0
+    lot_ids = [int(item[0].get("id") or 0) for item in exits]
+    shares = sum(int(item[0].get("shares") or 0) for item in exits)
+    reasons = []
+    for _lot, rs in exits:
+        for r in rs:
+            if r not in reasons:
+                reasons.append(r)
+    return True, reasons, lot_ids, shares
+
+
+def _clear_hold_meta():
+    A.hold_peak = None
+    A.hold_bars = 0
+    A._hold_count_day = ""
+    A.time_force_grace_until = None
+    A.time_force_trend_skip = False
+    A.round_scaled = False
+    clr = globals().get("_clear_ex_rights_state")
+    if callable(clr):
+        clr()
+    else:
+        A.ex_rights_applied = []
+        A.ex_rights_allot_pending = []
+
+
+def _bump_hold_bars(day):
+    """每个交易日持仓计 1 根。"""
+    if getattr(A, "_hold_count_day", "") == day:
+        return
+    A.hold_bars = int(getattr(A, "hold_bars", 0) or 0) + 1
+    A._hold_count_day = day
+
+
+def _drop_forming_bar(seq):
+    """去掉正在形成的最新一根（实盘未收盘 K）。"""
+    if seq is None:
+        return None
+    if len(seq) < 2:
+        return list(seq) if seq else seq
+    return list(seq[:-1])
+
+
+def _live_close_confirm_on():
+    return (not getattr(A, "is_backtest", False)) and bool(
+        globals().get("LIVE_CLOSE_CONFIRM", True)
+    )
+
+
+def _calendar_prev_weekday(yyyymmdd):
+    """自然日回退到上一工作日（跳过周末；节假日以行情轴为准）。"""
+    try:
+        d = datetime.datetime.strptime(str(yyyymmdd), "%Y%m%d")
+    except Exception:
+        return str(yyyymmdd)
+    d -= datetime.timedelta(days=1)
+    while int(d.weekday()) >= 5:
+        d -= datetime.timedelta(days=1)
+    return d.strftime("%Y%m%d")
+
+
+def _last_closed_bar_day(C, today):
+    """上一根已收盘日线交易日；优先行情时间轴，否则跳过周末的自然日。"""
+    today = str(today)
+    clock = str(getattr(A, "clock_prev_closed_day", "") or "")
+    if clock and (not getattr(A, "is_backtest", False)):
+        return clock
+    days = None
+    try:
+        days = _get_daily_bar_days(C, A.stock, count=8)
+    except Exception:
+        days = None
+    if days:
+        last = str(days[-1])
+        if last >= today and len(days) >= 2:
+            return str(days[-2])
+        if last and last < today:
+            return last
+    return _calendar_prev_weekday(today)
+
+
+def _live_signal_day(C, today):
+    """开盘兜底/盘中校验用的信号日：上一根已收盘交易日（保证 signal_day < 今日可成交）。"""
+    return _last_closed_bar_day(C, today)
+
+
+def _mark_confirmed_eval(day):
+    """收盘确认完成（当日完整 K）。"""
+    A._confirmed_eval_day = str(day)
+    _save_state()
+
+
+def _mark_fallback_done(day):
+    """开盘兜底评估完成；不写 confirmed，以免挡住今日收盘确认。"""
+    A._fallback_done_day = str(day)
+    _save_state()
+
+
+def _mark_signal_eval_done(day, is_confirm):
+    if is_confirm:
+        _mark_confirmed_eval(day)
+    else:
+        _mark_fallback_done(day)
+
+
+def _pending_ready(pend, day, bar_tag, mode):
+    if not isinstance(pend, dict):
+        return False
+    sig_tag = str(pend.get("signal_tag", "") or "")
+    sig_day = str(pend.get("signal_day", "") or "")
+    if mode == "day":
+        # 同日尾盘可成交；隔夜残留次日可成交。实际报单还受 _can_exec_signal_pending 约束。
+        return bool(sig_day) and sig_day <= day
+    if sig_tag and bar_tag:
+        return sig_tag < bar_tag
+    if sig_day and sig_day <= day:
+        return True
+    return False
+
+
+def _cfg_hhmmss(key, default):
+    return str(globals().get(key, default) or default)
+
+
+def _in_hhmmss_window(now_s, start, end, inclusive_end=False):
+    s = str(now_s)
+    if inclusive_end:
+        return start <= s <= end
+    return start <= s < end
+
+
+def _in_close_exec_window(now_s):
+    start = _cfg_hhmmss("PENDING_EXEC_START", "145600")
+    end = _cfg_hhmmss("PENDING_EXEC_END", "145700")
+    return _in_hhmmss_window(now_s, start, end, inclusive_end=False)
+
+
+def _in_open_exec_window(now_s):
+    start = _cfg_hhmmss("OPEN_EXEC_START", "093000")
+    end = _cfg_hhmmss("OPEN_EXEC_END", "094500")
+    return _in_hhmmss_window(now_s, start, end, inclusive_end=False)
+
+
+def _can_exec_signal_pending(pend, day, now_s):
+    """回测随时；实盘当日信号仅尾盘，隔夜残留开盘窗（尾盘也可补）。"""
+    if getattr(A, "is_backtest", False):
+        return True
+    if not _live_close_confirm_on():
+        return True
+    if not isinstance(pend, dict):
+        return False
+    sig_day = str(pend.get("signal_day", "") or "")
+    if _in_close_exec_window(now_s):
+        return True
+    if _in_open_exec_window(now_s) and sig_day and sig_day < str(day):
+        return True
+    return False
+
+
+def _signal_exec_px(pend, day, now_s, open_px, last_px):
+    """尾盘/回测同日用收盘现价；隔夜残留用开盘价。"""
+    sig_day = str((pend or {}).get("signal_day", "") or "")
+    if getattr(A, "is_backtest", False):
+        if sig_day and sig_day < str(day):
+            return float(open_px), "open"
+        return float(last_px), "close"
+    if _in_close_exec_window(now_s):
+        return float(last_px), "close"
+    return float(open_px), "open"
+
+
+def _log_pending_defer_once(kind, day, now_s, signal_day):
+    """成交窗外 defer 每个交易日每种 pending 只打一次日志，避免盘中刷屏。"""
+    kind = str(kind or "")
+    day = str(day or "")
+    attr = "_defer_log_%s_day" % kind
+    if str(getattr(A, attr, "") or "") == day:
+        return
+    setattr(A, attr, day)
+    print(
+        "%s pending_%s defer outside exec window now=%s signal_day=%s"
+        % (STRATEGY_NAME, kind, now_s, signal_day)
+    )
+    _event_log(
+        "pending_%s_defer" % kind,
+        now=now_s,
+        signal_day=signal_day,
+        close_exec_end=_cfg_hhmmss("PENDING_EXEC_END", "145700"),
+        open_exec_end=_cfg_hhmmss("OPEN_EXEC_END", "094500"),
+    )
+
+
+def _should_emit_bar_status(C, now, force, status_idle):
+    """
+    状态行是否输出。
+    force（信号上升沿）立刻打；回测 idle 逐 bar、非 idle 每 20 根；
+    实盘无新沿时一律按 LIVE_HEARTBEAT_SEC 节流（空仓/持仓/挂起相同）。
+    """
+    if not getattr(A, "ready_logged", False):
+        return True
+    if force:
+        return True
+    if getattr(A, "is_backtest", False):
+        if status_idle:
+            return True
+        try:
+            return int(getattr(C, "barpos", 0) or 0) % 20 == 0
+        except Exception:
+            return False
+    sec = int(globals().get("LIVE_HEARTBEAT_SEC") or 60)
+    if sec <= 0:
+        return True
+    last = getattr(A, "_bar_status_at", None)
+    if last is not None and now is not None:
+        try:
+            if (now - last).total_seconds() < float(sec):
+                return False
+        except Exception:
+            pass
+    return True
+
+
+def _bar_signal_rising_edge(buy_sig, sell_ok):
+    """
+    相对上一 tick 的买卖上升沿。
+    电平一直为真时不再强制打状态行（避免收盘确认窗刷屏）。
+    """
+    cur = (bool(buy_sig), bool(sell_ok))
+    prev = getattr(A, "_bar_sig_prev", None)
+    A._bar_sig_prev = cur
+    if prev is None:
+        return bool(cur[0] or cur[1])
+    return (cur[0] and not prev[0]) or (cur[1] and not prev[1])
+
+
+def _lot_open_day(lot):
+    ot = str((lot or {}).get("opened_at") or "")
+    return ot[:8] if len(ot) >= 8 else ""
+
+
+def _pending_exit_unfilled_ids():
+    """pending_exit.lot_ids 中仍持有的笔；无 lot_ids 视为整仓出清残留。"""
+    pe = getattr(A, "pending_exit", None)
+    if not isinstance(pe, dict):
+        return []
+    lots = getattr(A, "lots", None) or []
+    raw_ids = pe.get("lot_ids")
+    idset = None
+    if raw_ids:
+        try:
+            idset = set(int(x) for x in raw_ids)
+        except Exception:
+            idset = None
+    remain = []
+    for lot in lots:
+        if not isinstance(lot, dict):
+            continue
+        try:
+            sh = int(lot.get("shares") or 0)
+            lid = int(lot.get("id") or 0)
+        except Exception:
+            continue
+        if sh < 100 or lid <= 0:
+            continue
+        if idset is None or lid in idset:
+            remain.append(lid)
+    return remain
+
+
+def _refresh_pending_exit_remain(remain_ids):
+    pe = getattr(A, "pending_exit", None)
+    if not isinstance(pe, dict):
+        return
+    remain_ids = [int(x) for x in (remain_ids or []) if x]
+    pe["lot_ids"] = list(remain_ids)
+    shares = 0
+    idset = set(remain_ids)
+    for lot in getattr(A, "lots", None) or []:
+        if not isinstance(lot, dict):
+            continue
+        try:
+            if int(lot.get("id") or 0) in idset:
+                shares += int(lot.get("shares") or 0)
+        except Exception:
+            continue
+    pe["shares"] = int(shares)
+    A.pending_exit = pe
+
+
+def _log_skip_sell_eval_day(day):
+    day = str(day or "")
+    if str(getattr(A, "_skip_sell_eval_logged", "") or "") == day:
+        return
+    A._skip_sell_eval_logged = day
+    print(
+        "%s skip sell eval after add fill day=%s last_add=%s"
+        % (STRATEGY_NAME, day, getattr(A, "_last_add_signal", "") or "-")
+    )
+    _event_log(
+        "skip_sell_eval_day",
+        day=day,
+        last_add=getattr(A, "_last_add_signal", "") or "",
+        last_add_day=getattr(A, "_last_add_day", "") or "",
+    )
+
+
+def _log_sell_lot_can_use(now, day, lot_ids, want_vol, reason):
+    """核对按笔卖出 vs 券商合计 can_use：当日新仓可能实际卖掉旧仓。"""
+    avail = None
+    try:
+        avail = _max_sell_vol(now)
+    except Exception:
+        avail = None
+    idset = None
+    if lot_ids:
+        try:
+            idset = set(int(x) for x in lot_ids)
+        except Exception:
+            idset = None
+    target = []
+    others = []
+    same_day_target = []
+    older_other = []
+    for lot in getattr(A, "lots", None) or []:
+        if not isinstance(lot, dict):
+            continue
+        try:
+            lid = int(lot.get("id") or 0)
+            sh = int(lot.get("shares") or 0)
+        except Exception:
+            continue
+        if sh < 100 or lid <= 0:
+            continue
+        open_day = _lot_open_day(lot)
+        brief = {
+            "id": lid,
+            "shares": sh,
+            "opened_at": str(lot.get("opened_at") or ""),
+            "open_day": open_day,
+            "hold_bars": lot.get("hold_bars"),
+        }
+        is_tgt = idset is None or lid in idset
+        if is_tgt:
+            target.append(brief)
+            if open_day and open_day == str(day):
+                same_day_target.append(lid)
+        else:
+            others.append(brief)
+            if open_day and open_day < str(day):
+                older_other.append(lid)
+    last_add_day = str(getattr(A, "_last_add_day", "") or "")
+    last_add = str(getattr(A, "_last_add_signal", "") or "")
+    risk = bool(same_day_target) and (avail is None or int(avail) >= 100) and (
+        bool(older_other) or bool(others)
+    )
+    print(
+        "%s SELL lot-can_use reason=%s lots=%s want=%s avail=%s "
+        "same_day_lots=%s other=%s last_add=%s@%s risk=%s"
+        % (
+            STRATEGY_NAME,
+            reason,
+            lot_ids if lot_ids is not None else "-",
+            want_vol,
+            avail,
+            same_day_target or "-",
+            [x.get("id") for x in others] or "-",
+            last_add or "-",
+            last_add_day or "-",
+            risk,
+        )
+    )
+    _event_log(
+        "sell_lot_can_use",
+        reason=reason,
+        lot_ids=lot_ids,
+        want=want_vol,
+        avail=avail,
+        target=target,
+        other=others,
+        same_day_lots=same_day_target,
+        last_add=last_add,
+        last_add_day=last_add_day,
+        risk=risk,
+    )
+    if risk:
+        print(
+            "%s WARN SELL lots=%s opened today; broker can_use may fill older lots, "
+            "not necessarily lots=%s (plat_break add same-day trail is the typical case)"
+            % (STRATEGY_NAME, same_day_target, lot_ids)
+        )
+        _event_log(
+            "sell_lot_can_use_risk",
+            lot_ids=lot_ids,
+            same_day_lots=same_day_target,
+            avail=avail,
+            last_add=last_add,
+            last_add_day=last_add_day,
+        )
+
+
+def _after_signal_buy_filled(px, day, add=False):
+    """买入成交后初始化持仓元数据并清信号 pending。"""
+    pe = getattr(A, "pending_entry", None)
+    add_reasons = []
+    book_frac = None
+    if isinstance(pe, dict):
+        add_reasons = [str(x) for x in (pe.get("reasons") or []) if x]
+        if pe.get("book_frac") is not None:
+            try:
+                book_frac = float(pe.get("book_frac"))
+            except Exception:
+                book_frac = None
+    A.pending_entry = None
+    A.pending_exit = None
+    A.round_scaled = True if add else False
+    if add:
+        d = str(day or "")
+        A._skip_sell_eval_day = d
+        A._last_add_day = d
+        A._last_add_signal = ",".join(add_reasons) if add_reasons else "add"
+        print(
+            "%s skip sell eval after add fill day=%s signal=%s"
+            % (STRATEGY_NAME, d, A._last_add_signal)
+        )
+        _event_log(
+            "skip_sell_eval_after_add",
+            day=d,
+            signal=A._last_add_signal,
+        )
+    if _lots_enabled():
+        lots = getattr(A, "lots", None) or []
+        if lots and day:
+            lots[-1]["hold_count_bar"] = str(day)
+            if not add:
+                lots[-1]["hold_bars"] = 0
+        if lots and book_frac is not None:
+            lots[-1]["book_frac"] = float(book_frac)
+        _mirror_hold_from_lots()
+        _save_state()
+        return
+    if not add:
+        try:
+            A.hold_peak = float(px) if px else None
+        except Exception:
+            A.hold_peak = None
+        A.hold_bars = 0
+        A._hold_count_day = str(day or "")
+        A.time_force_grace_until = None
+        A.time_force_trend_skip = False
+    _save_state()
+
+
+def _after_signal_sell_filled():
+    """卖出成交（或已空仓）后清信号 pending 与持仓元数据。"""
+    A.pending_exit = None
+    A.pending_entry = None
+    A.lots = []
+    _clear_hold_meta()
+    _save_state()
+
+
+def _finish_sell_fill():
+    if _lots_enabled() and getattr(A, "lots", None):
+        remain = _pending_exit_unfilled_ids()
+        if remain:
+            _refresh_pending_exit_remain(remain)
+            acted = getattr(A, "acted", None)
+            if isinstance(acted, set):
+                acted.discard("SELL")
+            pe = getattr(A, "pending_exit", None) or {}
+            print(
+                "%s pending_exit keep after partial fill lots=%s shares=%s"
+                % (STRATEGY_NAME, remain, pe.get("shares"))
+            )
+            _event_log(
+                "pending_exit_keep_partial",
+                lot_ids=remain,
+                shares=pe.get("shares"),
+            )
+            _save_state()
+            return
+        A.pending_exit = None
+        acted = getattr(A, "acted", None)
+        if isinstance(acted, set):
+            acted.discard("SELL")
+        _save_state()
+        return
+    _after_signal_sell_filled()
+
+
+def _pending_on_buy_fill(pend, vol, px):
+    """覆盖 common：成交后再清 pending_entry / 写 hold_meta（废单则保留信号 pending）。"""
+    extra = pend.get("extra_pos") if isinstance(pend.get("extra_pos"), dict) else {}
+    _apply_buy_fill(vol, px, pend.get("opened_at") or pend.get("submitted_at"), **extra)
+    ot = str(pend.get("opened_at") or pend.get("submitted_at") or "")
+    day = ot[:8] if len(ot) >= 8 else datetime.datetime.now().strftime("%Y%m%d")
+    _after_signal_buy_filled(px, day, add=bool(extra.get("add")))
+
+
+def _pending_on_sell_fill(pend, now, vol, px):
+    """覆盖 common：成交后再清 pending_exit；部分成交仍持仓则保留 hold_meta。"""
+    intent = str(pend.get("intent", "") or "")
+    last_hint = pend.get("last_hint")
+    if last_hint is None:
+        last_hint = px
+    mark_half = bool(pend.get("mark_half"))
+    lot_ids = pend.get("lot_ids")
+    if not lot_ids:
+        pe = getattr(A, "pending_exit", None)
+        if isinstance(pe, dict):
+            lot_ids = pe.get("lot_ids")
+    _apply_sell_fill(now, intent, last_hint, vol, mark_half=mark_half, lot_ids=lot_ids)
+    _finish_sell_fill()
+
+
+def _on_signal_order_ok(side, px=None, day=None, add=False):
+    """下单返回 True：实盘等成交回调；回测/DRY 立即清信号 pending 并写 hold_meta。"""
+    live_waiting = (not getattr(A, "is_backtest", False)) and (
+        not DRY_RUN
+    ) and isinstance(getattr(A, "pending", None), dict)
+    if live_waiting:
+        print(
+            "%s %s submitted keep signal pending until fill"
+            % (STRATEGY_NAME, side)
+        )
+        _event_log("signal_pending_keep_until_fill", side=side)
+        _save_state()
+        return
+    if side == "buy":
+        _after_signal_buy_filled(px, day, add=add)
+        return
+    _finish_sell_fill()
+
+
+_SELL_LABELS = {
+    "skip_add_bar": "加仓成交后当日不评卖",
+}
+_BUY_LABELS = {
+    "chase_skip": "追高过滤跳过",
+    "w_bias_skip": "周线高位乖离禁开",
+    "w_slope_skip": "低位周线MA34未连升禁开",
+    "vol_dry_skip": "无量阴跌禁开",
+    "scale_once": "本轮已加仓",
+    "book_lot_cap": "跟踪池已满三笔跳过买入",
+    "buy_cap": "账户或单标的额度已满跳过开仓",
+    "scale_cap": "账户或单标的额度已满跳过加仓",
+    "wait": "等待共享账本冻结",
+    "book_fail": "持股查询失败且无本地账本不下单",
+}
+
+
+def _reason_label(code, kind="sell"):
+    code = str(code or "")
+    leaf = ((globals().get("LEAVES") or {}).get(code) or {})
+    if kind == "buy" and leaf.get("label_buy"):
+        return leaf.get("label_buy")
+    if leaf.get("label"):
+        return leaf.get("label")
+    table = _SELL_LABELS if kind == "sell" else _BUY_LABELS
+    return table.get(code, code)
+
+
+def _format_reasons(codes, kind="sell"):
+    codes = [str(x) for x in (codes or []) if x]
+    if not codes:
+        return "-"
+    parts = ["%s(%s)" % (c, _reason_label(c, kind)) for c in codes]
+    return ",".join(parts)
+
+
+def _try_exec_pending_exit(C, now, now_s, day, tag, open_px, last_px, holding):
+    """成交就绪的 pending_exit。True=调用方应 return。"""
+    if not holding:
+        return False
+    pe_exit = getattr(A, "pending_exit", None)
+    if not isinstance(pe_exit, dict):
+        return False
+    if not _pending_ready(pe_exit, day, tag, "day"):
+        return False
+    if not _can_exec_signal_pending(pe_exit, day, now_s):
+        _log_pending_defer_once("exit", day, now_s, pe_exit.get("signal_day"))
+        return False
+    px, px_kind = _signal_exec_px(pe_exit, day, now_s, open_px, last_px)
+    reason = str(pe_exit.get("reason", "SELL") or "SELL")
+    reasons = pe_exit.get("reasons") or [reason]
+    print(
+        "%s SELL by signal=%s label=%s all=%s lots=%s shares=%s signal_day=%s @%s=%.4f"
+        % (
+            STRATEGY_NAME,
+            reason,
+            _reason_label(reason, "sell"),
+            _format_reasons(reasons, "sell"),
+            pe_exit.get("lot_ids") or "-",
+            pe_exit.get("shares") if pe_exit.get("shares") is not None else _pos_shares(),
+            pe_exit.get("signal_day"),
+            px_kind,
+            px,
+        )
+    )
+    _event_log(
+        "sell_by_signal",
+        signal=reason,
+        label=_reason_label(reason, "sell"),
+        all_reasons=_format_reasons(reasons, "sell"),
+        signal_day=pe_exit.get("signal_day"),
+        px=px,
+        px_kind=px_kind,
+        lot_ids=pe_exit.get("lot_ids"),
+        shares=pe_exit.get("shares"),
+    )
+    lot_ids = pe_exit.get("lot_ids")
+    want_vol = pe_exit.get("shares")
+    _log_sell_lot_can_use(now, day, lot_ids, want_vol, reason)
+    ok = _order_sell(
+        C,
+        reason,
+        px,
+        now,
+        want_vol=None if want_vol is None else int(want_vol),
+        lot_ids=lot_ids,
+    )
+    if ok:
+        _on_signal_order_ok("sell")
+    else:
+        print(
+            "%s pending_exit keep after sell fail/skip signal=%s"
+            % (STRATEGY_NAME, reason)
+        )
+        _event_log(
+            "pending_exit_keep_after_fail",
+            sell_reason=reason,
+            signal_day=pe_exit.get("signal_day"),
+        )
+    return True
+
+
+def _try_exec_pending_entry(
+    C,
+    now,
+    now_s,
+    day,
+    tag,
+    open_px,
+    last_px,
+    holding,
+    cash,
+    fctx,
+    w_detail,
+    sell_ok,
+):
+    """成交就绪的 pending_entry。'done'=return；'force_eval'=让路卖点；None=继续。"""
+    if str(getattr(A, "_universe_pass", "") or "") == "eval":
+        return None
+    pe_entry = getattr(A, "pending_entry", None)
+    pe_is_add = isinstance(pe_entry, dict) and bool(pe_entry.get("add"))
+    if not (
+        ((not holding) or pe_is_add)
+        and isinstance(pe_entry, dict)
+        and (pe_is_add or ("BUY" not in getattr(A, "acted", set())))
+        and _pending_ready(pe_entry, day, tag, "day")
+    ):
+        return None
+    if pe_is_add and not holding:
+        A.pending_entry = None
+        _save_state()
+        print("%s pending_entry cancel add_no_pos" % STRATEGY_NAME)
+        _event_log("pending_entry_cancel", reason="add_no_pos")
+        return "done"
+    sell_block = bool(pe_is_add and sell_ok)
+    scale_ok, scale_why = _scale_gate(w_detail, price=last_px) if pe_is_add else (True, "")
+    if sell_block or (pe_is_add and (not scale_ok)):
+        why = "scale_sell_block" if sell_block else scale_why
+        A.pending_entry = None
+        _save_state()
+        print("%s pending_entry cancel %s" % (STRATEGY_NAME, why))
+        _event_log(
+            "pending_entry_cancel",
+            reason=why,
+            signal_day=pe_entry.get("signal_day"),
+        )
+        if sell_block:
+            return "force_eval"
+        return "done"
+    gate = _scale_in_gate_hit(fctx)
+    if gate:
+        A.pending_entry = None
+        _save_state()
+        print("%s pending_entry cancel %s" % (STRATEGY_NAME, gate))
+        _event_log(
+            "pending_entry_cancel",
+            reason=gate,
+            signal_day=pe_entry.get("signal_day"),
+        )
+        return "done"
+    if not _can_exec_signal_pending(pe_entry, day, now_s):
+        _log_pending_defer_once("entry", day, now_s, pe_entry.get("signal_day"))
+        return None
+    if _equal_split_on() and (not _book_is_frozen(now_s)):
+        _log_pending_defer_once("book", day, now_s, pe_entry.get("signal_day"))
+        return None
+    px, px_kind = _signal_exec_px(pe_entry, day, now_s, open_px, last_px)
+    reasons = pe_entry.get("reasons") or []
+    primary = reasons[0] if reasons else "entry"
+    kind = "add" if pe_is_add else "buy"
+    cap_ok, cap_why, snap = _fill_room_ok(px, opening=not pe_is_add)
+    if isinstance(pe_entry, dict):
+        pe_entry["book_frac"] = snap.get("frac")
+        A.pending_entry = pe_entry
+    if _dynamic_budget_on():
+        _log_fill_budget(snap, kind)
+    if cap_why in ("wait", "book_fail", "no_E"):
+        _log_pending_defer_once(cap_why or "wait", day, now_s, pe_entry.get("signal_day"))
+        return None
+    if not cap_ok:
+        A.pending_entry = None
+        _save_state()
+        why = cap_why or ("scale_cap" if pe_is_add else "buy_cap")
+        print("%s pending_entry cancel %s" % (STRATEGY_NAME, why))
+        _event_log(
+            "pending_entry_cancel",
+            reason=why,
+            signal_day=pe_entry.get("signal_day"),
+            E=snap.get("E"),
+            N=snap.get("N"),
+            k=snap.get("k"),
+            reserve=snap.get("reserve"),
+            lot=snap.get("lot"),
+            book_mv=snap.get("book_mv"),
+            other_mv=snap.get("other_mv"),
+            name_mv=snap.get("name_mv"),
+            n_buy=snap.get("n_buy"),
+            why=snap.get("why"),
+        )
+        return "done"
+    print(
+        "%s %s by signal=%s label=%s all=%s signal_day=%s @%s=%.4f"
+        % (
+            STRATEGY_NAME,
+            "BUY add" if pe_is_add else "BUY",
+            primary,
+            _reason_label(primary, "buy"),
+            _format_reasons(reasons, "buy"),
+            pe_entry.get("signal_day"),
+            px_kind,
+            px,
+        )
+    )
+    _event_log(
+        "buy_by_signal" if not pe_is_add else "buy_add_by_signal",
+        signal=primary,
+        label=_reason_label(primary, "buy"),
+        all_reasons=_format_reasons(reasons, "buy"),
+        signal_day=pe_entry.get("signal_day"),
+        px=px,
+        px_kind=px_kind,
+        add=pe_is_add,
+    )
+    budget = float(snap.get("lot") or 0)
+    ok = _order_buy(C, px, now, budget, add=pe_is_add, book_frac=snap.get("frac"))
+    if ok:
+        _on_signal_order_ok("buy", px=px, day=day, add=pe_is_add)
+    else:
+        print(
+            "%s pending_entry keep after %s fail/skip signal=%s"
+            % (STRATEGY_NAME, kind, primary)
+        )
+        _event_log(
+            "pending_entry_keep_after_fail",
+            signal=primary,
+            signal_day=pe_entry.get("signal_day"),
+            add=pe_is_add,
+        )
+    return "done"
+
+
+def _need_open_fallback(day, prev_closed, live_cc, phase):
+    if not (live_cc and phase == "exec"):
+        return False
+    confirmed_day = str(getattr(A, "_confirmed_eval_day", "") or "")
+    return (
+        confirmed_day < str(prev_closed or "")
+        and str(getattr(A, "_fallback_done_day", "") or "") != str(day)
+        and (not isinstance(getattr(A, "pending_entry", None), dict))
+        and (not isinstance(getattr(A, "pending_exit", None), dict))
+    )
+
+
+def _live_tick_open_last(C):
+    """开盘成交价：优先 tick open/last；没有则该票补 2 根日 K。"""
+    stock = str(getattr(A, "stock", "") or "")
+    t = None
+    try:
+        t = _get_stock_tick(C, stock)
+    except Exception:
+        t = None
+    last = _tick_field(t, ("lastPrice", "last", "price", "close"))
+    open_px = _tick_field(
+        t, ("open", "openPrice", "lastOpen", "openPx", "open_price")
+    )
+    if last > 0 and open_px > 0:
+        return float(open_px), float(last), "tick"
+    ohlcv = None
+    try:
+        key = "d1open"
+        st = stock.replace(".", "_")
+        if st:
+            key = "d1open_%s" % st
+        ohlcv = _get_ohlcv_period(C, stock, "1d", 2, 1, key)
+    except Exception:
+        ohlcv = None
+    if ohlcv:
+        opens_d, _h, _l, closes_d, _v = ohlcv
+        op = float(opens_d[-1]) if opens_d else 0.0
+        cl = float(closes_d[-1]) if closes_d else 0.0
+        if op > 0 or cl > 0:
+            return op if op > 0 else cl, cl if cl > 0 else op, "bar2"
+    return 0.0, 0.0, "none"
+
+
+def _handle_open_exec_no_fallback(C, ctx):
+    """开盘无兜底：打卡 + tick 成交。True=结束该票；False=exec 轮买入需拉日+周。"""
+    now = ctx["now"]
+    now_s = ctx["now_s"]
+    day = ctx["day"]
+    tag = ctx["tag"]
+    upass = str(getattr(A, "_universe_pass", "") or "")
+    pe = getattr(A, "pending_entry", None)
+    px = getattr(A, "pending_exit", None)
+    holding = _has_position()
+    if upass != "exec":
+        if isinstance(pe, dict):
+            return False
+        buy_sig = False
+        scale_sig = isinstance(pe, dict) and bool(pe.get("add"))
+        sell_ok = isinstance(px, dict)
+        _sync_signal_book(day, now_s, buy_sig, scale_sig, holding, sell_ok)
+        if isinstance(px, dict):
+            t_open, t_last, _src = _live_tick_open_last(C)
+            if t_last > 0:
+                _try_exec_pending_exit(
+                    C,
+                    now,
+                    now_s,
+                    day,
+                    tag,
+                    t_open if t_open > 0 else t_last,
+                    t_last,
+                    holding,
+                )
+        return True
+    if isinstance(pe, dict):
+        return False
+    if isinstance(px, dict):
+        t_open, t_last, _src = _live_tick_open_last(C)
+        if t_last > 0:
+            _try_exec_pending_exit(
+                C,
+                now,
+                now_s,
+                day,
+                tag,
+                t_open if t_open > 0 else t_last,
+                t_last,
+                holding,
+            )
+        return True
+    return True
+
+
+def _handle_clock_gate(C, from_timer=False):
+    """实例门禁。from_timer 用墙钟、不算 is_last_bar。None=本轮跳过。"""
+    bt = getattr(A, "is_backtest", False)
+    bar_dt = _bar_datetime(C)
+    now = bar_dt if bt else datetime.datetime.now()
+    now_s = _bar_hhmmss(now)
+    day = now.strftime("%Y%m%d")
+    tag = _bar_tag(bar_dt)
+    hhmm = _bar_hhmm(bar_dt if bt else now)
+    live_cc = _live_close_confirm_on()
+    conf_start = str(globals().get("SIGNAL_CONFIRM_START", "145600") or "145600")
+    conf_end = str(globals().get("SIGNAL_CONFIRM_END", "150000") or "150000")
+    in_exec = (not bt) and (DECISION_START <= now_s < conf_start)
+    in_confirm = (not bt) and (conf_start <= now_s <= conf_end)
+    phase = "bt" if bt else "live"
+    live_work = ""
+    if bt:
+        _bt_roll_t1(day)
+        _bt_recover_position(now=now)
+        return {
+            "bt": True,
+            "now": now,
+            "now_s": now_s,
+            "day": day,
+            "tag": tag,
+            "hhmm": hhmm,
+            "live_cc": live_cc,
+            "phase": "bt",
+            "live_work": "",
+            "bar_dt": bar_dt,
+        }
+    if from_timer:
+        fn = globals().get("_compute_live_work")
+        if callable(fn):
+            live_work = str(fn(now_s, day) or "")
+        if not live_work:
+            if not getattr(A, "_universe_loop", False):
+                _live_heartbeat("outside_session")
+            return None
+        if live_work == "signal":
+            phase = "confirm"
+        elif live_work == "open_exec":
+            phase = "exec"
+        else:
+            phase = "pending"
+        return {
+            "bt": False,
+            "now": now,
+            "now_s": now_s,
+            "day": day,
+            "tag": tag,
+            "hhmm": hhmm,
+            "live_cc": live_cc,
+            "phase": phase,
+            "live_work": live_work,
+            "bar_dt": bar_dt,
+        }
+    if live_cc:
+        if (not in_exec) and (not in_confirm):
+            _live_heartbeat("outside_session")
+            return None
+        phase = "confirm" if in_confirm else "exec"
+    else:
+        if now_s < DECISION_START or now_s > DECISION_END:
+            _live_heartbeat("outside_session")
+            return None
+        phase = "session"
+    if LIVE_ONLY_LAST_BAR:
+        try:
+            if hasattr(C, "is_last_bar") and (not C.is_last_bar()):
+                return None
+        except Exception:
+            pass
+    _live_heartbeat(phase)
+    return {
+        "bt": False,
+        "now": now,
+        "now_s": now_s,
+        "day": day,
+        "tag": tag,
+        "hhmm": hhmm,
+        "live_cc": live_cc,
+        "phase": phase,
+        "live_work": "",
+        "bar_dt": bar_dt,
+    }
+
+
+def _handle_stock(C, ctx):
+    bt = ctx["bt"]
+    now = ctx["now"]
+    now_s = ctx["now_s"]
+    day = ctx["day"]
+    tag = ctx["tag"]
+    hhmm = ctx["hhmm"]
+    live_cc = ctx["live_cc"]
+    phase = ctx["phase"]
+    live_work = str(ctx.get("live_work") or "")
+    upass = str(getattr(A, "_universe_pass", "") or "")
+    # 收盘确认：用当日完整日 K；周 K 不含未收盘周（与回测 0000 原生 1w 一致）
+    # 开盘：日 K 去未收盘根；周 K 同样不含未收盘周
+    prev_d = False
+    prev_w = False
+
+    if not bt:
+        if getattr(A, "pending", None):
+            if _process_pending(C, now):
+                if not getattr(A, "_universe_loop", False):
+                    _live_heartbeat("pending")
+                return
+        if live_work == "pending":
+            return
+
+    _reset_day(day)
+
+    if (not bt) and live_work == "open_exec":
+        prev_closed = str(
+            ctx.get("prev_closed")
+            or getattr(A, "clock_prev_closed_day", "")
+            or ""
+        )
+        need_fb_early = _need_open_fallback(day, prev_closed, live_cc, phase)
+        if (not need_fb_early) and _handle_open_exec_no_fallback(C, ctx):
+            return
+
+    if (not bt) and live_work == "signal" and upass == "exec":
+        pe_only = getattr(A, "pending_entry", None)
+        px_only = getattr(A, "pending_exit", None)
+        if not isinstance(pe_only, dict) and not isinstance(px_only, dict):
+            return
+        if (not isinstance(pe_only, dict)) and isinstance(px_only, dict):
+            holding_x = _has_position()
+            t_open, t_last, _src = _live_tick_open_last(C)
+            if t_last > 0:
+                _try_exec_pending_exit(
+                    C,
+                    now,
+                    now_s,
+                    day,
+                    tag,
+                    t_open if t_open > 0 else t_last,
+                    t_last,
+                    holding_x,
+                )
+            return
+
+    cash = _available_cash()
+    if cash is None:
+        if live_work:
+            cash = 0.0
+        else:
+            _live_heartbeat("no_cash_or_login")
+            return
+
+    ohlcv_d = _get_ohlcv_1d(C, A.stock)
+    if ohlcv_d is None:
+        _live_heartbeat("ohlcv_1d_none")
+        return
+    opens_d, highs_d, lows_d, closes_d, vols_d = ohlcv_d
+
+    ohlcv_w = _get_ohlcv_1w(C, A.stock)
+    if ohlcv_w is None:
+        _live_heartbeat("ohlcv_1w_none")
+        return
+    _ow, _hw, _lw, closes_w, _vw = ohlcv_w
+
+    open_px = float(opens_d[-1])
+    # v1.10 误把开盘兜底写成 confirmed=今日，会挡收盘确认；盘中执行时段自动清掉
+    if (
+        live_cc
+        and phase == "exec"
+        and str(getattr(A, "_confirmed_eval_day", "") or "") == day
+    ):
+        print(
+            "%s clear mis-marked confirmed_eval_day=%s (was open fallback)"
+            % (STRATEGY_NAME, day)
+        )
+        _event_log("clear_mis_confirmed_eval_day", day=day)
+        A._confirmed_eval_day = ""
+        _save_state()
+    # 开盘兜底：上一根已收盘日尚未确认、今日尚未兜底、无挂起
+    prev_closed_day = _last_closed_bar_day(C, day) if live_cc else day
+    confirmed_day = str(getattr(A, "_confirmed_eval_day", "") or "")
+    need_fallback = (
+        live_cc
+        and phase == "exec"
+        and confirmed_day < str(prev_closed_day)
+        and str(getattr(A, "_fallback_done_day", "") or "") != day
+        and (not isinstance(getattr(A, "pending_entry", None), dict))
+        and (not isinstance(getattr(A, "pending_exit", None), dict))
+    )
+    if live_cc and phase == "confirm":
+        highs_s, lows_s, closes_s, vols_s = highs_d, lows_d, closes_d, vols_d
+        closes_ws = closes_w
+        sig_day_daily = day
+        sig_day_weekly = day
+    elif need_fallback or (live_cc and phase == "exec"):
+        # 开盘兜底 / 盘中执行：日 K 去掉未收盘根，避免未完成日线误触 vol_dry 等；
+        # 周 K 已在 _get_ohlcv_1w 丢掉未收盘周，与 confirm/回测一致
+        # 日信号日=上一完整交易日；周线 streak 仍按今日计（看的是上一完整周）
+        prev_d = True
+        prev_w = False
+        highs_s = _drop_forming_bar(highs_d)
+        lows_s = _drop_forming_bar(lows_d)
+        closes_s = _drop_forming_bar(closes_d)
+        vols_s = _drop_forming_bar(vols_d)
+        closes_ws = closes_w
+        if closes_s is None or len(closes_s) < 3 or closes_ws is None or len(closes_ws) < 3:
+            _live_heartbeat("ohlcv_confirm_short")
+            return
+        sig_day_daily = prev_closed_day
+        sig_day_weekly = day
+    else:
+        # 回测：信号评估用完整序列
+        highs_s, lows_s, closes_s, vols_s = highs_d, lows_d, closes_d, vols_d
+        closes_ws = closes_w
+        sig_day_daily = day
+        sig_day_weekly = day
+
+    price = float(closes_s[-1])
+    high_px = float(highs_s[-1])
+    exec_open_px = open_px
+    exec_last_px = price
+    if (not bt) and live_work == "open_exec" and (not need_fallback):
+        t_open, t_last, _src = _live_tick_open_last(C)
+        if t_last > 0:
+            exec_open_px = t_open if t_open > 0 else t_last
+            exec_last_px = t_last
+    if bt:
+        _bt_recover_position(now=now, last=float(closes_d[-1]))
+
+    w_detail = _weekly_market_features(closes_ws)
+    weekly_bull = _weekly_bull_from_detail(w_detail)
+    fctx = _build_factor_ctx(
+        closes_s,
+        vols_s,
+        highs_s,
+        lows_s,
+        w_detail,
+        price,
+        clock={"sig_day": sig_day_daily, "track_bear": False},
+    )
+    weekly_bear = _factor_hit("weekly_bear", fctx)
+    # 清仓二次确认只在 bt / confirm / 开盘兜底累计；盘中 exec 不改 streak
+    track_bear = (not live_cc) or (phase == "confirm") or bool(need_fallback)
+    w_bear_confirmed, w_bear_n = _update_w_bear_streak(
+        weekly_bear, sig_day_weekly, track=track_bear
+    )
+    fctx = _factor_ctx_bind_state(
+        fctx,
+        w_bear_streak=w_bear_n,
+        w_bear_confirmed=w_bear_confirmed,
+        cost=_pos_cost_price(),
+    )
+    entry_slot = _eval_entry_slot(fctx)
+    buy_reasons = list(entry_slot.get("reasons") or [])
+    sell_ok = False
+    sell_reasons = []
+
+    holding = _has_position() or (bt and _bt_held_vol() > 0)
+    if holding and _lots_enabled():
+        _ensure_lots()
+    if holding:
+        try:
+            _maybe_apply_ex_rights(C, day)
+        except Exception as e:
+            print(_strategy_tag(), "ex_rights fail", e)
+            _event_log("ex_rights_fail", error=str(e), day=day)
+    cost = _pos_cost_price()
+    exit_ids = []
+    exit_shares = 0
+    if _lots_enabled():
+        if not holding:
+            if getattr(A, "lots", None):
+                A.lots = []
+            if (
+                getattr(A, "hold_peak", None) is not None
+                or int(getattr(A, "hold_bars", 0) or 0)
+                or getattr(A, "time_force_grace_until", None) is not None
+                or bool(getattr(A, "time_force_trend_skip", False))
+                or bool(getattr(A, "round_scaled", False))
+            ):
+                _clear_hold_meta()
+        else:
+            _ensure_lots()
+            changed = False
+            for lot in A.lots:
+                if _bump_lot_bars(lot, day):
+                    changed = True
+                if _update_lot_peaks(lot, high_px, price):
+                    changed = True
+            _mirror_hold_from_lots()
+            if changed:
+                _save_state()
+    elif not holding:
+        if (
+            getattr(A, "hold_peak", None) is not None
+            or int(getattr(A, "hold_bars", 0) or 0)
+            or getattr(A, "time_force_grace_until", None) is not None
+            or bool(getattr(A, "time_force_trend_skip", False))
+            or bool(getattr(A, "round_scaled", False))
+        ):
+            _clear_hold_meta()
+    else:
+        _bump_hold_bars(day)
+        if _update_hold_peak(high_px, cost):
+            _save_state()
+
+    skip_sell_eval = str(getattr(A, "_skip_sell_eval_day", "") or "") == str(day)
+    skip_before = bool(getattr(A, "time_force_trend_skip", False))
+    if skip_sell_eval and holding:
+        _log_skip_sell_eval_day(day)
+        sell_ok = False
+        sell_reasons = ["skip_add_bar"]
+        exit_ids = []
+        exit_shares = 0
+    elif holding and _lots_enabled():
+        sell_ok, sell_reasons, exit_ids, exit_shares = _collect_lot_exits(
+            fctx, price, closes_s, highs=highs_s, lows=lows_s
+        )
+    elif holding:
+        fctx_x = _bind_exit_ctx(
+            fctx,
+            cost=cost,
+            hold_peak=getattr(A, "hold_peak", None),
+            hold_bars=getattr(A, "hold_bars", 0),
+        )
+        slot_x = _eval_exit_slot(fctx_x)
+        sell_ok = bool(slot_x.get("hit"))
+        sell_reasons = list(slot_x.get("reasons") or [])
+    if holding and (not skip_before) and bool(getattr(A, "time_force_trend_skip", False)):
+        _save_state()
+
+    ret_pct = None
+    if holding and cost > 0:
+        ret_pct = (price - cost) / cost
+
+    buy_sig = bool(entry_slot.get("hit"))
+    scale_slot = _eval_scale_in_slot(fctx)
+    scale_reasons = list(scale_slot.get("reasons") or [])
+    scale_ok, scale_why = _scale_gate(w_detail, price=price)
+    scale_sig = bool(scale_ok and scale_slot.get("hit"))
+    exit_slot = {"hit": bool(sell_ok), "reasons": list(sell_reasons)}
+    intent = _arbitrate_intent(
+        entry=entry_slot,
+        scale_in=scale_slot,
+        exit_slot=exit_slot,
+        scale_out=_eval_scale_out_slot(fctx),
+        scale_gate_ok=scale_ok,
+        holding=holding,
+        lot_ids=exit_ids,
+        shares=exit_shares,
+    )
+
+    if not bt and upass != "exec":
+        _sync_signal_book(day, now_s, buy_sig, scale_sig, holding, sell_ok)
+
+    pe_now = bool(getattr(A, "pending_entry", None))
+    px_now = bool(getattr(A, "pending_exit", None))
+    # 信号上升沿强制打；实盘其余按 LIVE_HEARTBEAT_SEC；回测 idle 用 status_idle
+    force_bar_log = _bar_signal_rising_edge(buy_sig or scale_sig, sell_ok)
+    status_idle = (bool(holding) or pe_now or px_now) and (not force_bar_log)
+    if upass != "exec" and _should_emit_bar_status(C, now, force_bar_log, status_idle):
+        A.ready_logged = True
+        if not getattr(A, "is_backtest", False):
+            A._bar_status_at = now
+        print(
+            "%s" % STRATEGY_NAME,
+            day,
+            hhmm,
+            "n1d=%d n1w=%d close=%.4f sig_d=%s sig_w=%s phase=%s prev_d=%s prev_w=%s "
+            "w_bull=%s w_bear=%s w_bn=%s/%s w_ma5=%s w_ma30=%s w_hist=%s "
+            "buy=%s buyR=%s scale=%s scaleR=%s sell=%s sellR=%s "
+            "hold=%s nlot=%s ret=%s pe=%s px=%s bt_held=%s avail=%s"
+            % (
+                len(closes_s),
+                len(closes_ws),
+                price,
+                sig_day_daily,
+                sig_day_weekly,
+                phase,
+                prev_d,
+                prev_w,
+                weekly_bull,
+                weekly_bear,
+                w_bear_n,
+                _w_bear_confirm_need(),
+                None if w_detail.get("ma5") is None else round(w_detail["ma5"], 4),
+                None if w_detail.get("ma30") is None else round(w_detail["ma30"], 4),
+                None if w_detail.get("hist") is None else round(w_detail["hist"], 4),
+                buy_sig,
+                ",".join(buy_reasons) if buy_reasons else "-",
+                scale_sig,
+                (
+                    ",".join(scale_reasons)
+                    if scale_sig and scale_reasons
+                    else (scale_why or (",".join(scale_reasons) if scale_reasons else "-"))
+                ),
+                sell_ok,
+                ",".join(sell_reasons) if sell_reasons else "-",
+                holding,
+                _pos_lots() if holding else 0,
+                None if ret_pct is None else ("%.2f%%" % (ret_pct * 100.0)),
+                pe_now,
+                px_now,
+                _bt_held_vol() if bt else "-",
+                _bt_available_vol() if bt else "-",
+            ),
+        )
+        _bar_log(
+            day=day,
+            hhmm=hhmm,
+            n1d=len(closes_s),
+            n1w=len(closes_ws),
+            close=round(price, 6),
+            sig_d=sig_day_daily,
+            sig_w=sig_day_weekly,
+            phase=phase,
+            prev_d=prev_d,
+            prev_w=prev_w,
+            w_bull=weekly_bull,
+            w_bear=weekly_bear,
+            w_bn=w_bear_n,
+            w_bn_need=_w_bear_confirm_need(),
+            w_ma5=None if w_detail.get("ma5") is None else round(w_detail["ma5"], 4),
+            w_ma30=None if w_detail.get("ma30") is None else round(w_detail["ma30"], 4),
+            w_hist=None if w_detail.get("hist") is None else round(w_detail["hist"], 4),
+            buy=buy_sig,
+            buyR=",".join(buy_reasons) if buy_reasons else "-",
+            scale=scale_sig,
+            scaleR=(
+                ",".join(scale_reasons)
+                if scale_sig and scale_reasons
+                else (scale_why or (",".join(scale_reasons) if scale_reasons else "-"))
+            ),
+            sell=bool(sell_ok),
+            sellR=",".join(sell_reasons) if sell_reasons else "-",
+            hold=holding,
+            nlot=_pos_lots() if holding else 0,
+            ret=None if ret_pct is None else round(ret_pct * 100.0, 4),
+            pe=pe_now,
+            px=px_now,
+        )
+
+    # ---- 先执行挂起的卖/买（尾盘按收盘价；隔夜残留开盘按开盘价）----
+    if _try_exec_pending_exit(C, now, now_s, day, tag, exec_open_px, exec_last_px, holding):
+        return
+    force_eval = False
+    entry_act = _try_exec_pending_entry(
+        C,
+        now,
+        now_s,
+        day,
+        tag,
+        exec_open_px,
+        exec_last_px,
+        holding,
+        cash,
+        fctx,
+        w_detail,
+        sell_ok,
+    )
+    if entry_act == "done":
+        return
+    if entry_act == "force_eval":
+        force_eval = True
+    if upass == "exec" and (not force_eval):
+        return
+
+    # ---- 新信号：回测当根；实盘仅收盘确认或开盘兜底 ----
+    allow_new = True
+    is_confirm = live_cc and phase == "confirm"
+    if live_cc:
+        if is_confirm:
+            if getattr(A, "_confirmed_eval_day", "") == day:
+                allow_new = False
+        elif need_fallback:
+            allow_new = True
+        else:
+            allow_new = False
+    if not allow_new and not force_eval:
+        return
+
+    intent_target = intent.get("target")
+    if holding:
+        cur_ex = getattr(A, "pending_exit", None)
+        if intent_target == "flat":
+            if isinstance(cur_ex, dict):
+                if live_cc:
+                    _mark_signal_eval_done(day, is_confirm)
+                return
+            uniq = []
+            seen = set()
+            for r in sell_reasons:
+                if r not in seen and r != "skip_add_bar":
+                    seen.add(r)
+                    uniq.append(r)
+            reason = uniq[0] if uniq else "SELL"
+            # 周线清仓用 sig_w；日线卖点用 sig_d
+            exit_sig_day = (
+                sig_day_weekly if _is_weekly_flatten(reason, uniq) else sig_day_daily
+            )
+            A.pending_exit = {
+                "mode": "day",
+                "reason": reason,
+                "signal_day": exit_sig_day,
+                "signal_tag": tag,
+                "close": price,
+                "reasons": uniq,
+            }
+            if _lots_enabled() and exit_ids:
+                A.pending_exit["lot_ids"] = list(exit_ids)
+                A.pending_exit["shares"] = int(exit_shares)
+            A.pending_entry = None
+            if live_cc:
+                _mark_signal_eval_done(day, is_confirm)
+            else:
+                _save_state()
+            print(
+                "%s pending_exit set signal=%s label=%s all=%s lots=%s shares=%s day=%s close=%.4f phase=%s"
+                % (
+                    STRATEGY_NAME,
+                    reason,
+                    _reason_label(reason, "sell"),
+                    _format_reasons(uniq, "sell"),
+                    exit_ids or "-",
+                    exit_shares or _pos_shares(),
+                    exit_sig_day,
+                    price,
+                    phase,
+                )
+            )
+            _event_log(
+                "pending_exit_set",
+                signal=reason,
+                label=_reason_label(reason, "sell"),
+                all_reasons=_format_reasons(uniq, "sell"),
+                signal_day=exit_sig_day,
+                close=price,
+                phase=phase,
+                lot_ids=exit_ids or None,
+                shares=exit_shares or None,
+            )
+            _try_exec_pending_exit(C, now, now_s, day, tag, exec_open_px, exec_last_px, holding)
+        elif intent_target == "reduce":
+            if live_cc:
+                _mark_signal_eval_done(day, is_confirm)
+            return
+        elif intent_target == "add":
+            if isinstance(getattr(A, "pending_entry", None), dict):
+                if live_cc:
+                    _mark_signal_eval_done(day, is_confirm)
+                return
+            add_reasons = list(intent.get("reasons") or scale_reasons)
+            A.pending_entry = {
+                "signal_day": sig_day_daily,
+                "signal_tag": tag,
+                "close": price,
+                "reasons": add_reasons,
+                "add": True,
+            }
+            A.pending_exit = None
+            if live_cc:
+                _mark_signal_eval_done(day, is_confirm)
+            else:
+                _save_state()
+            primary = add_reasons[0] if add_reasons else "entry"
+            print(
+                "%s pending_entry set add signal=%s label=%s all=%s day=%s close=%.4f lots=%s phase=%s"
+                % (
+                    STRATEGY_NAME,
+                    primary,
+                    _reason_label(primary, "buy"),
+                    _format_reasons(add_reasons, "buy"),
+                    sig_day_daily,
+                    price,
+                    _pos_lots(),
+                    phase,
+                )
+            )
+            _event_log(
+                "pending_entry_set",
+                signal=primary,
+                label=_reason_label(primary, "buy"),
+                all_reasons=_format_reasons(add_reasons, "buy"),
+                signal_day=sig_day_daily,
+                close=price,
+                phase=phase,
+                add=True,
+            )
+            _try_exec_pending_entry(
+                C,
+                now,
+                now_s,
+                day,
+                tag,
+                exec_open_px,
+                exec_last_px,
+                holding,
+                cash,
+                fctx,
+                w_detail,
+                sell_ok,
+            )
+        elif live_cc:
+            _mark_signal_eval_done(day, is_confirm)
+        return
+
+    if intent_target == "open" and ("BUY" not in getattr(A, "acted", set())):
+        if _book_n_held_live() >= _cfg_book_lot_max():
+            if live_cc:
+                _mark_signal_eval_done(day, is_confirm)
+            print("%s skip open book_lot_cap n_held=%s" % (STRATEGY_NAME, _book_n_held_live()))
+            _event_log("pending_entry_skip", reason="book_lot_cap", n_held=_book_n_held_live())
+            return
+        if isinstance(getattr(A, "pending_entry", None), dict):
+            if live_cc:
+                _mark_signal_eval_done(day, is_confirm)
+            return
+        open_reasons = list(intent.get("reasons") or buy_reasons)
+        A.pending_entry = {
+            "signal_day": sig_day_daily,
+            "signal_tag": tag,
+            "close": price,
+            "reasons": open_reasons,
+        }
+        A.pending_exit = None
+        if live_cc:
+            _mark_signal_eval_done(day, is_confirm)
+        else:
+            _save_state()
+        primary = open_reasons[0] if open_reasons else "entry"
+        print(
+            "%s pending_entry set signal=%s label=%s all=%s day=%s close=%.4f phase=%s"
+            % (
+                STRATEGY_NAME,
+                primary,
+                _reason_label(primary, "buy"),
+                _format_reasons(open_reasons, "buy"),
+                sig_day_daily,
+                price,
+                phase,
+            )
+        )
+        _event_log(
+            "pending_entry_set",
+            signal=primary,
+            label=_reason_label(primary, "buy"),
+            all_reasons=_format_reasons(open_reasons, "buy"),
+            signal_day=sig_day_daily,
+            close=price,
+            phase=phase,
+        )
+        _try_exec_pending_entry(
+            C,
+            now,
+            now_s,
+            day,
+            tag,
+            exec_open_px,
+            exec_last_px,
+            holding,
+            cash,
+            fctx,
+            w_detail,
+            sell_ok,
+        )
+    elif live_cc:
+        _mark_signal_eval_done(day, is_confirm)
+
+
+def _handle(C):
+    ctx = _handle_clock_gate(C, from_timer=False)
+    if ctx is None:
+        return
+    _handle_stock(C, ctx)
+
+# === fband/universe.py ===
+# 单实例监视 BOOK_STOCKS：切票上下文、run_time 扫池、账本 eval/exec 两轮。
+_UNIVERSE_UI_KEYS = (
+    "ready_logged",
+    "_bar_status_at",
+    "_bar_sig_prev",
+    "_skip_sell_eval_logged",
+    "_defer_log_entry_day",
+    "_defer_log_exit_day",
+    "_defer_log_book_day",
+    "_defer_log_wait_day",
+)
+
+
+def _watch_stocks():
+    """BOOK_STOCKS 代码列表（保持配置键原样）。"""
+    mp = _book_stock_map()
+    if not mp:
+        return []
+    return sorted(list(mp.keys()))
+
+
+def _watch_universe_codes():
+    """交易池 + 时钟主图（不在池内时）。暖机 init 也是 do_back_test，不能只订主图。"""
+    codes = []
+    seen = set()
+    for x in list(getattr(A, "watch", None) or []) or _watch_stocks():
+        s = str(x or "").strip()
+        if (not s) or (s in seen):
+            continue
+        seen.add(s)
+        codes.append(s)
+    chart = str(getattr(A, "chart_stock", "") or "").strip()
+    if chart and chart not in seen:
+        codes.append(chart)
+    return codes
+
+
+def _apply_watch_universe(C):
+    codes = _watch_universe_codes()
+    if not codes:
+        return
+    try:
+        C.set_universe(codes)
+        print(
+            _strategy_tag(),
+            "set_universe n=%s" % len(codes),
+            ",".join(codes),
+        )
+        _event_log("set_universe", n=len(codes), stocks=codes)
+    except Exception as e:
+        print("%s set_universe fail" % STRATEGY_NAME, e)
+        _event_log("set_universe_fail", error=str(e))
+
+
+def _is_local_bt(C=None):
+    """CSV 无头回放：必须一图一票走 _handle，不能当成指数暖机 skip。"""
+    if C is not None and bool(getattr(C, "_local_bt", False)):
+        return True
+    return bool(globals().get("_LOCAL_BT"))
+
+
+def _chart_in_watch():
+    chart = _norm_code(getattr(A, "chart_stock", ""))
+    watch = getattr(A, "watch", None) or []
+    if (not chart) or (not watch):
+        return False
+    for x in watch:
+        if _norm_code(x) == chart:
+            return True
+    return False
+
+
+def _ohlcv_prefetch_codes(live_work, stocks, day, prev_closed):
+    """本轮会走 _get_ohlcv_1d/1w 的交易池子集。signal=全池；open_exec=未确认兜底或买入 pending。"""
+    live_work = str(live_work or "")
+    out_stocks = []
+    for x in stocks or []:
+        s = str(x or "").strip()
+        if s:
+            out_stocks.append(s)
+    if live_work == "signal":
+        return list(out_stocks)
+    if live_work != "open_exec":
+        return []
+    pmap = getattr(A, "_per_stock", None)
+    if not isinstance(pmap, dict) or not pmap:
+        return list(out_stocks)
+    prev_closed = str(prev_closed or "")
+    day = str(day or "")
+    need = []
+    for code in out_stocks:
+        rec = pmap.get(code)
+        if not isinstance(rec, dict):
+            rec = {}
+            want = str(code).strip().upper()
+            for k, v in pmap.items():
+                if str(k or "").strip().upper() == want and isinstance(v, dict):
+                    rec = v
+                    break
+        confirmed = str(rec.get("_confirmed_eval_day", "") or "")
+        has_pend = bool(rec.get("_has_pend"))
+        extra = rec.get("_hot_extra") if isinstance(rec.get("_hot_extra"), dict) else {}
+        has_buy = bool(rec.get("_has_buy_pend")) or isinstance(
+            extra.get("pending_entry"), dict
+        )
+        fb_done = str(
+            rec.get("_fallback_done_day", "") or extra.get("fallback_done_day") or ""
+        )
+        need_fb = (
+            (not has_pend)
+            and (confirmed < prev_closed)
+            and (fb_done != day)
+        )
+        if need_fb or has_buy:
+            need.append(code)
+    return need
+
+
+def _per_stock_map():
+    d = getattr(A, "_per_stock", None)
+    if not isinstance(d, dict):
+        d = {}
+        A._per_stock = d
+    return d
+
+
+# 同票 STATE 磁盘重读间隔（秒）。未到期用内存热缓存，避免 2s 定时器刷 state loaded。
+_STATE_RELOAD_SEC = 60
+
+
+def _stash_stock_ui(code):
+    code = str(code or "").strip()
+    if not code:
+        return
+    rec = dict(_per_stock_map().get(code) or {})
+    for k in _UNIVERSE_UI_KEYS:
+        rec[k] = getattr(A, k, None)
+    _per_stock_map()[code] = rec
+
+
+def _restore_stock_ui(code):
+    code = str(code or "").strip()
+    rec = _per_stock_map().get(code) if code else None
+    if not isinstance(rec, dict):
+        A.ready_logged = False
+        A._bar_status_at = None
+        A._bar_sig_prev = None
+        return
+    for k in _UNIVERSE_UI_KEYS:
+        if k in rec:
+            setattr(A, k, rec[k])
+
+
+def _copy_state_dict(val):
+    if isinstance(val, dict):
+        return dict(val)
+    return None
+
+
+def _copy_state_lots(val):
+    if not isinstance(val, list):
+        return []
+    out = []
+    for lot in val:
+        if isinstance(lot, dict):
+            out.append(dict(lot))
+    return out
+
+
+def _stash_hot_state(code):
+    """切票前把仓位/pending/extra 留在内存，供间隔内免读盘。"""
+    code = str(code or "").strip()
+    if not code:
+        return
+    _stash_stock_ui(code)
+    rec = dict(_per_stock_map().get(code) or {})
+    rec["_hot_position"] = _copy_state_dict(getattr(A, "position", None))
+    rec["_hot_lots"] = _copy_state_lots(getattr(A, "lots", None))
+    rec["_hot_acted_day"] = str(getattr(A, "acted_day", "") or "")
+    rec["_hot_acted"] = set(getattr(A, "acted", set()) or [])
+    rec["_hot_bt_held"] = int(getattr(A, "bt_held", 0) or 0)
+    rec["_hot_bt_locked"] = int(getattr(A, "bt_locked", 0) or 0)
+    rec["_hot_bt_lock_day"] = str(getattr(A, "bt_lock_day", "") or "")
+    rec["_hot_bt_opened_at"] = str(getattr(A, "bt_opened_at", "") or "")
+    pend = getattr(A, "pending", None)
+    rec["_hot_pending"] = dict(pend) if isinstance(pend, dict) else None
+    extra = {}
+    fn = globals().get("_state_extra_save")
+    if callable(fn):
+        try:
+            fn(extra)
+        except Exception:
+            extra = {}
+    rec["_hot_extra"] = extra
+    rec["_hot_ok"] = True
+    _per_stock_map()[code] = rec
+
+
+def _restore_hot_state(code):
+    rec = _per_stock_map().get(code) if code else None
+    if not (isinstance(rec, dict) and rec.get("_hot_ok")):
+        return False
+    pos = rec.get("_hot_position")
+    A.position = dict(pos) if isinstance(pos, dict) else None
+    A.lots = _copy_state_lots(rec.get("_hot_lots"))
+    A.acted_day = str(rec.get("_hot_acted_day") or "")
+    acted = rec.get("_hot_acted")
+    if isinstance(acted, (set, list, tuple)):
+        A.acted = set([str(x) for x in acted])
+    else:
+        A.acted = set()
+    A.bt_held = int(rec.get("_hot_bt_held") or 0)
+    A.bt_locked = int(rec.get("_hot_bt_locked") or 0)
+    A.bt_lock_day = str(rec.get("_hot_bt_lock_day") or "")
+    A.bt_opened_at = str(rec.get("_hot_bt_opened_at") or "")
+    pend = rec.get("_hot_pending")
+    A.pending = dict(pend) if isinstance(pend, dict) else None
+    extra = rec.get("_hot_extra")
+    fn = globals().get("_state_extra_load")
+    if callable(fn) and isinstance(extra, dict):
+        try:
+            fn(extra)
+        except Exception:
+            pass
+    _restore_stock_ui(code)
+    return True
+
+
+def _state_reload_due(code):
+    rec = _per_stock_map().get(code) or {}
+    last = rec.get("_state_loaded_at")
+    if last is None or (not rec.get("_hot_ok")):
+        return True
+    try:
+        sec = float(globals().get("_STATE_RELOAD_SEC") or 60)
+        return (datetime.datetime.now() - last).total_seconds() >= sec
+    except Exception:
+        return True
+
+
+def _live_load_state(code):
+    """读盘。每票只在首次打印路径；之后静默（含 60s 重读）。"""
+    rec = _per_stock_map().get(code) or {}
+    log = not bool(rec.get("_state_path_logged"))
+    _load_state(log=log)
+    _restore_stock_ui(code)
+    rec = dict(_per_stock_map().get(code) or {})
+    rec["_state_path_logged"] = True
+    rec["_state_loaded_at"] = datetime.datetime.now()
+    _per_stock_map()[code] = rec
+    _stash_hot_state(code)
+
+
+def _activate_stock(code):
+    """保存当前票 → reset extra → 切 A.stock → load 该票 STATE。"""
+    code = str(code or "").strip()
+    if not code:
+        return ""
+    cur = str(getattr(A, "stock", "") or "").strip()
+    if cur == code:
+        return code
+    if cur:
+        _stash_hot_state(cur)
+        if not getattr(A, "is_backtest", False):
+            _save_state()
+    _reset_stock_ctx()
+    A.stock = code
+    _restore_stock_ui(code)
+    if getattr(A, "is_backtest", False):
+        # eval/exec 两轮：eval 写入的 pending_entry 在 _hot_extra，exec 前须恢复
+        _restore_hot_state(code)
+        return code
+    if _state_reload_due(code):
+        _live_load_state(code)
+    elif not _restore_hot_state(code):
+        _live_load_state(code)
+    return code
+
+
+def _timer_session_idle(now_s):
+    """午休、开盘前、确认窗结束后空闲。晚盘截止跟 SIGNAL_CONFIRM_END，等于截止时刻仍工作。"""
+    s = str(now_s or "")
+    if "113000" <= s < "130000":
+        return True
+    conf_e = _cfg_hhmmss("SIGNAL_CONFIRM_END", "150000")
+    dec_s = _cfg_hhmmss("DECISION_START", "093000")
+    if s > conf_e or s < dec_s:
+        return True
+    return False
+
+
+def _compute_live_work(now_s, day):
+    policy = str(globals().get("LIVE_OHLCV_POLICY") or "window").strip().lower()
+    open_s = _cfg_hhmmss("OPEN_EXEC_START", "093000")
+    open_e = _cfg_hhmmss("OPEN_EXEC_END", "094500")
+    conf_s = _cfg_hhmmss("SIGNAL_CONFIRM_START", "145600")
+    conf_e = _cfg_hhmmss("SIGNAL_CONFIRM_END", "150000")
+    dec_s = _cfg_hhmmss("DECISION_START", "093000")
+    s = str(now_s or "")
+    if s < dec_s or s > conf_e:
+        return ""
+    if policy == "always":
+        return "signal"
+    if open_s <= s < open_e:
+        return "open_exec"
+    if conf_s <= s <= conf_e:
+        if str(getattr(A, "_universe_signal_done_day", "") or "") == str(day):
+            return "pending"
+        return "signal"
+    return "pending"
+
+
+def _ensure_clock_prev_closed(C, today):
+    """时钟图上一根已收盘日，全池共用，避免每票再拉 8 根日 K。"""
+    today = str(today or "")
+    if (
+        str(getattr(A, "_clock_prev_for", "") or "") == today
+        and str(getattr(A, "clock_prev_closed_day", "") or "")
+    ):
+        return A.clock_prev_closed_day
+    chart = str(getattr(A, "chart_stock", "") or "") or str(
+        getattr(A, "stock", "") or ""
+    )
+    days = None
+    try:
+        if chart:
+            days = _get_daily_bar_days(C, chart, count=8)
+    except Exception:
+        days = None
+    prev = ""
+    if days:
+        last = str(days[-1])
+        if last >= today and len(days) >= 2:
+            prev = str(days[-2])
+        elif last and last < today:
+            prev = last
+    if not prev:
+        prev = _calendar_prev_weekday(today)
+    A.clock_prev_closed_day = prev
+    A._clock_prev_for = today
+    return prev
+
+
+def _log_book_checkin_missing(now_s):
+    window = _book_window_id(now_s)
+    if not window:
+        return
+    now = datetime.datetime.now()
+    last = getattr(A, "_checkin_missing_at", None)
+    if last is not None:
+        try:
+            if (now - last).total_seconds() < 30:
+                return
+        except Exception:
+            pass
+    data = _book_load()
+    if str(data.get("window") or "") != window:
+        names = {}
+    else:
+        names = data.get("names") if isinstance(data.get("names"), dict) else {}
+    missing = []
+    for code in getattr(A, "watch", None) or _watch_stocks():
+        rec = names.get(code)
+        if rec is None:
+            rec = names.get(str(code).upper())
+        if not (isinstance(rec, dict) and rec.get("checkin")):
+            missing.append(code)
+    if not missing:
+        return
+    A._checkin_missing_at = now
+    print(
+        "%s checkin missing=%s window=%s"
+        % (STRATEGY_NAME, ",".join(missing), window)
+    )
+    _event_log("checkin_missing", missing=missing, window=window)
+
+
+def _on_mode_switch_to_live(C):
+    """覆盖 common:mode。宇宙模式禁止按时钟品种 load_state。"""
+    print(
+        _strategy_tag(),
+        "mode switch backtest -> live",
+        "raw_do_back_test=",
+        getattr(A, "do_back_test_raw", None),
+        "barpos=",
+        getattr(C, "barpos", None),
+    )
+    _event_log(
+        "mode_switch",
+        direction="backtest_to_live",
+        raw_do_back_test=getattr(A, "do_back_test_raw", None),
+        barpos=getattr(C, "barpos", None),
+    )
+    A.ready_logged = False
+    A._hb_at = None
+    watch = list(getattr(A, "watch", None) or [])
+    chart = str(getattr(A, "chart_stock", "") or "").strip()
+    if watch and chart and (not _chart_in_watch()):
+        print(
+            _strategy_tag(),
+            "live switch skip clock load chart=",
+            chart,
+        )
+        _event_log("live_switch_skip_clock_load", chart=chart)
+        _reset_stock_ctx()
+        A.stock = ""
+        A.pending = None
+        _apply_watch_universe(C)
+        return
+    try:
+        if str(getattr(A, "stock", "") or "").strip():
+            _load_state()
+        else:
+            _reset_stock_ctx()
+    except Exception as e:
+        print(_strategy_tag(), "live switch load_state fail", e)
+        _event_log("live_switch_load_state_fail", error=str(e))
+    if not hasattr(A, "pending"):
+        A.pending = None
+    recon = globals().get("_reconcile_with_broker")
+    if callable(recon) and str(getattr(A, "stock", "") or "").strip():
+        try:
+            recon()
+        except Exception as e:
+            print(_strategy_tag(), "live switch reconcile fail", e)
+            _event_log("live_switch_reconcile_fail", error=str(e))
+    _apply_watch_universe(C)
+
+
+def _handle_universe(C):
+    """实盘定时扫池。不依赖 is_last_bar。"""
+    A._universe_loop = True
+    A._drive = "timer"
+    ctx = _handle_clock_gate(C, from_timer=True)
+    if ctx is None:
+        A._universe_loop = False
+        A._live_work = ""
+        return
+    live_work = str(ctx.get("live_work") or "")
+    A._live_work = live_work
+    day = ctx.get("day")
+    _ensure_clock_prev_closed(C, day)
+    ctx["prev_closed"] = getattr(A, "clock_prev_closed_day", "")
+    stocks = list(getattr(A, "watch", None) or _watch_stocks())
+    if not stocks:
+        _live_heartbeat("no_watch")
+        A._universe_loop = False
+        return
+    _live_heartbeat(live_work)
+
+    def _run_one(code, upass):
+        try:
+            _activate_stock(code)
+            A._universe_pass = upass
+            A._live_work = live_work
+            _handle_stock(C, ctx)
+            rec = _per_stock_map().get(code) or {}
+            rec["_confirmed_eval_day"] = str(
+                getattr(A, "_confirmed_eval_day", "") or ""
+            )
+            rec["_fallback_done_day"] = str(
+                getattr(A, "_fallback_done_day", "") or ""
+            )
+            rec["_has_pend"] = bool(
+                getattr(A, "pending_entry", None)
+                or getattr(A, "pending_exit", None)
+                or getattr(A, "pending", None)
+            )
+            rec["_has_buy_pend"] = isinstance(
+                getattr(A, "pending_entry", None), dict
+            )
+            _per_stock_map()[code] = rec
+            _stash_hot_state(code)
+        except Exception as e:
+            print("%s universe stock error" % STRATEGY_NAME, code, e)
+            _event_log("universe_stock_error", stock=code, error=str(e))
+            try:
+                traceback.print_exc()
+            except Exception:
+                pass
+        finally:
+            A._universe_pass = ""
+
+    if live_work == "pending":
+        for code in stocks:
+            _run_one(code, "")
+    else:
+        need_codes = _ohlcv_prefetch_codes(
+            live_work, stocks, day, ctx.get("prev_closed")
+        )
+        try:
+            if need_codes:
+                _prefetch_watch_ohlcv(C, need_codes)
+            for code in stocks:
+                _run_one(code, "eval")
+            _log_book_checkin_missing(ctx.get("now_s"))
+            for code in stocks:
+                if getattr(A, "is_backtest", False):
+                    rec = _per_stock_map().get(code) or {}
+                    if not rec.get("_has_pend"):
+                        continue
+                _run_one(code, "exec")
+            if live_work == "signal":
+                all_ok = True
+                any_pend = False
+                for code in stocks:
+                    rec = _per_stock_map().get(code) or {}
+                    if str(rec.get("_confirmed_eval_day", "") or "") != str(day):
+                        all_ok = False
+                    if rec.get("_has_pend"):
+                        any_pend = True
+                if all_ok and (not any_pend):
+                    A._universe_signal_done_day = str(day)
+        finally:
+            cache = getattr(A, "_ohlcv_cache", None)
+            if isinstance(cache, dict):
+                cache.clear()
+
+    cur = str(getattr(A, "stock", "") or "").strip()
+    if cur and (not getattr(A, "is_backtest", False)):
+        _stash_hot_state(cur)
+        _save_state()
+    A._universe_loop = False
+    A._live_work = ""
+    A._universe_pass = ""
+
+
+def _universe_on_timer(C):
+    """定时扫池。时段过滤在此，不依赖 startTime。"""
+    if getattr(A, "busy", False):
+        return
+    if not _chart_in_watch():
+        try:
+            _refresh_mode(C)
+        except Exception:
+            pass
+    if getattr(A, "is_backtest", False):
+        return
+    now = datetime.datetime.now()
+    now_s = _bar_hhmmss(now)
+    if _timer_session_idle(now_s):
+        return
+    A.busy = True
+    A._force_quicktrade = 2
+    try:
+        _handle_universe(C)
+    except Exception as e:
+        print("%s universe timer error" % STRATEGY_NAME, e)
+        _event_log("universe_timer_error", error=str(e))
+        try:
+            traceback.print_exc()
+        except Exception:
+            pass
+    finally:
+        A._force_quicktrade = None
+        A.busy = False
+
+
+def check_market(C):
+    """C.run_time 回调。必须是顶层公开函数名，与 init 注册字符串一致。"""
+    n = int(getattr(A, "_timer_hits", 0) or 0) + 1
+    A._timer_hits = n
+    if n <= 5 or (n % 30) == 0:
+        now_s = ""
+        try:
+            now_s = _bar_hhmmss(datetime.datetime.now())
+        except Exception:
+            pass
+        print(
+            "%s check_market hit=%s t=%s busy=%s bt=%s"
+            % (
+                STRATEGY_NAME,
+                n,
+                now_s,
+                getattr(A, "busy", False),
+                getattr(A, "is_backtest", None),
+            )
+        )
+    _universe_on_timer(C)
+
+# === fband/runtime.py ===
+def _as_bool(val):
+    if isinstance(val, bool):
+        return val
+    s = str(val).strip().lower()
+    return s in ("1", "true", "yes", "y", "是")
+
+
+def _apply_panel():
+    """策略交易注入 bind → 写回 config 全局。须由 init() 直接调用。"""
+    g = globals()
+    names = dict(g)
+    try:
+        fr = sys._getframe(1)
+        for _ in range(3):
+            if fr is None:
+                break
+            names.update(fr.f_globals)
+            names.update(fr.f_locals)
+            fr = fr.f_back
+    except Exception:
+        pass
+    applied = []
+    for bind, const, kind in (g.get("PANEL_BINDS") or ()):
+        if bind not in names:
+            continue
+        val = names[bind]
+        cur = g.get(const)
+        if kind == "bool":
+            new = _as_bool(val)
+        elif kind == "int":
+            new = int(float(val))
+        elif kind == "float":
+            new = float(val)
+        else:
+            new = str(val)
+        if const == "BUDGET_BASE":
+            new = _norm_budget_base(new)
+        g[const] = new
+        applied.append(const)
+        if new != cur:
+            print(_strategy_tag(), "panel", const, cur, "->", new)
+    if applied:
+        g["_PANEL_APPLIED"] = set(applied)
+        print(_strategy_tag(), "panel applied", ",".join(applied))
+
+
+def _register_live_timer(C):
+    """实盘秒级定时。必须在 init 里调用。
+
+    国金/迅投：startTime 要用已经过去的 YYYY-MM-DD HH:MM:SS，定时器才视为到期并开始重复。
+    空串或仅 09:30:00 会等到「下一次该时刻」或根本不触发。period 官方为 nSecond。
+    """
+    func = "check_market"
+    start = "2026-01-01 09:00:00"
+    last_err = None
+    for period in ("2nSecond", "2Second"):
+        try:
+            C.run_time(func, period, start)
+            print(
+                "%s run_time %s %s start=%s"
+                % (STRATEGY_NAME, func, period, start)
+            )
+            return
+        except Exception as e:
+            last_err = e
+            print(
+                "%s run_time register fail period=%s" % (STRATEGY_NAME, period),
+                e,
+            )
+    _event_log("run_time_fail", error=str(last_err))
+
+
+def _trail_tiers_json():
+    """整表 compact JSON；网格指纹 trail_tiers=。"""
+    tiers = _factor_param(None, "trail_stop", "tiers") or ()
+    out = []
+    for row in tiers:
+        seq = list(row)
+        while len(seq) < 4:
+            seq.append(None)
+        lo, hi, gb, fl = seq[0], seq[1], seq[2], seq[3]
+        out.append(
+            [
+                float(lo),
+                None if hi is None else float(hi),
+                float(gb),
+                None if fl is None else float(fl),
+            ]
+        )
+    return json.dumps(out, separators=(",", ":"))
+
+
+def init(C):
+    A.busy = False
+    A._hb_at = None
+    try:
+        _apply_panel()
+        _init_impl(C)
+    except Exception as e:
+        print("%s init error" % STRATEGY_NAME, e)
+        _event_log("init_error", error=str(e))
+        try:
+            traceback.print_exc()
+        except Exception:
+            pass
+
+
+def _init_impl(C):
+    A.chart_stock = C.stockcode + "." + C.market
+    if _is_local_bt(C):
+        A.watch = [A.chart_stock]
+    else:
+        A.watch = _watch_stocks()
+        if not A.watch:
+            A.watch = [A.chart_stock]
+    A.stock = A.chart_stock
+    A.period = _resolve_period(C, default="1d")
+    if "account" in globals() and account:
+        A.acct = str(account)
+    elif hasattr(C, "accountid") and C.accountid:
+        A.acct = str(C.accountid)
+    else:
+        A.acct = ACCOUNT_ID
+
+    if "accountType" in globals() and accountType:
+        A.acct_type = str(accountType)
+    else:
+        A.acct_type = ACCOUNT_TYPE
+
+    try:
+        C.set_account(A.acct)
+    except Exception:
+        pass
+
+    A.buy_code = 23 if A.acct_type == "STOCK" else 33
+    A.sell_code = 24 if A.acct_type == "STOCK" else 34
+    A.busy = False
+    A.do_back_test_raw = _is_backtest(C)
+    A.is_backtest = A.do_back_test_raw
+    A._diag = set()
+
+    do_dl = DOWNLOAD_HIST_BACKTEST if A.is_backtest else DOWNLOAD_HIST_LIVE
+    if A.is_backtest:
+        if do_dl:
+            try:
+                _download_hist(A.stock, A.period)
+                _download_hist(A.stock, "1w")
+            except Exception as e:
+                print("%s download_hist abort-safe" % STRATEGY_NAME, e)
+        else:
+            print("%s skip download_history (live)" % STRATEGY_NAME, A.period, "+1w")
+    elif do_dl:
+        for code in A.watch:
+            try:
+                _download_hist(code, A.period)
+                _download_hist(code, "1w")
+            except Exception as e:
+                print("%s download_hist abort-safe" % STRATEGY_NAME, code, e)
+    else:
+        print(
+            "%s skip download_history (live) n=%s" % (STRATEGY_NAME, len(A.watch)),
+            A.period,
+            "+1w",
+        )
+
+    if A.is_backtest:
+        barpos = 0
+        try:
+            barpos = int(getattr(C, "barpos", 0) or 0)
+        except Exception:
+            barpos = 0
+        fresh = (not getattr(A, "_bt_alive", False)) or (barpos <= 0)
+        if fresh:
+            A.position = None
+            A.acted_day = ""
+            A.acted = set()
+            A.pending = None
+            A.pending_entry = None
+            A.pending_exit = None
+            A.hold_peak = None
+            A.hold_bars = 0
+            A._hold_count_day = ""
+            A.time_force_grace_until = None
+            A.time_force_trend_skip = False
+            A.lots = []
+            A.round_scaled = False
+            A._confirmed_eval_day = ""
+            A._fallback_done_day = ""
+            A._w_bear_streak = 0
+            A._w_bear_last_day = ""
+            A._skip_sell_eval_day = ""
+            A._last_add_day = ""
+            A._last_add_signal = ""
+            A.bt_held = 0
+            A.bt_locked = 0
+            A.bt_lock_day = ""
+            A.bt_opened_at = ""
+            A._bt_alive = True
+            A.ready_logged = False
+            A._bt_hb_logged = False
+            A._bt_hb_skip_logged = False
+            print("%s backtest session start barpos=" % STRATEGY_NAME, barpos)
+        else:
+            if not hasattr(A, "bt_held"):
+                A.bt_held = _pos_shares()
+            if not hasattr(A, "acted") or A.acted is None:
+                A.acted = set()
+            if not hasattr(A, "pending"):
+                A.pending = None
+            if not hasattr(A, "pending_entry"):
+                A.pending_entry = None
+            if not hasattr(A, "pending_exit"):
+                A.pending_exit = None
+            if not hasattr(A, "hold_peak"):
+                A.hold_peak = None
+            if not hasattr(A, "hold_bars"):
+                A.hold_bars = 0
+            if not hasattr(A, "_hold_count_day"):
+                A._hold_count_day = ""
+            if not hasattr(A, "time_force_grace_until"):
+                A.time_force_grace_until = None
+            if not hasattr(A, "time_force_trend_skip"):
+                A.time_force_trend_skip = False
+            if not hasattr(A, "lots") or A.lots is None:
+                A.lots = []
+            if not hasattr(A, "round_scaled"):
+                A.round_scaled = False
+            if not hasattr(A, "_confirmed_eval_day"):
+                A._confirmed_eval_day = ""
+            if not hasattr(A, "_fallback_done_day"):
+                A._fallback_done_day = ""
+            if not hasattr(A, "_w_bear_streak"):
+                A._w_bear_streak = 0
+            if not hasattr(A, "_w_bear_last_day"):
+                A._w_bear_last_day = ""
+            if not hasattr(A, "_skip_sell_eval_day"):
+                A._skip_sell_eval_day = ""
+            if not hasattr(A, "_last_add_day"):
+                A._last_add_day = ""
+            if not hasattr(A, "_last_add_signal"):
+                A._last_add_signal = ""
+            _bt_recover_position()
+            print(
+                "%s backtest re-init preserve barpos=" % STRATEGY_NAME,
+                barpos,
+                "pos=",
+                A.position,
+                "bt_held=",
+                _bt_held_vol(),
+            )
+    else:
+        # 实盘宇宙：不按主图/时钟 load；第一轮定时回调再 _activate_stock
+        _reset_stock_ctx()
+        A.stock = ""
+        A.ready_logged = False
+
+    _apply_watch_universe(C)
+
+    drive = "handlebar"
+    if A.is_backtest:
+        # 编辑器回测必须靠 handlebar 扫历史 K。注册秒级定时后终端可能改走墙钟
+        # 定时、不再推进 barpos；而 check_market 在 is_backtest 下直接 return，
+        # 表现为 init 之后没有任何 close=/diag。
+        print("%s backtest skip run_time drive=handlebar" % STRATEGY_NAME)
+    else:
+        drive = "timer"
+        _register_live_timer(C)
+
+    uni = list(getattr(A, "watch", None) or [])
+    print(
+        "%s UNIVERSE n=%s stocks=%s chart=%s drive=%s 只保留一个 HlBand 实例"
+        % (
+            STRATEGY_NAME,
+            len(uni),
+            ",".join(uni) or "-",
+            getattr(A, "chart_stock", "") or "-",
+            drive,
+        )
+    )
+
+    _win = _structure_windows()
+    print(
+        "%s %s init" % (STRATEGY_NAME, STRATEGY_VER),
+        "chart=",
+        getattr(A, "chart_stock", "") or "-",
+        "stock=",
+        getattr(A, "stock", "") or "-",
+        A.acct,
+        A.acct_type,
+        "PERIOD=",
+        A.period,
+        "ohlcv_policy=",
+        str(globals().get("LIVE_OHLCV_POLICY") or "window"),
+        "DIVIDEND=",
+        _dividend_type() if getattr(A, "stock", "") else "per-stock",
+        "chart_div=",
+        _chart_dividend(C) or "-",
+        "BACKTEST=",
+        A.is_backtest,
+        "DRY_RUN=",
+        DRY_RUN,
+        "budget_base=",
+        _cfg_budget_base(),
+        "budget=",
+        _trade_budget_cap(),
+        "BOOK_N=",
+        _cfg_book_n(),
+        "book_stocks=",
+        ",".join(sorted(_book_stock_set())) or "-",
+        "cash_ratio=",
+        CASH_RATIO,
+        "lot_open_frac=",
+        LOT_OPEN_FRAC,
+        "lot_add_frac=",
+        LOT_ADD_FRAC,
+        "book_lot_max=",
+        BOOK_LOT_MAX,
+        "book_freeze=",
+        "%s/%s" % (BOOK_FREEZE_CLOSE, BOOK_FREEZE_OPEN),
+        "wMA=",
+        "%d/%d" % (_win["w_ma"]["fast"], _win["w_ma"]["life"]),
+        "dMA=",
+        "%d/%d" % (_win["d_ma"]["mid"], _win["d_ma"]["slow"]),
+        "atr=",
+        int(_win["atr"]["n"]),
+        "ma_type=",
+        _ma_kind(),
+        "stop=",
+        _factor_param(None, "stop_loss", "pct"),
+        "atr_stop=",
+        _factor_param(None, "atr_stop", "k"),
+        "atr_trail=",
+        "%s/%s"
+        % (
+            _factor_param(None, "atr_trail_stop", "k1"),
+            _factor_param(None, "atr_trail_stop", "k2"),
+        ),
+        "trail_arm=",
+        _trail_arm(),
+        "trail_tiers=",
+        _trail_tiers_json(),
+        "chase<",
+        _factor_param(None, "chase", "max_pct"),
+        "scale=",
+        SCALE_ENABLE,
+        "scale_lots=",
+        SCALE_LOTS,
+        "scale_once=",
+        SCALE_ONCE_PER_ROUND,
+        "scale_arm=",
+        SCALE_ARM,
+        "scale_arm_bars=",
+        SCALE_ARM_BARS,
+        "scale_plat=",
+        "%d/%.2f"
+        % (
+            int(_factor_param(None, "plat_break", "lookback") or 20),
+            float(_factor_param(None, "plat_break", "max_range") or 0.10),
+        ),
+        "scale_w_expand=",
+        _factor_param(None, "w_macd_golden", "hist_expand"),
+        "time_force_bars=",
+        _factor_param(None, "time_force", "bars"),
+        "time_force_min_ret=",
+        _time_force_min_ret(),
+        "recipe=",
+        _recipe_fingerprint(),
+        "close_exec=",
+        "%s-%s" % (
+            globals().get("PENDING_EXEC_START", "145600"),
+            globals().get("PENDING_EXEC_END", "145700"),
+        ),
+        "open_exec=",
+        "%s-%s" % (
+            globals().get("OPEN_EXEC_START", "093000"),
+            globals().get("OPEN_EXEC_END", "094500"),
+        ),
+        "confirm=",
+        "%s-%s" % (
+            globals().get("SIGNAL_CONFIRM_START", "145600"),
+            globals().get("SIGNAL_CONFIRM_END", "150000"),
+        ),
+    )
+    _event_log(
+        "init",
+        acct=A.acct,
+        acct_type=A.acct_type,
+        period=A.period,
+        dividend=_dividend_type(),
+        chart_div=_chart_dividend(C) or "",
+        backtest=A.is_backtest,
+        dry_run=DRY_RUN,
+        budget_base=_cfg_budget_base(),
+        budget=_trade_budget_cap(),
+        scale=SCALE_ENABLE,
+        scale_lots=SCALE_LOTS,
+        scale_once=SCALE_ONCE_PER_ROUND,
+        scale_arm=SCALE_ARM,
+        scale_arm_bars=SCALE_ARM_BARS,
+        scale_w_hist_min=SCALE_W_HIST_MIN,
+        scale_plat_lookback=_factor_param(None, "plat_break", "lookback"),
+        scale_plat_max_range=_factor_param(None, "plat_break", "max_range"),
+        scale_w_hist_expand=_factor_param(None, "w_macd_golden", "hist_expand"),
+        stop=_factor_param(None, "stop_loss", "pct"),
+        trail_arm=_trail_arm(),
+        time_force_bars=_factor_param(None, "time_force", "bars"),
+        time_force_min_ret=_time_force_min_ret(),
+        close_exec="%s-%s"
+        % (
+            globals().get("PENDING_EXEC_START", "145600"),
+            globals().get("PENDING_EXEC_END", "145700"),
+        ),
+        open_exec="%s-%s"
+        % (
+            globals().get("OPEN_EXEC_START", "093000"),
+            globals().get("OPEN_EXEC_END", "094500"),
+        ),
+        confirm="%s-%s"
+        % (
+            globals().get("SIGNAL_CONFIRM_START", "145600"),
+            globals().get("SIGNAL_CONFIRM_END", "150000"),
+        ),
+        book_n=_cfg_book_n(),
+        book_stocks=len(_book_stock_set()),
+        watch=len(getattr(A, "watch", None) or []),
+        chart=getattr(A, "chart_stock", "") or "",
+        ohlcv_policy=str(globals().get("LIVE_OHLCV_POLICY") or ""),
+        cash_ratio=CASH_RATIO,
+        lot_open_frac=LOT_OPEN_FRAC,
+        lot_add_frac=LOT_ADD_FRAC,
+        book_lot_max=BOOK_LOT_MAX,
+        ma_type=_ma_kind(),
+        log_dir=str(globals().get("LOG_DIR") or ""),
+    )
+
+
+def handlebar(C):
+    try:
+        _refresh_mode(C)
+        bt = getattr(A, "is_backtest", False)
+        if bt and (not getattr(A, "_bt_hb_logged", False)):
+            A._bt_hb_logged = True
+            print(
+                "%s backtest handlebar start barpos=" % STRATEGY_NAME,
+                getattr(C, "barpos", None),
+                "busy=",
+                getattr(A, "busy", False),
+                "chart_in_watch=",
+                _chart_in_watch(),
+            )
+        if getattr(A, "busy", False):
+            return
+        A.busy = True
+        if bt:
+            if _is_local_bt(C) or (not (getattr(A, "watch", None) or [])) or _chart_in_watch():
+                _handle(C)
+            elif not getattr(A, "_bt_hb_skip_logged", False):
+                A._bt_hb_skip_logged = True
+                print(
+                    "%s backtest handlebar skip chart not in watch" % STRATEGY_NAME,
+                    getattr(A, "chart_stock", ""),
+                    "watch=",
+                    ",".join(getattr(A, "watch", None) or []) or "-",
+                )
+        # 实盘暖机（主图不在池）：只 _refresh_mode。live 扫池只走 run_time。
+    except Exception as e:
+        print("%s handlebar error" % STRATEGY_NAME, e)
+        _event_log("handlebar_error", error=str(e))
+        try:
+            traceback.print_exc()
+        except Exception:
+            pass
+    finally:
+        A.busy = False

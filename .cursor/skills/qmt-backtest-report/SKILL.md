@@ -3,7 +3,7 @@ name: qmt-backtest-report
 description: >-
   从 QMT 终端回测 log 自动生成分析报告：解析成交、成交表 CSV、权益曲线、
   持仓着色 K 线、Markdown 报告。Use when the user mentions 回测报告、分析报告、
-  解析 log、成交表、权益曲线、K线图、报告自动化，或 hongli_band/log.txt /
+  解析 log、成交表、权益曲线、K线图、报告自动化，或 factor_band/log.txt /
   回测分析报告、plot_trades_kline、report 目录.
 ---
 
@@ -15,7 +15,7 @@ description: >-
 ## 何时使用
 
 - 用户说：生成/更新回测分析报告、解析 log、画权益曲线/K 线
-- 主题下已有 `log.txt`（如 `hongli_band/log.txt`）
+- 主题下已有 `log.txt`（如 `factor_band/log.txt`）
 - 联调结束后需要沉淀数字结论
 
 联调踩坑仍走 [qmt-model-script](../qmt-model-script/SKILL.md)；本 skill **只读日志与画图，不改策略片段、不 deploy**。
@@ -25,7 +25,7 @@ description: >-
 在仓库根目录：
 
 ```bash
-python .cursor/skills/qmt-backtest-report/scripts/generate_report.py --theme hongli_band
+python .cursor/skills/qmt-backtest-report/scripts/generate_report.py --theme factor_band
 ```
 
 先将国金终端导出的 **`QMT终端操作明细.csv`** 放到 `<主题>/report/`（盈亏真源）；无此文件则回退 log 自记账价并告警。
@@ -82,7 +82,7 @@ python .cursor/skills/qmt-backtest-report/scripts/generate_report.py --theme hon
 ## 主题薄封装
 
 ```bash
-python hongli_band/gen_report.py
+python factor_band/gen_report.py
 ```
 
 改策略后：先覆盖 `log.txt`，再跑本脚本。
