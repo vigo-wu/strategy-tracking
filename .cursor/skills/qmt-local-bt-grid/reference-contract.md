@@ -28,6 +28,7 @@ JSON 可序列化。元组在 JSON 里用数组；`null` = Python `None`。
   "factor_params": {
     "stop_loss": {"pct": 0.10},
     "time_force": {"bars": 0, "arm": 0.03},
+    "scale_arm": {"arm": 0.03, "bars": 8, "hist_min": -0.01},
     "atr_trail_stop": {"k1": 2.0, "k2": 1.5},
     "trail_stop": {
       "tiers": [

@@ -172,7 +172,8 @@ class DefaultRecipeShapeTests(unittest.TestCase):
         scale = recipe["scale_in"]
         self.assertEqual(scale[0], "and")
         self.assertNotIn(["not", "chase"], scale[1:5])
-        or_node = scale[-1]
+        self.assertEqual(scale[-1], "scale_arm")
+        or_node = next(n for n in scale[1:] if isinstance(n, list) and n and n[0] == "or")
         self.assertEqual(or_node[0], "or")
         self.assertEqual(or_node[1], ["and", "pullback_vol", ["not", "chase"]])
         self.assertIn("plat_break", or_node)

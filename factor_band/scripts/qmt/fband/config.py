@@ -48,22 +48,17 @@ TRADE_BUDGET = 100000.0
 # 周线：快/生命线（5/34）；mid=13 仅日志多头。取数 need 另钳原 MA55 暖机地板。
 # ATR：威尔德平滑窗 atr.n；<=0 关 atr_stop。
 
-# 盈利后加仓门槛（仓位层，不进 factor_params）：
-#   峰值浮盈 >= SCALE_ARM，且该笔已持仓 >= SCALE_ARM_BARS 日
+# 盈利后加仓：门槛叶子 scale_arm（峰值浮盈 / 持仓日 / 周柱）在 RECIPE.scale_in；
 #   回踩加仓仍受 chase；破平台/金叉不受
 #   执行日若已触发卖点则取消加仓
 # SCALE_ONCE_PER_ROUND：同一轮只加一次
-# SCALE_W_HIST_MIN：周线 MACD 柱低于此值不加；None 关闭
 # SCALE_LOTS=True：每笔独立成本/峰值/止盈
 SCALE_ENABLE = True
 SCALE_ONCE_PER_ROUND = True
-SCALE_ARM = 0.03
-SCALE_ARM_BARS = 8
-SCALE_W_HIST_MIN = -0.01
 SCALE_LOTS = True
 
 # 默认 Recipe：四槽布尔式。因子数字在 factors/catalog.py（写入 factor_params）；
-# 均线/MACD/ATR 窗真源 structure。SCALE_ARM 等仓位门槛不进表。
+# 均线/MACD/ATR 窗真源 structure。scale_once / 满槽 / 资金不进表。
 # scale_out 恒 false：减仓未启用。
 RECIPE = {
     "entry": [
@@ -87,6 +82,7 @@ RECIPE = {
             "plat_break",
             "w_macd_golden",
         ],
+        "scale_arm",
     ],
     "exit": [
         "or",

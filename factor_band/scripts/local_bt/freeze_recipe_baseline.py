@@ -188,6 +188,16 @@ def _eval_cases(ns: dict) -> list[dict]:
     plat_h = [10.05] * 30 + [10.35]
     plat_l = [9.95] * 30 + [10.2]
     plat_ctx = ns["_build_factor_ctx"](plat_c, None, plat_h, plat_l, detail, None)
+    market = dict(plat_ctx.get("market") or {})
+    w_detail = dict(market.get("w_detail") or {})
+    w_detail["hist"] = 0.0
+    market["w_detail"] = w_detail
+    plat_ctx = dict(plat_ctx)
+    plat_ctx["market"] = market
+    plat_ctx = ns["_factor_ctx_bind_state"](
+        plat_ctx,
+        lots=[{"hold_max_ret": 0.04, "hold_bars": 10}],
+    )
     plat = bool(ns["_factor_hit"]("plat_break", plat_ctx))
     scale = ns["_eval_scale_in_slot"](plat_ctx)
     cases.append(

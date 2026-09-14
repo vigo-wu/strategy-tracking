@@ -162,6 +162,33 @@ LEAVES = {
             },
         },
     },
+    "scale_arm": {
+        "label": "加仓-浮盈持仓周柱门槛",
+        "group": "scale",
+        "params": {
+            "arm": {
+                "default": 0.03,
+                "percent": True,
+                "abbrev": "sa",
+                "label": "加仓门槛",
+                "axis": 4,
+            },
+            "bars": {
+                "default": 8,
+                "percent": False,
+                "abbrev": "sab",
+                "label": "加仓持仓日",
+                "axis": 5,
+            },
+            "hist_min": {
+                "default": -0.01,
+                "percent": False,
+                "abbrev": "swh",
+                "label": "加仓周柱下限",
+                "axis": 6,
+            },
+        },
+    },
     "stop_loss": {
         "label": "硬止损",
         "group": "exit",

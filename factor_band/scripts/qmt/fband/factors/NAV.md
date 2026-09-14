@@ -51,7 +51,7 @@ config.py
 | 槽 | 形态 | 备注 |
 | :--- | :--- | :--- |
 | `entry` | `¬chase ∧ ¬vol_dry ∧ ¬w_bias ∧ ¬w_slope ∧ ¬weekly_bear ∧ pullback_vol` | 未命中 reasons 为第一个挡住的叶子 |
-| `scale_in` | `¬vol_dry ∧ ¬w_bias ∧ ¬w_slope ∧ ¬weekly_bear ∧ ((pullback_vol ∧ ¬chase) ∨ plat_break ∨ w_macd_golden)` | 破平台/金叉**不受** chase；回踩加仓受。`SCALE_ARM` / `scale_once` / 满槽在 `_scale_gate`，不进表达式 |
+| `scale_in` | `¬vol_dry ∧ ¬w_bias ∧ ¬w_slope ∧ ¬weekly_bear ∧ ((pullback_vol ∧ ¬chase) ∨ plat_break ∨ w_macd_golden) ∧ scale_arm` | 破平台/金叉**不受** chase；回踩加仓受。`scale_arm` 在表达式末。`scale_once` / 满槽在 `_scale_gate` |
 | `exit` | `weekly_bear_confirm ∨ atr_stop ∨ atr_trail_stop ∨ time_force` | or 短路；主因=第一个命中叶子。`stop_loss` / `trail_stop` 叶子仍在，默认 AST 不引用 |
 | `scale_out` | `false` | **减仓未启用**。Intent 预留 `reduce`，strategy 忽略 |
 
@@ -69,7 +69,7 @@ config.py
 4. 网格覆盖仍是 `overrides.factor_params` / `overrides.structure`，由 `_factor_params_apply_global` / `_structure_apply_global` 按段再按 key 合并。新序列仍改 `indicators/` + `ctx.py`。
 5. 不要改 `_handle` 才能加叶子；仓位门槛不要写进布尔式。
 
-不要进 `lib/`：`BOOK_LOT_MAX`、现金、`scale_once`、`SCALE_ARM`、pending 超时、T+1。  
+不要进 `lib/`：`BOOK_LOT_MAX`、现金、`scale_once`、pending 超时、T+1。  
 不要把因子塞进 `indicators/`。
 
 叶子以后仍留策略侧。引擎（ctx/registry/expr/slots）以后可迁 `qmt_common/factors/`。

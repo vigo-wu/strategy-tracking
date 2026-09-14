@@ -450,7 +450,12 @@ class GridSpecTest(unittest.TestCase):
         self.assertNotIn("D_MA_MID", ids)
         self.assertIn("d_ma.mid", ids)
         self.assertIn("w_ma.mid", ids)
-        self.assertIn("SCALE_ARM", ids)
+        self.assertNotIn("SCALE_ARM", ids)
+        self.assertNotIn("SCALE_ARM_BARS", ids)
+        self.assertNotIn("SCALE_W_HIST_MIN", ids)
+        self.assertIn("scale_arm.arm", ids)
+        self.assertIn("scale_arm.bars", ids)
+        self.assertIn("scale_arm.hist_min", ids)
         self.assertIn("time_force.bars", ids)
 
     def test_reject_retired_min_ret_spec(self) -> None:
@@ -480,6 +485,17 @@ class GridSpecTest(unittest.TestCase):
                 }
             )
         self.assertIn("TIME_FORCE_GRACE_BARS", str(ctx.exception))
+
+    def test_reject_old_scale_arm_key(self) -> None:
+        with self.assertRaises(GridSpecError) as ctx:
+            reject_retired_min_ret(
+                {
+                    "cells": [
+                        {"id": "sa3", "overrides": {"SCALE_ARM": 0.03}},
+                    ]
+                }
+            )
+        self.assertIn("SCALE_ARM", str(ctx.exception))
 
     def test_reject_old_factor_key(self) -> None:
         with self.assertRaises(GridSpecError) as ctx:

@@ -41,7 +41,7 @@ description: >-
 | 网格扫参（不改登记、不改 AST） | `qmt-local-bt-grid` |
 | 新开一整套终端策略 | `qmt-common-modules` |
 
-片段禁止互 `import`。**禁止**手改 `qmt_terminal_*.py`、`registry` 手写表、`MODULE_ORDER` 的 **lib 段**、`grid_spec` 因子白名单。仓位门槛（`SCALE_ARM` / `scale_once` / 满槽 / 资金）**不进** `LEAVES` / `lib/` / `indicators/`。
+片段禁止互 `import`。**禁止**手改 `qmt_terminal_*.py`、`registry` 手写表、`MODULE_ORDER` 的 **lib 段**、`grid_spec` 因子白名单。仓位门槛（`scale_once` / 满槽 / 资金）**不进** `LEAVES` / `lib/` / `indicators/`。加仓武装门槛走叶子 `scale_arm`。
 
 ---
 

@@ -40,7 +40,7 @@
   "pullback_vol"]
 ```
 
-加仓信号（门槛在仓位层）：
+加仓信号（`scale_arm` 在表达式末，避免抢成交主因）：
 
 ```json
 ["and",
@@ -48,7 +48,8 @@
   ["not", "w_slope"], ["not", "weekly_bear"],
   ["or",
     ["and", "pullback_vol", ["not", "chase"]],
-    "plat_break", "w_macd_golden"]]
+    "plat_break", "w_macd_golden"],
+  "scale_arm"]
 ```
 
 细原子示例（第二期才用，现行默认配置不用）：
@@ -102,10 +103,11 @@ entry:
   ¬chase & ¬vol_dry & ¬w_bias & ¬w_slope & ¬weekly_bear & pullback_vol
 
 scale_in:
-  （仓位门槛 SCALE_ARM / scale_once / 满槽在仓位层）
   ¬vol_dry & ¬w_bias & ¬w_slope & ¬weekly_bear
   & ((pullback_vol & ¬chase) | plat_break | w_macd_golden)
+  & scale_arm
   # 破平台 / 金叉不受 chase；回踩加仓受
+  # scale_once / 满槽在仓位层
 
 exit:
   weekly_bear_confirm | atr_stop | atr_trail_stop | time_force
@@ -125,6 +127,7 @@ scale_out:
 | 因子 | 主要读的 state |
 | :--- | :--- |
 | `chase` / `vol_dry` / `w_bias` / `w_slope` / `pullback_vol` / `plat_break` / `w_macd_golden` | 可几乎只靠 market |
+| `scale_arm` | `lots` / `hold_max_ret` / `hold_bars`、`w_detail.hist` |
 | `stop_loss` / `atr_stop` / `trail_stop` / `atr_trail_stop` | `cost`、`hold_peak`（或 lot 同名字段）；`atr_stop` / `atr_trail_stop` 另读 `market.atr` |
 | `time_force` | `hold_bars`、`hold_max_ret`、`time_force_trend_skip` |
 | `weekly_bear`（当天空头，禁开/撤买） | 主要靠 `w_detail` |
@@ -149,13 +152,14 @@ scale_out:
 | `weekly_bear_confirm` | **确认清仓**：streak ≥ N | `weekly_bear_confirm.days` |
 | `plat_break` | 平台突破 | `plat_break.lookback` / `max_range` / `break_buf` |
 | `w_macd_golden` | 周金叉且柱放大 | `w_macd_golden.hist_expand` |
+| `scale_arm` | 峰值浮盈 + 该笔持仓日 + 周柱下限 | `scale_arm.arm` / `bars` / `hist_min`；`arm<=0` 回落 `0.03`；`bars<=0` 不查持仓日；`hist_min` 为 `None` 关闭周柱 |
 | `stop_loss` | 收盘相对成本 | `stop_loss.pct` |
 | `atr_stop` | 收盘 <= 成本 − k×ATR | `atr_stop.k`；窗是 `structure.atr.n` |
 | `atr_trail_stop` | 峰值相对成本 > k1×ATR 武装；收盘<=成本或峰值回撤>=k2×ATR | `atr_trail_stop.k1` / `k2`；`k1<=0` 整条关；`k2<=0` 只保本 |
 | `trail_stop` | 档位回撤 / 利润底 | `trail_stop.tiers`（默认 exit 不引用） |
 | `time_force` | 持仓日 + 慢线地板 + 武装让路 | `time_force.bars` / `time_force.arm`；`arm<=0` 关让路 |
 
-仓位门槛（`SCALE_ARM` / `scale_once` / 满槽）**不进** Factor Lib，也不进 `factor_params`。
+仓位门槛（`scale_once` / 满槽）**不进** Factor Lib，也不进 `factor_params`。`SCALE_ARM` / `SCALE_ARM_BARS` / `SCALE_W_HIST_MIN` 已删，顶层写入即报错；改 `scale_arm.arm` / `bars` / `hist_min`。
 
 同一 id 可进多槽；阈值按 id 共享。不做每槽别名。
 
@@ -170,9 +174,9 @@ scale_out:
 | 住哪 | 例子 | 说明 |
 | :--- | :--- | :--- |
 | `RECIPE` 四个槽位 AST | `entry` / `scale_in` / `exit` / `scale_out` | 无数字；默认盘启用写这里 |
-| `catalog.LEAVES` → `RECIPE.factor_params` | `stop_loss.pct`、`atr_stop.k`、`atr_trail_stop.k1` / `k2`、`time_force.arm`、`chase.max_pct`、`trail_stop.tiers` | 作者改 `LEAVES`；运行时 `_factor_param` |
+| `catalog.LEAVES` → `RECIPE.factor_params` | `stop_loss.pct`、`atr_stop.k`、`atr_trail_stop.k1` / `k2`、`time_force.arm`、`chase.max_pct`、`trail_stop.tiers`、`scale_arm.arm` / `bars` / `hist_min` | 作者改 `LEAVES`；运行时 `_factor_param` |
 | `RECIPE.structure` | 见下表 | 均线/MACD/ATR **窗**；`_structure_windows` |
-| 仓位 / 资金全局 | `SCALE_ARM`、`CASH_RATIO`、`TRADE_BUDGET` | 不上表、不上因子面板 |
+| 仓位 / 资金全局 | `SCALE_ENABLE`、`CASH_RATIO`、`TRADE_BUDGET` | 不上表、不上因子面板 |
 
 `RECIPE.structure` 现行默认配置字面量（`<=0` 关该条均线/ATR；MACD 三窗都应 >0）：
 
@@ -185,18 +189,19 @@ scale_out:
 
 读取指标周期窗：调用方先 `_structure_windows()`，再把 `n` 传给 `_ema` / `_sma` / `_calc_macd`（三窗必传）/ `_calc_atr`。缺键用上表数字字面量。网格覆盖 `_structure_apply_global`，按段再按 key 合并。QMT 暖机（`market._ohlcv_need_*`）走 `_structure_windows()`；local_bt `run.py` 读裸表，缺键当 0——现行默认配置字面量齐全时两者一致。价格均线算法不上 `structure`：现行日/周价格均线由调用点直调 `_ema`。
 
-网格：因子轴元数据（分组 / 短名 / percent / kind）来自 `LEAVES`；轴 id 仍是点路径（`stop_loss.pct` / `atr_stop.k` / `atr_trail_stop.k1` / `k2` / `time_force.arm` / `d_ma.mid` / `atr.n`）；短 id 如 `dmm15` / `ask` / `atk1` / `atk2` / `tfa` / `atr`。`atr_stop.k` / `atr_trail_stop.k1` / `k2` 是浮点倍数轴（`LEAVES` 默认 `2.0`，可扫 `1.5`），**不是**百分比轴。格子 `overrides` 形态不变，必须写成：
+网格：因子轴元数据（分组 / 短名 / percent / kind）来自 `LEAVES`；轴 id 仍是点路径（`stop_loss.pct` / `atr_stop.k` / `atr_trail_stop.k1` / `k2` / `time_force.arm` / `scale_arm.arm` / `scale_arm.bars` / `scale_arm.hist_min` / `d_ma.mid` / `atr.n`）；短 id 如 `dmm15` / `ask` / `atk1` / `atk2` / `tfa` / `sa` / `sab` / `swh` / `atr`。`atr_stop.k` / `atr_trail_stop.k1` / `k2` 是浮点倍数轴（`LEAVES` 默认 `2.0`，可扫 `1.5`），**不是**百分比轴。格子 `overrides` 形态不变，必须写成：
 
 ```text
 {"factor_params": {"stop_loss": {"pct": 0.06}}}
 {"factor_params": {"atr_stop": {"k": 1.5}}}
 {"factor_params": {"atr_trail_stop": {"k1": 2.0, "k2": 1.5}}}
 {"factor_params": {"time_force": {"arm": 0.03}}}
+{"factor_params": {"scale_arm": {"arm": 0.03, "bars": 8, "hist_min": -0.01}}}
 {"structure": {"d_ma": {"mid": 15}}}
 {"structure": {"atr": {"n": 14}}}
 ```
 
-顶层旧键（`STOP_LOSS` / `D_MA_MID`）或顶层点路径（`stop_loss.pct` / `d_ma.mid`）都直接报错。面板只上模拟下单 / 资金 / 加仓开关，因子阈值和指标周期窗不上屏。
+顶层旧键（`STOP_LOSS` / `D_MA_MID` / `SCALE_ARM`）或顶层点路径（`stop_loss.pct` / `d_ma.mid`）都直接报错。面板只上模拟下单 / 资金 / 加仓开关，因子阈值和指标周期窗不上屏。
 
 `recipe=` 指纹：表达式 + 折进表的 `factor_params` + `structure`。apply 之后再算，`overrides` 袋为空。默认哈希会随 payload 增 `structure` 而变；参数指纹预检用 `expected_fingerprint` 重算，不要对历史 `report/grid/` 档案里的旧哈希。两份拷贝：`factors/slots.py` 与 `local_bt/grid_spec.py`。
 

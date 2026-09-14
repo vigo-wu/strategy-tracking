@@ -45,6 +45,7 @@ _EXPECTED_FP = {
         "break_buf": 0.0,
     },
     "w_macd_golden": {"hist_expand": 1.2},
+    "scale_arm": {"arm": 0.03, "bars": 8, "hist_min": -0.01},
     "stop_loss": {"pct": 0.08},
     "atr_stop": {"k": 2.0},
     "atr_trail_stop": {"k1": 2.0, "k2": 2.0},
@@ -118,7 +119,7 @@ class CatalogContractTests(unittest.TestCase):
         self.assertEqual(fp, _EXPECTED_FP)
 
     def test_recipe_fingerprint_unchanged(self) -> None:
-        self.assertEqual(recipe_fingerprint({}), "23b3e414")
+        self.assertEqual(recipe_fingerprint({}), "c167b7d0")
 
     def test_catalog_axis_order(self) -> None:
         ids = list(catalog_ids())
@@ -158,6 +159,9 @@ class CatalogContractTests(unittest.TestCase):
                 "plat_break.max_range",
                 "plat_break.break_buf",
                 "w_macd_golden.hist_expand",
+                "scale_arm.arm",
+                "scale_arm.bars",
+                "scale_arm.hist_min",
             ),
         )
 

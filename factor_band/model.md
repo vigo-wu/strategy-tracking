@@ -11,7 +11,7 @@
 
 FactorBand 是 **中长线 / 波段** 交易框架：日线主图找点、周线作跨周期过滤，持仓按笔记账，全池分档。标的以 `BOOK_STOCKS` 为准，不限定板块或分红风格。
 
-信号不写死在过程式分支。叶子登记在因子库（`factors/catalog.py` 的 `LEAVES` + `factors/lib/<id>.py`），每个因子只回答条件是否成立，**不带开仓/平仓立场**。立场由四个槽位的条件抽象语法树赋予（`config.RECIPE`）。同一叶子可进多槽（例如 `pullback_vol` 可同时作开仓与加仓）。改四个槽位的引用、`and` / `or` / `not` 即换组合；格子只覆盖 `overrides.factor_params` / `overrides.structure`，不能改 AST。仓位门槛（`SCALE_ARM` / `scale_once` / 满槽 / 资金）不进因子库。登记 ≠ 已启用：`stop_loss` / `trail_stop` 仍在 `LEAVES`，现行默认配置的 `exit` 不引用。
+信号不写死在过程式分支。叶子登记在因子库（`factors/catalog.py` 的 `LEAVES` + `factors/lib/<id>.py`），每个因子只回答条件是否成立，**不带开仓/平仓立场**。立场由四个槽位的条件抽象语法树赋予（`config.RECIPE`）。同一叶子可进多槽（例如 `pullback_vol` 可同时作开仓与加仓）。改四个槽位的引用、`and` / `or` / `not` 即换组合；格子只覆盖 `overrides.factor_params` / `overrides.structure`，不能改 AST。仓位门槛（`scale_once` / 满槽 / 资金）不进因子库。登记 ≠ 已启用：`stop_loss` / `trail_stop` 仍在 `LEAVES`，现行默认配置的 `exit` 不引用。
 
 同一根 K 四个槽位都求值，仓位仲裁优先级写死：`flat > reduce > add > open`。现行默认配置 `scale_out=false`（减仓未启用）。`weekly_bull` 只进日志，不是因子、不进四个槽位。
 
@@ -21,6 +21,7 @@ FactorBand 是 **中长线 / 波段** 交易框架：日线主图找点、周线
 entry:     ¬chase ∧ ¬vol_dry ∧ ¬w_bias ∧ ¬w_slope ∧ ¬weekly_bear ∧ pullback_vol
 scale_in:  ¬vol_dry ∧ ¬w_bias ∧ ¬w_slope ∧ ¬weekly_bear
            ∧ ((pullback_vol ∧ ¬chase) ∨ plat_break ∨ w_macd_golden)
+           ∧ scale_arm
 exit:      weekly_bear_confirm ∨ atr_stop ∨ atr_trail_stop ∨ time_force
            # stop_loss / trail_stop 已登记，默认 AST 不引用
 scale_out: false
@@ -32,7 +33,7 @@ scale_out: false
 实盘报单成功后**保留**信号 pending / 止盈元数据，**仅成交回调**后清除；废单/撤单后下一尾盘或开盘窗自动重试。  
 **加仓成交后当日不再评新卖点**（`skip_sell_eval_day`，实盘同一根日 K 的后续 tick 也跳过）；已挂的 `pending_exit` 仍可成交。T+1 导致整仓/多笔只卖掉一部分时，若 `pending_exit.lot_ids` 还有剩余笔则**保留** pending，不因部分成交清掉。
 
-**加仓**（`SCALE_ENABLE`）分两层：AST 回答「加仓叶子是否命中」；`_scale_gate` 回答「这一轮允不允许加」。门槛：任一笔峰值浮盈 `>= SCALE_ARM`（`0.03`，独立于 `trail_stop` 档1）、该笔持仓日 `>= SCALE_ARM_BARS`（`8`）、周线 MACD 柱 `>= SCALE_W_HIST_MIN`（`-0.01`）。现行默认配置的 `scale_in` 触发为下列**任一**：① 合格缩量回踩（`pullback_vol`，且受 `chase`）；② 日线收盘确认突破前期平台（`plat_break`）；③ 近两周周线 MACD 黄金交叉且柱放大（`w_macd_golden`）。破平台/金叉不受 `chase`。`SCALE_ONCE_PER_ROUND`（默认开）：**同一轮只加一次**——加仓成交后锁定，该只只要还剩任何一笔就不能再买；两笔都平掉后才能再开下一轮。金额：第二笔 30% cap；若该笔已是全池第三槽则吃剩余可部署资金。执行日若已触发卖点则**取消加仓、让路出场**（`scale_sell_block`）。全池最多 3 笔（`BOOK_LOT_MAX`），前两笔 50%/30%、第三笔吃剩余（约 20% cap）；满则 `book_lot_cap`。  
+**加仓**（`SCALE_ENABLE`）分两层：AST 回答「加仓叶子是否命中」（含 `scale_arm`）；`_scale_gate` 回答「这一轮允不允许加」（`scale_once` / 满槽 / 资金）。`scale_arm`：任一笔峰值浮盈 `>= scale_arm.arm`（`0.03`，独立于 `trail_stop` 档1）、该笔持仓日 `>= scale_arm.bars`（`8`）、周线 MACD 柱 `>= scale_arm.hist_min`（`-0.01`）。现行默认配置的 `scale_in` 触发为下列**任一**：① 合格缩量回踩（`pullback_vol`，且受 `chase`）；② 日线收盘确认突破前期平台（`plat_break`）；③ 近两周周线 MACD 黄金交叉且柱放大（`w_macd_golden`）。破平台/金叉不受 `chase`。`SCALE_ONCE_PER_ROUND`（默认开）：**同一轮只加一次**——加仓成交后锁定，该只只要还剩任何一笔就不能再买；两笔都平掉后才能再开下一轮。金额：第二笔 30% cap；若该笔已是全池第三槽则吃剩余可部署资金。执行日若已触发卖点则**取消加仓、让路出场**（`scale_sell_block`）。全池最多 3 笔（`BOOK_LOT_MAX`），前两笔 50%/30%、第三笔吃剩余（约 20% cap）；满则 `book_lot_cap`。  
 **多仓**（`SCALE_LOTS`，默认开）：记账在共用模块 `scripts/qmt_common/single/lots.py`。每笔自己的成本、峰值、持仓日数、时间成本豁免；`atr_stop` / `atr_trail_stop` / `time_force`（以及未进默认 exit 的 `stop_loss` / `trail_stop`）**按笔**出。`weekly_bear_confirm` 仍一次出清剩余各笔。第一笔可以先止盈，第二笔继续拿（本轮已加过则不再加第三笔）。券商可卖是合计 `can_use`，与 `lots=[id]` 可能对不齐；卖出时打 `SELL lot-can_use`，若目标笔当日新开且可卖来自旧仓则打 `WARN`。  
 关 `SCALE_LOTS` 则均价合并、整仓出。
 
@@ -72,10 +73,11 @@ scale_out: false
 
 ### 加仓（`scale_in` + `_scale_gate`）
 
-已持仓、门槛通过、且本轮尚未加过仓时挂 `pending_entry add=True`，尾盘按**分档金额**成交（第二笔 30% cap；全池最后一槽吃剩余；错过则次日开盘补）。执行日 `scale_in` 顶层 `not` 叶子任一为真则撤买（`_scale_in_gate_hit`）。另有 `scale_once` / `scale_bars` / `scale_w_hist` / `scale_sell_block` / `scale_cap` / `book_lot_cap`。
+已持仓、门槛通过、且本轮尚未加过仓时挂 `pending_entry add=True`，尾盘按**分档金额**成交（第二笔 30% cap；全池最后一槽吃剩余；错过则次日开盘补）。执行日 `scale_in` 顶层 `not` 叶子任一为真则撤买（`_scale_in_gate_hit`）。另有 `scale_once` / `scale_arm` / `scale_sell_block` / `scale_cap` / `book_lot_cap`。
 
 | 触发 | 条件 | 日志码 |
 | :--- | :--- | :--- |
+| 浮盈持仓周柱 | 峰值浮盈 `>= scale_arm.arm`（当前 `0.03`）且该笔持仓日 `>= scale_arm.bars`（当前 `8`）且周柱 `>= scale_arm.hist_min`（当前 `-0.01`） | `scale_arm` |
 | 缩量回踩 | 与开仓相同：近 MA20/60 且连续 N 日缩量；受 `chase` | `pullback_vol` |
 | 日线破平台 | 回看 `plat_break.lookback` 日（当前 20，不含当日）高低点振幅 `(高-低)/低 <= plat_break.max_range`（当前 10%）；收盘严格站上该窗口最高价 × `(1+break_buf)`（当前 `break_buf=0`）；昨收仍在平台内 | `plat_break` |
 | 周线 MACD 金叉放大 | 本周 DIF 上穿 DEA 且红柱比上周增长；或上周已金叉、本周红柱达到上周柱绝对值 × `w_macd_golden.hist_expand`（当前 1.2） | `w_macd_golden` |
@@ -230,12 +232,12 @@ scale_out: false
 | `trail_stop.tiers` | 见 §3 | 阶梯移动止盈（叶子仍在；默认 exit 不引用；`factor_params`） |
 | `time_force.bars` | `30` | 时间成本起始持仓日；`<=0` 关整条（`factor_params`） |
 | `time_force.arm` | `0.03` | 时间成本让路：峰值浮盈门槛；`<=0` 关让路（站上慢线也日历强平） |
-| `SCALE_ENABLE` | `True` | 盈利后满足持仓日/周线柱，再缩量回踩或破平台或周线 MACD 金叉放大则加第二笔 |
+| `SCALE_ENABLE` | `True` | 盈利后满足 `scale_arm`，再缩量回踩或破平台或周线 MACD 金叉放大则加第二笔 |
 | `SCALE_LOTS` | `True` | 分笔独立止盈止损；关则均价合并整仓出（仅 config，实盘勿改） |
 | `SCALE_ONCE_PER_ROUND` | `True` | 同一轮只加一次；加过仓后该只须全平才能再开（仅 config） |
-| `SCALE_ARM` | `0.03` | 峰值浮盈门槛（独立于 `trail_stop` 档1；仅 config） |
-| `SCALE_ARM_BARS` | `8` | 第一笔持仓满 8 日才加仓（仅 config） |
-| `SCALE_W_HIST_MIN` | `-0.01` | 周线 MACD 柱低于此值不加仓（仅 config） |
+| `scale_arm.arm` | `0.03` | 峰值浮盈门槛（独立于 `trail_stop` 档1；`factor_params`） |
+| `scale_arm.bars` | `8` | 该笔持仓满 8 日才加仓（`factor_params`；`<=0` 不查持仓日） |
+| `scale_arm.hist_min` | `-0.01` | 周线 MACD 柱低于此值不加仓（`factor_params`；`None` 关闭） |
 | `plat_break.lookback` | `20` | 日线平台回看日（不含当日；`factor_params`） |
 | `plat_break.max_range` | `0.10` | 平台振幅上限 10%；更宽则不算平台（`factor_params`） |
 | `plat_break.break_buf` | `0.0` | 突破缓冲：收盘须站上平台高 × `(1+buf)`（`factor_params`） |

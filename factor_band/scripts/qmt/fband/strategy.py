@@ -242,40 +242,8 @@ def _round_scaled_now():
     return True
 
 
-def _scale_peak_ret():
-    mx = 0.0
-    armed_bars = 0
-    arm = float(globals().get("SCALE_ARM") or 0)
-    if arm <= 0:
-        arm = 0.03
-    if _lots_enabled():
-        for lot in _ensure_lots():
-            try:
-                ret = float(lot.get("hold_max_ret") or 0)
-            except Exception:
-                ret = 0.0
-            bars = int(lot.get("hold_bars") or 0)
-            if ret > mx:
-                mx = ret
-            if ret >= arm and bars > armed_bars:
-                armed_bars = bars
-        if mx <= 0:
-            peak = getattr(A, "hold_peak", None)
-            cost = _pos_cost_price()
-            if peak and cost > 0:
-                mx = (float(peak) - float(cost)) / float(cost)
-            armed_bars = int(getattr(A, "hold_bars", 0) or 0)
-        return mx, armed_bars
-    peak = getattr(A, "hold_peak", None)
-    cost = _pos_cost_price()
-    if peak and cost > 0:
-        mx = (float(peak) - float(cost)) / float(cost)
-    armed_bars = int(getattr(A, "hold_bars", 0) or 0)
-    return mx, armed_bars
-
-
-def _scale_gate(w_detail=None, price=None):
-    """加仓门槛：(ok, why)。why 仅失败时有值。"""
+def _scale_gate(w_detail=None, price=None, ctx=None):
+    """加仓门槛：(ok, why)。why 仅失败时有值。scale_arm 叶子另在 AST；此处再检一次供执行日撤单。"""
     if not bool(globals().get("SCALE_ENABLE")):
         return False, "scale_off"
     sh = _pos_shares()
@@ -288,20 +256,14 @@ def _scale_gate(w_detail=None, price=None):
     blocked, why_b = _book_scale_blocked()
     if blocked:
         return False, why_b or "book_lot_cap"
-    arm = float(globals().get("SCALE_ARM") or 0)
-    if arm <= 0:
-        arm = 0.03
-    mx, armed_bars = _scale_peak_ret()
-    if mx < arm:
+    fctx = ctx
+    if fctx is None:
+        fctx = {
+            "market": {"w_detail": w_detail or {}, "close": price},
+            "state": {},
+        }
+    if not _factor_hit("scale_arm", fctx):
         return False, "scale_arm"
-    need_bars = int(globals().get("SCALE_ARM_BARS") or 0)
-    if need_bars > 0 and armed_bars < need_bars:
-        return False, "scale_bars"
-    hist_min = globals().get("SCALE_W_HIST_MIN")
-    if hist_min is not None and w_detail is not None:
-        h = w_detail.get("hist")
-        if h is not None and float(h) < float(hist_min):
-            return False, "scale_w_hist"
     return True, ""
 
 
@@ -1009,7 +971,9 @@ def _try_exec_pending_entry(
         _event_log("pending_entry_cancel", reason="add_no_pos")
         return "done"
     sell_block = bool(pe_is_add and sell_ok)
-    scale_ok, scale_why = _scale_gate(w_detail, price=last_px) if pe_is_add else (True, "")
+    scale_ok, scale_why = (
+        _scale_gate(w_detail, price=last_px, ctx=fctx) if pe_is_add else (True, "")
+    )
     if sell_block or (pe_is_add and (not scale_ok)):
         why = "scale_sell_block" if sell_block else scale_why
         A.pending_entry = None
@@ -1549,7 +1513,7 @@ def _handle_stock(C, ctx):
     buy_sig = bool(entry_slot.get("hit"))
     scale_slot = _eval_scale_in_slot(fctx)
     scale_reasons = list(scale_slot.get("reasons") or [])
-    scale_ok, scale_why = _scale_gate(w_detail, price=price)
+    scale_ok, scale_why = _scale_gate(w_detail, price=price, ctx=fctx)
     scale_sig = bool(scale_ok and scale_slot.get("hit"))
     exit_slot = {"hit": bool(sell_ok), "reasons": list(sell_reasons)}
     intent = _arbitrate_intent(

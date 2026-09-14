@@ -31,7 +31,7 @@
 
 `kind` 只写在网格出场轴上。写到入场/加仓会被当成出场松紧。
 
-不要进 `LEAVES`：资金、`SCALE_*`、`RECIPE.structure`、四个槽位的条件抽象语法树。
+不要进 `LEAVES`：资金、`SCALE_ENABLE` / `SCALE_ONCE_PER_ROUND` / `SCALE_LOTS`、`RECIPE.structure`、四个槽位的条件抽象语法树。`SCALE_ARM` / `SCALE_ARM_BARS` / `SCALE_W_HIST_MIN` 已删，顶层写入即报错。
 
 ## 类型安全防错警告
 

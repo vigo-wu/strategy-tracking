@@ -36,7 +36,7 @@ BOOK_STOCKS = {
 }
 
 # 单实例共享信号账本（不是 STATE_FILE；禁止按标的分文件）
-BOOK_FILE = r"D:\FBand\fband_book.json"
+BOOK_FILE = r"D:\FactorBand\fband_book.json"
 # 资金基数：equity=总资产减其它股票市值；fixed=下面 TRADE_BUDGET。面板下拉会写成中文，代码归一成这两值。
 BUDGET_BASE = "equity"
 # 可部署比例（相对所选基数）；其余留作 T+1 / 废单重试
@@ -58,22 +58,17 @@ TRADE_BUDGET = 100000.0
 # 周线：快/生命线（5/34）；mid=13 仅日志多头。取数 need 另钳原 MA55 暖机地板。
 # ATR：威尔德平滑窗 atr.n；<=0 关 atr_stop。
 
-# 盈利后加仓门槛（仓位层，不进 factor_params）：
-#   峰值浮盈 >= SCALE_ARM，且该笔已持仓 >= SCALE_ARM_BARS 日
+# 盈利后加仓：门槛叶子 scale_arm（峰值浮盈 / 持仓日 / 周柱）在 RECIPE.scale_in；
 #   回踩加仓仍受 chase；破平台/金叉不受
 #   执行日若已触发卖点则取消加仓
 # SCALE_ONCE_PER_ROUND：同一轮只加一次
-# SCALE_W_HIST_MIN：周线 MACD 柱低于此值不加；None 关闭
 # SCALE_LOTS=True：每笔独立成本/峰值/止盈
 SCALE_ENABLE = True
 SCALE_ONCE_PER_ROUND = True
-SCALE_ARM = 0.03
-SCALE_ARM_BARS = 8
-SCALE_W_HIST_MIN = -0.01
 SCALE_LOTS = True
 
 # 默认 Recipe：四槽布尔式。因子数字在 factors/catalog.py（写入 factor_params）；
-# 均线/MACD/ATR 窗真源 structure。SCALE_ARM 等仓位门槛不进表。
+# 均线/MACD/ATR 窗真源 structure。scale_once / 满槽 / 资金不进表。
 # scale_out 恒 false：减仓未启用。
 RECIPE = {
     "entry": [
@@ -97,6 +92,7 @@ RECIPE = {
             "plat_break",
             "w_macd_golden",
         ],
+        "scale_arm",
     ],
     "exit": [
         "or",
@@ -191,14 +187,14 @@ PENDING_ORPHAN_SEC = 60
 
 # QMT 模型无 __file__；状态绝对路径（含 {stock}，宇宙循环按票分文件）
 #   513530.SH → ...\fband_513530_SH.json
-STATE_FILE = r"D:\FBand\fband_{stock}.json"
+STATE_FILE = r"D:\FactorBand\fband_{stock}.json"
 # 实盘结构化日志根目录；落盘为 LOG_DIR/<stock_tag>/{tag}_events.jsonl 等
 # 空字符串关闭落盘（仍保留终端 print）
-LOG_DIR = r"D:\FBand\logs"
+LOG_DIR = r"D:\FactorBand\logs"
 # True=回测也写日志（默认关，避免回测刷爆磁盘）
 LOG_IN_BACKTEST = False
 
-STRATEGY_NAME = "FBand"
+STRATEGY_NAME = "FactorBand"
 STRATEGY_VER = "v5.0.0"
 # =======================================================
 
@@ -371,6 +367,33 @@ LEAVES = {
                 "abbrev": "she",
                 "label": "金叉柱放大",
                 "axis": 3,
+            },
+        },
+    },
+    "scale_arm": {
+        "label": "加仓-浮盈持仓周柱门槛",
+        "group": "scale",
+        "params": {
+            "arm": {
+                "default": 0.03,
+                "percent": True,
+                "abbrev": "sa",
+                "label": "加仓门槛",
+                "axis": 4,
+            },
+            "bars": {
+                "default": 8,
+                "percent": False,
+                "abbrev": "sab",
+                "label": "加仓持仓日",
+                "axis": 5,
+            },
+            "hist_min": {
+                "default": -0.01,
+                "percent": False,
+                "abbrev": "swh",
+                "label": "加仓周柱下限",
+                "axis": 6,
             },
         },
     },
@@ -4082,6 +4105,116 @@ def _factor_eval_w_macd_golden(ctx):
     hit = hist >= base * ratio
     return bool(hit), {"hist": hist, "hist_prev": hist_prev}
 
+# === fband/factors/lib/scale_arm.py ===
+def _scale_arm_threshold(ctx=None):
+    raw = _factor_param(ctx, "scale_arm", "arm", 0.03)
+    try:
+        arm = float(raw)
+    except (TypeError, ValueError):
+        arm = 0.03
+    if arm <= 0:
+        arm = 0.03
+    return arm
+
+
+def _scale_arm_need_bars(ctx=None):
+    raw = _factor_param(ctx, "scale_arm", "bars", 8)
+    try:
+        return int(0 if raw is None else raw)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _scale_arm_hist_min(ctx=None):
+    raw = _factor_param(ctx, "scale_arm", "hist_min", -0.01)
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _scale_arm_hold_peak(state=None):
+    st = state or {}
+    peak = st.get("hold_peak")
+    bars = st.get("hold_bars")
+    cost = st.get("cost")
+    obj = globals().get("A")
+    if peak is None and obj is not None:
+        peak = getattr(obj, "hold_peak", None)
+    if bars is None and obj is not None:
+        bars = getattr(obj, "hold_bars", 0)
+    if cost is None:
+        cost_fn = globals().get("_pos_cost_price")
+        cost = cost_fn() if callable(cost_fn) else 0
+    try:
+        cost = float(cost or 0)
+    except (TypeError, ValueError):
+        cost = 0.0
+    mx = 0.0
+    if peak and cost > 0:
+        mx = (float(peak) - float(cost)) / float(cost)
+    return mx, int(bars or 0)
+
+
+def _scale_arm_peak(ctx=None):
+    """任一笔峰值浮盈与该笔持仓日。优先 ctx.state.lots。"""
+    arm = _scale_arm_threshold(ctx)
+    state = (ctx or {}).get("state") or {}
+    lots = state.get("lots")
+    lots_enabled = False
+    enabled_fn = globals().get("_lots_enabled")
+    if callable(enabled_fn):
+        try:
+            lots_enabled = bool(enabled_fn())
+        except Exception:
+            lots_enabled = False
+    if lots is None and lots_enabled:
+        lots_fn = globals().get("_ensure_lots")
+        if callable(lots_fn):
+            lots = lots_fn()
+    if lots is None:
+        return _scale_arm_hold_peak(state)
+    mx = 0.0
+    armed_bars = 0
+    for lot in lots:
+        try:
+            ret = float(lot.get("hold_max_ret") or 0)
+        except Exception:
+            ret = 0.0
+        bars = int(lot.get("hold_bars") or 0)
+        if ret > mx:
+            mx = ret
+        if ret >= arm and bars > armed_bars:
+            armed_bars = bars
+    if mx <= 0:
+        return _scale_arm_hold_peak(state)
+    return mx, armed_bars
+
+
+def _factor_eval_scale_arm(ctx):
+    """峰值浮盈 >= arm，且该笔持仓日 >= bars，且周柱 >= hist_min。"""
+    mx, armed_bars = _scale_arm_peak(ctx)
+    arm = _scale_arm_threshold(ctx)
+    detail = {"peak": mx, "armed_bars": armed_bars, "arm": arm}
+    if mx < arm:
+        return False, detail
+    need_bars = _scale_arm_need_bars(ctx)
+    detail["need_bars"] = need_bars
+    if need_bars > 0 and armed_bars < need_bars:
+        return False, detail
+    hist_min = _scale_arm_hist_min(ctx)
+    detail["hist_min"] = hist_min
+    if hist_min is not None:
+        w_detail = ((ctx or {}).get("market") or {}).get("w_detail") or {}
+        h = w_detail.get("hist")
+        if h is not None:
+            detail["hist"] = float(h)
+            if float(h) < float(hist_min):
+                return False, detail
+    return True, detail
+
 # === fband/factors/lib/stop_loss.py ===
 def _factor_eval_stop_loss(ctx):
     market = (ctx or {}).get("market") or {}
@@ -7616,40 +7749,8 @@ def _round_scaled_now():
     return True
 
 
-def _scale_peak_ret():
-    mx = 0.0
-    armed_bars = 0
-    arm = float(globals().get("SCALE_ARM") or 0)
-    if arm <= 0:
-        arm = 0.03
-    if _lots_enabled():
-        for lot in _ensure_lots():
-            try:
-                ret = float(lot.get("hold_max_ret") or 0)
-            except Exception:
-                ret = 0.0
-            bars = int(lot.get("hold_bars") or 0)
-            if ret > mx:
-                mx = ret
-            if ret >= arm and bars > armed_bars:
-                armed_bars = bars
-        if mx <= 0:
-            peak = getattr(A, "hold_peak", None)
-            cost = _pos_cost_price()
-            if peak and cost > 0:
-                mx = (float(peak) - float(cost)) / float(cost)
-            armed_bars = int(getattr(A, "hold_bars", 0) or 0)
-        return mx, armed_bars
-    peak = getattr(A, "hold_peak", None)
-    cost = _pos_cost_price()
-    if peak and cost > 0:
-        mx = (float(peak) - float(cost)) / float(cost)
-    armed_bars = int(getattr(A, "hold_bars", 0) or 0)
-    return mx, armed_bars
-
-
-def _scale_gate(w_detail=None, price=None):
-    """加仓门槛：(ok, why)。why 仅失败时有值。"""
+def _scale_gate(w_detail=None, price=None, ctx=None):
+    """加仓门槛：(ok, why)。why 仅失败时有值。scale_arm 叶子另在 AST；此处再检一次供执行日撤单。"""
     if not bool(globals().get("SCALE_ENABLE")):
         return False, "scale_off"
     sh = _pos_shares()
@@ -7662,20 +7763,14 @@ def _scale_gate(w_detail=None, price=None):
     blocked, why_b = _book_scale_blocked()
     if blocked:
         return False, why_b or "book_lot_cap"
-    arm = float(globals().get("SCALE_ARM") or 0)
-    if arm <= 0:
-        arm = 0.03
-    mx, armed_bars = _scale_peak_ret()
-    if mx < arm:
+    fctx = ctx
+    if fctx is None:
+        fctx = {
+            "market": {"w_detail": w_detail or {}, "close": price},
+            "state": {},
+        }
+    if not _factor_hit("scale_arm", fctx):
         return False, "scale_arm"
-    need_bars = int(globals().get("SCALE_ARM_BARS") or 0)
-    if need_bars > 0 and armed_bars < need_bars:
-        return False, "scale_bars"
-    hist_min = globals().get("SCALE_W_HIST_MIN")
-    if hist_min is not None and w_detail is not None:
-        h = w_detail.get("hist")
-        if h is not None and float(h) < float(hist_min):
-            return False, "scale_w_hist"
     return True, ""
 
 
@@ -8383,7 +8478,9 @@ def _try_exec_pending_entry(
         _event_log("pending_entry_cancel", reason="add_no_pos")
         return "done"
     sell_block = bool(pe_is_add and sell_ok)
-    scale_ok, scale_why = _scale_gate(w_detail, price=last_px) if pe_is_add else (True, "")
+    scale_ok, scale_why = (
+        _scale_gate(w_detail, price=last_px, ctx=fctx) if pe_is_add else (True, "")
+    )
     if sell_block or (pe_is_add and (not scale_ok)):
         why = "scale_sell_block" if sell_block else scale_why
         A.pending_entry = None
@@ -8923,7 +9020,7 @@ def _handle_stock(C, ctx):
     buy_sig = bool(entry_slot.get("hit"))
     scale_slot = _eval_scale_in_slot(fctx)
     scale_reasons = list(scale_slot.get("reasons") or [])
-    scale_ok, scale_why = _scale_gate(w_detail, price=price)
+    scale_ok, scale_why = _scale_gate(w_detail, price=price, ctx=fctx)
     scale_sig = bool(scale_ok and scale_slot.get("hit"))
     exit_slot = {"hit": bool(sell_ok), "reasons": list(sell_reasons)}
     intent = _arbitrate_intent(
@@ -10190,9 +10287,11 @@ def _init_impl(C):
         "scale_once=",
         SCALE_ONCE_PER_ROUND,
         "scale_arm=",
-        SCALE_ARM,
+        _factor_param(None, "scale_arm", "arm"),
         "scale_arm_bars=",
-        SCALE_ARM_BARS,
+        _factor_param(None, "scale_arm", "bars"),
+        "scale_w_hist=",
+        _factor_param(None, "scale_arm", "hist_min"),
         "scale_plat=",
         "%d/%.2f"
         % (
@@ -10237,9 +10336,9 @@ def _init_impl(C):
         scale=SCALE_ENABLE,
         scale_lots=SCALE_LOTS,
         scale_once=SCALE_ONCE_PER_ROUND,
-        scale_arm=SCALE_ARM,
-        scale_arm_bars=SCALE_ARM_BARS,
-        scale_w_hist_min=SCALE_W_HIST_MIN,
+        scale_arm=_factor_param(None, "scale_arm", "arm"),
+        scale_arm_bars=_factor_param(None, "scale_arm", "bars"),
+        scale_w_hist_min=_factor_param(None, "scale_arm", "hist_min"),
         scale_plat_lookback=_factor_param(None, "plat_break", "lookback"),
         scale_plat_max_range=_factor_param(None, "plat_break", "max_range"),
         scale_w_hist_expand=_factor_param(None, "w_macd_golden", "hist_expand"),

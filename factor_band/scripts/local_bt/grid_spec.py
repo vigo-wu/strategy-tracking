@@ -49,7 +49,6 @@ _MONEY_PERCENT_KEYS = frozenset(
         "CASH_RATIO",
         "LOT_OPEN_FRAC",
         "LOT_ADD_FRAC",
-        "SCALE_ARM",
     }
 )
 PERCENT_KEYS = set(_MONEY_PERCENT_KEYS)
@@ -73,6 +72,9 @@ DELETED_FACTOR_KEYS = frozenset(
         "SCALE_PLAT_MAX_RANGE",
         "SCALE_W_HIST_EXPAND_RATIO",
         "SCALE_PLAT_BREAK_BUF",
+        "SCALE_ARM",
+        "SCALE_ARM_BARS",
+        "SCALE_W_HIST_MIN",
         "D_MA_MID",
         "D_MA_SLOW",
         "W_MA_FAST",
@@ -135,9 +137,6 @@ NONE_TOKENS = frozenset({"none", "null", "-", "—", "无", "nan"})
 PARAM_LABELS = {
     "SCALE_ENABLE": "加仓开关",
     "SCALE_ONCE_PER_ROUND": "每轮只加一次",
-    "SCALE_ARM": "加仓门槛",
-    "SCALE_ARM_BARS": "加仓持仓日",
-    "SCALE_W_HIST_MIN": "加仓周柱下限",
     "SCALE_LOTS": "分笔独立",
     "CASH_RATIO": "可部署比例",
     "BOOK_LOT_MAX": "全池最多笔",
@@ -157,9 +156,6 @@ PARAM_LABELS = {
 ABBREV_FIXED = {
     "SCALE_ENABLE": "se",
     "SCALE_ONCE_PER_ROUND": "sor",
-    "SCALE_ARM": "sa",
-    "SCALE_ARM_BARS": "sab",
-    "SCALE_W_HIST_MIN": "swh",
     "SCALE_LOTS": "slt",
     "CASH_RATIO": "cr",
     "BOOK_LOT_MAX": "blm",
