@@ -85,6 +85,22 @@ def _emit(on_progress: ProgressCb, **kwargs: Any) -> None:
         pass
 
 
+def _emit_walk_event(
+    on_progress: ProgressCb,
+    *,
+    done: int,
+    total: int,
+    label: str,
+    extra: Mapping[str, Any],
+) -> None:
+    """WalkProgress.extras 已含 phase，禁止再传 phase= 与 **extra 叠用。"""
+    payload = dict(extra)
+    payload["done"] = int(done)
+    payload["total"] = int(total)
+    payload["label"] = label
+    _emit(on_progress, **payload)
+
+
 def _basket_book(
     stocks: list[str],
     *,
@@ -577,13 +593,12 @@ def run_robust(
             label=str(label or ""),
             job_key=str(extra.get("job_key") or cid or ""),
         )
-        _emit(
+        _emit_walk_event(
             on_progress,
-            phase=str(extra.get("phase") or "run"),
             done=int(done),
             total=int(tot),
             label=label,
-            **extra,
+            extra=extra,
         )
 
     _heartbeat(force=True, phase="probe", label="探针 init", job_key="robust")

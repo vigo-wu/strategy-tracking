@@ -1298,6 +1298,46 @@ class ChartMaFrameTests(unittest.TestCase):
         self.assertAlmostEqual(float(sma[2]), 2.0)
         self.assertAlmostEqual(float(sma[3]), 3.0)
 
+    def test_ema_vectorized_matches_ref_loop(self):
+        import numpy as np
+        from analyze import price_ma
+        from run import _exec_bundle
+
+        def _ema_ref(closes, n):
+            arr = np.asarray(closes, dtype=float)
+            n = int(n)
+            if n <= 0 or len(arr) < n:
+                return None
+            out = np.full(len(arr), np.nan, dtype=float)
+            alpha = 2.0 / (n + 1.0)
+            out[n - 1] = float(np.mean(arr[:n]))
+            for i in range(n, len(arr)):
+                out[i] = alpha * arr[i] + (1.0 - alpha) * out[i - 1]
+            return out
+
+        ns = _exec_bundle()
+        rng = np.random.default_rng(0)
+        cases = (
+            (np.arange(1.0, 11.0), 3),
+            (np.arange(1.0, 11.0), 1),
+            (np.arange(1.0, 11.0), 10),
+            (rng.normal(size=180), 12),
+            (rng.normal(size=180), 60),
+            (rng.normal(size=120), 26),
+        )
+        for c, n in cases:
+            ref = _ema_ref(c, n)
+            got = ns["_ema"](c, n)
+            chart = price_ma(c, n, "EMA")
+            self.assertIsNotNone(ref)
+            self.assertIsNotNone(got)
+            np.testing.assert_allclose(got, ref, rtol=1e-12, atol=1e-12)
+            np.testing.assert_allclose(chart, ref, rtol=1e-12, atol=1e-12)
+        self.assertIsNone(ns["_ema"]([1.0, 2.0], 3))
+        self.assertIsNone(price_ma([1.0, 2.0], 3, "EMA"))
+        self.assertIsNone(ns["_ema"]([1.0, 2.0, 3.0], 0))
+        self.assertIsNone(price_ma([1.0, 2.0, 3.0], 0, "EMA"))
+
     def test_filename_ma_kind(self):
         from analyze import resolve_chart_ma_kind
 

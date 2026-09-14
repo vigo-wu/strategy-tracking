@@ -431,6 +431,36 @@ class TestRobustRunHelpers(unittest.TestCase):
         self.assertIn("探针 init", cap)
         self.assertFalse(cap.endswith("running"))
 
+    def test_emit_walk_event_phase_in_extra(self) -> None:
+        from grid_run import WalkProgress, _emit_walk_progress
+        from robust_run import _emit_walk_event
+
+        seen: list[dict] = []
+
+        def on_walk(cid: str, done: int, tot: int, label: str, **extra: object) -> None:
+            _emit_walk_event(
+                lambda ev: seen.append(ev),
+                done=int(done),
+                total=int(tot),
+                label=label,
+                extra=extra,
+            )
+
+        state = WalkProgress(4)
+        state.start("basket_001")
+        _emit_walk_progress(
+            on_walk,
+            state,
+            "basket_001",
+            "回放 basket_001",
+            phase="walk",
+            job_key="basket_001",
+        )
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(seen[0]["phase"], "walk")
+        self.assertEqual(seen[0]["label"], "回放 basket_001")
+        self.assertEqual(seen[0]["job_key"], "basket_001")
+
     def test_print_walk_line_grid_format(self) -> None:
         from io import StringIO
 

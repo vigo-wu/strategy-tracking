@@ -1149,6 +1149,26 @@ def resolve_chart_ma_kind(
     return str(cfg.get("ma_type") or "EMA")
 
 
+def _ema_sma_seed(c, n: int):
+    """与 hlband/indicators._ema 相同：前 n 根 SMA 播种，其后 alpha=2/(n+1) 递推。"""
+    out = np.full(len(c), np.nan, dtype=float)
+    seed = float(np.mean(c[:n]))
+    out[n - 1] = seed
+    rest = c[n:]
+    if rest.size == 0:
+        return out
+    if n == 1:
+        out[:] = c
+        return out
+    alpha = 2.0 / (n + 1.0)
+    beta = 1.0 - alpha
+    ks = np.arange(rest.size, dtype=float)
+    scaled = rest * (beta ** -ks)
+    cs = np.cumsum(scaled)
+    out[n:] = alpha * (beta ** ks) * cs + (beta ** (ks + 1.0)) * seed
+    return out
+
+
 def price_ma(closes, n, kind: str = "EMA"):
     """与 hlband/indicators._sma/_ema 相同：EMA 前 n 根用 SMA 播种。"""
     c = np.asarray(closes, dtype=float)
@@ -1156,18 +1176,14 @@ def price_ma(closes, n, kind: str = "EMA"):
     if n <= 0 or len(c) < n:
         return None
     algo = normalize_ma_type(kind) or "EMA"
-    out = np.full(len(c), np.nan, dtype=float)
     if algo == "SMA":
+        out = np.full(len(c), np.nan, dtype=float)
         cs = np.cumsum(c)
         out[n - 1] = cs[n - 1] / float(n)
         if len(c) > n:
             out[n:] = (cs[n:] - cs[:-n]) / float(n)
         return out
-    alpha = 2.0 / (n + 1.0)
-    out[n - 1] = float(np.mean(c[:n]))
-    for i in range(n, len(c)):
-        out[i] = alpha * c[i] + (1.0 - alpha) * out[i - 1]
-    return out
+    return _ema_sma_seed(c, n)
 
 
 def _bars_to_ohlc(bars) -> pd.DataFrame:
