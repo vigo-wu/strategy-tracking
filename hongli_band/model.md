@@ -1,69 +1,94 @@
-# 红利板块波段策略：周线定方向，日线找买卖点
+# HlBand：中长线 / 波段，因子库组合四个槽位
 
 **主题目录**：`hongli_band/`｜**版本**：v1.70｜**形态**：单仓骨架 / 分笔多仓｜**运行**：国金 QMT 终端模型（见 §5）；本地 CSV 回放（见 §6）  
-**参数默认值**：`hongli_band/scripts/qmt/hlband/config.py`（文档以该文件为准）。因子数字的唯一可信数据源（Single Source of Truth）是 `RECIPE.factor_params`；均线/MACD/ATR 窗的唯一可信数据源是 `RECIPE.structure`。交易终端实盘环境在「模型交易 → 新建/编辑策略交易」面板只覆盖开关 / 资金基数 / 固定金额 / 可部署比例 / 加仓开关（`hlband/panel.xml`）；编辑器回测无注入时用 config。买点窗口、时间成本、加仓细节、`SCALE_LOTS`、阶梯止盈 `trail_stop.tiers`、`RECIPE.structure` 指标周期窗、`BOOK_STOCKS` 子配置 / `MA_TYPE`、路径仍只在 config（因子阈值和指标周期窗不上屏）。
+**参数默认值**：`hongli_band/scripts/qmt/hlband/config.py`（文档以该文件为准）。因子数字的唯一可信数据源（Single Source of Truth）是 `RECIPE.factor_params`；均线/MACD/ATR 窗的唯一可信数据源是 `RECIPE.structure`。交易终端实盘环境在「模型交易 → 新建/编辑策略交易」面板只覆盖开关 / 资金基数 / 固定金额 / 可部署比例 / 加仓开关（`hlband/panel.xml`）；编辑器回测无注入时用 config。买入 `entry`、加仓 `scale_in`、卖出 `exit`、减仓 `scale_out` 四个槽位的条件抽象语法树、买点窗口、时间成本、加仓细节、`SCALE_LOTS`、阶梯止盈 `trail_stop.tiers`、`RECIPE.structure` 指标周期窗、`BOOK_STOCKS` 子配置 / `MA_TYPE`、路径仍只在 config（因子阈值和指标周期窗不上屏）。
+
+分层契约见 [`docs/架构重构/架构.md`](./docs/架构重构/架构.md)；叶子与四个槽位草图见 [`docs/架构重构/Recipe分类.md`](./docs/架构重构/Recipe分类.md)。跟踪池、部署文件名与历史目录名不约束标的风格。
 
 ---
 
 ## 核心逻辑
 
-红利资产慢牛爬坡、震荡抗跌。脚本做 **周线估值/斜率过滤 + 日线缩量低吸 + 动态锁利卖出**。  
-行情复权按标的：`BOOK_STOCKS[code].dividend_type`（默认 601939=`front` 价差前复权，其余=`front_ratio` 等比前复权）；缺键回落全局 `DIVIDEND_TYPE`（`front_ratio`）。公式「基本信息 → 复权方式」只影响看图，不叠加。改复权会改变均线与买卖点。**回测**时 `front`/`front_ratio` 自动改为：请求 `none` + `get_divid_factors` 做**时点前复权（PIT）**——`front_ratio` 用 `Πdr`，`front` 用价差事件序；日线/周线各自按 bar 标签日。实盘仍走 QMT `front*`。旧静态 CSV / 早期同结果 PIT 报告不可直接比。主图 **日线**；实盘信号在收盘确认窗评估（默认 14:56 起），**尾盘成交窗**（`PENDING_EXEC_START`～`PENDING_EXEC_END`，默认 14:56:00–14:57:00）在连续竞价最后一分钟按 **卖一价限价**买入、买一价限价卖出（`prType=11`）。**14:57 起已是收盘集合竞价，本窗不再报单。** 错过则保留到下一交易日 **开盘兜底窗**（`OPEN_EXEC_START`～`OPEN_EXEC_END`，默认 09:30–09:45）按开盘价补成交（连续竞价走市价）。若收盘窗未跑到，开盘对上一根已收盘日兜底评估（`confirmed_eval_day < 上一完整交易日`），同日开盘窗可成交。回测与尾盘主路径对齐：信号日按**收盘价**成交；T+1 隔夜残留按下一日开盘价。  
+HlBand 是 **中长线 / 波段** 交易框架：日线主图找点、周线作跨周期过滤，持仓按笔记账，全池分档。标的以 `BOOK_STOCKS` 为准，不限定板块或分红风格。
+
+信号不写死在过程式分支。叶子登记在因子库（`factors/catalog.py` 的 `LEAVES` + `factors/lib/<id>.py`），每个因子只回答条件是否成立，**不带开仓/平仓立场**。立场由四个槽位的条件抽象语法树赋予（`config.RECIPE`）。同一叶子可进多槽（例如 `pullback_vol` 可同时作开仓与加仓）。改四个槽位的引用、`and` / `or` / `not` 即换组合；格子只覆盖 `overrides.factor_params` / `overrides.structure`，不能改 AST。仓位门槛（`SCALE_ARM` / `scale_once` / 满槽 / 资金）不进因子库。登记 ≠ 已启用：`stop_loss` / `trail_stop` 仍在 `LEAVES`，现行默认配置的 `exit` 不引用。
+
+同一根 K 四个槽位都求值，仓位仲裁优先级写死：`flat > reduce > add > open`。现行默认配置 `scale_out=false`（减仓未启用）。`weekly_bull` 只进日志，不是因子、不进四个槽位。
+
+现行默认配置的组合（可改，不是框架定义）：
+
+```text
+entry:     ¬chase ∧ ¬vol_dry ∧ ¬w_bias ∧ ¬w_slope ∧ ¬weekly_bear ∧ pullback_vol
+scale_in:  ¬vol_dry ∧ ¬w_bias ∧ ¬w_slope ∧ ¬weekly_bear
+           ∧ ((pullback_vol ∧ ¬chase) ∨ plat_break ∨ w_macd_golden)
+exit:      weekly_bear_confirm ∨ atr_stop ∨ atr_trail_stop ∨ time_force
+           # stop_loss / trail_stop 已登记，默认 AST 不引用
+scale_out: false
+```
+
+行情复权优先 `BOOK_STOCKS[code].dividend_type`，缺键回落全局 `DIVIDEND_TYPE`（`front_ratio`）。现行默认配置的 `BOOK_STOCKS` 是代码集合，未写 per-stock 覆盖，池内全部 `front_ratio`。公式「基本信息 → 复权方式」只影响看图，不叠加。改复权会改变均线与买卖点。**回测**时 `front`/`front_ratio` 自动改为：请求 `none` + `get_divid_factors` 做**时点前复权（PIT）**——`front_ratio` 用 `Πdr`，`front` 用价差事件序；日线/周线各自按 bar 标签日。实盘仍走 QMT `front*`。旧静态 CSV / 早期同结果 PIT 报告不可直接比。
+
+主图 **日线**。实盘信号在收盘确认窗评估（`SIGNAL_CONFIRM_START`～`SIGNAL_CONFIRM_END`，默认 14:56:30–15:00:00），**尾盘成交窗**（`PENDING_EXEC_START`～`PENDING_EXEC_END`，默认 14:56:40–14:57:00）在连续竞价按 **卖一价限价**买入、买一价限价卖出（`prType=11`）。**14:57 起已是收盘集合竞价，本窗不再报单。** 错过则保留到下一交易日 **开盘兜底窗**（`OPEN_EXEC_START`～`OPEN_EXEC_END`，默认 09:30–09:45）按开盘价补成交（连续竞价走市价）。若收盘窗未跑到，开盘对上一根已收盘日兜底评估（`confirmed_eval_day < 上一完整交易日`），同日开盘窗可成交。回测与尾盘主路径对齐：信号日按**收盘价**成交；T+1 隔夜残留按下一日开盘价。  
 实盘报单成功后**保留**信号 pending / 止盈元数据，**仅成交回调**后清除；废单/撤单后下一尾盘或开盘窗自动重试。  
 **加仓成交后当日不再评新卖点**（`skip_sell_eval_day`，实盘同一根日 K 的后续 tick 也跳过）；已挂的 `pending_exit` 仍可成交。T+1 导致整仓/多笔只卖掉一部分时，若 `pending_exit.lot_ids` 还有剩余笔则**保留** pending，不因部分成交清掉。
 
-**加仓**（`SCALE_ENABLE`）：已有仓且同时满足门槛：任一笔峰值浮盈 `>= SCALE_ARM`（`0.03`，独立于 TRAIL 档1）、该笔持仓日 `>= SCALE_ARM_BARS`（`8`）、周线 MACD 柱 `>= SCALE_W_HIST_MIN`（`-0.01`）。第二笔触发为下列**任一**：① 合格缩量回踩（`pullback_vol`，回踩加仓）；② 日线收盘确认突破前期平台（`plat_break`，破平台推仓）；③ 近两周周线 MACD 黄金交叉且柱放大（`w_macd_golden`）。`SCALE_ONCE_PER_ROUND`（默认开）：**同一轮只加一次**——加仓成交后锁定，该只只要还剩任何一笔就不能再买；两笔都平掉后才能再开下一轮。金额：第二笔 30% cap；若该笔已是全池第三槽则吃剩余可部署资金。执行日若已触发卖点则**取消加仓、让路出场**。全池最多 3 笔（`BOOK_LOT_MAX`），前两笔 50%/30%、第三笔吃剩余（约 20% cap）；满则 `book_lot_cap`。回踩加仓仍受 `chase`；破平台/金叉不受。**移动止盈不让路加仓信号评估**，但执行日卖点优先。  
+**加仓**（`SCALE_ENABLE`）分两层：AST 回答「加仓叶子是否命中」；`_scale_gate` 回答「这一轮允不允许加」。门槛：任一笔峰值浮盈 `>= SCALE_ARM`（`0.03`，独立于 `trail_stop` 档1）、该笔持仓日 `>= SCALE_ARM_BARS`（`8`）、周线 MACD 柱 `>= SCALE_W_HIST_MIN`（`-0.01`）。现行默认配置的 `scale_in` 触发为下列**任一**：① 合格缩量回踩（`pullback_vol`，且受 `chase`）；② 日线收盘确认突破前期平台（`plat_break`）；③ 近两周周线 MACD 黄金交叉且柱放大（`w_macd_golden`）。破平台/金叉不受 `chase`。`SCALE_ONCE_PER_ROUND`（默认开）：**同一轮只加一次**——加仓成交后锁定，该只只要还剩任何一笔就不能再买；两笔都平掉后才能再开下一轮。金额：第二笔 30% cap；若该笔已是全池第三槽则吃剩余可部署资金。执行日若已触发卖点则**取消加仓、让路出场**（`scale_sell_block`）。全池最多 3 笔（`BOOK_LOT_MAX`），前两笔 50%/30%、第三笔吃剩余（约 20% cap）；满则 `book_lot_cap`。  
 **多仓**（`SCALE_LOTS`，默认开）：记账在共用模块 `scripts/qmt_common/single/lots.py`。每笔自己的成本、峰值、持仓日数、时间成本豁免；`atr_stop` / `atr_trail_stop` / `time_force`（以及未进默认 exit 的 `stop_loss` / `trail_stop`）**按笔**出。`weekly_bear_confirm` 仍一次出清剩余各笔。第一笔可以先止盈，第二笔继续拿（本轮已加过则不再加第三笔）。券商可卖是合计 `can_use`，与 `lots=[id]` 可能对不齐；卖出时打 `SELL lot-can_use`，若目标笔当日新开且可卖来自旧仓则打 `WARN`。  
 关 `SCALE_LOTS` 则均价合并、整仓出。
 
 ---
 
-## 一、周线过滤
+## 一、因子库与四个槽位
+
+叶子登记在 `LEAVES`；默认盘启用哪些、如何 `and` / `or` / `not`，写在 `config.RECIPE` 四个槽位。均线/MACD/ATR 窗只读 `RECIPE.structure`（通过 `_structure_windows()` 读取）。阈值运行时读 `RECIPE.factor_params`（catalog 用 defaults 整表写入）。
 
 周线均线为斐波那契 **MA5 / MA13 / MA34**（`RECIPE.structure.w_ma` 的 `fast` / `mid` / `life`，当前 5 / 13 / 34；`mid` 只给日志多头 `weekly_bull`）。周线取数 need 另钳原 MA55 暖机地板。价格均线**算法**优先取 `BOOK_STOCKS[code].ma_type`，缺省回落全局 `MA_TYPE`（`EMA` 或 `SMA`，默认 EMA）；成交量均量始终 SMA。文档与日志里的 `w_ma30` 字段实际是生命线 MA34。实盘与回测都只用**上一根已收盘周 K**（丢掉今天所在自然周，周五尾盘也看上周），对齐 QMT 回测 0000 原生 `1w`。
 
-1. `(MA5_W - MA34_W) / MA34_W >= w_bias.hard`（当前 `0.08`）→ 禁开（`w_bias`）。
-2. **低位斜率**：当周线乖离 `< w_slope.low`（当前 `0.02`）时，要求 **MA34 连续 `w_slope.slope_weeks` 周向上**（当前 `2`），否则禁开（`w_slope`）；执行日也会取消 pending。
-3. 周线空头（收盘破 34 周，或 DIF/DEA 零轴下死叉）：**当日即禁开**（`weekly_bear`）；持仓强制清仓须 **连续 `weekly_bear_confirm.days` 根日 K（信号日）仍空**（当前 `2`）才挂 `pending_exit`；执行日若仍空头则取消买入 pending。
+现行默认配置里，周线叶子是跨周期过滤（禁开 / 清仓），不是开仓前提：
 
-说明：开仓不强制要求 `weekly_bull`；多头（MA5>MA13 且 DIF>0 且红柱且生命线未明显走平）仅用于日志，禁开靠乖离/斜率/空头。
+| 叶子 | 槽 | 条件 | 现行默认 |
+| :--- | :--- | :--- | :--- |
+| `w_bias` | `entry` / `scale_in` 的 `not` | `(MA5_W − MA34_W) / MA34_W >= w_bias.hard` → 禁开 | `0.08` |
+| `w_slope` | 同上 | 乖离 `< w_slope.low` 时，MA34 未连续 `slope_weeks` 周向上 → 禁开；执行日也会取消 pending | `0.02` / `2` |
+| `weekly_bear` | 同上 | 收盘破 34 周，或 DIF/DEA 零轴下死叉：**当日即禁开**；执行日若仍空头则取消买入 pending | 无叶子阈值 |
+| `weekly_bear_confirm` | `exit` | 连续 `days` 根日 K（信号日）仍空才挂 `pending_exit` | `2` |
+
+开仓不要求 `weekly_bull`。多头（MA5>MA13 且 DIF>0 且红柱且生命线未明显走平）仅用于日志。
 
 ---
 
-## 二、买入
+## 二、买入 / 加仓（现行默认配置）
 
-### 买点 缩量回踩强支撑（`pullback_vol`）
+下表与条件是现行默认 `entry` / `scale_in`，不是框架唯一形态。
 
-- 收盘靠近 `MA20` 或 `MA60`（容差 `pullback_vol.tol`，当前 ±2.5%；算法见标的 `ma_type` / `MA_TYPE`）
-- **连续** `pullback_vol.confirm_days` 日（当前 `2`）成交量 `<` 该日 `MAVOL10 × pullback_vol.ratio`（当前 `0.9`）；贴均线只看当天
+### 开仓（`entry`）
 
-空仓时开第一笔（`pullback_vol`）。已持仓且门槛+触发都满足、且本轮尚未加过仓时挂 `pending_entry add=True`，尾盘按**分档金额**成交（第二笔 30% cap；全池最后一槽吃剩余；错过则次日开盘补）。加仓仍受下方全局拦截（破平台/金叉不受 `chase`）；另有 `scale_once` / `scale_bars` / `scale_w_hist` / `scale_sell_block` / `scale_cap` / `book_lot_cap`。周线空头 / 乖离 / 斜率 / 无量阴跌会取消加仓 pending。
+空仓且 `entry` 命中：缩量回踩（`pullback_vol`），且不被 `chase` / `vol_dry` / `w_bias` / `w_slope` / `weekly_bear` 挡住。未命中时 reasons 为第一个挡住的叶子。
 
-### 加仓触发（持仓中，回踩或破平台任一）
+`pullback_vol`：
+
+- 收盘靠近日线中线或慢线（`d_ma.mid` / `d_ma.slow`，当前 MA20 / MA60；容差 `pullback_vol.tol`，当前 ±2.5%；算法见标的 `ma_type` / `MA_TYPE`）。对应窗 `<=0` 则该条贴线关掉
+- **连续** `pullback_vol.confirm_days` 日（当前 `2`）成交量 `<` 该日 `MAVOL{vol_n} × pullback_vol.ratio`（当前 `vol_n=10`、`ratio=0.9`）；贴均线只看当天
+
+### 加仓（`scale_in` + `_scale_gate`）
+
+已持仓、门槛通过、且本轮尚未加过仓时挂 `pending_entry add=True`，尾盘按**分档金额**成交（第二笔 30% cap；全池最后一槽吃剩余；错过则次日开盘补）。执行日 `scale_in` 顶层 `not` 叶子任一为真则撤买（`_scale_in_gate_hit`）。另有 `scale_once` / `scale_bars` / `scale_w_hist` / `scale_sell_block` / `scale_cap` / `book_lot_cap`。
 
 | 触发 | 条件 | 日志码 |
 | :--- | :--- | :--- |
-| 缩量回踩 | 与第一笔相同：近 MA20/60 且连续 N 日缩量；受 `chase` | `pullback_vol` |
-| 日线破平台 | 回看 `plat_break.lookback` 日（当前 20，不含当日）高低点振幅 `(高-低)/低 <= plat_break.max_range`（当前 10%）；收盘严格站上该窗口最高价；昨收仍在平台内 | `plat_break` |
+| 缩量回踩 | 与开仓相同：近 MA20/60 且连续 N 日缩量；受 `chase` | `pullback_vol` |
+| 日线破平台 | 回看 `plat_break.lookback` 日（当前 20，不含当日）高低点振幅 `(高-低)/低 <= plat_break.max_range`（当前 10%）；收盘严格站上该窗口最高价 × `(1+break_buf)`（当前 `break_buf=0`）；昨收仍在平台内 | `plat_break` |
 | 周线 MACD 金叉放大 | 本周 DIF 上穿 DEA 且红柱比上周增长；或上周已金叉、本周红柱达到上周柱绝对值 × `w_macd_golden.hist_expand`（当前 1.2） | `w_macd_golden` |
 
-### 全局拦截（任一则当日不开 / 可取消 pending）
-
-| 条件 | 日志码 |
-| :--- | :--- |
-| 周线空头 | `weekly_bear` |
-| 当日涨幅 ≥ `chase.max_pct`（当前 `0.05`） | `chase` |
-| 收盘 < MA20 且量 < MAVOL20 × `vol_dry.ratio`（当前 `0.60`） | `vol_dry` |
-| 周线高位乖离 / 低位斜率不达标 | `w_bias` / `w_slope` |
-| 账户或单标的额度已满 / 全池满 3 笔 | `buy_cap` / `scale_cap` / `book_lot_cap` |
-
-`chase` 拦第一笔和回踩加仓；破平台 / 周线金叉加仓不受 5% 涨幅禁开。其余拦截对加仓同样生效。
+`chase`：当日涨幅 ≥ `chase.max_pct`（当前 `0.05`）。拦开仓和回踩加仓；破平台 / 周线金叉不受。  
+`vol_dry`：收盘 < MA20 且量 < MAVOL20 × `vol_dry.ratio`（当前 `0.60`）。对开仓和加仓都生效。  
+额度已满 / 全池满 3 笔在仓位层：`buy_cap` / `scale_cap` / `book_lot_cap`（不进 AST）。
 
 ---
 
 ## 仓位：全池三笔分档（50% / 30% / 剩余资金）
 
-跟踪池以 config `BOOK_STOCKS` 为准。N = 字典长度。**一个** HlBand 实例用 `run_time` 扫全池，**当天买单写入同一份账本**，冻结后按空档赋额。全池最多 `BOOK_LOT_MAX=3` 笔（开仓+加仓合计）。已从池中移除但仍持仓的票，其市值算其它股票，从 `E_s` 扣掉（仅 `BUDGET_BASE=equity`）；须先停掉旧多图实例，勿再并行打卡。
+跟踪池以 config `BOOK_STOCKS` 为准。N = 集合/字典长度。**一个** HlBand 实例用 `run_time` 扫全池，**当天买单写入同一份账本**，冻结后按空档赋额。全池最多 `BOOK_LOT_MAX=3` 笔（开仓+加仓合计）。已从池中移除但仍持仓的票，其市值算其它股票，从 `E_s` 扣掉（仅 `BUDGET_BASE=equity`）；须先停掉旧多图实例，勿再并行打卡。
 
 `BUDGET_BASE=equity`（默认）：`E_s = 账户总资产 − 其它股票市值`，`cap = CASH_RATIO×E_s`（20 万账户、0.90 → 约 18 万）。  
 `BUDGET_BASE=fixed`：基数=`TRADE_BUDGET`，`cap = CASH_RATIO×TRADE_BUDGET`（10 万、0.90 → 9 万；空池三笔约 4.5 万 / 2.7 万 / 1.8 万）。其它股票市值不进基数。从较大 E_s 切到更小固定金额**不强制卖**，只停买。`k` / `book_mv` 只统计白名单。
@@ -76,7 +101,7 @@
 
 同标的一轮：开仓 1 笔 + 加仓最多 1 笔。加过仓后该只只要还剩任何仓就不再买（`scale_once`）；两笔都平掉才能再开。卖掉该只大仓、还留着 30% 时，大仓由**其他空仓标的**开仓补回（此时只剩 1 槽，该开仓吃剩余，约等于 50%），不是同一只再开。大仓空且只剩 1 个槽时不加仓，留给开仓。
 
-账本路径 `BOOK_FILE`（默认 `D:\tradingStrategy\hlband_book.json`），**不是**按标的分的 `STATE_FILE`。无买点也要打卡。
+账本路径 `BOOK_FILE`（默认 `D:\HlBandV7\hlband_book.json`），**不是**按标的分的 `STATE_FILE`。无买点也要打卡。
 
 | 时间 | 做什么 |
 | :--- | :--- |
@@ -120,16 +145,20 @@
 
 ---
 
-## 三、卖出
+## 三、卖出（现行默认配置）
+
+下表是现行默认 `exit`。默认 AST **不含** `stop_loss` / `trail_stop`（叶子与 `factor_params` 仍在，网格可扫）。
 
 | 卖点 | 条件 | 日志码 |
 | :--- | :--- | :--- |
-| ① ATR 止损 | 收盘 ≤ **该笔**成本 − `atr_stop.k`×ATR（当前 `k=2`、`atr.n=14`） | `atr_stop` |
-| ② ATR 移动止盈 | **该笔**峰值相对成本 > `atr_trail_stop.k1`×ATR 武装（当前 `k1=2`）：收盘 ≤ 成本（保本）或峰值回撤 ≥ `k2`×ATR（当前 `k2=2`） | `atr_trail_stop` |
-| ③ 智能时间 | **该笔**持仓 **> `time_force.bars`**（当前 30）日：破日线 MA60 → 强制平仓；仍站上 MA60 且峰值浮盈 **< `time_force.arm`**（当前 3%）→ **立即强制平仓**；峰值已达门槛 → **不按日历强平**，交给 ATR 移动止盈 / 破 MA60 / 周线转空。`arm<=0` 关让路 | `time_force` |
+| ① ATR 止损 | 收盘 ≤ **该笔**成本 − `atr_stop.k`×ATR（当前 `k=2`、`atr.n=14`）；`atr.n<=0` 或 `k<=0` 关 | `atr_stop` |
+| ② ATR 移动止盈 | **该笔**峰值相对成本 > `atr_trail_stop.k1`×ATR 武装（当前 `k1=2`）：收盘 ≤ 成本（保本）或峰值回撤 ≥ `k2`×ATR（当前 `k2=2`）；`k1<=0` 整条关；`k2<=0` 只保本 | `atr_trail_stop` |
+| ③ 智能时间 | **该笔**持仓 **> `time_force.bars`**（当前 30）日：破日线 MA60 → 强制平仓；仍站上 MA60 且峰值浮盈 **< `time_force.arm`**（当前 3%）→ **立即强制平仓**；峰值已达门槛 → **不按日历强平**，交给 ATR 移动止盈 / 破 MA60 / 周线转空。`arm<=0` 关让路；`d_ma.slow<=0` 慢线地板不存在则整条不触发 | `time_force` |
 | 兜底 | 周线转空且连续 `weekly_bear_confirm.days` 日 | `weekly_bear_confirm` |
 
-默认 `RECIPE.exit` **不含** `stop_loss` / `trail_stop`（叶子与 `factor_params` 仍在，网格可扫）。阶梯档位 `trail_stop.tiers`（峰值浮盈 = `(hold_peak − cost) / cost`）：
+优先级（挂 pending 主因，`exit` 的 or 短路）：`weekly_bear_confirm` > `atr_stop` > `atr_trail_stop` > `time_force`。
+
+阶梯档位 `trail_stop.tiers`（峰值浮盈 = `(hold_peak − cost) / cost`）仅在把该叶子写进 `exit` 后才生效：
 
 | 档 | 峰值浮盈 | 回撤容忍 | 利润底线 |
 | :--- | :--- | :--- | :--- |
@@ -137,7 +166,6 @@
 | 落袋为安 | [6%, 10%) | 3% | 至少带走 3% |
 | 放鹰吃肉 | ≥ 10% | 4% | — |
 
-优先级（挂 pending 主因，`RECIPE.exit` 的 or 短路）：`weekly_bear_confirm` > `atr_stop` > `atr_trail_stop` > `time_force`。  
 持仓过除权除息：卖点评估前按 `get_divid_factors` 的 `dr` 缩放该票 `cost`/`hold_peak`（送转同步股数）；**配股默认按未认购**（股数不含配股部分），实盘用券商量延后判定认购后再加权成本；除权日当日开仓不缩放。回测若行情是**静态** `front`/`front_ratio`/`back`/`back_ratio`/`follow`（未走 PIT）则跳过；**PIT 激活**（回测 front*→none+因子）时与实盘一样缩放。本地回测操作明细同步写「送转」行，成交轮次按缩放后成本/股数计收益%。  
 `SCALE_LOTS` 开启时，除 `weekly_bear_confirm` 一次出清外，其余卖点只平触发的那几笔（日志 `lots=[id]`）。  
 买卖委托失败/T+1 skip 时**保留**对应 pending（及持仓元数据）；实盘报单成功亦保留至成交，废单后尾盘或次日开盘窗可重试。当日新买的笔 T+1 不可卖，不清仓状态。  
@@ -147,27 +175,29 @@
 
 ## 四、执行对照表
 
+下表是现行默认组合，不是框架唯一形态。
+
 | 步骤 | 维度 | 公式（当前配置） |
 | :--- | :--- | :--- |
-| 周线过滤 | MA5/MA34 | `(wMA5-wMA34)/wMA34 < 0.08` 才可开 |
+| 周线高位乖离 | MA5/MA34 | `(wMA5-wMA34)/wMA34 < 0.08` 才可开 |
 | 低位斜率 | MA34 | 乖离 < 2% 时须连续 2 周向上 |
-| 日线低吸 | 位置+连续缩量 | 近 MA20/60 且连续 2 日 `vol < 当日MAVOL10×0.9` |
-| 顺势加仓 | 回踩 / 日线平台 / 周线 MACD | 再缩量回踩，或收盘站上 20 日平台高，或近两周金叉且柱放大 |
+| 缩量回踩 | 位置+连续缩量 | 近 MA20/60 且连续 2 日 `vol < 当日MAVOL10×0.9` |
+| 加仓 | 回踩 / 日线平台 / 周线 MACD | 再缩量回踩（受 chase），或收盘站上 20 日平台高，或近两周金叉且柱放大 |
 | 无量阴跌 | MA20+20日量 | 收盘 < MA20 且 `vol < MAVOL20×0.60` → 禁开 |
 | 填满仓位 | 全池最多 3 笔 50/30/剩余 | 前两笔 50%/30%；第三笔吃剩余可部署资金；满 3 笔 `book_lot_cap` |
-| 动态防御 | ATR 移动止盈 | 峰值相对成本 > 2×ATR 武装；收盘≤成本或回撤≥2×ATR（`k1`/`k2`；`k1<=0` 关；`k2<=0` 只保本） |
+| ATR 止损 | 成本 − k×ATR | `close ≤ cost − 2×ATR14`（威尔德；`atr.n<=0` 或 `k<=0` 关） |
+| ATR 移动止盈 | 峰值相对成本 | 峰值相对成本 > 2×ATR 武装；收盘≤成本或回撤≥2×ATR（`k1`/`k2`；`k1<=0` 关；`k2<=0` 只保本） |
 | 智能时间 | MA60 地板 | `> time_force.bars` 日：破 MA60 强平；站上且峰值 < `time_force.arm`（3%）立即强平；峰值≥arm 不按日历强平 |
-| ATR止损 | 成本 − k×ATR | `close ≤ cost − 2×ATR14`（威尔德；`atr.n<=0` 或 `k<=0` 关） |
 
 ---
 
 ## 五、QMT 运行
 
-**部署**：`python hongli_band/scripts/qmt/_deploy_qmt_gbk.py` → `HlBand.py` / `红利波段.py`，以及 `formulaLayout/HlBand.xml` / `红利波段.xml`  
+**部署**：`python hongli_band/scripts/qmt/_deploy_qmt_gbk.py` → `HlBand.py` / `红利波段.py`，以及 `formulaLayout/HlBand.xml` / `红利波段.xml`（产物文件名；不约束跟踪池风格）  
 **报告**：`python hongli_band/gen_report.py` → `report/`  
 **片段**：`hongli_band/scripts/qmt/hlband/`（只改片段 / `panel.xml` 后 re-deploy，勿手改终端 GBK 或 `formulaLayout`）
 
-实盘改参：模型交易里打开**这一个**策略实例，改「模拟下单 / 资金基数 / 固定金额 / 可部署比例 / 高位禁开 / 追高 / 硬止损 / 加仓开关」后确定再运行。跟踪池只数以 `BOOK_STOCKS` 长度为准，不要在面板改 N。增减标的改 `BOOK_STOCKS` 后 deploy 并重启这一实例。`TRADE_BUDGET` 在 `BUDGET_BASE=fixed` 时是实盘基数；`equity` 时实盘忽略此栏。编辑器回测仍用 config（一图一票，主图挂池内那只）。
+实盘改参：模型交易里打开**这一个**策略实例，改「模拟下单 / 资金基数 / 固定金额 / 可部署比例 / 加仓开关」后确定再运行。跟踪池只数以 `BOOK_STOCKS` 长度为准，不要在面板改 N。增减标的改 `BOOK_STOCKS` 后 deploy 并重启这一实例。`TRADE_BUDGET` 在 `BUDGET_BASE=fixed` 时是实盘基数；`equity` 时实盘忽略此栏。编辑器回测仍用 config（一图一票，主图挂池内那只）。
 
 实盘：**主图只当时钟**（建议挂不在 `BOOK_STOCKS` 的日线指数）；扫池只走 `run_time`（`1nSecond`，起始空串立即启动）。勿勾独立运行/简易运行。确认窗/开盘兜底才拉全量 K，盘中只处理 pending。账本同一轮先 eval 打卡再 exec 买入。上线前必须停掉旧多图实例。定时下单 `quickTrade=2`。
 
@@ -204,11 +234,12 @@
 | `SCALE_ENABLE` | `True` | 盈利后满足持仓日/周线柱，再缩量回踩或破平台或周线 MACD 金叉放大则加第二笔 |
 | `SCALE_LOTS` | `True` | 分笔独立止盈止损；关则均价合并整仓出（仅 config，实盘勿改） |
 | `SCALE_ONCE_PER_ROUND` | `True` | 同一轮只加一次；加过仓后该只须全平才能再开（仅 config） |
-| `SCALE_ARM` | `0.03` | 峰值浮盈门槛（独立于 TRAIL 档1；仅 config） |
+| `SCALE_ARM` | `0.03` | 峰值浮盈门槛（独立于 `trail_stop` 档1；仅 config） |
 | `SCALE_ARM_BARS` | `8` | 第一笔持仓满 8 日才加仓（仅 config） |
 | `SCALE_W_HIST_MIN` | `-0.01` | 周线 MACD 柱低于此值不加仓（仅 config） |
 | `plat_break.lookback` | `20` | 日线平台回看日（不含当日；`factor_params`） |
 | `plat_break.max_range` | `0.10` | 平台振幅上限 10%；更宽则不算平台（`factor_params`） |
+| `plat_break.break_buf` | `0.0` | 突破缓冲：收盘须站上平台高 × `(1+buf)`（`factor_params`） |
 | `w_macd_golden.hist_expand` | `1.2` | 上周金叉时本周红柱须放大至 1.2 倍（`factor_params`） |
 | `stop_loss.pct` | `0.08` | 硬止损（相对该笔成本；`factor_params`；默认 exit 不引用） |
 | `atr_stop.k` | `2` | ATR 止损倍数：收盘 ≤ 成本 − k×ATR（`factor_params`）；`<=0` 关 |
@@ -249,4 +280,4 @@
 
 不经过国金编辑器，用 KlineDump 日线回放同一套拼接脚本。行情在 `tools/csv/<复权>/`，产物在 `hongli_band/report/<复权>/`。**`front`/`front_ratio` 任务读 `csv/none` + `csv/divid_factors/*.json` 做时点前复权（PIT）**（`mode=diff` / `mode=ratio`），报告目录名仍为逻辑复权；日志指纹含 `pit=1 mode=…`。缺 none CSV 或因子 JSON 会硬失败——须先跑 KlineDump（`DUMP_STOCKS` 覆盖要测的票，`DIVIDEND_TYPES` 含 `none`，`DUMP_DIVID_FACTORS=True`）。启动：`python hongli_band/local_bt_ui.py`。
 
-目录、复权多选、按年批量、选股择优见 **[`local_bt.md`](./local_bt.md)**。买卖规则仍以本文 §1–§4 与 `config.py` 为准。
+目录、复权多选、按年批量、选股择优见 **[`local_bt.md`](./local_bt.md)**。买卖规则仍以本文 §1–§4 与 `config.py` 为准。现行默认四个槽位见 §核心逻辑；改 `RECIPE` 后以 config 为准。
