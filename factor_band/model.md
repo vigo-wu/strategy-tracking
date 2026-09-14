@@ -243,7 +243,7 @@ scale_out: false
 | `w_macd_golden.hist_expand` | `1.2` | 上周金叉时本周红柱须放大至 1.2 倍（`factor_params`） |
 | `stop_loss.pct` | `0.08` | 硬止损（相对该笔成本；`factor_params`；默认 exit 不引用） |
 | `atr_stop.k` | `2.0` | ATR 止损倍数：收盘 ≤ 成本 − k×ATR（`factor_params`，浮点，可扫 `1.5`）；`<=0` 关 |
-| `atr_trail_stop.k1` | `2.0` | ATR 移动武装：峰值相对成本 > k1×ATR（`factor_params`，浮点）；`<=0` 整条关 |
+| `atr_trail_stop.k1` | `2.0` | ATR 移动保本：峰值相对成本 > k1×ATR（`factor_params`，浮点）；`<=0` 整条关 |
 | `atr_trail_stop.k2` | `2.0` | ATR 移动回撤：已武装且峰值回撤 ≥ k2×ATR（`factor_params`，浮点）；`<=0` 只保本 |
 | `chase.max_pct` | `0.05` | 追高禁开（`factor_params`） |
 | `LIVE_CLOSE_CONFIRM` | `True` | 收盘确认 + 开盘兜底 |

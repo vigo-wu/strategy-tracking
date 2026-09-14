@@ -218,7 +218,7 @@ LEAVES = {
                 "default": 2.0,
                 "percent": False,
                 "abbrev": "atk1",
-                "label": "ATR移动武装",
+                "label": "ATR移动保本",
                 "kind": "smaller_tighten",
                 "off": "le0",
                 "axis": 5,

@@ -26,7 +26,7 @@ BOOK_STOCKS = {
 }
 
 # 单实例共享信号账本（不是 STATE_FILE；禁止按标的分文件）
-BOOK_FILE = r"D:\HlBandV7\hlband_book.json"
+BOOK_FILE = r"D:\FBand\fband_book.json"
 # 资金基数：equity=总资产减其它股票市值；fixed=下面 TRADE_BUDGET。面板下拉会写成中文，代码归一成这两值。
 BUDGET_BASE = "equity"
 # 可部署比例（相对所选基数）；其余留作 T+1 / 废单重试
@@ -182,16 +182,16 @@ PENDING_TIMEOUT_SEC = 180
 PENDING_ORPHAN_SEC = 60
 
 # QMT 模型无 __file__；状态绝对路径（含 {stock}，宇宙循环按票分文件）
-#   513530.SH → ...\hlband_513530_SH.json
-STATE_FILE = r"D:\HlBandV7\hlband_{stock}.json"
+#   513530.SH → ...\fband_513530_SH.json
+STATE_FILE = r"D:\FBand\fband_{stock}.json"
 # 实盘结构化日志根目录；落盘为 LOG_DIR/<stock_tag>/{tag}_events.jsonl 等
 # 空字符串关闭落盘（仍保留终端 print）
-LOG_DIR = r"D:\HlBandV7\logs"
+LOG_DIR = r"D:\FBand\logs"
 # True=回测也写日志（默认关，避免回测刷爆磁盘）
 LOG_IN_BACKTEST = False
 
-STRATEGY_NAME = "HlBandV7"
-STRATEGY_VER = "v1.70"
+STRATEGY_NAME = "FBand"
+STRATEGY_VER = "v5.0.0"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
