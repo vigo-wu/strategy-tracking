@@ -129,4 +129,4 @@ python factor_band/scripts/qmt/_deploy_qmt_gbk.py
 
 默认**不升** `STRATEGY_VER`，除非用户要求或语义已变。加阈值会改 `recipe=` 哈希，参数指纹预检按现行默认配置重算，不要对历史档案旧哈希。
 
-网格：因子轴跟 `LEAVES` 走；overrides 仍是 `overrides.factor_params` / `overrides.structure`。用户没点名则**不跑网格**。
+网格：因子轴跟 `LEAVES` **且**四个槽位已启用叶子走（登记未启用的不上 `catalog_ids()`）；overrides 仍是 `overrides.factor_params` / `overrides.structure`。用户没点名则**不跑网格**。

@@ -61,24 +61,13 @@ _EXPECTED_FP = {
 }
 
 _EXPECTED_CATALOG_HEAD = (
-    "stop_loss.pct",
-    "trail_stop.tiers",
-    "time_force.bars",
-    "weekly_bear_confirm.days",
     "atr_stop.k",
     "atr_trail_stop.k1",
     "atr_trail_stop.k2",
-    "time_force.arm",
-    "pullback_vol.tol",
-    "pullback_vol.ratio",
-    "pullback_vol.vol_n",
-    "pullback_vol.confirm_days",
-    "vol_dry.ratio",
-    "vol_dry.n",
-    "chase.max_pct",
-    "w_bias.hard",
-    "w_slope.low",
-    "w_slope.slope_weeks",
+    "keltner_vol.k",
+    "keltner_vol.ratio",
+    "keltner_vol.vol_n",
+    "keltner_vol.confirm_days",
 )
 
 
@@ -129,16 +118,6 @@ class CatalogContractTests(unittest.TestCase):
         self.assertEqual(
             ENTRY_KEYS,
             (
-                "pullback_vol.tol",
-                "pullback_vol.ratio",
-                "pullback_vol.vol_n",
-                "pullback_vol.confirm_days",
-                "vol_dry.ratio",
-                "vol_dry.n",
-                "chase.max_pct",
-                "w_bias.hard",
-                "w_slope.low",
-                "w_slope.slope_weeks",
                 "keltner_vol.k",
                 "keltner_vol.ratio",
                 "keltner_vol.vol_n",
@@ -148,37 +127,21 @@ class CatalogContractTests(unittest.TestCase):
         self.assertEqual(
             EXIT_KEYS,
             (
-                "stop_loss.pct",
-                "trail_stop.tiers",
-                "time_force.bars",
-                "weekly_bear_confirm.days",
                 "atr_stop.k",
                 "atr_trail_stop.k1",
                 "atr_trail_stop.k2",
-                "time_force.arm",
             ),
         )
-        self.assertEqual(
-            SCALE_FACTOR_KEYS,
-            (
-                "plat_break.lookback",
-                "plat_break.max_range",
-                "plat_break.break_buf",
-                "w_macd_golden.hist_expand",
-                "scale_arm.arm",
-                "scale_arm.bars",
-                "scale_arm.hist_min",
-            ),
-        )
+        self.assertEqual(SCALE_FACTOR_KEYS, ())
 
     def test_infer_kind_directions(self) -> None:
         from grid_run import load_config_defaults
 
         defaults = load_config_defaults()
-        self.assertEqual(infer_kind("stop_loss.pct", 0.06, defaults), "tighten")
+        self.assertEqual(infer_kind("atr_stop.k", 1.5, defaults), "tighten")
+        self.assertEqual(infer_kind("atr_stop.k", 2.5, defaults), "loosen")
+        self.assertEqual(infer_kind("atr_stop.k", 0, defaults), "off")
         self.assertEqual(infer_kind("atr_trail_stop.k1", 0, defaults), "off")
-        self.assertEqual(infer_kind("time_force.arm", 0.01, defaults), "loosen")
-        self.assertEqual(infer_kind("time_force.bars", 0, defaults), "off")
 
     def test_module_order_follows_leaves(self) -> None:
         from _deploy_qmt_gbk import MODULE_ORDER, _leaf_lib_paths

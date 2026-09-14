@@ -182,13 +182,11 @@ ABBREV_FIXED = {
     "keltner.atr_n": "kat",
 }
 DEFAULT_SCAN = {
-    "stop_loss.pct": "6,10",
-    "time_force.bars": "0",
+    "atr_stop.k": "1.5,2.5",
 }
 DEFAULT_SELECTED = ()
 DEFAULT_EXTRAS = {
-    "stop_loss.pct": (0.06, 0.10),
-    "time_force.bars": (0,),
+    "atr_stop.k": (1.5, 2.5),
 }
 
 
@@ -538,16 +536,78 @@ def _load_config_ns() -> dict[str, Any]:
         raise GridSpecError("找不到 %s" % exc) from exc
 
 
-def _iter_leaf_params(leaves: Mapping[str, Any] | None):
+def _ast_leaf_ids(expr: Any) -> set[str]:
+    """与 factors/expr._recipe_leaf_ids 同一套：四个槽位 AST 里的叶子 id。"""
+    if expr is False or expr is None or expr is True:
+        return set()
+    if isinstance(expr, str):
+        return {expr}
+    if not isinstance(expr, (list, tuple)) or not expr:
+        return set()
+    op = expr[0]
+    if op in ("and", "or", "not"):
+        out: set[str] = set()
+        for node in expr[1:]:
+            out |= _ast_leaf_ids(node)
+        return out
+    if isinstance(op, str):
+        return {op}
+    return set()
+
+
+def _active_leaf_ids(ns: Mapping[str, Any] | None = None) -> frozenset[str] | None:
+    """启用叶子。bundle 有 `_recipe_compute_leaves` 则用之；否则从 RECIPE 走同一特例。None = fail-open。"""
+    src = ns if ns is not None else _load_config_ns()
+    fn = src.get("_recipe_compute_leaves")
+    if callable(fn):
+        try:
+            return frozenset(fn())
+        except Exception:
+            pass
+    rec = src.get("RECIPE") or {}
+    if not rec:
+        return None
+    used: set[str] = set()
+    for slot in ("entry", "scale_in", "exit", "scale_out"):
+        used |= _ast_leaf_ids(rec.get(slot))
+    if "weekly_bear_confirm" in used:
+        used.add("weekly_bear")
+    scale_in = rec.get("scale_in")
+    if scale_in is not False and scale_in is not None:
+        used.add("scale_arm")
+    return frozenset(used)
+
+
+def unused_factor_override_leaves(overrides: Mapping[str, Any] | None) -> tuple[str, ...]:
+    """命名格子 factor_params 里未启用的叶子 id。CLI 只 WARN，生成器仍硬失败。"""
+    active = _active_leaf_ids()
+    if active is None:
+        return ()
+    fp = dict(overrides or {}).get("factor_params")
+    if not isinstance(fp, dict):
+        return ()
+    return tuple(sorted(str(fid) for fid in fp if str(fid) not in active))
+
+
+def _iter_leaf_params(
+    leaves: Mapping[str, Any] | None,
+    active: frozenset[str] | None = None,
+):
     for fid, leaf in (leaves or {}).items():
+        if active is not None and str(fid) not in active:
+            continue
         group = (leaf or {}).get("group")
         for key, spec in ((leaf or {}).get("params") or {}).items():
             yield str(fid), str(key), "%s.%s" % (fid, key), group, spec or {}
 
 
-def _keys_for_group(leaves: Mapping[str, Any] | None, group: str) -> tuple[str, ...]:
+def _keys_for_group(
+    leaves: Mapping[str, Any] | None,
+    group: str,
+    active: frozenset[str] | None = None,
+) -> tuple[str, ...]:
     rows: list[tuple[int, str]] = []
-    for _fid, _key, path, grp, spec in _iter_leaf_params(leaves):
+    for _fid, _key, path, grp, spec in _iter_leaf_params(leaves, active):
         if grp != group:
             continue
         try:
@@ -573,12 +633,13 @@ def _install_leaf_axes() -> None:
     ns = _load_config_ns()
     leaves = ns.get("LEAVES") or {}
     _LEAVES = dict(leaves)
-    ENTRY_KEYS = _keys_for_group(leaves, "entry")
-    EXIT_KEYS = _keys_for_group(leaves, "exit")
-    SCALE_FACTOR_KEYS = _keys_for_group(leaves, "scale")
+    active = _active_leaf_ids(ns)
+    ENTRY_KEYS = _keys_for_group(leaves, "entry", active)
+    EXIT_KEYS = _keys_for_group(leaves, "exit", active)
+    SCALE_FACTOR_KEYS = _keys_for_group(leaves, "scale", active)
     kind_ids: set[str] = set()
     percents = set(_MONEY_PERCENT_KEYS)
-    for _fid, _key, path, _grp, spec in _iter_leaf_params(leaves):
+    for _fid, _key, path, _grp, spec in _iter_leaf_params(leaves, active):
         if spec.get("label"):
             PARAM_LABELS[path] = str(spec["label"])
         if spec.get("abbrev"):
@@ -706,6 +767,9 @@ def _build_catalog() -> tuple[ParamSpec, ...]:
     ns = _load_config_ns()
     rec = ns.get("RECIPE") or {}
     flat = flatten_factor_params(rec.get("factor_params") or {})
+    active = _active_leaf_ids(ns)
+    if active is not None:
+        flat = {k: v for k, v in flat.items() if k.split(".", 1)[0] in active}
     flat.update(flatten_structure(rec.get("structure") or {}))
     found = list(flat)
     found.extend(_scan_config_names(ns))
@@ -1194,6 +1258,8 @@ def family_value_label(family: str, value: Any) -> str:
 
 def base_label(defaults: Mapping[str, Any], families: Iterable[str]) -> str:
     fams = [f for f in FAMILY_ORDER if f in set(families)]
+    if fams == ["atr_stop.k"]:
+        return "现行 %gx" % float(current_value("atr_stop.k", defaults))
     if fams == ["stop_loss.pct"]:
         return "现行 %s" % _format_pct(float(current_value("stop_loss.pct", defaults)))
     if fams == ["trail_stop.tiers"]:
@@ -1505,6 +1571,20 @@ def correct_cell_kinds(
 
 def chip_presets(family: str, defaults: Mapping[str, Any]) -> list[Any]:
     cur = current_value(family, defaults)
+    if family == "atr_stop.k":
+        vals = [1.0, 1.5, 2.0, 2.5, 3.0]
+        out: list[Any] = []
+        for v in vals:
+            if v not in out:
+                out.append(float(v))
+        try:
+            fv = float(cur)
+        except (TypeError, ValueError):
+            fv = None
+        if fv is not None and fv not in out:
+            out.append(fv)
+            out.sort()
+        return out
     if family == "stop_loss.pct":
         return [0.06, 0.07, 0.08, 0.09, 0.10, 0.12]
     if family == "time_force.bars":

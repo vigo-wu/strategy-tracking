@@ -1,25 +1,25 @@
 {
   "theme": "factor_band",
-  "sweep": "stop_loss_confirm",
+  "sweep": "atr_stop_confirm",
   "compare_div": "front_ratio",
   "cells": [
     {
       "id": "base",
-      "label": "现行 8%",
+      "label": "现行 2x",
       "kind": "base",
       "overrides": {}
     },
     {
-      "id": "sl06",
-      "label": "止损 6%",
+      "id": "ask1p5",
+      "label": "ATR止损 1.5x",
       "kind": "tighten",
-      "overrides": {"factor_params": {"stop_loss": {"pct": 0.06}}}
+      "overrides": {"factor_params": {"atr_stop": {"k": 1.5}}}
     },
     {
-      "id": "sl10",
-      "label": "止损 10%",
+      "id": "ask2p5",
+      "label": "ATR止损 2.5x",
       "kind": "loosen",
-      "overrides": {"factor_params": {"stop_loss": {"pct": 0.10}}}
+      "overrides": {"factor_params": {"atr_stop": {"k": 2.5}}}
     }
   ]
 }

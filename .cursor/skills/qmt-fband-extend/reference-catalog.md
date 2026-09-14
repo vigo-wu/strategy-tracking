@@ -27,7 +27,7 @@
 | `off` | `le0`：`<=0` 标 `off`。`stop_loss.pct` 必须 `off: None`（0 是更紧，不是关规则） |
 | `axis` | 同 `group` 内排序。`time_force.bars` 与 `arm` 不要靠插入序硬挨 |
 
-`weekly_bear_confirm.days` 只进网格出场组、不设 `kind`（现行默认配置如此）。
+`weekly_bear_confirm.days` 启用后才进网格出场组、不设 `kind`。
 
 `kind` 只写在网格出场轴上。写到入场/加仓会被当成出场松紧。
 
@@ -63,4 +63,4 @@
 - `LEAVES` id ↔ `lib/<id>.py` ↔ `_factor_eval_<id>` ↔ `_LEAF_MARKET_NEED`
 - 四个槽位 AST 里出现的 id ⊆ `LEAVES`（启用 ⊆ 登记）
 - 无阈值因子不在 `factor_params`
-- 新因子轴出现在 `catalog_ids()`；新结构轴出现在 `STRUCTURE_KEYS`
+- 新因子轴在**登记且 AST 启用后**出现在 `catalog_ids()`；新结构轴出现在 `STRUCTURE_KEYS`

@@ -74,11 +74,12 @@ def _walk(
 
 def _nine_cell_spec() -> dict:
     defaults = {
+        "atr_stop.k": 2.0,
         "stop_loss.pct": 0.08,
         "time_force.bars": 30,
         "trail_stop.tiers": ((0.03, 0.06, 0.015, None), (0.06, 0.10, 0.03, 0.03), (0.10, None, 0.04, None)),
     }
-    cells = build_cells({"stop_loss.pct": [0.05, 0.06, 0.07, 0.09, 0.10, 0.11, 0.12, 0.13]}, defaults)
+    cells = build_cells({"atr_stop.k": [1.0, 1.25, 1.5, 1.75, 2.25, 2.5, 2.75, 3.0]}, defaults)
     return {"theme": "factor_band", "sweep": "nine_cells", "compare_div": "front_ratio", "cells": cells}
 
 

@@ -194,7 +194,7 @@ scale_out:
 
 读取指标周期窗：调用方先 `_structure_windows()`，再把 `n` 传给 `_ema` / `_sma` / `_calc_macd`（三窗必传）/ `_calc_atr` / `_calc_keltner`（`ema_n` / `atr_n` / `k` 必传；`k` 不上 `structure`）。缺键用上表数字字面量。网格覆盖 `_structure_apply_global`，按段再按 key 合并。QMT 暖机（`market._ohlcv_need_*`）走 `_structure_windows()`；local_bt `run.py` 读裸表，缺键当 0——现行默认配置字面量齐全时两者一致。价格均线算法不上 `structure`：现行日/周价格均线由调用点直调 `_ema`。
 
-网格：因子轴元数据（分组 / 短名 / percent / kind）来自 `LEAVES`；轴 id 仍是点路径（`stop_loss.pct` / `atr_stop.k` / `atr_trail_stop.k1` / `k2` / `time_force.arm` / `scale_arm.arm` / `scale_arm.bars` / `scale_arm.hist_min` / `d_ma.mid` / `d_ma.trend` / `atr.n` / `keltner.ema_n` / `keltner.atr_n` / `keltner_vol.k`）；短 id 如 `dmm15` / `dmt` / `ask` / `atk1` / `atk2` / `tfa` / `sa` / `sab` / `swh` / `atr` / `kem` / `kat` / `kvk`。`atr_stop.k` / `atr_trail_stop.k1` / `k2` 是浮点倍数轴（`LEAVES` 默认 `2.0`，可扫 `1.5`），**不是**百分比轴。格子 `overrides` 形态不变，必须写成：
+网格：因子轴元数据（分组 / 短名 / percent / kind）来自 `LEAVES`，侧栏只含买入 `entry`、加仓 `scale_in`、卖出 `exit`、减仓 `scale_out` 四个槽位已启用叶子的阈值（现行默认配置的 `stop_loss` 登记保留、不上轴）。轴 id 仍是点路径（`stop_loss.pct` / `atr_stop.k` / `atr_trail_stop.k1` / `k2` / `time_force.arm` / `scale_arm.arm` / `scale_arm.bars` / `scale_arm.hist_min` / `d_ma.mid` / `d_ma.trend` / `atr.n` / `keltner.ema_n` / `keltner.atr_n` / `keltner_vol.k`）；短 id 如 `dmm15` / `dmt` / `ask` / `atk1` / `atk2` / `tfa` / `sa` / `sab` / `swh` / `atr` / `kem` / `kat` / `kvk`。`atr_stop.k` / `atr_trail_stop.k1` / `k2` 是浮点倍数轴（`LEAVES` 默认 `2.0`，可扫 `1.5`），**不是**百分比轴。格子 `overrides` 形态不变，必须写成：
 
 ```text
 {"factor_params": {"stop_loss": {"pct": 0.06}}}

@@ -17,7 +17,7 @@ MAE 为何不可信、本轮数字：需要时再读 [reference-lessons.md](refe
 
 ## 何时使用
 
-- 用户要确认 `stop_loss.pct` / `atr_stop.k` / `atr_trail_stop.k1` / `k2` / `trail_stop.tiers` / `time_force.bars` / `time_force.arm`（或同类出场阈值）哪个更好
+- 用户要确认 `stop_loss.pct` / `atr_stop.k` / `atr_trail_stop.k1` / `k2` / `trail_stop.tiers` / `time_force.bars` / `time_force.arm`（或同类出场阈值）哪个更好。**侧栏只列出买入 `entry`、加仓 `scale_in`、卖出 `exit`、减仓 `scale_out` 四个槽位已启用叶子的阈值**；`stop_loss.pct` 等未引用叶子不上轴，须先改 `config.RECIPE` 启用再扫。已写好的命名 spec 仍可跑（未启用 overrides 对信号空转，CLI 打 WARN）
 - 用户说网格、扫参、最优参数、对照重跑、样本外选参
 - 已有主题 `scripts/local_bt/` 与 config `BOOK_STOCKS`
 
@@ -106,7 +106,7 @@ python .cursor/skills/qmt-local-bt-grid/scripts/summarize.py --sweep-dir factor_
 ```json
 {
   "theme": "factor_band",
-  "sweep": "stop_loss_confirm",
+  "sweep": "atr_stop_confirm",
   "compare_div": "front_ratio",
   "year_start": 2018,
   "year_end": 2026,
@@ -115,16 +115,16 @@ python .cursor/skills/qmt-local-bt-grid/scripts/summarize.py --sweep-dir factor_
   "check_start": 2023,
   "check_end": 2026,
   "cells": [
-    {"id": "base", "label": "现行 8%", "kind": "base", "overrides": {}},
-    {"id": "sl06", "label": "止损 6%", "kind": "tighten", "overrides": {"factor_params": {"stop_loss": {"pct": 0.06}}}},
-    {"id": "sl10", "label": "止损 10%", "kind": "loosen", "overrides": {"factor_params": {"stop_loss": {"pct": 0.10}}}}
+    {"id": "base", "label": "现行 2x", "kind": "base", "overrides": {}},
+    {"id": "ask1p5", "label": "ATR止损 1.5x", "kind": "tighten", "overrides": {"factor_params": {"atr_stop": {"k": 1.5}}}},
+    {"id": "ask2p5", "label": "ATR止损 2.5x", "kind": "loosen", "overrides": {"factor_params": {"atr_stop": {"k": 2.5}}}}
   ]
 }
 ```
 
 空间隔离示例见 `examples/stop_loss_space.json`（`asset_split.mode=random_from_csv`，宇宙默认 `tools/csv/none`）。
 
-`kind`：`base` / `tighten` / `loosen` / `off` / `other`（`id=base` 仅兼容旧 spec）。扫描生成的格子用 token id；等于 config 时 `is_current=true`。因子轴元数据（入场/出场/加仓分组、短名、percent、`kind`/`off`）来自 `factor_band/scripts/qmt/fband/factors/catalog.py` 的 `LEAVES`，不要手改 `grid_spec` 白名单。因子/结构轴 id 仍是点路径（如 `stop_loss.pct`、`atr_stop.k`、`atr_trail_stop.k1` / `k2`、`time_force.arm`、`d_ma.mid`、`d_ma.trend`、`atr.n`、`keltner.ema_n` / `keltner.atr_n`）；格子 `overrides` 形态不变，写成 `{"factor_params": {"stop_loss": {"pct": 0.06}}}`、`{"factor_params": {"atr_stop": {"k": 1.5}}}`、`{"factor_params": {"atr_trail_stop": {"k1": 2.0}}}`、`{"factor_params": {"time_force": {"arm": 0.03}}}` 或 `{"structure": {"d_ma": {"mid": 15}}}` / `{"structure": {"d_ma": {"trend": 120}}}` / `{"structure": {"atr": {"n": 14}}}` / `{"structure": {"keltner": {"ema_n": 20, "atr_n": 20}}}`。`atr_stop.k` / `atr_trail_stop.k1` / `k2` 是浮点倍数轴（`LEAVES` 默认 `2.0`，扫描 `1.5` 保留小数，格子短 id 如 `ask1p5`），不是百分比轴。资金仍是顶层全局名（`CASH_RATIO`）。顶层旧键（`STOP_LOSS` / `D_MA_MID`）和顶层点路径（`stop_loss.pct` / `d_ma.mid`）都直接报错。
+`kind`：`base` / `tighten` / `loosen` / `off` / `other`（`id=base` 仅兼容旧 spec）。扫描生成的格子用 token id；等于 config 时 `is_current=true`。因子轴元数据（入场/出场/加仓分组、短名、percent、`kind`/`off`）来自 `factor_band/scripts/qmt/fband/factors/catalog.py` 的 `LEAVES`，**再按买入 `entry`、加仓 `scale_in`、卖出 `exit`、减仓 `scale_out` 四个槽位已启用叶子过滤**；不要手改 `grid_spec` 白名单。登记未启用的叶子（现行默认配置的 `stop_loss`）不上侧栏；UI / `build_cells` 扫未启用轴报「未知参数族」。因子/结构轴 id 仍是点路径（如 `stop_loss.pct`、`atr_stop.k`、`atr_trail_stop.k1` / `k2`、`time_force.arm`、`d_ma.mid`、`d_ma.trend`、`atr.n`、`keltner.ema_n` / `keltner.atr_n`）；格子 `overrides` 形态不变，写成 `{"factor_params": {"stop_loss": {"pct": 0.06}}}`、`{"factor_params": {"atr_stop": {"k": 1.5}}}`、`{"factor_params": {"atr_trail_stop": {"k1": 2.0}}}`、`{"factor_params": {"time_force": {"arm": 0.03}}}` 或 `{"structure": {"d_ma": {"mid": 15}}}` / `{"structure": {"d_ma": {"trend": 120}}}` / `{"structure": {"atr": {"n": 14}}}` / `{"structure": {"keltner": {"ema_n": 20, "atr_n": 20}}}`。`atr_stop.k` / `atr_trail_stop.k1` / `k2` 是浮点倍数轴（`LEAVES` 默认 `2.0`，扫描 `1.5` 保留小数，格子短 id 如 `ask1p5`），不是百分比轴。资金仍是顶层全局名（`CASH_RATIO`）。顶层旧键（`STOP_LOSS` / `D_MA_MID`）和顶层点路径（`stop_loss.pct` / `d_ma.mid`）都直接报错。`recipe=` 指纹与运行时 `factor_params` 仍是全表，不因侧栏过滤而删未引用键。
 
 ## 已知限制（继承 `run_book_backtest`）
 

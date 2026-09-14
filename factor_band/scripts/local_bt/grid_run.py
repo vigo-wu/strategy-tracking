@@ -59,6 +59,7 @@ from grid_spec import (  # noqa: E402
     recipe_fingerprint,
     reject_retired_min_ret,
     struct_eq,
+    unused_factor_override_leaves,
 )
 from grid_progress import (  # noqa: E402
     STATUS_DIRTY,
@@ -338,6 +339,13 @@ def validate_spec(spec: dict[str, Any]) -> list[dict[str, Any]]:
                 rec["n_diffs"] = int(raw.get("n_diffs"))
             except (TypeError, ValueError):
                 pass
+        unused = unused_factor_override_leaves(overrides)
+        if unused:
+            print(
+                "WARN %s.overrides.factor_params 含未启用叶子 %s；AST 未引用则对信号空转"
+                % (cid, ",".join(unused)),
+                flush=True,
+            )
         out.append(rec)
     try:
         apply_year_windows(spec)
@@ -369,15 +377,13 @@ def load_config_defaults() -> dict[str, Any]:
     rec = ns.get("RECIPE") or {}
     flat = flatten_factor_params(rec.get("factor_params") or {})
     flat.update(flatten_structure(rec.get("structure") or {}))
-    out: dict[str, Any] = {}
-    seen: set[str] = set()
+    out: dict[str, Any] = dict(flat)
+    seen: set[str] = set(out)
     for spec in param_catalog():
         if spec.key in seen:
             continue
         seen.add(spec.key)
-        if spec.key in flat:
-            out[spec.key] = flat[spec.key]
-        elif spec.key in ns:
+        if spec.key in ns:
             out[spec.key] = ns[spec.key]
     return out
 
