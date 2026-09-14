@@ -100,7 +100,6 @@ SKIP_NAMES = frozenset(
         "BOOK_FREEZE_CLOSE",
         "BOOK_FREEZE_OPEN",
         "BUDGET_BASE",
-        "MA_TYPE",
         "PERIOD",
         "OHLC_COUNT",
         "WEEKLY_OHLC_COUNT",

@@ -309,8 +309,8 @@ def load_book_defaults(config_path: str | None = None) -> dict[str, Any]:
 
 
 def load_book_stocks_full(config_path: str | None = None) -> dict[str, dict[str, str]]:
-    """config.BOOK_STOCKS → {code: {ma_type, dividend_type}}。读失败则空字典。"""
-    from analyze import DEFAULT_DIVIDEND_TYPE, normalize_dividend_type, normalize_ma_type  # noqa: WPS433
+    """config.BOOK_STOCKS → {code: {dividend_type}}。读失败则空字典。遗留 ma_type 键忽略。"""
+    from analyze import DEFAULT_DIVIDEND_TYPE, normalize_dividend_type  # noqa: WPS433
 
     try:
         mod = _load_hlband_config_mod(config_path)
@@ -319,7 +319,6 @@ def load_book_stocks_full(config_path: str | None = None) -> dict[str, dict[str,
     if mod is None:
         return {}
     raw = getattr(mod, "BOOK_STOCKS", None)
-    default_ma = normalize_ma_type(getattr(mod, "MA_TYPE", "EMA")) or "EMA"
     default_div = (
         normalize_dividend_type(getattr(mod, "DIVIDEND_TYPE", "")) or DEFAULT_DIVIDEND_TYPE
     )
@@ -335,14 +334,15 @@ def load_book_stocks_full(config_path: str | None = None) -> dict[str, dict[str,
         if not stock:
             continue
         if isinstance(v, dict):
-            ma = normalize_ma_type(v.get("ma_type")) or default_ma
             div = normalize_dividend_type(v.get("dividend_type")) or default_div
-        elif isinstance(v, str):
-            ma = normalize_ma_type(v) or default_ma
-            div = default_div
+            cfg = {"dividend_type": div}
+            leftover = str(v.get("ma_type") or "").strip().upper()
+            if leftover in ("SMA", "EMA"):
+                cfg["ma_type"] = leftover
         else:
-            ma, div = default_ma, default_div
-        out[stock] = {"ma_type": ma, "dividend_type": div}
+            div = default_div
+            cfg = {"dividend_type": div}
+        out[stock] = cfg
     return out
 
 
@@ -430,7 +430,7 @@ def is_year_keyed_baskets(data: dict[str, Any] | None) -> bool:
 
 def coerce_book_stocks_dict(raw: Any) -> dict[str, dict[str, str]]:
     """list / dict → {code: {ma_type, dividend_type}}。"""
-    from analyze import DEFAULT_DIVIDEND_TYPE, normalize_dividend_type, normalize_ma_type  # noqa: WPS433
+    from analyze import DEFAULT_DIVIDEND_TYPE, normalize_dividend_type  # noqa: WPS433
 
     if raw is None:
         return {}
@@ -446,14 +446,14 @@ def coerce_book_stocks_dict(raw: Any) -> dict[str, dict[str, str]]:
         if not stock:
             continue
         if isinstance(v, dict):
-            ma = normalize_ma_type(v.get("ma_type")) or "EMA"
             div = normalize_dividend_type(v.get("dividend_type")) or DEFAULT_DIVIDEND_TYPE
-        elif isinstance(v, str):
-            ma = normalize_ma_type(v) or "EMA"
-            div = DEFAULT_DIVIDEND_TYPE
+            cfg = {"dividend_type": div}
+            leftover = str(v.get("ma_type") or "").strip().upper()
+            if leftover in ("SMA", "EMA"):
+                cfg["ma_type"] = leftover
         else:
-            ma, div = "EMA", DEFAULT_DIVIDEND_TYPE
-        out[stock] = {"ma_type": ma, "dividend_type": div}
+            cfg = {"dividend_type": DEFAULT_DIVIDEND_TYPE}
+        out[stock] = cfg
     return out
 
 

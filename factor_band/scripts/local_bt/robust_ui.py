@@ -76,7 +76,6 @@ def _ensure_state() -> None:
     ss.setdefault("robust_basket_size", 10)
     ss.setdefault("robust_seed", 42)
     ss.setdefault("robust_workers", 0)
-    ss.setdefault("robust_ma_type", "EMA")
     ss.setdefault("robust_compare_div", DEFAULT_DIVIDEND_TYPE)
     ss.setdefault("robust_compound", True)
     ss.setdefault("robust_universe", DEFAULT_UNIVERSE_DIR)
@@ -177,7 +176,6 @@ def _current_spec() -> dict[str, Any]:
         "seed": int(ss.get("robust_seed") or 42),
         "universe_dir": DEFAULT_UNIVERSE_DIR,
         "full_span": bool(ss.get("robust_full_span")),
-        "ma_type": str(ss.get("robust_ma_type") or "EMA"),
         "compare_div": str(ss.get("robust_compare_div") or DEFAULT_DIVIDEND_TYPE),
         "compound_backtest": bool(ss.get("robust_compound", True)),
         "gate": gate_from_state(),
@@ -378,7 +376,6 @@ def render_robust_sidebar() -> None:
     n_preview = int(st.session_state.get("robust_n_baskets") or 40)
     pool_n = resolve_pool_workers(int(st.session_state.get("robust_workers") or 0), n_preview)
     st.caption("将开 %s 路（%s 组）" % (pool_n, n_preview))
-    st.selectbox("均线", options=["EMA", "SMA"], key="robust_ma_type", disabled=busy, persist_state="session")
     st.selectbox(
         "复权",
         options=list(DIVIDEND_TYPES),

@@ -106,10 +106,12 @@ class BookStocksParseTests(unittest.TestCase):
         )
         data = parse_book_stocks_text(text)
         book = coerce_book_stocks_dict(data)
-        self.assertEqual(book["601988.SH"]["ma_type"], "SMA")
+        self.assertNotIn("ma_type", book["601988.SH"])
+        self.assertEqual(book["601988.SH"]["dividend_type"], "front_ratio")
 
     def test_year_keyed_extract(self) -> None:
         text = (
+            "{\n"
             '  "2022": {"600350.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"}},\n'
             '  "2023": {"601988.SH": "SMA"},\n'
             "}"
@@ -118,7 +120,8 @@ class BookStocksParseTests(unittest.TestCase):
         y22 = basket_from_import_text(text, "2022")
         self.assertEqual(set(y22), {"600350.SH"})
         y23 = basket_from_import_text(text, "2023")
-        self.assertEqual(y23["601988.SH"]["ma_type"], "SMA")
+        self.assertNotIn("ma_type", y23["601988.SH"])
+        self.assertEqual(y23["601988.SH"]["dividend_type"], "front_ratio")
         with self.assertRaises(ValueError):
             basket_from_import_text(text, "2024")
 

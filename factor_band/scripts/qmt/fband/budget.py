@@ -16,14 +16,9 @@ def _norm_code(code):
 
 
 def _book_entry_normalize(val):
-    """把 BOOK_STOCKS 的 value 规范成 dict。str → {ma_type: str}；其它非 dict → {}。"""
+    """把 BOOK_STOCKS 的 value 规范成 dict。str / 其它非 dict → {}（忽略遗留 ma_type 简写）。"""
     if isinstance(val, dict):
         return dict(val)
-    if isinstance(val, (str, bytes)):
-        s = str(val or "").strip()
-        if s:
-            return {"ma_type": s}
-        return {}
     return {}
 
 

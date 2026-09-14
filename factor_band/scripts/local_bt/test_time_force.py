@@ -19,7 +19,6 @@ _INDICATOR_FILES = (
     "sma.py",
     "ema.py",
     "macd.py",
-    "price_ma.py",
 )
 
 TIERS = (
@@ -43,7 +42,6 @@ def _load_tf_ns(**overrides):
         "np": np,
         "A": A,
         "STRATEGY_NAME": "HlBand",
-        "MA_TYPE": "SMA",
         "BOOK_STOCKS": {},
         "_save_state": lambda: logs.append("save"),
         "_event_log": lambda event, **fields: logs.append((event, fields)),

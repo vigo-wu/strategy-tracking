@@ -325,8 +325,6 @@ def _init_impl(C):
         "%d/%d" % (_win["d_ma"]["mid"], _win["d_ma"]["slow"]),
         "atr=",
         int(_win["atr"]["n"]),
-        "ma_type=",
-        _ma_kind(),
         "stop=",
         _factor_param(None, "stop_loss", "pct"),
         "atr_stop=",
@@ -431,7 +429,6 @@ def _init_impl(C):
         lot_open_frac=LOT_OPEN_FRAC,
         lot_add_frac=LOT_ADD_FRAC,
         book_lot_max=BOOK_LOT_MAX,
-        ma_type=_ma_kind(),
         log_dir=str(globals().get("LOG_DIR") or ""),
     )
 

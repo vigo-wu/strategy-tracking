@@ -1,7 +1,7 @@
 # FactorBand：中长线 / 波段，因子库组合四个槽位
 
 **主题目录**：`factor_band/`｜**版本**：v1.70｜**形态**：单仓骨架 / 分笔多仓｜**运行**：国金 QMT 终端模型（见 §5）；本地 CSV 回放（见 §6）  
-**参数默认值**：`factor_band/scripts/qmt/fband/config.py`（文档以该文件为准）。因子数字的唯一可信数据源（Single Source of Truth）是 `RECIPE.factor_params`；均线/MACD/ATR 窗的唯一可信数据源是 `RECIPE.structure`。交易终端实盘环境在「模型交易 → 新建/编辑策略交易」面板只覆盖开关 / 资金基数 / 固定金额 / 可部署比例 / 加仓开关（`fband/panel.xml`）；编辑器回测无注入时用 config。买入 `entry`、加仓 `scale_in`、卖出 `exit`、减仓 `scale_out` 四个槽位的条件抽象语法树、买点窗口、时间成本、加仓细节、`SCALE_LOTS`、阶梯止盈 `trail_stop.tiers`、`RECIPE.structure` 指标周期窗、`BOOK_STOCKS` 子配置 / `MA_TYPE`、路径仍只在 config（因子阈值和指标周期窗不上屏）。
+**参数默认值**：`factor_band/scripts/qmt/fband/config.py`（文档以该文件为准）。因子数字的唯一可信数据源（Single Source of Truth）是 `RECIPE.factor_params`；均线/MACD/ATR 窗的唯一可信数据源是 `RECIPE.structure`。交易终端实盘环境在「模型交易 → 新建/编辑策略交易」面板只覆盖开关 / 资金基数 / 固定金额 / 可部署比例 / 加仓开关（`fband/panel.xml`）；编辑器回测无注入时用 config。买入 `entry`、加仓 `scale_in`、卖出 `exit`、减仓 `scale_out` 四个槽位的条件抽象语法树、买点窗口、时间成本、加仓细节、`SCALE_LOTS`、阶梯止盈 `trail_stop.tiers`、`RECIPE.structure` 指标周期窗、`BOOK_STOCKS` 子配置、路径仍只在 config（因子阈值和指标周期窗不上屏）。价格均线算法由调用点直调 `_ema` / `_sma`，不上配置。
 
 分层契约见 [`docs/架构重构/架构.md`](./docs/架构重构/架构.md)；叶子与四个槽位草图见 [`docs/架构重构/Recipe分类.md`](./docs/架构重构/Recipe分类.md)。跟踪池、部署文件名与历史目录名不约束标的风格。
 
@@ -42,7 +42,7 @@ scale_out: false
 
 叶子登记在 `LEAVES`；默认盘启用哪些、如何 `and` / `or` / `not`，写在 `config.RECIPE` 四个槽位。均线/MACD/ATR 窗只读 `RECIPE.structure`（通过 `_structure_windows()` 读取）。阈值运行时读 `RECIPE.factor_params`（catalog 用 defaults 整表写入）。
 
-周线均线为斐波那契 **MA5 / MA13 / MA34**（`RECIPE.structure.w_ma` 的 `fast` / `mid` / `life`，当前 5 / 13 / 34；`mid` 只给日志多头 `weekly_bull`）。周线取数 need 另钳原 MA55 暖机地板。价格均线**算法**优先取 `BOOK_STOCKS[code].ma_type`，缺省回落全局 `MA_TYPE`（`EMA` 或 `SMA`，默认 EMA）；成交量均量始终 SMA。文档与日志里的 `w_ma30` 字段实际是生命线 MA34。实盘与回测都只用**上一根已收盘周 K**（丢掉今天所在自然周，周五尾盘也看上周），对齐 QMT 回测 0000 原生 `1w`。
+周线均线为斐波那契 **MA5 / MA13 / MA34**（`RECIPE.structure.w_ma` 的 `fast` / `mid` / `life`，当前 5 / 13 / 34；`mid` 只给日志多头 `weekly_bull`）。周线取数 need 另钳原 MA55 暖机地板。价格均线由 `ctx` 直调 `_ema`（量均始终 `_sma`；MACD 仍 `_ema`）。文档与日志里的 `w_ma30` 字段实际是生命线 MA34。实盘与回测都只用**上一根已收盘周 K**（丢掉今天所在自然周，周五尾盘也看上周），对齐 QMT 回测 0000 原生 `1w`。
 
 现行默认配置里，周线叶子是跨周期过滤（禁开 / 清仓），不是开仓前提：
 
@@ -67,7 +67,7 @@ scale_out: false
 
 `pullback_vol`：
 
-- 收盘靠近日线中线或慢线（`d_ma.mid` / `d_ma.slow`，当前 MA20 / MA60；容差 `pullback_vol.tol`，当前 ±2.5%；算法见标的 `ma_type` / `MA_TYPE`）。对应窗 `<=0` 则该条贴线关掉
+- 收盘靠近日线中线或慢线（`d_ma.mid` / `d_ma.slow`，当前 MA20 / MA60；容差 `pullback_vol.tol`，当前 ±2.5%；算法由 `ctx` 直调 `_ema`）。对应窗 `<=0` 则该条贴线关掉
 - **连续** `pullback_vol.confirm_days` 日（当前 `2`）成交量 `<` 该日 `MAVOL{vol_n} × pullback_vol.ratio`（当前 `vol_n=10`、`ratio=0.9`）；贴均线只看当天
 
 ### 加仓（`scale_in` + `_scale_gate`）
@@ -208,14 +208,13 @@ scale_out: false
 | `DIVIDEND_TYPE` | `"front_ratio"` | 池外/未写 `dividend_type` 时的复权缺省（仅 config）；池内未写字段回落此值 |
 | `TRADE_BUDGET` | `100000` | 固定金额；实盘 `BUDGET_BASE=fixed` 时作基数；编辑器回测袖子 |
 | `BUDGET_BASE` | `"equity"` | `equity`=总资产减其它市值；`fixed`=上面固定金额。面板下拉「总资产减其它 / 固定金额」 |
-| `BOOK_STOCKS` | 见 config | 单实例监视名单；N=集合/字典长度；未写 `ma_type`/`dividend_type` 回落全局 |
+| `BOOK_STOCKS` | 见 config | 单实例监视名单；N=集合/字典长度；未写 `dividend_type` 回落全局 |
 | `BOOK_FILE` | `D:\HlBandV7\hlband_book.json` | 单实例信号账本；不是 STATE |
 | `BOOK_FREEZE_CLOSE/OPEN` | `PENDING_EXEC_START` / `093030` | 收盘冻结=尾盘成交窗起点；开盘冻结保留 30s 打卡缓冲 |
 | `CASH_RATIO` | `0.90` | 可部署比例（相对所选基数） |
 | `BOOK_LOT_MAX` | `3` | 全池同时最多 3 笔（仅 config） |
 | `LOT_OPEN_FRAC` | `0.50` | 开仓：大仓空则 50%；大仓已在且非最后一槽则 30%（仅 config） |
 | `LOT_ADD_FRAC` | `0.30` | 第二笔 30%；全池最后一槽不锁此值，改吃剩余约 20% cap（仅 config） |
-| `MA_TYPE` | `"EMA"` | 价格均线**算法**缺省：`EMA`/`SMA`；`BOOK_STOCKS[code].ma_type` 优先（仅 config；不是窗。量均始终 SMA，MACD 仍 EMA） |
 | `d_ma.mid` / `d_ma.slow` | `20` / `60` | 日线中/慢均线（`RECIPE.structure`）；`<=0` 关该条（关中线同时关无量阴跌禁开；关慢线则 time_force 破线地板关掉） |
 | `w_ma.fast` / `w_ma.mid` / `w_ma.life` | `5` / `13` / `34` | 周线快/中/生命线（`RECIPE.structure`）；`mid` 仅日志多头 |
 | `macd.fast` / `macd.slow` / `macd.signal` | `12` / `26` / `9` | 周线 MACD 三窗（`RECIPE.structure`） |

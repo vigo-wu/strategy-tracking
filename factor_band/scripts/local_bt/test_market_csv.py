@@ -590,12 +590,12 @@ class YearSplitTests(unittest.TestCase):
                 ma_type="SMA",
             )
             self.assertTrue(row.get("ok"), row.get("error"))
-            self.assertEqual(row.get("ma_type"), "SMA")
             name = Path(row["log"]).name
             self.assertIn("2020", name)
-            self.assertIn("SMA", name)
+            self.assertNotIn("SMA", name)
+            self.assertNotIn("EMA", name)
             text = Path(row["log"]).read_text(encoding="utf-8")
-            self.assertIn("ma_type= SMA", text)
+            self.assertNotIn("ma_type=", text)
 
 
 class DetailReTests(unittest.TestCase):
@@ -1658,7 +1658,7 @@ class BookSnippetTests(unittest.TestCase):
             ]
         )
         text = format_book_snippet(df)
-        self.assertIn('"ma_type": "EMA"', text)
+        self.assertNotIn("ma_type", text)
         self.assertIn('"dividend_type": "front"', text)
         self.assertIn("600350.SH", text)
 
@@ -1676,7 +1676,7 @@ class BookSnippetTests(unittest.TestCase):
         )
         text = format_book_snippet(df)
         self.assertIn("000000.SZ", text)
-        self.assertIn('"ma_type": "EMA"', text)
+        self.assertNotIn("ma_type", text)
         self.assertIn('"dividend_type": "front_ratio"', text)
         self.assertEqual(ma_suggest_label("000000.SZ", ""), "EMA（默认）")
 
@@ -1693,7 +1693,7 @@ class BookSnippetTests(unittest.TestCase):
             ]
         )
         text = format_book_snippet(df)
-        self.assertIn('"ma_type": "EMA"', text)
+        self.assertNotIn("ma_type", text)
         self.assertIn('"dividend_type": "front"', text)
 
 

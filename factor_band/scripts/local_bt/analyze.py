@@ -1040,7 +1040,7 @@ def load_chart_ma_config(
     *,
     force: bool = False,
 ) -> dict[str, Any]:
-    """读 hlband config 的均线周期 / 缺省 MA_TYPE / BOOK_STOCKS。不 import 拼接脚本。"""
+    """读 hlband config 的均线周期。价格均线算法由策略调用点决定（现行 EMA）。不 import 拼接脚本。"""
     global _CHART_MA_CFG
     if _CHART_MA_CFG is not None and config_path is None and (not force):
         return _CHART_MA_CFG
@@ -1060,9 +1060,6 @@ def load_chart_ma_config(
             mod = importlib.util.module_from_spec(spec)
             try:
                 spec.loader.exec_module(mod)
-                raw_ma = normalize_ma_type(getattr(mod, "MA_TYPE", "EMA"))
-                if raw_ma:
-                    out["ma_type"] = raw_ma
                 rec = getattr(mod, "RECIPE", None) or {}
                 st = rec.get("structure") if isinstance(rec, dict) else {}
                 st = st if isinstance(st, dict) else {}
@@ -1091,13 +1088,7 @@ def load_chart_ma_config(
                     code = str(k or "").strip().upper()
                     if not code:
                         continue
-                    if isinstance(v, dict):
-                        kind = normalize_ma_type(v.get("ma_type")) or "EMA"
-                    elif isinstance(v, str):
-                        kind = normalize_ma_type(v) or "EMA"
-                    else:
-                        kind = "EMA"
-                    book[code] = kind
+                    book[code] = "EMA"
                 out["book"] = book
             except Exception:
                 pass
@@ -1128,7 +1119,7 @@ def resolve_chart_ma_kind(
     detail_path: str | Path | None = None,
     ma_kind: str = "",
 ) -> str:
-    """明细文件名 _(SMA|EMA) → BOOK_STOCKS → 全局 MA_TYPE。"""
+    """明细文件名 _(SMA|EMA)（历史档案）→ 否则 EMA（与策略调用点一致）。"""
     forced = normalize_ma_type(ma_kind)
     if forced:
         return forced
@@ -1136,17 +1127,7 @@ def resolve_chart_ma_kind(
         from_name = ma_kind_from_detail_path(detail_path)
         if from_name:
             return from_name
-    cfg = load_chart_ma_config()
-    code = str(stock or "").strip().upper()
-    book = cfg.get("book") or {}
-    if code:
-        if code in book:
-            return str(book[code])
-        compact = code.replace("_", ".")
-        for k, v in book.items():
-            if str(k).strip().upper().replace("_", ".") == compact:
-                return str(v)
-    return str(cfg.get("ma_type") or "EMA")
+    return "EMA"
 
 
 def _ema_sma_seed(c, n: int):

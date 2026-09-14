@@ -55,6 +55,14 @@ class LocalBtLogTest(unittest.TestCase):
             self.assertEqual(len(trades), 1)
             self.assertEqual(trades[0]["sell_signal"], "trail_stop")
 
+    def test_parse_banner_without_ma_type(self) -> None:
+        from local_bt_log import parse_banner
+
+        text = "local_bt 600350.SH csv= x.csv walk= 20180101 20181231 n= 10 hist_n= 20 weekly= a n_w_start= 5 div= front_ratio pit= 0 mode= -\n"
+        banner = parse_banner(text)
+        self.assertEqual(banner.get("stock"), "600350.SH")
+        self.assertEqual(banner.get("ma_type"), "")
+
 
 if __name__ == "__main__":
     unittest.main()

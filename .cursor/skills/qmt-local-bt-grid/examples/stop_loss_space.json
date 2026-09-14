@@ -12,7 +12,6 @@
       "mode": "random_from_csv",
       "universe_dir": "tools/csv/none",
       "n": 20,
-      "ma_type": "EMA",
       "dividend_type": "front_ratio",
       "exclude": []
     },

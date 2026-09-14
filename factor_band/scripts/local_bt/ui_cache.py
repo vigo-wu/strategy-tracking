@@ -101,7 +101,6 @@ ROBUST_KEYS: tuple[str, ...] = (
     "robust_drawn_baskets",
     "robust_draw_fp",
     "robust_mean_jaccard",
-    "robust_ma_type",
     "robust_compare_div",
     "robust_compound",
     "robust_param_source",

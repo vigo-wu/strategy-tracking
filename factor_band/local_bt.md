@@ -96,7 +96,7 @@ factor_band/回测记录/      ← 旧终端导出；「仅分析」会一并列
 
 - 下拉列表是所选复权目录里标的的 **并集**。
 - 同一套起止日期；开跑后对每种复权找该票 `*_1d_*.csv`，缺文件则跳过并提示。
-- 价格均线锁 `BOOK_STOCKS[code].ma_type`，缺省全局 `MA_TYPE`（当前默认 EMA）。可用 `--ma-type` 强制一种。
+- 价格均线由策略调用点直调 `_ema`（量均 `_sma`）。不再用 `--ma-type` / `BOOK_STOCKS.ma_type` 切换算法。
 - 上传 CSV 只写入 **第一种** 勾选复权。
 - 跑完后若成功 ≥2 种复权：先出 KPI 对照表与权益曲线叠加，再用 tab 切换查看该复权的 K 线 / 成交（K 线价格口径不同，不叠加）。
 
@@ -121,10 +121,10 @@ factor_band/回测记录/      ← 旧终端导出；「仅分析」会一并列
 
 流程：
 
-1. 建议均线锁 `BOOK_STOCKS[code].ma_type` / 全局 `MA_TYPE`。磁盘上就算还有成对 `_SMA`/`_EMA` 分年文件，也不按盈亏选。
+1. 价格均线由策略调用点直调 `_ema`。磁盘上就算还有成对 `_SMA`/`_EMA` 分年文件，也不按盈亏选。
 2. 再在「窗口内仍有分年 KPI」的复权之间，取 **year 键交集**，比总盈亏；与最高者 `|Δ|≤1` 元视为接近，再比胜率；仍平优先 `front_ratio`。
 3. 用胜出复权的窗口内分年 KPI 打分；股性（年化波动、贴 MA20）读 **该窗口建议复权** 的 `csv/<type>/`。
-4. 过线后按得分取 Top N。页面给出 `BOOK_STOCKS` 草稿：建议均线写默认算法；建议复权有对照用对照赢家，缺对照回落 `DIVIDEND_TYPE` / 池内子配置。
+4. 过线后按得分取 Top N。页面给出 `BOOK_STOCKS` 草稿：建议复权有对照用对照赢家，缺对照回落 `DIVIDEND_TYPE` / 池内子配置。
 
 默认硬过滤、侧栏控件范围与打分权重写在 `factor_band/scripts/local_bt/select_config.py`，侧栏可改。成交年占比 / 盈利年占比 / 每年轮次按选定窗口计。
 
@@ -149,7 +149,7 @@ factor_band/回测记录/      ← 旧终端导出；「仅分析」会一并列
 
 #### 固定标的回放
 
-- 默认载入 [`hlband/config.py`](./scripts/qmt/fband/config.py) 的 `BOOK_STOCKS`（含 `ma_type` / `dividend_type`）；可在表单 `data_editor` 增删改；「从 config 重载」恢复；「导入」弹窗可粘贴单篮子 `BOOK_STOCKS` 字典（含 `# 名称` 注释，不写回 config）。按年字典请用 Walk-forward 各段导入。
+- 默认载入 [`hlband/config.py`](./scripts/qmt/fband/config.py) 的 `BOOK_STOCKS`（含 `dividend_type`）；可在表单 `data_editor` 增删改；「从 config 重载」恢复；「导入」弹窗可粘贴单篮子 `BOOK_STOCKS` 字典（含 `# 名称` 注释，不写回 config）。按年字典请用 Walk-forward 各段导入。
 - 区间：数据起始/结束年 → `YYYY0101`–`YYYY1231` 连续回放（复利在区间内滚动，不按年重置钱包）。
 - 仓位：与 Walk-forward 相同（资金帽 / `BOOK_LOT_MAX` / 分档）；默认开复利；可强制重跑。
 - 产物：`report/<type>/local_bt_book_fixed_{start}_{end}_k{hash8}_*`；总表 `report/local_bt_fixed_book.csv`。
@@ -234,7 +234,7 @@ python factor_band/scripts/local_bt/select_analysis.py \
 | `select_year` | 该段段首（换仓年） |
 | `is_rebalance` | 是否段首换仓年 |
 | `picks` | 该段篮子（顿号分隔） |
-| `pick_details` | 篮子明细：`stock` / `ma_type` / `dividend_type`（界面「查看标的」弹窗；CSV 中为 JSON 字符串） |
+| `pick_details` | 篮子明细：`stock` / `dividend_type`（界面「查看标的」弹窗；CSV 中为 JSON 字符串） |
 | `portfolio_pnl` | 该年篮子 **组合回放** 盈亏 |
 | `naive_pnl` | 列保留、不计算（恒空）；组合看 `portfolio_pnl` |
 | `status` | `ok` / `无推荐` / `回放失败:…` |
@@ -262,7 +262,7 @@ python factor_band/scripts/local_bt/select_analysis.py \
 
 ```json
 {
-  "2022": {"600350.SH": {"ma_type": "EMA", "dividend_type": "front_ratio"}},
+  "2022": {"600350.SH": {"dividend_type": "front_ratio"}},
   "2023": ["601988.SH", "600900.SH"]
 }
 ```
@@ -334,7 +334,7 @@ python factor_band/scripts/local_bt/select_analysis.py \
 python factor_band/scripts/local_bt/run.py --csv-dir tools/csv --start 20210101 --end 20251231 --split year --dividend-type front,front_ratio
 ```
 
-`--dividend-type` 逗号分隔；未给默认 `front_ratio`。`--split year` 按自然年。`--workers 0` 为自动进程数。多种复权一次进同一个进程池；同一标的 CSV 的年分段在同一 worker 内顺序跑、复用已加载的行情。需要强制一种均线时加 `--ma-type SMA|EMA`。
+`--dividend-type` 逗号分隔；未给默认 `front_ratio`。`--split year` 按自然年。`--workers 0` 为自动进程数。多种复权一次进同一个进程池；同一标的 CSV 的年分段在同一 worker 内顺序跑、复用已加载的行情。
 
 选股（同样扫兄弟复权目录）：
 

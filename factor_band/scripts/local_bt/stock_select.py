@@ -37,10 +37,8 @@ from analyze import (  # noqa: E402
     analyze_detail,
     daily_csvs_by_stock,
     dividend_label,
-    load_chart_ma_config,
     logical_dividend_type,
     normalize_dividend_type,
-    normalize_ma_type,
     parse_budget_from_log,
     pick_div_winner,
     resolve_typed_dir,
@@ -1199,12 +1197,9 @@ def score_universe(
 
 
 def run_default_ma_div(stock: str = "") -> tuple[str, str]:
-    """当前实跑缺省：池内用 BOOK_STOCKS 子配置，否则 config MA_TYPE / DIVIDEND_TYPE。"""
-    cfg = load_chart_ma_config()
-    code = str(stock or "").strip().upper()
-    book_ma = (cfg.get("book") or {}).get(code) if code else ""
-    ma = normalize_ma_type(book_ma) or normalize_ma_type(cfg.get("ma_type")) or "EMA"
-    div = logical_dividend_type(code) or DEFAULT_DIVIDEND_TYPE
+    """当前实跑缺省：价格均线 EMA；复权用 DIVIDEND_TYPE / 池内子配置。"""
+    ma = "EMA"
+    div = logical_dividend_type(stock) or DEFAULT_DIVIDEND_TYPE
     return ma, div
 
 
@@ -1245,12 +1240,12 @@ def format_book_snippet(recommend: pd.DataFrame) -> str:
         stock = str(r.get("stock") or "").strip()
         if not stock:
             continue
-        kind = snippet_ma_type(r)
         div = snippet_div_type(r)
-        fields = ['"ma_type": "%s"' % kind]
+        fields = []
         if div in DIVIDEND_TYPES:
             fields.append('"dividend_type": "%s"' % div)
-        lines.append('    "%s": {%s},' % (stock, ", ".join(fields)))
+        inner = ", ".join(fields)
+        lines.append('    "%s": {%s},' % (stock, inner) if inner else '    "%s",' % stock)
         n += 1
     lines.append("}")
     if n == 0:
@@ -1268,7 +1263,6 @@ def recommend_to_basket(recommend: pd.DataFrame | None) -> dict[str, dict[str, s
         if not stock:
             continue
         out[stock] = {
-            "ma_type": snippet_ma_type(r),
             "dividend_type": snippet_div_type(r),
         }
     return out
@@ -1292,7 +1286,7 @@ def coverage_notes(coverage: dict[str, Any], scanned: dict[str, Any] | None = No
         if int(coverage.get(prev) or 0) and int(coverage.get(last) or 0) < int(0.9 * int(coverage.get(prev) or 0)):
             notes.append("%s 年批明显少于 %s，覆盖不齐。" % (last, prev))
     notes.append(
-        "建议均线锁 `BOOK_STOCKS` / `MA_TYPE`；建议复权按选定年 **%s** 成对盈亏择优。白名单不覆盖建议。"
+        "建议复权按选定年 **%s** 成对盈亏择优。价格均线由策略调用点直调 _ema。白名单不覆盖建议。"
         % "、".join(str(y) for y in score_years)
     )
     n_dc = int(coverage.get("n_div_compare") or 0)

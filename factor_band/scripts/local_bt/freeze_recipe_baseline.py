@@ -154,7 +154,7 @@ def _eval_cases(ns: dict) -> list[dict]:
     cases.append({"id": "trailish", "sell_ok": bool(ok), "sell_reasons": list(rs)})
 
     pb_c = [10.0 + 0.01 * i for i in range(80)]
-    ma20 = ns["_price_ma"](pb_c, 20)
+    ma20 = ns["_ema"](pb_c, 20)
     m20 = ns["_last_valid"](ma20, -1)
     pb_c[-1] = float(m20)
     pb_c[-2] = float(m20) * 1.001

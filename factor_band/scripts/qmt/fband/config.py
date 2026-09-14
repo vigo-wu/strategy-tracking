@@ -13,8 +13,8 @@ ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 # cap = CASH_RATIO * 基数。BUDGET_BASE=equity：基数=E_s=总资产-非白名单股票市值；
 # BUDGET_BASE=fixed：基数=TRADE_BUDGET（不读其它市值）。
 # k / book_mv 只统计 BOOK_STOCKS。N = 集合/字典长度。实盘单实例监视全池并写账本；回测用 TRADE_BUDGET。
-# 形态：code 集合，或 code → 配置字典。ma_type（EMA|SMA）；dividend_type 见下方复权注释。
-# 简写兼容：value 写成 "SMA" 视为 {"ma_type": "SMA"}；旧纯字符串 tuple 仍认作白名单。
+# 形态：code 集合，或 code → 配置字典（dividend_type 见下方复权注释）。
+# 旧纯字符串 tuple 仍认作白名单。价格均线算法由调用点直调 _ema/_sma，不上本表。
 BOOK_STOCKS = {
     "600938.SH",
     "603259.SH",
@@ -26,7 +26,7 @@ BOOK_STOCKS = {
 }
 
 # 单实例共享信号账本（不是 STATE_FILE；禁止按标的分文件）
-BOOK_FILE = r"D:\FBand\fband_book.json"
+BOOK_FILE = r"D:\FactorBand\fband_book.json"
 # 资金基数：equity=总资产减其它股票市值；fixed=下面 TRADE_BUDGET。面板下拉会写成中文，代码归一成这两值。
 BUDGET_BASE = "equity"
 # 可部署比例（相对所选基数）；其余留作 T+1 / 废单重试
@@ -42,10 +42,8 @@ LOT_ADD_FRAC = 0.30
 TRADE_BUDGET = 100000.0
 
 # ---- 周线过滤（跨周期；主图仍是日线）----
-# 价格均线缺省：EMA 或 SMA（大小写不敏感）。BOOK_STOCKS[code].ma_type 优先；
-# 缺省/非法回落本常量。只作用于周/日价格均线；成交量均量始终 SMA；MACD 仍用 EMA。
-MA_TYPE = "EMA"
 # 周/日均线周期、MACD 窗与 ATR 窗在 RECIPE.structure（字面量）。
+# 价格均线算法由 ctx / 因子调用点直调 _ema（量均始终 _sma；MACD 仍 _ema）。
 # 日线：中线→回踩/无量阴跌；慢线→回踩支撑 + 时间成本地板。<=0 关该条。
 # 周线：快/生命线（5/34）；mid=13 仅日志多头。取数 need 另钳原 MA55 暖机地板。
 # ATR：威尔德平滑窗 atr.n；<=0 关 atr_stop。
@@ -183,14 +181,14 @@ PENDING_ORPHAN_SEC = 60
 
 # QMT 模型无 __file__；状态绝对路径（含 {stock}，宇宙循环按票分文件）
 #   513530.SH → ...\fband_513530_SH.json
-STATE_FILE = r"D:\FBand\fband_{stock}.json"
+STATE_FILE = r"D:\FactorBand\fband_{stock}.json"
 # 实盘结构化日志根目录；落盘为 LOG_DIR/<stock_tag>/{tag}_events.jsonl 等
 # 空字符串关闭落盘（仍保留终端 print）
-LOG_DIR = r"D:\FBand\logs"
+LOG_DIR = r"D:\FactorBand\logs"
 # True=回测也写日志（默认关，避免回测刷爆磁盘）
 LOG_IN_BACKTEST = False
 
-STRATEGY_NAME = "FBand"
+STRATEGY_NAME = "FactorBand"
 STRATEGY_VER = "v5.0.0"
 # =======================================================
 

@@ -172,7 +172,6 @@ scale_out:
 | `RECIPE` 四个槽位 AST | `entry` / `scale_in` / `exit` / `scale_out` | 无数字；默认盘启用写这里 |
 | `catalog.LEAVES` → `RECIPE.factor_params` | `stop_loss.pct`、`atr_stop.k`、`atr_trail_stop.k1` / `k2`、`time_force.arm`、`chase.max_pct`、`trail_stop.tiers` | 作者改 `LEAVES`；运行时 `_factor_param` |
 | `RECIPE.structure` | 见下表 | 均线/MACD/ATR **窗**；`_structure_windows` |
-| 算法（不是窗） | `MA_TYPE`、`BOOK_STOCKS[].ma_type` | SMA/EMA；不上 `structure` |
 | 仓位 / 资金全局 | `SCALE_ARM`、`CASH_RATIO`、`TRADE_BUDGET` | 不上表、不上因子面板 |
 
 `RECIPE.structure` 现行默认配置字面量（`<=0` 关该条均线/ATR；MACD 三窗都应 >0）：
@@ -184,7 +183,7 @@ scale_out:
 | `macd` | `fast` / `slow` / `signal` | 12 / 26 / 9 | 周线 DIF/DEA/柱 |
 | `atr` | `n` | 14 | 日线威尔德 ATR；`<=0` 关 `atr_stop` / `atr_trail_stop` |
 
-读取指标周期窗：调用方先 `_structure_windows()`，再把 `n` 传给 `_price_ma` / `_calc_macd`（三窗必传）/ `_calc_atr`。缺键用上表数字字面量。网格覆盖 `_structure_apply_global`，按段再按 key 合并。QMT 暖机（`market._ohlcv_need_*`）走 `_structure_windows()`；local_bt `run.py` 读裸表，缺键当 0——现行默认配置字面量齐全时两者一致。
+读取指标周期窗：调用方先 `_structure_windows()`，再把 `n` 传给 `_ema` / `_sma` / `_calc_macd`（三窗必传）/ `_calc_atr`。缺键用上表数字字面量。网格覆盖 `_structure_apply_global`，按段再按 key 合并。QMT 暖机（`market._ohlcv_need_*`）走 `_structure_windows()`；local_bt `run.py` 读裸表，缺键当 0——现行默认配置字面量齐全时两者一致。价格均线算法不上 `structure`：现行日/周价格均线由调用点直调 `_ema`。
 
 网格：因子轴元数据（分组 / 短名 / percent / kind）来自 `LEAVES`；轴 id 仍是点路径（`stop_loss.pct` / `atr_stop.k` / `atr_trail_stop.k1` / `k2` / `time_force.arm` / `d_ma.mid` / `atr.n`）；短 id 如 `dmm15` / `ask` / `atk1` / `atk2` / `tfa` / `atr`。`atr_stop.k` / `atr_trail_stop.k1` / `k2` 是浮点倍数轴（`LEAVES` 默认 `2.0`，可扫 `1.5`），**不是**百分比轴。格子 `overrides` 形态不变，必须写成：
 

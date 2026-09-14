@@ -38,7 +38,7 @@ MAE 为何不可信、本轮数字：需要时再读 [reference-lessons.md](refe
 2. 格子 = **扫描取值笛卡尔积**，不自动插入现行档。扫描值全等于 config 的格打 `is_current` / `★现行`。不强制 `id=base`。
 3. 关联常量不顺手改：动 `trail_stop.tiers` 整表不改 `SCALE_ARM`。让路是 `time_force.arm`；禁止顶层 `TIME_FORCE_MIN_RET`；旧 spec 含该轴须拒绝重存。
 4. `time_force.bars<=0` 关闭整条 time_force。`time_force.arm<=0` 关让路（站上慢线也日历强平）。
-5. **主样本**：默认=跟踪池 `BOOK_STOCKS` 一段组合连续回放（`year_start0101`–`year_end1231`，单账户、最多 3 笔、`CASH_RATIO×`权益复利）。`asset_split.mode=random_from_csv` 时调参篮 / 盲测篮 **各跑一段**（两套钱包，禁止 `tune∪holdout` 同一 book）。均线锁 `BOOK_STOCKS[].ma_type` / 全局 `MA_TYPE`。旧 `report/grid/<sweep>/` 的 stock×年 log **须重跑**，禁止只汇总。
+5. **主样本**：默认=跟踪池 `BOOK_STOCKS` 一段组合连续回放（`year_start0101`–`year_end1231`，单账户、最多 3 笔、`CASH_RATIO×`权益复利）。`asset_split.mode=random_from_csv` 时调参篮 / 盲测篮 **各跑一段**（两套钱包，禁止 `tune∪holdout` 同一 book）。价格均线由策略调用点直调 `_ema`，网格不扫算法。旧 `report/grid/<sweep>/` 的 stock×年 log **须重跑**，禁止只汇总。
 6. **时空双重隔离**：时间用 `tune_*` / `check_*`；空间用 `tune_stocks` / `holdout_stocks`（盲测只否决、不参与格子比大小）。`mode=off` 时无空间门。
 7. 每格写入主题 `report/grid/<sweep>/<cell>/`，**不得覆盖** `report/front_ratio/` 等基线 log。
 8. **全局单层多进程池**（禁止格间×格内嵌套 ProcessPool）：`--workers` / `grid_workers` = 全局进程数。`<=0` 自动 `min(walk 数, CPU)`；`1` 全串行；`>=2` 铺平**当前组**各格 walk 进同一池（不夹 16）。一次只提交一组，禁止把全部格子塞进同一个池。格内最多 2 段（tune + holdout）。进度 = (已完成 walk + 在跑 bar 分数) / `(本组格数 × n_jobs)`，参数指纹预检不占分母。

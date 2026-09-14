@@ -13,7 +13,7 @@ OOS_YEARS = {2023, 2024, 2025, 2026}
 BUDGET = 100000.0
 
 RE_BANNER = re.compile(
-    r"local_bt\s+(\S+)\s+csv=\s+(\S+)\s+walk=\s+(\d+)\s+(\d+).*?\bma_type=\s+(\S+)",
+    r"local_bt\s+(\S+)\s+csv=\s+(\S+)\s+walk=\s+(\d+)\s+(\d+)(?:.*?ma_type=\s+(\S+))?",
     re.S,
 )
 RE_BUY_FILL = re.compile(r"BUY(?: add)? filled (\{.*\})")
@@ -53,7 +53,7 @@ def parse_banner(text: str) -> dict[str, str]:
         "csv": m.group(2).strip(),
         "walk_start": m.group(3)[:8],
         "walk_end": m.group(4)[:8],
-        "ma_type": m.group(5).strip().upper(),
+        "ma_type": (m.group(5) or "").strip().upper(),
     }
 
 

@@ -83,7 +83,7 @@ def _time_force_hit(price, closes, hold_bars, lot=None, ctx=None):
         return False
     if hold_bars is None or int(hold_bars) <= bars_lim:
         return False
-    ma60_arr = _price_ma(closes, slow_n)
+    ma60_arr = _ema(closes, slow_n)
     if ma60_arr is None:
         return False
     i = len(closes) - 1

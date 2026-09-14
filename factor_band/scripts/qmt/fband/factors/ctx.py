@@ -134,9 +134,9 @@ def _weekly_market_features(closes_w):
     win = _structure_windows()
     w_ma = win["w_ma"]
     mc = win["macd"]
-    ma5 = _price_ma(closes_w, w_ma["fast"])
-    ma10 = _price_ma(closes_w, w_ma["mid"])
-    ma30 = _price_ma(closes_w, w_ma["life"])
+    ma5 = _ema(closes_w, w_ma["fast"])
+    ma10 = _ema(closes_w, w_ma["mid"])
+    ma30 = _ema(closes_w, w_ma["life"])
     macd = _calc_macd(closes_w, mc["fast"], mc["slow"], mc["signal"])
     if ma5 is None or ma10 is None or ma30 is None or macd is None:
         return detail
@@ -241,8 +241,8 @@ def _factor_daily_features(closes, volumes):
         slow_n = 0
     detail["mid_n"] = mid_n
     detail["slow_n"] = slow_n
-    ma20 = _price_ma(closes, mid_n) if mid_n > 0 else None
-    ma60 = _price_ma(closes, slow_n) if slow_n > 0 else None
+    ma20 = _ema(closes, mid_n) if mid_n > 0 else None
+    ma60 = _ema(closes, slow_n) if slow_n > 0 else None
     raw_vn = _factor_param(None, "pullback_vol", "vol_n")
     raw_dn = _factor_param(None, "vol_dry", "n")
     try:

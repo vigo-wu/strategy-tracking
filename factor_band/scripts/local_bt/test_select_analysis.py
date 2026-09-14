@@ -57,7 +57,8 @@ class SelectAnalysisTests(unittest.TestCase):
             book = load_book_stocks_full(str(cfg))
             self.assertEqual(book["600350.SH"]["ma_type"], "EMA")
             self.assertEqual(book["600350.SH"]["dividend_type"], "front_ratio")
-            self.assertEqual(book["601988.SH"]["ma_type"], "SMA")
+            self.assertNotIn("ma_type", book["601988.SH"])
+            self.assertEqual(book["601988.SH"]["dividend_type"], "front_ratio")
             rows = book_stocks_to_editor_rows(book)
             back = editor_rows_to_book_stocks(rows)
             self.assertIn("600350.SH", back)
@@ -75,7 +76,7 @@ class SelectAnalysisTests(unittest.TestCase):
                 encoding="utf-8",
             )
             book = load_book_stocks_full(str(cfg))
-            self.assertEqual(book["600350.SH"]["ma_type"], "EMA")
+            self.assertNotIn("ma_type", book["600350.SH"])
             self.assertEqual(book["600350.SH"]["dividend_type"], "front_ratio")
             self.assertEqual(set(book), {"600350.SH", "601988.SH"})
 
@@ -297,6 +298,7 @@ class SelectAnalysisTests(unittest.TestCase):
         self.assertEqual(resolve_period_basket([], fb), {})
         listed = resolve_period_basket(["601988.SH"], fb)
         self.assertEqual(listed["601988.SH"]["ma_type"], "EMA")
+        self.assertEqual(listed["601988.SH"]["dividend_type"], "front_ratio")
         partial = resolve_period_basket({"600350.SH": {"ma_type": "SMA"}}, fb)
         self.assertEqual(partial["600350.SH"]["ma_type"], "SMA")
         self.assertEqual(partial["600350.SH"]["dividend_type"], "front_ratio")

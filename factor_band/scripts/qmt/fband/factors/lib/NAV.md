@@ -11,7 +11,7 @@
 
 | id | 文件 | 现逻辑 | 主要读 | 阈值（`factor_params`） |
 | :--- | :--- | :--- | :--- | :--- |
-| `pullback_vol` | [pullback_vol.py](pullback_vol.py) | 贴中/慢均线 + 连续缩量 | 日线价量 | `pullback_vol.*`；中/慢线周期是 `structure.d_ma.*` |
+| `pullback_vol` | [pullback_vol.py](pullback_vol.py) | 贴中/慢均线 + 连续缩量 | 日线价量 | `pullback_vol.*`；中/慢线周期是 `structure.d_ma.*`；序列由 `ctx` 直调 `_ema` |
 | `chase` | [chase.py](chase.py) | 当日涨幅过大 | 日线收盘 | `chase.max_pct` |
 | `vol_dry` | [vol_dry.py](vol_dry.py) | 跌破中线且无量 | 日线价量 | `vol_dry.ratio` / `n`；中线周期是 `structure.d_ma.mid` |
 | `w_bias` | [w_bias.py](w_bias.py) | 周线高位乖离 | `w_detail` | `w_bias.hard` |
@@ -24,7 +24,7 @@
 | `atr_stop` | [atr_stop.py](atr_stop.py) | 收盘 <= 成本 − k×ATR | `state.lot` / `market.atr` | `atr_stop.k`；窗是 `structure.atr.n`（`<=0` 关） |
 | `atr_trail_stop` | [atr_trail_stop.py](atr_trail_stop.py) | 峰值相对成本 > k1×ATR 武装；收盘<=成本或峰值回撤>=k2×ATR | `state.lot` / `hold_peak` / `market.atr` | `atr_trail_stop.k1` / `k2`；`k1<=0` 整条关；`k2<=0` 只保本 |
 | `trail_stop` | [trail_stop.py](trail_stop.py) | 阶梯回撤 / 利润底 | `hold_peak` | `trail_stop.tiers`（默认 exit 不引用） |
-| `time_force` | [time_force.py](time_force.py) | 持仓日 + 慢线地板 + 武装让路 | `hold_bars` / peak | `time_force.bars` / `time_force.arm`；`arm<=0` 关让路；慢线是 `structure.d_ma.slow` |
+| `time_force` | [time_force.py](time_force.py) | 持仓日 + 慢线地板 + 武装让路 | `hold_bars` / peak | `time_force.bars` / `time_force.arm`；`arm<=0` 关让路；慢线是 `structure.d_ma.slow`，调用点直调 `_ema` |
 
 日志 / 成交主因直接用叶子 id（`chase`、`vol_dry`、`w_bias`、`w_slope`、`weekly_bear_confirm`）。当天空头禁开仍是 `weekly_bear`。历史 log 里的 `*_skip` / 清仓 `weekly_bear` 由选股/summarize 兼容读取。
 

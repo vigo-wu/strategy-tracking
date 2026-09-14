@@ -40,8 +40,6 @@ from compound_wallet import (  # noqa: E402
 )
 from trades_csv import CombinedTradeLedger, trades_csv_path, wrap_fill_hooks  # noqa: E402
 
-MA_TYPES = ("SMA", "EMA")
-
 
 def _norm_detail_stock(code: str) -> str:
     raw = str(code or "").strip().upper()
@@ -61,12 +59,10 @@ def book_stocks_hash(book_stocks: Mapping[str, Any]) -> str:
     for code in sorted(book_stocks.keys()):
         cfg = book_stocks[code]
         if isinstance(cfg, dict):
-            ma = str(cfg.get("ma_type") or "").upper()
             div = str(cfg.get("dividend_type") or "").lower()
         else:
-            ma = str(cfg or "").upper()
             div = ""
-        items.append([str(code).upper(), ma, div])
+        items.append([str(code).upper(), div])
     raw = json.dumps(items, ensure_ascii=False, separators=(",", ":"))
     return hashlib.md5(raw.encode("utf-8")).hexdigest()[:8]
 
@@ -80,14 +76,14 @@ def normalize_book_stocks(raw: Mapping[str, Any] | None) -> dict[str, dict[str, 
         if not stock:
             continue
         if isinstance(cfg, dict):
-            ma = str(cfg.get("ma_type") or "EMA").strip().upper()
             div = str(cfg.get("dividend_type") or DEFAULT_DIVIDEND_TYPE).strip().lower()
+            entry = {"dividend_type": div}
+            leftover = str(cfg.get("ma_type") or "").strip().upper()
+            if leftover in ("SMA", "EMA"):
+                entry["ma_type"] = leftover
         else:
-            ma = str(cfg or "EMA").strip().upper()
-            div = DEFAULT_DIVIDEND_TYPE
-        if ma not in MA_TYPES:
-            ma = "EMA"
-        out[stock] = {"ma_type": ma, "dividend_type": div}
+            entry = {"dividend_type": DEFAULT_DIVIDEND_TYPE}
+        out[stock] = entry
     return out
 
 

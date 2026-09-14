@@ -153,9 +153,6 @@ def default_log_name(stock: str, year: str = "", ma_type: str = "") -> str:
     year_s = str(year or "").strip()
     if year_s:
         parts.append(year_s)
-    ma = normalize_ma_type(ma_type)
-    if ma:
-        parts.append(ma)
     return "_".join(parts) + ".txt"
 
 
@@ -292,20 +289,6 @@ def run_init_probe(
             except Exception:
                 pass
     return buf.getvalue()
-
-
-def _apply_ma_type(ns: dict, kind: str) -> str:
-    k = normalize_ma_type(kind)
-    if not k:
-        return ""
-    ns["MA_TYPE"] = k
-    ns["_MA_TYPE_BAD"] = False
-
-    def _forced(_k=k):
-        return _k
-
-    ns["_ma_kind"] = _forced
-    return k
 
 
 def _apply_dividend_type(ns: dict, kind: str) -> str:
@@ -735,15 +718,9 @@ def run_backtest(
 
     dest = Path(out_dir) if out_dir else THEME / "report"
     dest.mkdir(parents=True, exist_ok=True)
-    ma = normalize_ma_type(ma_type)
     fname = log_name.strip() if log_name else ""
     if not fname:
-        fname = default_log_name(code, ma_type=ma)
-    elif ma:
-        stem = Path(fname).stem
-        suf = "_" + ma
-        if not stem.upper().endswith(suf):
-            fname = stem + suf + (Path(fname).suffix or ".txt")
+        fname = default_log_name(code)
     log_path = dest / fname
 
     n_w0 = 0
@@ -755,7 +732,7 @@ def run_backtest(
     if uses_pit_front(div):
         mode = "diff" if normalize_dividend_type(div) == "front" else "ratio"
     banner = (
-        "local_bt %s csv= %s walk= %s %s n= %s hist_n= %s weekly= %s n_w_start= %s ma_type= %s div= %s pit= %s mode= %s"
+        "local_bt %s csv= %s walk= %s %s n= %s hist_n= %s weekly= %s n_w_start= %s div= %s pit= %s mode= %s"
         % (
             code,
             csv_path,
@@ -765,7 +742,6 @@ def run_backtest(
             len(bars),
             weekly_src,
             n_w0,
-            ma or "config",
             div or "config",
             pit_flag,
             mode or "-",
@@ -780,8 +756,6 @@ def run_backtest(
 
     ns = _exec_bundle()
     _patch_fast_ohlcv(ns)
-    if ma:
-        _apply_ma_type(ns, ma)
     if div:
         _apply_dividend_type(ns, div)
     install_config_overrides(ns, overrides)
@@ -885,7 +859,7 @@ def backtest_one_result(
         row["n_bars"] = len(walk)
         fname = str(log_name or "").strip()
         if not fname:
-            fname = default_log_name(code, year=year_s, ma_type=ma)
+            fname = default_log_name(code, year=year_s)
         log_path = run_backtest(
             path,
             start=start,
@@ -894,7 +868,6 @@ def backtest_one_result(
             out_dir=dest,
             log_name=fname,
             quiet=quiet,
-            ma_type=ma,
             store=store,
             overrides=overrides,
             dividend_type=div,
@@ -1314,12 +1287,6 @@ def main(argv: list[str] | None = None) -> None:
         default="range",
         help="批量切分：range=整段区间；year=按自然年分段独立回测",
     )
-    ap.add_argument(
-        "--ma-type",
-        default="",
-        metavar="SMA|EMA",
-        help="强制价格均线 SMA/EMA（盖过 BOOK_STOCKS）；缺省用 config",
-    )
     args = ap.parse_args(argv)
     from analyze import (  # noqa: WPS433
         DEFAULT_CSV_ROOT,
@@ -1336,10 +1303,6 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     quiet = not bool(args.verbose)
-    raw_ma = str(args.ma_type or "").strip()
-    ma_type = normalize_ma_type(raw_ma)
-    if raw_ma and not ma_type:
-        raise SystemExit("--ma-type must be SMA or EMA")
     div_raw = str(args.dividend_type or "").strip()
     divs = parse_dividend_types(div_raw)
     if div_raw:
@@ -1389,7 +1352,6 @@ def main(argv: list[str] | None = None) -> None:
                     quiet=quiet,
                     split=args.split,
                     metas=metas,
-                    ma_type=ma_type,
                     dividend_type=div,
                 )
             )
@@ -1453,7 +1415,6 @@ def main(argv: list[str] | None = None) -> None:
             log_name=args.log_name if len(divs) == 1 else "",
             weekly_csv=args.weekly_csv or None,
             quiet=quiet,
-            ma_type=ma_type,
             dividend_type=div,
             csv_root=src_root,
         )

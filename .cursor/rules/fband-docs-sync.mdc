@@ -9,7 +9,7 @@ alwaysApply: true
 
 ## 当以下代码发生变动时，必须在同一次变更中同步更新主分支现行文档
 
-- `config.py` 的 `RECIPE` / `PANEL_BINDS` / 留下的全局（`MA_TYPE`、`SCALE_*`、资金）
+- `config.py` 的 `RECIPE` / `PANEL_BINDS` / 留下的全局（`SCALE_*`、资金）
 - `_factor_param` / `_structure_windows` / `_structure_apply_global` / `_factor_params_apply_global`
 - 网格轴 id、`overrides.factor_params` / `overrides.structure`、拒绝旧顶层键（不兼容 / Breaking Change）
 - `recipe=` 指纹 payload、init 日志字段（`dMA=` / `stop=`）

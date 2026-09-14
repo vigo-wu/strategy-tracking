@@ -42,7 +42,6 @@ from analyze import (  # noqa: E402
     csv_source_dividend_type,
     daily_csvs_by_stock,
     normalize_dividend_type,
-    normalize_ma_type,
     resolve_typed_dir,
 )
 from grid_spec import (  # noqa: E402
@@ -407,10 +406,9 @@ def book_stock_entries(raw: Any) -> list[tuple[Any, Any]]:
 
 
 def load_book_lock() -> list[tuple[str, str, str]]:
-    """config.BOOK_STOCKS → [(stock, ma_type, dividend_type), ...]。"""
+    """config.BOOK_STOCKS → [(stock, ma_type, dividend_type), ...]。ma_type 仅为残留字段，不锁信号。"""
     mod = _load_hlband_config()
     raw = getattr(mod, "BOOK_STOCKS", None)
-    default_ma = normalize_ma_type(getattr(mod, "MA_TYPE", "EMA")) or "EMA"
     default_div = (
         normalize_dividend_type(getattr(mod, "DIVIDEND_TYPE", "")) or DEFAULT_DIVIDEND_TYPE
     )
@@ -425,14 +423,10 @@ def load_book_lock() -> list[tuple[str, str, str]]:
         if not stock:
             continue
         if isinstance(v, dict):
-            ma = normalize_ma_type(v.get("ma_type")) or default_ma
             div = normalize_dividend_type(v.get("dividend_type")) or default_div
-        elif isinstance(v, str):
-            ma = normalize_ma_type(v) or default_ma
-            div = default_div
         else:
-            ma, div = default_ma, default_div
-        out.append((stock, ma, div))
+            div = default_div
+        out.append((stock, "EMA", div))
     if not out:
         raise GridError("config.BOOK_STOCKS 没有有效标的")
     return out
