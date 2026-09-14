@@ -1,5 +1,5 @@
 # coding: utf-8
-"""above_ema：收盘 > EMA(d_ma.trend)；trend<=0 关闸门。"""
+"""above_ema：收盘 > EMA(ema.1d.trend)；trend<=0 关闸门。"""
 from __future__ import annotations
 
 import unittest
@@ -33,12 +33,14 @@ class AboveEmaFactorTests(unittest.TestCase):
         self.assertFalse(self._hit(_ctx(9.99)))
 
     def test_trend_nonpositive_off(self) -> None:
-        orig = self.ns["RECIPE"]["structure"]["d_ma"]["trend"]
+        st = self.ns["RECIPE"]["structure"]
+        ema = st.setdefault("ema", {}).setdefault("1d", {})
+        orig = ema.get("trend", 120)
         try:
-            self.ns["RECIPE"]["structure"]["d_ma"]["trend"] = 0
+            ema["trend"] = 0
             self.assertTrue(self._hit(_ctx(9.0)))
         finally:
-            self.ns["RECIPE"]["structure"]["d_ma"]["trend"] = orig
+            ema["trend"] = orig
 
 
 if __name__ == "__main__":

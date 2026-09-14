@@ -557,19 +557,9 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
 def _ohlcv_need_1d():
     need = _market_need()
     parts = [3]
-    d_ma = _structure_windows()["d_ma"]
-    try:
-        mid_n = int(d_ma.get("mid") or 0)
-    except (TypeError, ValueError):
-        mid_n = 0
-    try:
-        slow_n = int(d_ma.get("slow") or 0)
-    except (TypeError, ValueError):
-        slow_n = 0
-    try:
-        trend_n = int(d_ma.get("trend") or 0)
-    except (TypeError, ValueError):
-        trend_n = 0
+    mid_n = _structure_ma_need_n("1d", "mid")
+    slow_n = _structure_ma_need_n("1d", "slow")
+    trend_n = _structure_ma_need_n("1d", "trend")
     if "d_ma_mid" in need and mid_n > 0:
         parts.append(mid_n)
     if "d_ma_slow" in need and slow_n > 0:
@@ -637,7 +627,8 @@ def _ohlcv_need_1d():
 def _ohlcv_need_1w_bars():
     # 55 = 原 W_MA_SLOW 暖机地板，不是均线周期
     win = _structure_windows()
-    return max(int(win["w_ma"]["life"]), int(win["macd"]["slow"]) + int(win["macd"]["signal"]), 55) + 5
+    w_life = _structure_ma_need_n("1w", "trend")
+    return max(w_life, int(win["macd"]["slow"]) + int(win["macd"]["signal"]), 55) + 5
 
 
 def _ohlcv_need_1w():

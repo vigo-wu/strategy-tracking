@@ -320,10 +320,10 @@ def _init_impl(C):
         "book_freeze=",
         "%s/%s" % (BOOK_FREEZE_CLOSE, BOOK_FREEZE_OPEN),
         "wMA=",
-        "%d/%d" % (_win["w_ma"]["fast"], _win["w_ma"]["life"]),
+        "%d/%d" % (_win["ema"]["1w"]["mid"], _win["ema"]["1w"]["trend"]),
         "dMA=",
         "%d/%d/%d"
-        % (_win["d_ma"]["mid"], _win["d_ma"]["slow"], _win["d_ma"]["trend"]),
+        % (_win["ema"]["1d"]["mid"], _win["ema"]["1d"]["slow"], _win["ema"]["1d"]["trend"]),
         "atr=",
         int(_win["atr"]["n"]),
         "kc=",

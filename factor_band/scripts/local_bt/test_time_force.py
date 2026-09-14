@@ -52,8 +52,10 @@ def _load_tf_ns(**overrides):
                 "trail_stop": {"tiers": [list(row) for row in TIERS]},
             },
             "structure": {
-                "d_ma": {"mid": 20, "slow": 60},
-                "w_ma": {"fast": 5, "mid": 13, "life": 34},
+                "ema": {
+                    "1d": {"mid": 20, "slow": 60, "trend": 120},
+                    "1w": {"mid": 5, "slow": 13, "trend": 34},
+                },
                 "macd": {"fast": 12, "slow": 26, "signal": 9},
             },
         },
@@ -128,7 +130,7 @@ class TimeForceHitTest(unittest.TestCase):
         ns0["RECIPE"]["factor_params"]["time_force"]["bars"] = 0
         self.assertFalse(ns0["_time_force_hit"](9.5, _closes(), 99, lot=_lot()))
         ns_s = _load_tf_ns()
-        ns_s["RECIPE"]["structure"]["d_ma"]["slow"] = 0
+        ns_s["RECIPE"]["structure"]["ema"]["1d"]["slow"] = 0
         self.assertFalse(ns_s["_time_force_hit"](9.5, _closes(), 99, lot=_lot()))
 
     def test_arm_own_not_trail_tier(self) -> None:

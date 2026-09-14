@@ -110,7 +110,7 @@ class CatalogContractTests(unittest.TestCase):
         self.assertEqual(fp, _EXPECTED_FP)
 
     def test_recipe_fingerprint_unchanged(self) -> None:
-        self.assertEqual(recipe_fingerprint({}), "77f177f1")
+        self.assertEqual(recipe_fingerprint({}), "295906a3")
 
     def test_catalog_axis_order(self) -> None:
         ids = list(catalog_ids())

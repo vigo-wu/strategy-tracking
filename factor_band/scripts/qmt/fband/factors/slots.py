@@ -1,25 +1,33 @@
 # === fband/factors/slots.py ===
 def _copy_nested_table(src):
+    """递归深拷贝嵌套 dict（structure 三层 / factor_params 两层皆可）。"""
+    if not isinstance(src, dict):
+        return src
     out = {}
-    for fid, block in (src or {}).items():
+    for fid, block in src.items():
         if isinstance(block, dict):
-            out[str(fid)] = dict(block)
+            out[str(fid)] = _copy_nested_table(block)
         else:
             out[str(fid)] = block
     return out
 
 
 def _merge_nested_table(dst, incoming):
+    """递归深合并；两边都是 dict 则下钻，否则覆盖。"""
     if not isinstance(incoming, dict):
         return dst
+    if not isinstance(dst, dict):
+        return _copy_nested_table(incoming)
     for fid, block in incoming.items():
-        if not isinstance(block, dict):
-            continue
-        cur = dst.get(str(fid))
-        if not isinstance(cur, dict):
-            cur = {}
-            dst[str(fid)] = cur
-        cur.update(block)
+        key = str(fid)
+        if isinstance(block, dict):
+            cur = dst.get(key)
+            if not isinstance(cur, dict):
+                dst[key] = {}
+                cur = dst[key]
+            _merge_nested_table(cur, block)
+        else:
+            dst[key] = block
     return dst
 
 

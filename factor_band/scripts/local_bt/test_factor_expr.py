@@ -67,21 +67,11 @@ class FactorExprTests(unittest.TestCase):
     def test_recipe_not_leaves_top_and(self) -> None:
         ns = self.ns
         recipe = ns["RECIPE"]
-        self.assertEqual(
-            ns["_recipe_not_leaves"](recipe["scale_in"]),
-            ["vol_dry", "w_bias", "w_slope", "weekly_bear"],
-        )
-        self.assertNotIn("chase", ns["_recipe_not_leaves"](recipe["scale_in"]))
+        self.assertEqual(ns["_recipe_not_leaves"](recipe["scale_in"]), [])
+        self.assertEqual(ns["_recipe_not_leaves"](recipe["entry"]), [])
 
     def test_exit_slot_or_confirm_and_atr(self) -> None:
         ns = self.ns
-        ctx_confirm = {
-            "market": {"close": 10.0},
-            "state": {"w_bear_streak": 2, "cost": 10.0},
-        }
-        slot = ns["_eval_exit_slot"](ctx_confirm)
-        self.assertTrue(slot["hit"])
-        self.assertEqual(slot["reasons"], ["weekly_bear_confirm"])
         lot = {"id": 1, "price": 10.0, "hold_peak": 12.1, "hold_bars": 5}
         ctx_stop = {
             "market": {"close": 8.0, "atr": 1.0, "atr_n": 14},
@@ -100,11 +90,13 @@ class FactorExprTests(unittest.TestCase):
 
     def test_entry_slot_chase_reason(self) -> None:
         ns = self.ns
+        # 现行 entry 无 chase；缺行情时 above_ema 不命中
         ctx = _chase_ctx(0.08)
         ctx["market"]["w_detail"] = {}
+        ctx["market"]["daily_ready"] = False
         slot = ns["_eval_entry_slot"](ctx)
         self.assertFalse(slot["hit"])
-        self.assertEqual(slot["reasons"], ["chase"])
+        self.assertIn("above_ema", slot["reasons"])
 
     def test_weekly_bear_same_day_vs_confirm(self) -> None:
         ns = self.ns
@@ -148,10 +140,7 @@ class FactorExprTests(unittest.TestCase):
         closes = [10.0] * 80
         try:
             A._w_bear_streak = 2
-            ok, rs = ns["_eval_lot_sell"](10.0, closes, lot)
-            self.assertTrue(ok)
-            self.assertEqual(rs, ["weekly_bear_confirm"])
-            A._w_bear_streak = 1
+            # 现行 exit 无 weekly_bear_confirm；streak  alone 不卖
             ok, rs = ns["_eval_lot_sell"](10.0, closes, lot)
             self.assertFalse(ok)
             self.assertNotIn("weekly_bear_confirm", rs)
@@ -166,30 +155,18 @@ class DefaultRecipeShapeTests(unittest.TestCase):
         ns = _exec_bundle()
         recipe = ns["RECIPE"]
         self.assertEqual(recipe["scale_out"], False)
+        self.assertEqual(recipe["scale_in"], False)
         entry = recipe["entry"]
         self.assertEqual(entry[0], "and")
-        self.assertIn(["not", "chase"], entry)
         self.assertIn("above_ema", entry)
         self.assertIn("keltner_vol", entry)
         self.assertNotIn("pullback_vol", entry)
-        scale = recipe["scale_in"]
-        self.assertEqual(scale[0], "and")
-        self.assertNotIn(["not", "chase"], scale[1:5])
-        self.assertEqual(scale[-1], "scale_arm")
-        or_node = next(n for n in scale[1:] if isinstance(n, list) and n and n[0] == "or")
-        self.assertEqual(or_node[0], "or")
-        self.assertEqual(or_node[1], ["and", "keltner_vol", ["not", "chase"]])
-        self.assertIn("plat_break", or_node)
-        self.assertIn("w_macd_golden", or_node)
-        self.assertIn("above_ema", scale)
         self.assertEqual(
             recipe["exit"],
             [
                 "or",
-                "weekly_bear_confirm",
                 "atr_stop",
                 "atr_trail_stop",
-                "time_force",
             ],
         )
         self.assertNotIn("stop_loss", recipe["exit"])
@@ -203,10 +180,14 @@ class DefaultRecipeShapeTests(unittest.TestCase):
         self.assertEqual(fp["time_force"]["bars"], 30)
         self.assertAlmostEqual(fp["time_force"]["arm"], 0.03)
         self.assertEqual(fp["pullback_vol"]["vol_n"], 10)
-        self.assertEqual(recipe["structure"]["atr"]["n"], 14)
         self.assertEqual(recipe["structure"]["keltner"]["ema_n"], 20)
         self.assertEqual(recipe["structure"]["keltner"]["atr_n"], 20)
-        self.assertEqual(recipe["structure"]["d_ma"]["trend"], 120)
+        self.assertEqual(recipe["structure"]["ema"]["1d"]["trend"], 120)
+        win = ns["_structure_windows"]()
+        self.assertEqual(win["ema"]["1d"]["mid"], 20)
+        self.assertEqual(win["ema"]["1d"]["slow"], 60)
+        self.assertEqual(win["ema"]["1w"]["mid"], 5)
+        self.assertEqual(win["atr"]["n"], 14)
 
 
 def _chase_ctx(chg):

@@ -42,10 +42,11 @@ LOT_ADD_FRAC = 0.30
 TRADE_BUDGET = 100000.0
 
 # ---- 周线过滤（跨周期；主图仍是日线）----
-# 周/日均线周期、MACD 窗、ATR 窗与肯特纳窗在 RECIPE.structure（字面量）。
-# 价格均线算法由 ctx / 因子调用点直调 _ema（量均始终 _sma；MACD 仍 _ema）。
-# 日线：中线→回踩/无量阴跌；慢线→回踩支撑 + 时间成本地板；trend→above_ema。<=0 关该条。
-# 周线：快/生命线（5/34）；mid=13 仅日志多头。取数 need 另钳原 MA55 暖机地板。
+# 均线/MACD/ATR/肯特纳窗在 RECIPE.structure（字面量）。
+# 价格均线：structure.ema|sma × 周期键（对齐 _VALID_PERIODS：1d/1w/…）× mid/slow/trend。
+# 调用点直调 _ema 读 ema.*，直调 _sma 读 sma.*（量均窗仍在 factor_params；MACD 仍 _ema）。
+# 日线 mid→回踩/无量阴跌；slow→回踩支撑 + 时间成本地板；trend→above_ema。<=0 关该条。
+# 周线 mid/slow/trend（5/13/34）；mid 仅日志多头。取数 need 另钳原 MA55 暖机地板。
 # ATR：威尔德平滑窗 atr.n；<=0 关 atr_stop。
 # 肯特纳：中轨 EMA 窗 keltner.ema_n，带宽 ATR 窗 keltner.atr_n（与 atr.n 独立）；<=0 关。
 
@@ -93,20 +94,12 @@ RECIPE = {
         # "weekly_bear_confirm",
         # "stop_loss",
         "atr_stop",
-        # "trail_stop",
         "atr_trail_stop",
-        # "time_force",
     ],
     "scale_out": False,
     "structure": {
-        # 日线中/慢/趋势均线；<=0 关该条
-        "d_ma": {"mid": 20, "slow": 60, "trend": 120},
-        # 周线快/中/生命线；mid 仅日志 weekly_bull
-        "w_ma": {"fast": 5, "mid": 13, "life": 34},
-        # MACD DIF/DEA/柱
-        "macd": {"fast": 12, "slow": 26, "signal": 9},
-        # 日线威尔德 ATR；<=0 关 atr_stop / atr_trail_stop
-        "atr": {"n": 14},
+        # ema|sma × _VALID_PERIODS 周期键 × mid/slow/trend；<=0 关该条
+        "ema": {"1d": {"trend": 120}},
         # 肯特纳中轨 EMA / 带宽 ATR；与 atr.n 独立；<=0 关
         "keltner": {"ema_n": 20, "atr_n": 20},
     },

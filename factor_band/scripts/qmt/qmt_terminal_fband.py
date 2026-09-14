@@ -52,10 +52,11 @@ LOT_ADD_FRAC = 0.30
 TRADE_BUDGET = 100000.0
 
 # ---- 周线过滤（跨周期；主图仍是日线）----
-# 周/日均线周期、MACD 窗、ATR 窗与肯特纳窗在 RECIPE.structure（字面量）。
-# 价格均线算法由 ctx / 因子调用点直调 _ema（量均始终 _sma；MACD 仍 _ema）。
-# 日线：中线→回踩/无量阴跌；慢线→回踩支撑 + 时间成本地板；trend→above_ema。<=0 关该条。
-# 周线：快/生命线（5/34）；mid=13 仅日志多头。取数 need 另钳原 MA55 暖机地板。
+# 均线/MACD/ATR/肯特纳窗在 RECIPE.structure（字面量）。
+# 价格均线：structure.ema|sma × 周期键（对齐 _VALID_PERIODS：1d/1w/…）× mid/slow/trend。
+# 调用点直调 _ema 读 ema.*，直调 _sma 读 sma.*（量均窗仍在 factor_params；MACD 仍 _ema）。
+# 日线 mid→回踩/无量阴跌；slow→回踩支撑 + 时间成本地板；trend→above_ema。<=0 关该条。
+# 周线 mid/slow/trend（5/13/34）；mid 仅日志多头。取数 need 另钳原 MA55 暖机地板。
 # ATR：威尔德平滑窗 atr.n；<=0 关 atr_stop。
 # 肯特纳：中轨 EMA 窗 keltner.ema_n，带宽 ATR 窗 keltner.atr_n（与 atr.n 独立）；<=0 关。
 
@@ -103,20 +104,12 @@ RECIPE = {
         # "weekly_bear_confirm",
         # "stop_loss",
         "atr_stop",
-        # "trail_stop",
         "atr_trail_stop",
-        # "time_force",
     ],
     "scale_out": False,
     "structure": {
-        # 日线中/慢/趋势均线；<=0 关该条
-        "d_ma": {"mid": 20, "slow": 60, "trend": 120},
-        # 周线快/中/生命线；mid 仅日志 weekly_bull
-        "w_ma": {"fast": 5, "mid": 13, "life": 34},
-        # MACD DIF/DEA/柱
-        "macd": {"fast": 12, "slow": 26, "signal": 9},
-        # 日线威尔德 ATR；<=0 关 atr_stop / atr_trail_stop
-        "atr": {"n": 14},
+        # ema|sma × _VALID_PERIODS 周期键 × mid/slow/trend；<=0 关该条
+        "ema": {"1d": {"trend": 120}},
         # 肯特纳中轨 EMA / 带宽 ATR；与 atr.n 独立；<=0 关
         "keltner": {"ema_n": 20, "atr_n": 20},
     },
@@ -3432,19 +3425,9 @@ def _get_ohlcv_period(C, stock, period, count, need, diag_key):
 def _ohlcv_need_1d():
     need = _market_need()
     parts = [3]
-    d_ma = _structure_windows()["d_ma"]
-    try:
-        mid_n = int(d_ma.get("mid") or 0)
-    except (TypeError, ValueError):
-        mid_n = 0
-    try:
-        slow_n = int(d_ma.get("slow") or 0)
-    except (TypeError, ValueError):
-        slow_n = 0
-    try:
-        trend_n = int(d_ma.get("trend") or 0)
-    except (TypeError, ValueError):
-        trend_n = 0
+    mid_n = _structure_ma_need_n("1d", "mid")
+    slow_n = _structure_ma_need_n("1d", "slow")
+    trend_n = _structure_ma_need_n("1d", "trend")
     if "d_ma_mid" in need and mid_n > 0:
         parts.append(mid_n)
     if "d_ma_slow" in need and slow_n > 0:
@@ -3512,7 +3495,8 @@ def _ohlcv_need_1d():
 def _ohlcv_need_1w_bars():
     # 55 = 原 W_MA_SLOW 暖机地板，不是均线周期
     win = _structure_windows()
-    return max(int(win["w_ma"]["life"]), int(win["macd"]["slow"]) + int(win["macd"]["signal"]), 55) + 5
+    w_life = _structure_ma_need_n("1w", "trend")
+    return max(w_life, int(win["macd"]["slow"]) + int(win["macd"]["signal"]), 55) + 5
 
 
 def _ohlcv_need_1w():
@@ -3700,24 +3684,98 @@ def _structure_int(block, key, default):
         return int(default)
 
 
+def _structure_deep_copy(src):
+    """递归深拷贝 structure / 嵌套 dict。"""
+    if not isinstance(src, dict):
+        return src
+    out = {}
+    for k, v in src.items():
+        out[str(k)] = _structure_deep_copy(v) if isinstance(v, dict) else v
+    return out
+
+
+def _structure_deep_merge(dst, incoming):
+    """递归按键合并；两边都是 dict 则下钻，否则覆盖。"""
+    if not isinstance(incoming, dict):
+        return dst
+    if not isinstance(dst, dict):
+        return _structure_deep_copy(incoming)
+    for k, v in incoming.items():
+        key = str(k)
+        if isinstance(v, dict):
+            cur = dst.get(key)
+            if not isinstance(cur, dict):
+                dst[key] = {}
+                cur = dst[key]
+            _structure_deep_merge(cur, v)
+        else:
+            dst[key] = v
+    return dst
+
+
+_STRUCTURE_DELETED_ROOTS = frozenset({"d_ma", "w_ma"})
+_STRUCTURE_MA_ROOTS = frozenset({"ema", "sma"})
+
+
+def _structure_ma_period_block(alg_block, period, defaults):
+    """从 ema/sma 段取一周期窗；缺键用 defaults（三元组 mid/slow/trend）。"""
+    block = (alg_block or {}).get(period) or {}
+    if block and not isinstance(block, dict):
+        raise ValueError("RECIPE.structure 周期段须为 dict：%s" % period)
+    mid_d, slow_d, trend_d = defaults
+    return {
+        "mid": _structure_int(block, "mid", mid_d),
+        "slow": _structure_int(block, "slow", slow_d),
+        "trend": _structure_int(block, "trend", trend_d),
+    }
+
+
+def _structure_reject_deleted(rec):
+    for bad in _STRUCTURE_DELETED_ROOTS:
+        if bad in (rec or {}):
+            raise ValueError(
+                "已删除的 structure 段 %s：请写 structure.ema|sma.<period>.<window>"
+                % bad
+            )
+
+
+def _structure_validate_ma_periods(alg_block, alg_name):
+    """周期键须 ∈ _VALID_PERIODS。"""
+    if not isinstance(alg_block, dict):
+        return
+    valid = globals().get("_VALID_PERIODS") or ()
+    valid_set = frozenset(valid)
+    for period in alg_block.keys():
+        p = str(period)
+        if valid_set and p not in valid_set:
+            raise ValueError(
+                "RECIPE.structure.%s 周期键须 ∈ _VALID_PERIODS，收到 %s" % (alg_name, p)
+            )
+
+
 def _structure_windows():
-    """只读 RECIPE.structure。缺键用数字字面量。"""
+    """只读 RECIPE.structure。缺键用数字字面量。物化 ema/sma × 1d/1w。"""
     rec = (globals().get("RECIPE") or {}).get("structure") or {}
-    d_ma = rec.get("d_ma") or {}
-    w_ma = rec.get("w_ma") or {}
+    _structure_reject_deleted(rec)
+    ema = rec.get("ema") or {}
+    sma = rec.get("sma") or {}
+    if ema and not isinstance(ema, dict):
+        raise ValueError("RECIPE.structure.ema 须为 dict")
+    if sma and not isinstance(sma, dict):
+        raise ValueError("RECIPE.structure.sma 须为 dict")
+    _structure_validate_ma_periods(ema, "ema")
+    _structure_validate_ma_periods(sma, "sma")
     macd = rec.get("macd") or {}
     atr = rec.get("atr") or {}
     keltner = rec.get("keltner") or {}
     return {
-        "d_ma": {
-            "mid": _structure_int(d_ma, "mid", 20),
-            "slow": _structure_int(d_ma, "slow", 60),
-            "trend": _structure_int(d_ma, "trend", 120),
+        "ema": {
+            "1d": _structure_ma_period_block(ema, "1d", (20, 60, 120)),
+            "1w": _structure_ma_period_block(ema, "1w", (5, 13, 34)),
         },
-        "w_ma": {
-            "fast": _structure_int(w_ma, "fast", 5),
-            "mid": _structure_int(w_ma, "mid", 13),
-            "life": _structure_int(w_ma, "life", 34),
+        "sma": {
+            "1d": _structure_ma_period_block(sma, "1d", (0, 0, 0)),
+            "1w": _structure_ma_period_block(sma, "1w", (0, 0, 0)),
         },
         "macd": {
             "fast": _structure_int(macd, "fast", 12),
@@ -3735,9 +3793,14 @@ def _structure_windows():
 
 
 def _structure_apply_global(params):
-    """只合进 RECIPE.structure，按段再按 key 合并。"""
+    """只合进 RECIPE.structure，递归按算法→周期→窗合并。"""
     if not isinstance(params, dict):
         return
+    _structure_reject_deleted(params)
+    for alg in _STRUCTURE_MA_ROOTS:
+        block = params.get(alg)
+        if block is not None:
+            _structure_validate_ma_periods(block if isinstance(block, dict) else {}, alg)
     rec = globals().get("RECIPE")
     if not isinstance(rec, dict):
         return
@@ -3745,14 +3808,21 @@ def _structure_apply_global(params):
     if not isinstance(st, dict):
         rec["structure"] = {}
         st = rec["structure"]
-    for fid, incoming in params.items():
-        if not isinstance(incoming, dict):
-            continue
-        cur = st.get(fid)
-        if not isinstance(cur, dict):
-            st[fid] = {}
-            cur = st[fid]
-        cur.update(incoming)
+    _structure_deep_merge(st, params)
+
+
+def _structure_ma_need_n(period, window):
+    """暖机：同周期同窗取 ema/sma 的 max（仅 >0）。"""
+    win = _structure_windows()
+    best = 0
+    for alg in ("ema", "sma"):
+        try:
+            n = int((win.get(alg) or {}).get(period, {}).get(window) or 0)
+        except (TypeError, ValueError, AttributeError):
+            n = 0
+        if n > best:
+            best = n
+    return best
 
 
 _MARKET_TAGS = frozenset(
@@ -3827,11 +3897,11 @@ def _weekly_market_features(closes_w):
         "close": None,
     }
     win = _structure_windows()
-    w_ma = win["w_ma"]
+    w_ema = win["ema"]["1w"]
     mc = win["macd"]
-    ma5 = _ema(closes_w, w_ma["fast"])
-    ma10 = _ema(closes_w, w_ma["mid"])
-    ma30 = _ema(closes_w, w_ma["life"])
+    ma5 = _ema(closes_w, w_ema["mid"])
+    ma10 = _ema(closes_w, w_ema["slow"])
+    ma30 = _ema(closes_w, w_ema["trend"])
     macd = _calc_macd(closes_w, mc["fast"], mc["slow"], mc["signal"])
     if ma5 is None or ma10 is None or ma30 is None or macd is None:
         return detail
@@ -3929,17 +3999,17 @@ def _factor_daily_features(closes, volumes, need=None):
         return False, detail
     if need is None:
         need = _market_need()
-    d_ma = _structure_windows()["d_ma"]
+    d_ema = _structure_windows()["ema"]["1d"]
     try:
-        mid_n = int(d_ma.get("mid") or 0)
+        mid_n = int(d_ema.get("mid") or 0)
     except (TypeError, ValueError):
         mid_n = 0
     try:
-        slow_n = int(d_ma.get("slow") or 0)
+        slow_n = int(d_ema.get("slow") or 0)
     except (TypeError, ValueError):
         slow_n = 0
     try:
-        trend_n = int(d_ma.get("trend") or 0)
+        trend_n = int(d_ema.get("trend") or 0)
     except (TypeError, ValueError):
         trend_n = 0
     detail["mid_n"] = mid_n
@@ -4295,7 +4365,7 @@ def _factor_eval_keltner_vol(ctx):
 # === fband/factors/lib/above_ema.py ===
 def _factor_eval_above_ema(ctx):
     try:
-        n = int(_structure_windows()["d_ma"]["trend"] or 0)
+        n = int(_structure_windows()["ema"]["1d"]["trend"] or 0)
     except (TypeError, ValueError, KeyError):
         n = 0
     if n <= 0:
@@ -4780,7 +4850,7 @@ def _time_force_mark_skip(lot, peak_ret, hold_bars, m60):
 def _time_force_hit(price, closes, hold_bars, lot=None, ctx=None):
     """智能时间成本：持仓 > time_force.bars 后评估出场。
     bars<=0 关闭整条规则。
-    d_ma.slow<=0 时慢线地板不存在，同样不触发（BARS 仍独立）。
+    ema.1d.slow<=0 时慢线地板不存在，同样不触发（BARS 仍独立）。
     收盘破日线慢均线 → 立即强制平仓。
     仍站上慢线时：峰值浮盈已达 time_force.arm 则不按日历强平；
     从未武装的死钱仓立即强平。"""
@@ -4792,7 +4862,7 @@ def _time_force_hit(price, closes, hold_bars, lot=None, ctx=None):
     if bars_lim <= 0:
         return False
     try:
-        slow_n = int(_structure_windows()["d_ma"]["slow"] or 0)
+        slow_n = int(_structure_windows()["ema"]["1d"]["slow"] or 0)
     except (TypeError, ValueError):
         slow_n = 0
     if slow_n <= 0:
@@ -5003,26 +5073,34 @@ def _recipe_not_leaves(expr):
 
 # === fband/factors/slots.py ===
 def _copy_nested_table(src):
+    """递归深拷贝嵌套 dict（structure 三层 / factor_params 两层皆可）。"""
+    if not isinstance(src, dict):
+        return src
     out = {}
-    for fid, block in (src or {}).items():
+    for fid, block in src.items():
         if isinstance(block, dict):
-            out[str(fid)] = dict(block)
+            out[str(fid)] = _copy_nested_table(block)
         else:
             out[str(fid)] = block
     return out
 
 
 def _merge_nested_table(dst, incoming):
+    """递归深合并；两边都是 dict 则下钻，否则覆盖。"""
     if not isinstance(incoming, dict):
         return dst
+    if not isinstance(dst, dict):
+        return _copy_nested_table(incoming)
     for fid, block in incoming.items():
-        if not isinstance(block, dict):
-            continue
-        cur = dst.get(str(fid))
-        if not isinstance(cur, dict):
-            cur = {}
-            dst[str(fid)] = cur
-        cur.update(block)
+        key = str(fid)
+        if isinstance(block, dict):
+            cur = dst.get(key)
+            if not isinstance(cur, dict):
+                dst[key] = {}
+                cur = dst[key]
+            _merge_nested_table(cur, block)
+        else:
+            dst[key] = block
     return dst
 
 
@@ -10636,10 +10714,10 @@ def _init_impl(C):
         "book_freeze=",
         "%s/%s" % (BOOK_FREEZE_CLOSE, BOOK_FREEZE_OPEN),
         "wMA=",
-        "%d/%d" % (_win["w_ma"]["fast"], _win["w_ma"]["life"]),
+        "%d/%d" % (_win["ema"]["1w"]["mid"], _win["ema"]["1w"]["trend"]),
         "dMA=",
         "%d/%d/%d"
-        % (_win["d_ma"]["mid"], _win["d_ma"]["slow"], _win["d_ma"]["trend"]),
+        % (_win["ema"]["1d"]["mid"], _win["ema"]["1d"]["slow"], _win["ema"]["1d"]["trend"]),
         "atr=",
         int(_win["atr"]["n"]),
         "kc=",

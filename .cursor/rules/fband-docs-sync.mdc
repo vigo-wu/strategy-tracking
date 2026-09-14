@@ -25,7 +25,7 @@ alwaysApply: true
 | 用户可见周期/默认值 | `factor_band/model.md` |
 | 网格轴 / overrides 形态 | `.cursor/skills/qmt-local-bt-grid/SKILL.md` 与 `reference-contract.md` |
 
-写现行键：`d_ma.mid`、`stop_loss.pct`、`overrides.structure`。禁止把已删名写成唯一可信数据源（`D_MA_MID`、`STOP_LOSS`），除非标明「已删、顶层写入即报错」。用语按 `.cursor/rules/docs-terminology.mdc`。
+写现行键：`ema.1d.mid`、`stop_loss.pct`、`overrides.structure`。禁止把已删名写成唯一可信数据源（`D_MA_MID`、`d_ma`/`w_ma`、`STOP_LOSS`），除非标明「已删、顶层写入即报错」。用语按 `.cursor/rules/docs-terminology.mdc`。
 
 ## 不要改
 

@@ -331,9 +331,11 @@ class GridRunApiTest(unittest.TestCase):
         self.assertNotIn("STATE_FILE", defaults)
         self.assertAlmostEqual(float(defaults["chase.max_pct"]), 0.05)
         self.assertAlmostEqual(float(defaults["stop_loss.pct"]), 0.08)
-        self.assertEqual(int(defaults["d_ma.mid"]), 20)
-        self.assertEqual(int(defaults["d_ma.slow"]), 60)
-        self.assertEqual(int(defaults["w_ma.mid"]), 13)
+        self.assertEqual(int(defaults["ema.1d.mid"]), 20)
+        self.assertEqual(int(defaults["ema.1d.slow"]), 60)
+        self.assertEqual(int(defaults["ema.1w.mid"]), 5)
+        self.assertEqual(int(defaults["ema.1w.slow"]), 13)
+        self.assertEqual(int(defaults["ema.1w.trend"]), 34)
         self.assertAlmostEqual(float(defaults["time_force.arm"]), 0.03)
         self.assertAlmostEqual(float(defaults["atr_trail_stop.k1"]), 2)
         self.assertAlmostEqual(float(defaults["atr_trail_stop.k2"]), 2)
@@ -538,7 +540,7 @@ class GridInitProbeTest(unittest.TestCase):
         self.assertIn("d_ma.mid", str(ctx.exception))
 
     def test_run_init_probe_applies_structure(self) -> None:
-        ov = {"structure": {"d_ma": {"mid": 15}}}
+        ov = {"structure": {"ema": {"1d": {"mid": 15}}}}
         text = run_init_probe(ov)
         self.assertIn("dMA=", text)
         self.assertRegex(text, r"dMA=\s*15/")

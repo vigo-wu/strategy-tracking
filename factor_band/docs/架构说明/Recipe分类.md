@@ -147,7 +147,7 @@ scale_out:
 | :--- | :--- | :--- |
 | `pullback_vol` | 贴中/慢均线 + 连续缩量 | `pullback_vol.tol` / `vol_n` / `ratio` / `confirm_days`（默认 AST 不引用） |
 | `keltner_vol` | 收盘在肯特纳通道内 + 连续缩量 | `keltner_vol.k` / `ratio` / `vol_n` / `confirm_days`；窗是 `structure.keltner.*` |
-| `above_ema` | 收盘 > 日线趋势 EMA | 无叶子阈值；窗是 `structure.d_ma.trend`（`<=0` 关闸门） |
+| `above_ema` | 收盘 > 日线趋势 EMA | 无叶子阈值；窗是 `structure.ema.1d.trend`（`<=0` 关闸门） |
 | `chase` | 当日涨幅过大 | `chase.max_pct` |
 | `vol_dry` | 跌破中线且无量 | `vol_dry.ratio` / `n` |
 | `w_bias` | 周线高位乖离 | `w_bias.hard` |
@@ -182,19 +182,20 @@ scale_out:
 | `RECIPE.structure` | 见下表 | 均线/MACD/ATR/肯特纳 **窗**；`_structure_windows` |
 | 仓位 / 资金全局 | `SCALE_ENABLE`、`CASH_RATIO`、`TRADE_BUDGET` | 不上表、不上因子面板 |
 
-`RECIPE.structure` 现行默认配置字面量（`<=0` 关该条均线/ATR/肯特纳；MACD 三窗都应 >0）：
+`RECIPE.structure` 现行读窗物化（`_structure_windows()`；`<=0` 关该条均线/ATR/肯特纳；MACD 三窗都应 >0）。价格均线按算法 × `_VALID_PERIODS` 周期键（`1d`/`1w`/…）× `mid`/`slow`/`trend`。config 字面量可精简（现行只写 `ema.1d.trend=120` + `keltner`）；缺键由读窗填字面量。
 
 | 段 | 键 | 现行默认 | 用途 |
 | :--- | :--- | :--- | :--- |
-| `d_ma` | `mid` / `slow` / `trend` | 20 / 60 / 120 | 日线回踩/无量阴跌；慢线还是 time_force 地板；`trend` 是 `above_ema`（`<=0` 关闸门） |
-| `w_ma` | `fast` / `mid` / `life` | 5 / 13 / 34 | 周线快/中/生命线；`mid` 仅日志 `weekly_bull` |
+| `ema.1d` | `mid` / `slow` / `trend` | 20 / 60 / 120 | 日线回踩/无量阴跌；慢线还是 time_force 地板；`trend` 是 `above_ema`（`<=0` 关闸门） |
+| `ema.1w` | `mid` / `slow` / `trend` | 5 / 13 / 34 | 周线快/中/生命线（原 `w_ma.fast/mid/life`）；`slow` 仅日志 `weekly_bull` |
+| `sma.1d` / `sma.1w` | `mid` / `slow` / `trend` | 全 0 | 价格 SMA 窗；现行盘无调用点；`<=0` 关条 |
 | `macd` | `fast` / `slow` / `signal` | 12 / 26 / 9 | 周线 DIF/DEA/柱 |
 | `atr` | `n` | 14 | 日线威尔德 ATR；`<=0` 关 `atr_stop` / `atr_trail_stop` |
 | `keltner` | `ema_n` / `atr_n` | 20 / 20 | 肯特纳中轨 EMA / 带宽 ATR（与 `atr.n` 独立）；`<=0` 关 |
 
-读取指标周期窗：调用方先 `_structure_windows()`，再把 `n` 传给 `_ema` / `_sma` / `_calc_macd`（三窗必传）/ `_calc_atr` / `_calc_keltner`（`ema_n` / `atr_n` / `k` 必传；`k` 不上 `structure`）。缺键用上表数字字面量。网格覆盖 `_structure_apply_global`，按段再按 key 合并。QMT 暖机（`market._ohlcv_need_*`）走 `_structure_windows()`；local_bt `run.py` 读裸表，缺键当 0——现行默认配置字面量齐全时两者一致。价格均线算法不上 `structure`：现行日/周价格均线由调用点直调 `_ema`。
+读取指标周期窗：调用方先 `_structure_windows()`，再把 `n` 传给 `_ema` / `_sma` / `_calc_macd`（三窗必传）/ `_calc_atr` / `_calc_keltner`（`ema_n` / `atr_n` / `k` 必传；`k` 不上 `structure`）。`_ema` 读 `ema.*`，`_sma` 读 `sma.*`。网格覆盖 `_structure_apply_global`，**递归**按算法→周期→窗合并。QMT 暖机（`market._ohlcv_need_*`）同周期对 `ema`/`sma` 窗取 max（`>0`）。旧 `d_ma`/`w_ma` 段写入即报错。量均窗仍在 `factor_params`（`pullback_vol.vol_n` / `vol_dry.n`）。
 
-网格：因子轴元数据（分组 / 短名 / percent / kind）来自 `LEAVES`，侧栏只含买入 `entry`、加仓 `scale_in`、卖出 `exit`、减仓 `scale_out` 四个槽位已启用叶子的阈值（现行默认配置的 `stop_loss` 登记保留、不上轴）。轴 id 仍是点路径（`stop_loss.pct` / `atr_stop.k` / `atr_trail_stop.k1` / `k2` / `time_force.arm` / `scale_arm.arm` / `scale_arm.bars` / `scale_arm.hist_min` / `d_ma.mid` / `d_ma.trend` / `atr.n` / `keltner.ema_n` / `keltner.atr_n` / `keltner_vol.k`）；短 id 如 `dmm15` / `dmt` / `ask` / `atk1` / `atk2` / `tfa` / `sa` / `sab` / `swh` / `atr` / `kem` / `kat` / `kvk`。`atr_stop.k` / `atr_trail_stop.k1` / `k2` 是浮点倍数轴（`LEAVES` 默认 `2.0`，可扫 `1.5`），**不是**百分比轴。格子 `overrides` 形态不变，必须写成：
+网格：因子轴元数据（分组 / 短名 / percent / kind）来自 `LEAVES`，侧栏只含买入 `entry`、加仓 `scale_in`、卖出 `exit`、减仓 `scale_out` 四个槽位已启用叶子的阈值（现行默认配置的 `stop_loss` 登记保留、不上轴）。轴 id 仍是点路径（`stop_loss.pct` / `atr_stop.k` / `atr_trail_stop.k1` / `k2` / `time_force.arm` / `scale_arm.arm` / `scale_arm.bars` / `scale_arm.hist_min` / `ema.1d.mid` / `ema.1d.trend` / `atr.n` / `keltner.ema_n` / `keltner.atr_n` / `keltner_vol.k`）；短 id 如 `e1dm15` / `e1dt` / `ask` / `atk1` / `atk2` / `tfa` / `sa` / `sab` / `swh` / `atr` / `kem` / `kat` / `kvk`。`sma.*` 不上轴。`atr_stop.k` / `atr_trail_stop.k1` / `k2` 是浮点倍数轴（`LEAVES` 默认 `2.0`，可扫 `1.5`），**不是**百分比轴。格子 `overrides` 形态不变，必须写成：
 
 ```text
 {"factor_params": {"stop_loss": {"pct": 0.06}}}
@@ -202,13 +203,13 @@ scale_out:
 {"factor_params": {"atr_trail_stop": {"k1": 2.0, "k2": 1.5}}}
 {"factor_params": {"time_force": {"arm": 0.03}}}
 {"factor_params": {"scale_arm": {"arm": 0.03, "bars": 8, "hist_min": -0.01}}}
-{"structure": {"d_ma": {"mid": 15}}}
-{"structure": {"d_ma": {"trend": 120}}}
+{"structure": {"ema": {"1d": {"mid": 15}}}}
+{"structure": {"ema": {"1d": {"trend": 120}}}}
 {"structure": {"atr": {"n": 14}}}
 {"structure": {"keltner": {"ema_n": 20, "atr_n": 20}}}
 ```
 
-顶层旧键（`STOP_LOSS` / `D_MA_MID` / `SCALE_ARM`）或顶层点路径（`stop_loss.pct` / `d_ma.mid`）都直接报错。面板只上模拟下单 / 资金 / 加仓开关，因子阈值和指标周期窗不上屏。
+顶层旧键（`STOP_LOSS` / `D_MA_MID` / `SCALE_ARM`）或顶层点路径（`stop_loss.pct` / `d_ma.mid` / `ema.1d.mid`）都直接报错；袋内旧段 `d_ma`/`w_ma` 亦报错。面板只上模拟下单 / 资金 / 加仓开关，因子阈值和指标周期窗不上屏。
 
 `recipe=` 指纹：表达式 + 折进表的 `factor_params` + `structure`。apply 之后再算，`overrides` 袋为空。默认哈希会随 payload 增 `structure` 而变；参数指纹预检用 `expected_fingerprint` 重算，不要对历史 `report/grid/` 档案里的旧哈希。两份拷贝：`factors/slots.py` 与 `local_bt/grid_spec.py`。
 

@@ -52,7 +52,7 @@ DEFAULTS = {
     "keltner_vol.ratio": 0.9,
     "keltner_vol.vol_n": 10,
     "keltner_vol.confirm_days": 2,
-    "d_ma.mid": 20,
+    "ema.1d.mid": 20,
     "stop_loss.pct": 0.08,
     "time_force.bars": 30,
     "trail_stop.tiers": (
@@ -147,15 +147,24 @@ class GridSpecTest(unittest.TestCase):
         self.assertEqual(by["ask0"]["overrides"]["factor_params"]["atr_stop"]["k"], 0)
 
     def test_dma_mid_zero_label(self) -> None:
-        self.assertEqual(family_value_label("d_ma.mid", 0), "日线中均线关闭")
-        self.assertEqual(family_value_label("d_ma.slow", 0), "日线慢均线关闭")
+        self.assertEqual(family_value_label("ema.1d.mid", 0), "日线中均线关闭")
+        self.assertEqual(family_value_label("ema.1d.slow", 0), "日线慢均线关闭")
         defs = dict(DEFAULTS)
-        defs["d_ma.mid"] = 20
-        cells = build_cells({"d_ma.mid": [0]}, defs)
+        defs["ema.1d.mid"] = 20
+        cells = build_cells({"ema.1d.mid": [0]}, defs)
         by = {c["id"]: c for c in cells}
-        self.assertEqual(by["dmm0"]["kind"], "other")
-        self.assertEqual(by["dmm0"]["label"], "日线中均线关闭")
-        self.assertEqual(by["dmm0"]["overrides"]["structure"]["d_ma"]["mid"], 0)
+        self.assertEqual(by["e1dm0"]["kind"], "other")
+        self.assertEqual(by["e1dm0"]["label"], "日线中均线关闭")
+        self.assertEqual(by["e1dm0"]["overrides"]["structure"]["ema"]["1d"]["mid"], 0)
+
+    def test_structure_deep_merge_keeps_siblings(self) -> None:
+        from grid_spec import deep_merge_structure
+
+        base = {"ema": {"1d": {"mid": 20, "slow": 60, "trend": 120}}}
+        merged = deep_merge_structure(base, {"ema": {"1d": {"trend": 150}}})
+        self.assertEqual(merged["ema"]["1d"]["mid"], 20)
+        self.assertEqual(merged["ema"]["1d"]["slow"], 60)
+        self.assertEqual(merged["ema"]["1d"]["trend"], 150)
 
     def test_trail_tiers_rejects_hi_le_lo(self) -> None:
         bad = [
@@ -253,7 +262,7 @@ class GridSpecTest(unittest.TestCase):
         self.assertNotIn("time_force.bars", ids)
         self.assertNotIn("trail_stop.tiers", ids)
         self.assertIn("atr.n", ids)
-        self.assertIn("d_ma.trend", ids)
+        self.assertIn("ema.1d.trend", ids)
         self.assertIn("keltner.ema_n", ids)
         self.assertIn("keltner.atr_n", ids)
         self.assertNotIn("TRAIL", ids)
@@ -416,8 +425,8 @@ class GridSpecTest(unittest.TestCase):
         self.assertNotIn("W_MA_MID", ids)
         self.assertNotIn("W_MA_SLOW", ids)
         self.assertNotIn("D_MA_MID", ids)
-        self.assertIn("d_ma.mid", ids)
-        self.assertIn("w_ma.mid", ids)
+        self.assertIn("ema.1d.mid", ids)
+        self.assertIn("ema.1w.mid", ids)
         self.assertNotIn("SCALE_ARM", ids)
         self.assertNotIn("SCALE_ARM_BARS", ids)
         self.assertNotIn("SCALE_W_HIST_MIN", ids)
@@ -504,12 +513,23 @@ class GridSpecTest(unittest.TestCase):
             reject_retired_min_ret(
                 {
                     "cells": [
-                        {"id": "dmm15", "overrides": {"d_ma.mid": 15}},
+                        {"id": "e1dm15", "overrides": {"d_ma.mid": 15}},
                     ]
                 }
             )
         self.assertIn("d_ma.mid", str(ctx.exception))
         self.assertIn("structure", str(ctx.exception))
+
+    def test_reject_nested_old_structure_root(self) -> None:
+        with self.assertRaises(GridSpecError) as ctx:
+            reject_retired_min_ret(
+                {
+                    "cells": [
+                        {"id": "x", "overrides": {"structure": {"d_ma": {"mid": 15}}}},
+                    ]
+                }
+            )
+        self.assertIn("d_ma", str(ctx.exception))
 
 
 if __name__ == "__main__":

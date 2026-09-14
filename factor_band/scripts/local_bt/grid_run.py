@@ -371,12 +371,12 @@ def _load_hlband_config():
 
 
 def load_config_defaults() -> dict[str, Any]:
-    from grid_spec import _load_config_ns, param_catalog
+    from grid_spec import _load_config_ns, _structure_flat_from_ns, param_catalog
 
     ns = _load_config_ns()
     rec = ns.get("RECIPE") or {}
     flat = flatten_factor_params(rec.get("factor_params") or {})
-    flat.update(flatten_structure(rec.get("structure") or {}))
+    flat.update(_structure_flat_from_ns(ns))
     out: dict[str, Any] = dict(flat)
     seen: set[str] = set(out)
     for spec in param_catalog():

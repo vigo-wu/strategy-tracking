@@ -43,7 +43,7 @@ scale_out: false
 
 叶子登记在 `LEAVES`；默认盘启用哪些、如何 `and` / `or` / `not`，写在 `config.RECIPE` 四个槽位。均线/MACD/ATR/肯特纳窗只读 `RECIPE.structure`（通过 `_structure_windows()` 读取）。阈值运行时读 `RECIPE.factor_params`（catalog 用 defaults 整表写入）。
 
-周线均线为斐波那契 **MA5 / MA13 / MA34**（`RECIPE.structure.w_ma` 的 `fast` / `mid` / `life`，当前 5 / 13 / 34；`mid` 只给日志多头 `weekly_bull`）。周线取数 need 另钳原 MA55 暖机地板。价格均线由 `ctx` 直调 `_ema`（量均始终 `_sma`；MACD 仍 `_ema`）。文档与日志里的 `w_ma30` 字段实际是生命线 MA34。实盘与回测都只用**上一根已收盘周 K**（丢掉今天所在自然周，周五尾盘也看上周），对齐 QMT 回测 0000 原生 `1w`。
+周线均线为斐波那契 **MA5 / MA13 / MA34**（`RECIPE.structure.ema.1w` 的 `mid` / `slow` / `trend`，当前 5 / 13 / 34；`slow` 只给日志多头 `weekly_bull`）。周线取数 need 另钳原 MA55 暖机地板。价格均线由 `ctx` 直调 `_ema` 读 `ema.*`（量均始终 `_sma` 读量窗 `factor_params`；MACD 仍 `_ema`）。文档与日志里的 `w_ma30` 字段实际是生命线 MA34。实盘与回测都只用**上一根已收盘周 K**（丢掉今天所在自然周，周五尾盘也看上周），对齐 QMT 回测 0000 原生 `1w`。
 
 现行默认配置里，周线叶子是跨周期过滤（禁开 / 清仓），不是开仓前提：
 
@@ -66,7 +66,7 @@ scale_out: false
 
 空仓且 `entry` 命中：通道内缩量（`keltner_vol`）且站上趋势均线（`above_ema`），且不被 `chase` / `vol_dry` / `w_bias` / `w_slope` / `weekly_bear` 挡住。未命中时 reasons 为第一个挡住的叶子。
 
-`above_ema`：收盘 **>** 日线趋势 EMA（`d_ma.trend`，当前 120）。窗 `<=0` 关闸门（不挡买）。等于均线不买。
+`above_ema`：收盘 **>** 日线趋势 EMA（`ema.1d.trend`，当前 120）。窗 `<=0` 关闸门（不挡买）。等于均线不买。
 
 `keltner_vol`：
 
@@ -160,7 +160,7 @@ scale_out: false
 | :--- | :--- | :--- |
 | ① ATR 止损 | 收盘 ≤ **该笔**成本 − `atr_stop.k`×ATR（当前 `k=2.0`、`atr.n=14`）；`atr.n<=0` 或 `k<=0` 关 | `atr_stop` |
 | ② ATR 移动止盈 | **该笔**峰值相对成本 > `atr_trail_stop.k1`×ATR 武装（当前 `k1=2.0`）：收盘 ≤ 成本（保本）或峰值回撤 ≥ `k2`×ATR（当前 `k2=2.0`）；`k1<=0` 整条关；`k2<=0` 只保本 | `atr_trail_stop` |
-| ③ 智能时间 | **该笔**持仓 **> `time_force.bars`**（当前 30）日：破日线 MA60 → 强制平仓；仍站上 MA60 且峰值浮盈 **< `time_force.arm`**（当前 3%）→ **立即强制平仓**；峰值已达门槛 → **不按日历强平**，交给 ATR 移动止盈 / 破 MA60 / 周线转空。`arm<=0` 关让路；`d_ma.slow<=0` 慢线地板不存在则整条不触发 | `time_force` |
+| ③ 智能时间 | **该笔**持仓 **> `time_force.bars`**（当前 30）日：破日线 MA60 → 强制平仓；仍站上 MA60 且峰值浮盈 **< `time_force.arm`**（当前 3%）→ **立即强制平仓**；峰值已达门槛 → **不按日历强平**，交给 ATR 移动止盈 / 破 MA60 / 周线转空。`arm<=0` 关让路；`ema.1d.slow<=0` 慢线地板不存在则整条不触发 | `time_force` |
 | 兜底 | 周线转空且连续 `weekly_bear_confirm.days` 日 | `weekly_bear_confirm` |
 
 优先级（挂 pending 主因，`exit` 的 or 短路）：`weekly_bear_confirm` > `atr_stop` > `atr_trail_stop` > `time_force`。
@@ -222,9 +222,9 @@ scale_out: false
 | `BOOK_LOT_MAX` | `3` | 全池同时最多 3 笔（仅 config） |
 | `LOT_OPEN_FRAC` | `0.50` | 开仓：大仓空则 50%；大仓已在且非最后一槽则 30%（仅 config） |
 | `LOT_ADD_FRAC` | `0.30` | 第二笔 30%；全池最后一槽不锁此值，改吃剩余约 20% cap（仅 config） |
-| `d_ma.mid` / `d_ma.slow` | `20` / `60` | 日线中/慢均线（`RECIPE.structure`）；`<=0` 关该条（关中线同时关无量阴跌禁开；关慢线则 time_force 破线地板关掉） |
-| `d_ma.trend` | `120` | 日线趋势均线（`RECIPE.structure`）；`above_ema` 用；`<=0` 关闸门 |
-| `w_ma.fast` / `w_ma.mid` / `w_ma.life` | `5` / `13` / `34` | 周线快/中/生命线（`RECIPE.structure`）；`mid` 仅日志多头 |
+| `ema.1d.mid` / `ema.1d.slow` | `20` / `60` | 日线中/慢均线（`RECIPE.structure.ema.1d`）；`<=0` 关该条（关中线同时关无量阴跌禁开；关慢线则 time_force 破线地板关掉） |
+| `ema.1d.trend` | `120` | 日线趋势均线（`RECIPE.structure.ema.1d`）；`above_ema` 用；`<=0` 关闸门 |
+| `ema.1w.mid` / `ema.1w.slow` / `ema.1w.trend` | `5` / `13` / `34` | 周线快/中/生命线（`RECIPE.structure.ema.1w`）；`slow` 仅日志多头 |
 | `macd.fast` / `macd.slow` / `macd.signal` | `12` / `26` / `9` | 周线 MACD 三窗（`RECIPE.structure`） |
 | `atr.n` | `14` | 日线威尔德 ATR 窗（`RECIPE.structure`）；`<=0` 关 `atr_stop` / `atr_trail_stop` |
 | `keltner.ema_n` / `keltner.atr_n` | `20` / `20` | 肯特纳中轨 EMA / 带宽 ATR 窗（`RECIPE.structure`，与 `atr.n` 独立）；`<=0` 关 |

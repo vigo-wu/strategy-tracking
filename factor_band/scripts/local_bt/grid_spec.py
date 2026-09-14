@@ -26,12 +26,12 @@ EXIT_KEYS: tuple[str, ...] = ()
 SCALE_FACTOR_KEYS: tuple[str, ...] = ()
 _LEAVES: dict[str, Any] = {}
 STRUCTURE_KEYS = (
-    "d_ma.mid",
-    "d_ma.slow",
-    "d_ma.trend",
-    "w_ma.fast",
-    "w_ma.mid",
-    "w_ma.life",
+    "ema.1d.mid",
+    "ema.1d.slow",
+    "ema.1d.trend",
+    "ema.1w.mid",
+    "ema.1w.slow",
+    "ema.1w.trend",
     "macd.fast",
     "macd.slow",
     "macd.signal",
@@ -39,7 +39,18 @@ STRUCTURE_KEYS = (
     "keltner.ema_n",
     "keltner.atr_n",
 )
-STRUCTURE_ROOTS = frozenset({"d_ma", "w_ma", "macd", "atr", "keltner"})
+STRUCTURE_ROOTS = frozenset({"ema", "sma", "macd", "atr", "keltner"})
+DELETED_STRUCTURE_ROOTS = frozenset({"d_ma", "w_ma"})
+DELETED_STRUCTURE_PATHS = frozenset(
+    {
+        "d_ma.mid",
+        "d_ma.slow",
+        "d_ma.trend",
+        "w_ma.fast",
+        "w_ma.mid",
+        "w_ma.life",
+    }
+)
 MONEY_KEYS = (
     "CASH_RATIO",
     "BOOK_LOT_MAX",
@@ -146,12 +157,12 @@ PARAM_LABELS = {
     "LOT_OPEN_FRAC": "开仓仓位",
     "LOT_ADD_FRAC": "第二笔仓位",
     "TRADE_BUDGET": "固定预算",
-    "d_ma.mid": "日线中均线",
-    "d_ma.slow": "日线慢均线",
-    "d_ma.trend": "日线趋势均线",
-    "w_ma.fast": "周线快均线",
-    "w_ma.mid": "周线中均线",
-    "w_ma.life": "周线生命线",
+    "ema.1d.mid": "日线中均线",
+    "ema.1d.slow": "日线慢均线",
+    "ema.1d.trend": "日线趋势均线",
+    "ema.1w.mid": "周线快均线",
+    "ema.1w.slow": "周线中均线",
+    "ema.1w.trend": "周线生命线",
     "macd.fast": "MACD 快线",
     "macd.slow": "MACD 慢线",
     "macd.signal": "MACD 信号",
@@ -168,12 +179,12 @@ ABBREV_FIXED = {
     "LOT_OPEN_FRAC": "lof",
     "LOT_ADD_FRAC": "laf",
     "TRADE_BUDGET": "tb",
-    "d_ma.mid": "dmm",
-    "d_ma.slow": "dms",
-    "d_ma.trend": "dmt",
-    "w_ma.fast": "wmf",
-    "w_ma.mid": "wmm",
-    "w_ma.life": "wml",
+    "ema.1d.mid": "e1dm",
+    "ema.1d.slow": "e1ds",
+    "ema.1d.trend": "e1dt",
+    "ema.1w.mid": "e1wm",
+    "ema.1w.slow": "e1ws",
+    "ema.1w.trend": "e1wt",
     "macd.fast": "mcf",
     "macd.slow": "mcs",
     "macd.signal": "mcg",
@@ -278,11 +289,42 @@ def reject_deleted_factor_keys(spec: Mapping[str, Any] | None) -> None:
         for key in DELETED_FACTOR_KEYS:
             if key in ov and key not in found:
                 found.append(str(key))
+        st = ov.get("structure")
+        if isinstance(st, dict):
+            for bad in DELETED_STRUCTURE_ROOTS:
+                if bad in st and bad not in found:
+                    found.append(str(bad))
     if found:
         raise GridSpecError("%s 见 %s" % (DELETED_FACTOR_MSG, ", ".join(found)))
     flat = _flat_factor_paths_in(spec)
     if flat:
         raise GridSpecError("%s 见 %s" % (FLAT_FACTOR_PATH_MSG, ", ".join(flat)))
+    # axes / 格子顶层点路径里的旧 d_ma.* / w_ma.*
+    data = dict(spec or {})
+    bad_paths: list[str] = []
+    for key in dict(data.get("axes") or {}):
+        if str(key) in DELETED_STRUCTURE_PATHS or str(key).split(".", 1)[0] in DELETED_STRUCTURE_ROOTS:
+            bad_paths.append(str(key))
+    for cell in data.get("cells") or []:
+        if not isinstance(cell, dict):
+            continue
+        cov = cell.get("overrides") or {}
+        if not isinstance(cov, dict):
+            continue
+        for key in cov:
+            if str(key) in DELETED_STRUCTURE_PATHS or str(key).split(".", 1)[0] in DELETED_STRUCTURE_ROOTS:
+                if str(key) not in bad_paths:
+                    bad_paths.append(str(key))
+        cst = cov.get("structure")
+        if isinstance(cst, dict):
+            for bad in DELETED_STRUCTURE_ROOTS:
+                if bad in cst and bad not in bad_paths:
+                    bad_paths.append(str(bad))
+    if bad_paths:
+        raise GridSpecError(
+            "已删除的 structure 路径：请写 ema|sma.<period>.<window>。见 %s"
+            % ", ".join(bad_paths)
+        )
 
 
 def reject_retired_min_ret(spec: Mapping[str, Any] | None) -> None:
@@ -331,13 +373,31 @@ def flatten_factor_params(table: Mapping[str, Any] | None) -> dict[str, Any]:
 
 
 def nest_factor_path(path: str, value: Any) -> dict[str, Any]:
-    """'stop_loss.pct', 0.06 → {'stop_loss': {'pct': 0.06}}"""
+    """'stop_loss.pct', 0.06 → {'stop_loss': {'pct': 0.06}}（仅两层）。"""
     if "." not in path:
         raise GridSpecError("不是因子点路径 %s" % path)
     fid, key = path.split(".", 1)
-    if not fid or not key:
+    if not fid or not key or "." in key:
         raise GridSpecError("不是因子点路径 %s" % path)
     return {fid: {key: value}}
+
+
+def nest_structure_path(path: str, value: Any) -> dict[str, Any]:
+    """'ema.1d.mid', 15 → {'ema': {'1d': {'mid': 15}}}（全段嵌套）。"""
+    parts = [p for p in str(path).split(".") if p]
+    if len(parts) < 2:
+        raise GridSpecError("不是 structure 点路径 %s" % path)
+    root = parts[0]
+    if root in DELETED_STRUCTURE_ROOTS or str(path) in DELETED_STRUCTURE_PATHS:
+        raise GridSpecError(
+            "已删除的 structure 路径 %s：请写 ema|sma.<period>.<window>" % path
+        )
+    if root not in STRUCTURE_ROOTS:
+        raise GridSpecError("未知 structure 根 %s" % path)
+    out: dict[str, Any] = {parts[-1]: value}
+    for part in reversed(parts[:-1]):
+        out = {part: out}
+    return out
 
 
 def deep_merge_factor_params(
@@ -369,6 +429,40 @@ def deep_merge_factor_params(
     return fp
 
 
+def deep_merge_structure(
+    base: Mapping[str, Any] | None,
+    incoming: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """递归合并 structure（兼容 keltner 两层与 ema.1d 三层）。"""
+
+    def _copy(src: Any) -> Any:
+        if isinstance(src, dict):
+            return {str(k): _copy(v) for k, v in src.items()}
+        return src
+
+    def _merge(dst: dict[str, Any], src: Mapping[str, Any]) -> dict[str, Any]:
+        for k, v in src.items():
+            key = str(k)
+            if key in DELETED_STRUCTURE_ROOTS:
+                raise GridSpecError(
+                    "已删除的 structure 段 %s：请写 ema|sma.<period>.<window>" % key
+                )
+            if isinstance(v, dict):
+                cur = dst.get(key)
+                if not isinstance(cur, dict):
+                    dst[key] = {}
+                    cur = dst[key]
+                _merge(cur, v)
+            else:
+                dst[key] = v
+        return dst
+
+    out: dict[str, Any] = _copy(base or {})
+    if not isinstance(incoming, Mapping):
+        return out
+    return _merge(out, incoming)
+
+
 def overrides_has_trail_tiers(overrides: Mapping[str, Any] | None) -> bool:
     fp = (overrides or {}).get("factor_params")
     if not isinstance(fp, dict):
@@ -378,12 +472,31 @@ def overrides_has_trail_tiers(overrides: Mapping[str, Any] | None) -> bool:
 
 
 def flatten_structure(table: Mapping[str, Any] | None) -> dict[str, Any]:
-    """RECIPE.structure → {'d_ma.mid': 20, ...}"""
-    return flatten_factor_params(table)
+    """RECIPE.structure → {'ema.1d.mid': 20, 'keltner.ema_n': 20, ...}"""
+    out: dict[str, Any] = {}
+
+    def _walk(node: Any, prefix: str) -> None:
+        if not isinstance(node, dict):
+            if prefix:
+                out[prefix] = node
+            return
+        for k, v in node.items():
+            key = str(k)
+            path = "%s.%s" % (prefix, key) if prefix else key
+            if isinstance(v, dict):
+                _walk(v, path)
+            else:
+                out[path] = v
+
+    _walk(table or {}, "")
+    return out
 
 
 def is_structure_path(path: str) -> bool:
-    return str(path) in STRUCTURE_KEYS or str(path).split(".", 1)[0] in STRUCTURE_ROOTS
+    p = str(path)
+    if p in DELETED_STRUCTURE_PATHS or p.split(".", 1)[0] in DELETED_STRUCTURE_ROOTS:
+        return False
+    return p in STRUCTURE_KEYS or p.split(".", 1)[0] in STRUCTURE_ROOTS
 
 
 def flatten_overrides(overrides: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -413,7 +526,7 @@ def _fold_tables_for_fingerprint(
     incoming_fp = ov.get("factor_params") if isinstance(ov.get("factor_params"), dict) else {}
     incoming_st = ov.get("structure") if isinstance(ov.get("structure"), dict) else {}
     fp = deep_merge_factor_params(fp_src, incoming_fp)
-    st = deep_merge_factor_params(st_src, incoming_st)
+    st = deep_merge_structure(st_src, incoming_st)
     leftover: dict[str, Any] = {}
     return fp, st, leftover
 
@@ -763,6 +876,72 @@ def _ordered_ids(found: Iterable[str]) -> list[str]:
 _install_leaf_axes()
 
 
+def materialize_structure_table(raw: Mapping[str, Any] | None) -> dict[str, Any]:
+    """与 ctx._structure_windows 同形的物化表（grid 侧无 ctx 时用）。"""
+    rec = dict(raw or {})
+    for bad in DELETED_STRUCTURE_ROOTS:
+        if bad in rec:
+            raise GridSpecError(
+                "已删除的 structure 段 %s：请写 ema|sma.<period>.<window>" % bad
+            )
+
+    def _iint(block: Mapping[str, Any] | None, key: str, default: int) -> int:
+        raw_v = (block or {}).get(key)
+        try:
+            return int(default if raw_v is None else raw_v)
+        except (TypeError, ValueError):
+            return int(default)
+
+    def _ma_period(alg: Mapping[str, Any] | None, period: str, defaults: tuple[int, int, int]) -> dict[str, int]:
+        block = (alg or {}).get(period) or {}
+        if block and not isinstance(block, dict):
+            raise GridSpecError("RECIPE.structure 周期段须为 dict：%s" % period)
+        mid_d, slow_d, trend_d = defaults
+        return {
+            "mid": _iint(block, "mid", mid_d),
+            "slow": _iint(block, "slow", slow_d),
+            "trend": _iint(block, "trend", trend_d),
+        }
+
+    ema = rec.get("ema") if isinstance(rec.get("ema"), dict) else {}
+    sma = rec.get("sma") if isinstance(rec.get("sma"), dict) else {}
+    macd = rec.get("macd") if isinstance(rec.get("macd"), dict) else {}
+    atr = rec.get("atr") if isinstance(rec.get("atr"), dict) else {}
+    keltner = rec.get("keltner") if isinstance(rec.get("keltner"), dict) else {}
+    return {
+        "ema": {
+            "1d": _ma_period(ema, "1d", (20, 60, 120)),
+            "1w": _ma_period(ema, "1w", (5, 13, 34)),
+        },
+        "sma": {
+            "1d": _ma_period(sma, "1d", (0, 0, 0)),
+            "1w": _ma_period(sma, "1w", (0, 0, 0)),
+        },
+        "macd": {
+            "fast": _iint(macd, "fast", 12),
+            "slow": _iint(macd, "slow", 26),
+            "signal": _iint(macd, "signal", 9),
+        },
+        "atr": {"n": _iint(atr, "n", 14)},
+        "keltner": {
+            "ema_n": _iint(keltner, "ema_n", 20),
+            "atr_n": _iint(keltner, "atr_n", 20),
+        },
+    }
+
+
+def _structure_flat_from_ns(ns: Mapping[str, Any]) -> dict[str, Any]:
+    """优先 _structure_windows()；否则按裸 RECIPE.structure 物化默认。"""
+    win_fn = ns.get("_structure_windows")
+    if callable(win_fn):
+        try:
+            return flatten_structure(win_fn())
+        except Exception:
+            pass
+    rec = ns.get("RECIPE") or {}
+    return flatten_structure(materialize_structure_table(rec.get("structure") or {}))
+
+
 def _build_catalog() -> tuple[ParamSpec, ...]:
     ns = _load_config_ns()
     rec = ns.get("RECIPE") or {}
@@ -770,7 +949,10 @@ def _build_catalog() -> tuple[ParamSpec, ...]:
     active = _active_leaf_ids(ns)
     if active is not None:
         flat = {k: v for k, v in flat.items() if k.split(".", 1)[0] in active}
-    flat.update(flatten_structure(rec.get("structure") or {}))
+    st_flat = _structure_flat_from_ns(ns)
+    for key in STRUCTURE_KEYS:
+        if key in st_flat:
+            flat[key] = st_flat[key]
     found = list(flat)
     found.extend(_scan_config_names(ns))
     ids = _ordered_ids(found)
@@ -822,6 +1004,10 @@ def get_param(family: str) -> ParamSpec | None:
 
 
 def require_param(family: str) -> ParamSpec:
+    if str(family) in DELETED_STRUCTURE_PATHS or str(family).split(".", 1)[0] in DELETED_STRUCTURE_ROOTS:
+        raise GridSpecError(
+            "已删除的 structure 路径 %s：请写 ema|sma.<period>.<window>" % family
+        )
     spec = get_param(family)
     if spec is None:
         raise GridSpecError("未知参数族 %s" % family)
@@ -1235,7 +1421,17 @@ def family_value_label(family: str, value: Any) -> str:
         if fv <= 0:
             return "ATR止损关闭"
         return "ATR止损 %gx" % fv
-    if family in ("d_ma.mid", "d_ma.slow", "d_ma.trend", "atr.n", "keltner.ema_n", "keltner.atr_n"):
+    if family in (
+        "ema.1d.mid",
+        "ema.1d.slow",
+        "ema.1d.trend",
+        "ema.1w.mid",
+        "ema.1w.slow",
+        "ema.1w.trend",
+        "atr.n",
+        "keltner.ema_n",
+        "keltner.atr_n",
+    ):
         try:
             iv = int(value)
         except (TypeError, ValueError):
@@ -1312,8 +1508,8 @@ def overrides_for_combo(
         else:
             packed = float(val)
         if is_structure_path(spec.id):
-            piece = nest_factor_path(spec.id, packed)
-            st = deep_merge_factor_params(st, piece)
+            piece = nest_structure_path(spec.id, packed)
+            st = deep_merge_structure(st, piece)
         elif "." in spec.id:
             piece = nest_factor_path(spec.id, packed)
             fp = deep_merge_factor_params(fp, piece)

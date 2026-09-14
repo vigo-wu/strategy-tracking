@@ -29,7 +29,7 @@
 indicators/util.py → sma.py → ema.py → macd.py → atr.py → keltner.py
 ```
 
-`macd.py` 直接调用 `_ema`，靠顺序看到符号。`keltner.py` 调用 `_ema` / `_calc_atr`。纯算法（util/sma/ema/macd/atr/keltner）以后可迁 `qmt_common/indicators/`。价格均线算法由调用点直调 `_ema` / `_sma`（现行日/周价格均线走 `_ema`；量均走 `_sma`）。
+`macd.py` 直接调用 `_ema`，靠顺序看到符号。`keltner.py` 调用 `_ema` / `_calc_atr`。纯算法（util/sma/ema/macd/atr/keltner）以后可迁 `qmt_common/indicators/`。价格均线算法由调用点直调 `_ema` / `_sma`（现行日/周价格均线走 `_ema` 读 `structure.ema.*`；量均走 `_sma`，窗在 `factor_params`）。
 
 ---
 
