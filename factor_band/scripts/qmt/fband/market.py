@@ -569,9 +569,15 @@ def _ohlcv_need_1d():
         slow_n = int(d_ma.get("slow") or 0)
     except (TypeError, ValueError):
         slow_n = 0
+    try:
+        trend_n = int(d_ma.get("trend") or 0)
+    except (TypeError, ValueError):
+        trend_n = 0
     confirm_n = _vol_pullback_confirm_need()
     raw_vn = _factor_param(None, "pullback_vol", "vol_n")
     raw_dn = _factor_param(None, "vol_dry", "n")
+    raw_kvn = _factor_param(None, "keltner_vol", "vol_n")
+    raw_kvc = _factor_param(None, "keltner_vol", "confirm_days")
     try:
         vol_n = int(10 if raw_vn is None else raw_vn)
     except (TypeError, ValueError):
@@ -580,18 +586,39 @@ def _ohlcv_need_1d():
         dry_n = int(20 if raw_dn is None else raw_dn)
     except (TypeError, ValueError):
         dry_n = 20
+    try:
+        kc_vol_n = int(10 if raw_kvn is None else raw_kvn)
+    except (TypeError, ValueError):
+        kc_vol_n = 10
+    try:
+        kc_confirm = int(2 if raw_kvc is None else raw_kvc)
+    except (TypeError, ValueError):
+        kc_confirm = 2
+    kc_confirm = max(1, kc_confirm)
     vol_pb_need = vol_n + max(0, confirm_n - 1)
+    kc_vol_need = kc_vol_n + max(0, kc_confirm - 1)
     try:
         atr_n = int(_structure_windows()["atr"]["n"] or 0)
     except (TypeError, ValueError, KeyError):
         atr_n = 0
+    try:
+        kc = _structure_windows()["keltner"]
+        kc_ema_n = int(kc.get("ema_n") or 0)
+        kc_atr_n = int(kc.get("atr_n") or 0)
+    except (TypeError, ValueError, KeyError):
+        kc_ema_n = 0
+        kc_atr_n = 0
     return max(
         mid_n if mid_n > 0 else 0,
         slow_n if slow_n > 0 else 0,
+        trend_n if trend_n > 0 else 0,
         vol_pb_need,
+        kc_vol_need,
         dry_n,
         plat_n + 2,
         atr_n if atr_n > 0 else 0,
+        kc_ema_n if kc_ema_n > 0 else 0,
+        kc_atr_n if kc_atr_n > 0 else 0,
     ) + 10
 
 

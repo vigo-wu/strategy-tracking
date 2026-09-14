@@ -52,11 +52,12 @@ LOT_ADD_FRAC = 0.30
 TRADE_BUDGET = 100000.0
 
 # ---- 周线过滤（跨周期；主图仍是日线）----
-# 周/日均线周期、MACD 窗与 ATR 窗在 RECIPE.structure（字面量）。
+# 周/日均线周期、MACD 窗、ATR 窗与肯特纳窗在 RECIPE.structure（字面量）。
 # 价格均线算法由 ctx / 因子调用点直调 _ema（量均始终 _sma；MACD 仍 _ema）。
-# 日线：中线→回踩/无量阴跌；慢线→回踩支撑 + 时间成本地板。<=0 关该条。
+# 日线：中线→回踩/无量阴跌；慢线→回踩支撑 + 时间成本地板；trend→above_ema。<=0 关该条。
 # 周线：快/生命线（5/34）；mid=13 仅日志多头。取数 need 另钳原 MA55 暖机地板。
 # ATR：威尔德平滑窗 atr.n；<=0 关 atr_stop。
+# 肯特纳：中轨 EMA 窗 keltner.ema_n，带宽 ATR 窗 keltner.atr_n（与 atr.n 独立）；<=0 关。
 
 # 盈利后加仓：门槛叶子 scale_arm（峰值浮盈 / 持仓日 / 周柱）在 RECIPE.scale_in；
 #   回踩加仓仍受 chase；破平台/金叉不受
@@ -68,7 +69,7 @@ SCALE_ONCE_PER_ROUND = True
 SCALE_LOTS = True
 
 # 默认 Recipe：四槽布尔式。因子数字在 factors/catalog.py（写入 factor_params）；
-# 均线/MACD/ATR 窗真源 structure。scale_once / 满槽 / 资金不进表。
+# 均线/MACD/ATR/肯特纳 窗真源 structure。scale_once / 满槽 / 资金不进表。
 # scale_out 恒 false：减仓未启用。
 RECIPE = {
     "entry": [
@@ -78,7 +79,8 @@ RECIPE = {
         ["not", "w_bias"],
         ["not", "w_slope"],
         ["not", "weekly_bear"],
-        "pullback_vol",
+        "above_ema",
+        "keltner_vol",
     ],
     "scale_in": [
         "and",
@@ -86,9 +88,10 @@ RECIPE = {
         ["not", "w_bias"],
         ["not", "w_slope"],
         ["not", "weekly_bear"],
+        "above_ema",
         [
             "or",
-            ["and", "pullback_vol", ["not", "chase"]],
+            ["and", "keltner_vol", ["not", "chase"]],
             "plat_break",
             "w_macd_golden",
         ],
@@ -105,14 +108,16 @@ RECIPE = {
     ],
     "scale_out": False,
     "structure": {
-        # 日线中/慢均线；<=0 关该条
-        "d_ma": {"mid": 20, "slow": 60},
+        # 日线中/慢/趋势均线；<=0 关该条
+        "d_ma": {"mid": 20, "slow": 60, "trend": 120},
         # 周线快/中/生命线；mid 仅日志 weekly_bull
         "w_ma": {"fast": 5, "mid": 13, "life": 34},
         # MACD DIF/DEA/柱
         "macd": {"fast": 12, "slow": 26, "signal": 9},
         # 日线威尔德 ATR；<=0 关 atr_stop / atr_trail_stop
         "atr": {"n": 14},
+        # 肯特纳中轨 EMA / 带宽 ATR；与 atr.n 独立；<=0 关
+        "keltner": {"ema_n": 20, "atr_n": 20},
     },
 }
 
@@ -314,6 +319,45 @@ LEAVES = {
     "weekly_bear": {
         "label": "周线转空强制清仓",
         "label_buy": "周线空头禁开",
+        "group": "entry",
+        "params": {},
+    },
+    "keltner_vol": {
+        "label": "通道内缩量",
+        "group": "entry",
+        "params": {
+            "k": {
+                "default": 2.0,
+                "percent": False,
+                "abbrev": "kvk",
+                "label": "通道倍数",
+                "axis": 10,
+            },
+            "ratio": {
+                "default": 0.9,
+                "percent": True,
+                "abbrev": "kvr",
+                "label": "通道缩量比例",
+                "axis": 11,
+            },
+            "vol_n": {
+                "default": 10,
+                "percent": False,
+                "abbrev": "kvn",
+                "label": "通道缩量窗口",
+                "axis": 12,
+            },
+            "confirm_days": {
+                "default": 2,
+                "percent": False,
+                "abbrev": "kvc",
+                "label": "通道缩量确认日",
+                "axis": 13,
+            },
+        },
+    },
+    "above_ema": {
+        "label": "价在趋势均线上",
         "group": "entry",
         "params": {},
     },
@@ -2400,6 +2444,30 @@ def _calc_atr(highs, lows, closes, n):
         return None
     return _wilder(tr, n)
 
+# === fband/indicators/keltner.py ===
+def _calc_keltner(highs, lows, closes, ema_n, atr_n, k):
+    """返回 (mid, upper, lower) 或 None。中轨 EMA，带宽 k×威尔德 ATR。窗与 k 必传，不读 RECIPE。"""
+    ema_n = int(ema_n)
+    atr_n = int(atr_n)
+    try:
+        k = float(k)
+    except (TypeError, ValueError):
+        return None
+    if ema_n <= 0 or atr_n <= 0 or k <= 0:
+        return None
+    mid = _ema(closes, ema_n)
+    atr = _calc_atr(highs, lows, closes, atr_n)
+    if mid is None or atr is None:
+        return None
+    n = min(len(mid), len(atr))
+    if n <= 0:
+        return None
+    mid = mid[:n]
+    atr = atr[:n]
+    upper = mid + k * atr
+    lower = mid - k * atr
+    return mid, upper, lower
+
 # === qmt_common/market_util.py ===
 # 作用: 行情辅助：诊断、序列解析、补历史、心跳
 # 主要符号: _diag_once, _series_from_ex, _download_hist, _live_heartbeat
@@ -3375,9 +3443,15 @@ def _ohlcv_need_1d():
         slow_n = int(d_ma.get("slow") or 0)
     except (TypeError, ValueError):
         slow_n = 0
+    try:
+        trend_n = int(d_ma.get("trend") or 0)
+    except (TypeError, ValueError):
+        trend_n = 0
     confirm_n = _vol_pullback_confirm_need()
     raw_vn = _factor_param(None, "pullback_vol", "vol_n")
     raw_dn = _factor_param(None, "vol_dry", "n")
+    raw_kvn = _factor_param(None, "keltner_vol", "vol_n")
+    raw_kvc = _factor_param(None, "keltner_vol", "confirm_days")
     try:
         vol_n = int(10 if raw_vn is None else raw_vn)
     except (TypeError, ValueError):
@@ -3386,18 +3460,39 @@ def _ohlcv_need_1d():
         dry_n = int(20 if raw_dn is None else raw_dn)
     except (TypeError, ValueError):
         dry_n = 20
+    try:
+        kc_vol_n = int(10 if raw_kvn is None else raw_kvn)
+    except (TypeError, ValueError):
+        kc_vol_n = 10
+    try:
+        kc_confirm = int(2 if raw_kvc is None else raw_kvc)
+    except (TypeError, ValueError):
+        kc_confirm = 2
+    kc_confirm = max(1, kc_confirm)
     vol_pb_need = vol_n + max(0, confirm_n - 1)
+    kc_vol_need = kc_vol_n + max(0, kc_confirm - 1)
     try:
         atr_n = int(_structure_windows()["atr"]["n"] or 0)
     except (TypeError, ValueError, KeyError):
         atr_n = 0
+    try:
+        kc = _structure_windows()["keltner"]
+        kc_ema_n = int(kc.get("ema_n") or 0)
+        kc_atr_n = int(kc.get("atr_n") or 0)
+    except (TypeError, ValueError, KeyError):
+        kc_ema_n = 0
+        kc_atr_n = 0
     return max(
         mid_n if mid_n > 0 else 0,
         slow_n if slow_n > 0 else 0,
+        trend_n if trend_n > 0 else 0,
         vol_pb_need,
+        kc_vol_need,
         dry_n,
         plat_n + 2,
         atr_n if atr_n > 0 else 0,
+        kc_ema_n if kc_ema_n > 0 else 0,
+        kc_atr_n if kc_atr_n > 0 else 0,
     ) + 10
 
 
@@ -3592,10 +3687,12 @@ def _structure_windows():
     w_ma = rec.get("w_ma") or {}
     macd = rec.get("macd") or {}
     atr = rec.get("atr") or {}
+    keltner = rec.get("keltner") or {}
     return {
         "d_ma": {
             "mid": _structure_int(d_ma, "mid", 20),
             "slow": _structure_int(d_ma, "slow", 60),
+            "trend": _structure_int(d_ma, "trend", 120),
         },
         "w_ma": {
             "fast": _structure_int(w_ma, "fast", 5),
@@ -3609,6 +3706,10 @@ def _structure_windows():
         },
         "atr": {
             "n": _structure_int(atr, "n", 14),
+        },
+        "keltner": {
+            "ema_n": _structure_int(keltner, "ema_n", 20),
+            "atr_n": _structure_int(keltner, "atr_n", 20),
         },
     }
 
@@ -3740,12 +3841,14 @@ def _factor_daily_features(closes, volumes):
     detail = {
         "ma20": None,
         "ma60": None,
+        "ma_trend": None,
         "vol10": None,
         "vol20": None,
         "vol_need": 1,
         "vol_streak": 0,
         "mid_n": 0,
         "slow_n": 0,
+        "trend_n": 0,
         "i": -1,
         "price": None,
         "vol": None,
@@ -3763,10 +3866,16 @@ def _factor_daily_features(closes, volumes):
         slow_n = int(d_ma.get("slow") or 0)
     except (TypeError, ValueError):
         slow_n = 0
+    try:
+        trend_n = int(d_ma.get("trend") or 0)
+    except (TypeError, ValueError):
+        trend_n = 0
     detail["mid_n"] = mid_n
     detail["slow_n"] = slow_n
+    detail["trend_n"] = trend_n
     ma20 = _ema(closes, mid_n) if mid_n > 0 else None
     ma60 = _ema(closes, slow_n) if slow_n > 0 else None
+    ma_trend = _ema(closes, trend_n) if trend_n > 0 else None
     raw_vn = _factor_param(None, "pullback_vol", "vol_n")
     raw_dn = _factor_param(None, "vol_dry", "n")
     try:
@@ -3791,12 +3900,14 @@ def _factor_daily_features(closes, volumes):
     vol = float(volumes[i])
     m20 = _last_valid(ma20, i) if ma20 is not None else None
     m60 = _last_valid(ma60, i) if ma60 is not None else None
+    m_trend = _last_valid(ma_trend, i) if ma_trend is not None else None
     v10 = _last_valid(vol10, i)
     v20 = _last_valid(vol20, i)
     detail.update(
         {
             "ma20": m20,
             "ma60": m60,
+            "ma_trend": m_trend,
             "vol10": vol10,
             "vol20": vol20,
             "price": price,
@@ -3829,6 +3940,17 @@ def _build_factor_ctx(
         atr_n = 0
     atr_arr = _calc_atr(highs, lows, closes, atr_n) if atr_n > 0 else None
     atr = _last_valid(atr_arr) if atr_arr is not None else None
+    try:
+        kc_win = _structure_windows()["keltner"]
+        kc_ema_n = int(kc_win["ema_n"] or 0)
+        kc_atr_n = int(kc_win["atr_n"] or 0)
+    except (TypeError, ValueError, KeyError):
+        kc_ema_n = 0
+        kc_atr_n = 0
+    kc_mid_arr = _ema(closes, kc_ema_n) if kc_ema_n > 0 and closes is not None else None
+    kc_atr_arr = _calc_atr(highs, lows, closes, kc_atr_n) if kc_atr_n > 0 else None
+    kc_mid = _last_valid(kc_mid_arr) if kc_mid_arr is not None else None
+    kc_atr = _last_valid(kc_atr_arr) if kc_atr_arr is not None else None
     market = {
         "close": price,
         "closes": closes,
@@ -3840,10 +3962,12 @@ def _build_factor_ctx(
         "daily_detail": daily,
         "ma20": daily.get("ma20"),
         "ma60": daily.get("ma60"),
+        "ma_trend": daily.get("ma_trend"),
         "vol10": daily.get("vol10"),
         "vol20": daily.get("vol20"),
         "mid_n": daily.get("mid_n"),
         "slow_n": daily.get("slow_n"),
+        "trend_n": daily.get("trend_n"),
         "i": daily.get("i"),
         "vol": daily.get("vol"),
         "v10": daily.get("v10"),
@@ -3851,6 +3975,10 @@ def _build_factor_ctx(
         "vol_need": daily.get("vol_need"),
         "atr": atr,
         "atr_n": atr_n,
+        "kc_mid": kc_mid,
+        "kc_atr": kc_atr,
+        "kc_ema_n": kc_ema_n,
+        "kc_atr_n": kc_atr_n,
     }
     return {
         "market": market,
@@ -3986,6 +4114,100 @@ def _factor_eval_weekly_bear(ctx):
     death_below = _cross_down(d1, e1, d0, e0) and (d0 < 0) and (e0 < 0)
     bear = (c < m30) or death_below
     return bool(bear), {"death_below": bool(death_below)}
+
+# === fband/factors/lib/keltner_vol.py ===
+def _factor_eval_keltner_vol(ctx):
+    market = (ctx or {}).get("market") or {}
+    if not market.get("daily_ready"):
+        return False, {"vol_streak": 0, "inside": False}
+    try:
+        k = float(_factor_param(ctx, "keltner_vol", "k"))
+    except (TypeError, ValueError):
+        k = 0.0
+    win = _structure_windows()["keltner"]
+    try:
+        ema_n = int(win["ema_n"] or 0)
+    except (TypeError, ValueError, KeyError):
+        ema_n = 0
+    try:
+        atr_n = int(win["atr_n"] or 0)
+    except (TypeError, ValueError, KeyError):
+        atr_n = 0
+    mid = market.get("kc_mid")
+    atr = market.get("kc_atr")
+    price = market.get("close")
+    if price is None:
+        price = market.get("daily_detail", {}).get("price")
+    if k <= 0 or ema_n <= 0 or atr_n <= 0 or None in (mid, atr, price):
+        return False, {"k": k, "inside": False, "vol_streak": 0}
+    upper = float(mid) + k * float(atr)
+    lower = float(mid) - k * float(atr)
+    inside = lower <= float(price) <= upper
+    raw_ratio = _factor_param(ctx, "keltner_vol", "ratio")
+    try:
+        ratio = float(0.9 if raw_ratio is None else raw_ratio)
+    except (TypeError, ValueError):
+        ratio = 0.9
+    raw_vn = _factor_param(ctx, "keltner_vol", "vol_n")
+    try:
+        vol_n = int(10 if raw_vn is None else raw_vn)
+    except (TypeError, ValueError):
+        vol_n = 10
+    raw_need = _factor_param(ctx, "keltner_vol", "confirm_days")
+    try:
+        vol_need = int(2 if raw_need is None else raw_need)
+    except (TypeError, ValueError):
+        vol_need = 2
+    vol_need = max(1, vol_need)
+    volumes = market.get("volumes")
+    vol_sma = _sma(volumes, vol_n) if vol_n > 0 else None
+    vol_streak = 0
+    if volumes is None or vol_sma is None:
+        return False, {
+            "k": k,
+            "inside": inside,
+            "vol_streak": 0,
+            "upper": upper,
+            "lower": lower,
+        }
+    i = int(market.get("i") or 0)
+    for step in range(vol_need):
+        j = i - step
+        if j < 0:
+            break
+        vma = _last_valid(vol_sma, j)
+        vj = float(volumes[j])
+        if vma is None or vma <= 0 or vj >= vma * ratio:
+            break
+        vol_streak += 1
+    hit = bool(inside and vol_streak >= vol_need)
+    return hit, {
+        "k": k,
+        "inside": inside,
+        "vol_streak": vol_streak,
+        "upper": upper,
+        "lower": lower,
+    }
+
+# === fband/factors/lib/above_ema.py ===
+def _factor_eval_above_ema(ctx):
+    try:
+        n = int(_structure_windows()["d_ma"]["trend"] or 0)
+    except (TypeError, ValueError, KeyError):
+        n = 0
+    if n <= 0:
+        return True, {"n": n, "off": True}
+    market = (ctx or {}).get("market") or {}
+    if not market.get("daily_ready"):
+        return False, {"n": n}
+    price = market.get("close")
+    if price is None:
+        price = market.get("daily_detail", {}).get("price")
+    ma = market.get("ma_trend")
+    if price is None or ma is None:
+        return False, {"n": n, "ma": ma, "price": price}
+    hit = float(price) > float(ma)
+    return hit, {"n": n, "ma": ma, "price": float(price)}
 
 # === fband/factors/lib/weekly_bear_confirm.py ===
 def _w_bear_confirm_need():
@@ -10261,9 +10483,12 @@ def _init_impl(C):
         "wMA=",
         "%d/%d" % (_win["w_ma"]["fast"], _win["w_ma"]["life"]),
         "dMA=",
-        "%d/%d" % (_win["d_ma"]["mid"], _win["d_ma"]["slow"]),
+        "%d/%d/%d"
+        % (_win["d_ma"]["mid"], _win["d_ma"]["slow"], _win["d_ma"]["trend"]),
         "atr=",
         int(_win["atr"]["n"]),
+        "kc=",
+        "%d/%d" % (_win["keltner"]["ema_n"], _win["keltner"]["atr_n"]),
         "stop=",
         _factor_param(None, "stop_loss", "pct"),
         "atr_stop=",

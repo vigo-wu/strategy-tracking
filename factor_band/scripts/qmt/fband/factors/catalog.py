@@ -109,6 +109,45 @@ LEAVES = {
         "group": "entry",
         "params": {},
     },
+    "keltner_vol": {
+        "label": "通道内缩量",
+        "group": "entry",
+        "params": {
+            "k": {
+                "default": 2.0,
+                "percent": False,
+                "abbrev": "kvk",
+                "label": "通道倍数",
+                "axis": 10,
+            },
+            "ratio": {
+                "default": 0.9,
+                "percent": True,
+                "abbrev": "kvr",
+                "label": "通道缩量比例",
+                "axis": 11,
+            },
+            "vol_n": {
+                "default": 10,
+                "percent": False,
+                "abbrev": "kvn",
+                "label": "通道缩量窗口",
+                "axis": 12,
+            },
+            "confirm_days": {
+                "default": 2,
+                "percent": False,
+                "abbrev": "kvc",
+                "label": "通道缩量确认日",
+                "axis": 13,
+            },
+        },
+    },
+    "above_ema": {
+        "label": "价在趋势均线上",
+        "group": "entry",
+        "params": {},
+    },
     "weekly_bear_confirm": {
         "label": "周线转空强制清仓",
         "group": "exit",

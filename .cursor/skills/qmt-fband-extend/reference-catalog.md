@@ -56,7 +56,7 @@
 3. `market._ohlcv_need_1d` / `_ohlcv_need_1w`（暖机）
 4. `local_bt/grid_spec.py` 的 `STRUCTURE_KEYS` 与 `STRUCTURE_ROOTS`
 
-因子调用：先 `_structure_windows()`，再把 `n` 传给 `_ema` / `_sma` / `_calc_macd` / `_calc_atr`。价格均线算法由调用点选定，不上 `structure`。
+因子调用：先 `_structure_windows()`，再把 `n` 传给 `_ema` / `_sma` / `_calc_macd` / `_calc_atr` / `_calc_keltner`。价格均线算法由调用点选定，不上 `structure`。`_calc_keltner` 的倍数 `k` 由调用方传入，不上 `structure`。
 
 ## 加完自检
 

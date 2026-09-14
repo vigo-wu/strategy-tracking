@@ -17,6 +17,7 @@
 | [ema.py](ema.py) | `_ema` | 是 | 指数均线 |
 | [macd.py](macd.py) | `_calc_macd` | 是 | 只用已拼入的 `_ema`（必须在 ema 之后）；`fast/slow/signal` **必传**，不读 `RECIPE` / `MACD_*` |
 | [atr.py](atr.py) | `_true_range` `_wilder` `_calc_atr` | 是 | 威尔德 ATR；`n` **必传**，不读 `RECIPE` / `atr.n`；`n<=0` 或长度不足 → `None` |
+| [keltner.py](keltner.py) | `_calc_keltner` | 是 | 中轨 EMA ± k×威尔德 ATR；必须在 ema / atr 之后；`ema_n` / `atr_n` / `k` **必传**，不读 `RECIPE`；`<=0` 或长度不足 → `None` |
 
 不要放进来：`chase` / `pullback_vol` / `trail_stop`（因子）以及 `_near_ma` / `_plat_window`（在 [../factors/lib/NAV.md](../factors/lib/NAV.md)）。
 
@@ -25,10 +26,10 @@
 ## 拼接顺序
 
 ```text
-indicators/util.py → sma.py → ema.py → macd.py → atr.py
+indicators/util.py → sma.py → ema.py → macd.py → atr.py → keltner.py
 ```
 
-`macd.py` 直接调用 `_ema`，靠顺序看到符号。纯算法（util/sma/ema/macd/atr）以后可迁 `qmt_common/indicators/`。价格均线算法由调用点直调 `_ema` / `_sma`（现行日/周价格均线走 `_ema`；量均走 `_sma`）。
+`macd.py` 直接调用 `_ema`，靠顺序看到符号。`keltner.py` 调用 `_ema` / `_calc_atr`。纯算法（util/sma/ema/macd/atr/keltner）以后可迁 `qmt_common/indicators/`。价格均线算法由调用点直调 `_ema` / `_sma`（现行日/周价格均线走 `_ema`；量均走 `_sma`）。
 
 ---
 

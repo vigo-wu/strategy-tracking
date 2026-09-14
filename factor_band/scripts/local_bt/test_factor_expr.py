@@ -169,15 +169,19 @@ class DefaultRecipeShapeTests(unittest.TestCase):
         entry = recipe["entry"]
         self.assertEqual(entry[0], "and")
         self.assertIn(["not", "chase"], entry)
+        self.assertIn("above_ema", entry)
+        self.assertIn("keltner_vol", entry)
+        self.assertNotIn("pullback_vol", entry)
         scale = recipe["scale_in"]
         self.assertEqual(scale[0], "and")
         self.assertNotIn(["not", "chase"], scale[1:5])
         self.assertEqual(scale[-1], "scale_arm")
         or_node = next(n for n in scale[1:] if isinstance(n, list) and n and n[0] == "or")
         self.assertEqual(or_node[0], "or")
-        self.assertEqual(or_node[1], ["and", "pullback_vol", ["not", "chase"]])
+        self.assertEqual(or_node[1], ["and", "keltner_vol", ["not", "chase"]])
         self.assertIn("plat_break", or_node)
         self.assertIn("w_macd_golden", or_node)
+        self.assertIn("above_ema", scale)
         self.assertEqual(
             recipe["exit"],
             [
@@ -200,6 +204,9 @@ class DefaultRecipeShapeTests(unittest.TestCase):
         self.assertAlmostEqual(fp["time_force"]["arm"], 0.03)
         self.assertEqual(fp["pullback_vol"]["vol_n"], 10)
         self.assertEqual(recipe["structure"]["atr"]["n"], 14)
+        self.assertEqual(recipe["structure"]["keltner"]["ema_n"], 20)
+        self.assertEqual(recipe["structure"]["keltner"]["atr_n"], 20)
+        self.assertEqual(recipe["structure"]["d_ma"]["trend"], 120)
 
 
 def _chase_ctx(chg):

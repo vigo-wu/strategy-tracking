@@ -39,13 +39,14 @@ JSON 可序列化。元组在 JSON 里用数组；`null` = Python `None`。
     }
   },
   "structure": {
-    "d_ma": {"mid": 15},
-    "atr": {"n": 14}
+    "d_ma": {"mid": 15, "trend": 120},
+    "atr": {"n": 14},
+    "keltner": {"ema_n": 20, "atr_n": 20}
   }
 }
 ```
 
-结构轴 id：`d_ma.mid` `d_ma.slow` `w_ma.fast` `w_ma.mid` `w_ma.life` `macd.fast` `macd.slow` `macd.signal` `atr.n`。短 id 如 `dmm15` / `atr`。出场另有 `atr_stop.k`（短 id `ask`）、`atr_trail_stop.k1` / `k2`（`atk1` / `atk2`，浮点倍数轴，**不是**百分比轴）、`time_force.arm`（`tfa`，百分比）。不要写顶层 `D_MA_MID` 或顶层 `d_ma.mid`。
+结构轴 id：`d_ma.mid` `d_ma.slow` `d_ma.trend` `w_ma.fast` `w_ma.mid` `w_ma.life` `macd.fast` `macd.slow` `macd.signal` `atr.n` `keltner.ema_n` `keltner.atr_n`。短 id 如 `dmm15` / `dmt` / `atr` / `kem` / `kat`。出场另有 `atr_stop.k`（短 id `ask`）、`atr_trail_stop.k1` / `k2`（`atk1` / `atk2`，浮点倍数轴，**不是**百分比轴）、`time_force.arm`（`tfa`，百分比）。不要写顶层 `D_MA_MID` 或顶层 `d_ma.mid`。
 
 空 `overrides` = `base`（现行片段常量，仍跑一遍以便对照目录与指纹）。
 

@@ -322,9 +322,12 @@ def _init_impl(C):
         "wMA=",
         "%d/%d" % (_win["w_ma"]["fast"], _win["w_ma"]["life"]),
         "dMA=",
-        "%d/%d" % (_win["d_ma"]["mid"], _win["d_ma"]["slow"]),
+        "%d/%d/%d"
+        % (_win["d_ma"]["mid"], _win["d_ma"]["slow"], _win["d_ma"]["trend"]),
         "atr=",
         int(_win["atr"]["n"]),
+        "kc=",
+        "%d/%d" % (_win["keltner"]["ema_n"], _win["keltner"]["atr_n"]),
         "stop=",
         _factor_param(None, "stop_loss", "pct"),
         "atr_stop=",

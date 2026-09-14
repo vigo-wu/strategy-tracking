@@ -68,10 +68,12 @@ def _structure_windows():
     w_ma = rec.get("w_ma") or {}
     macd = rec.get("macd") or {}
     atr = rec.get("atr") or {}
+    keltner = rec.get("keltner") or {}
     return {
         "d_ma": {
             "mid": _structure_int(d_ma, "mid", 20),
             "slow": _structure_int(d_ma, "slow", 60),
+            "trend": _structure_int(d_ma, "trend", 120),
         },
         "w_ma": {
             "fast": _structure_int(w_ma, "fast", 5),
@@ -85,6 +87,10 @@ def _structure_windows():
         },
         "atr": {
             "n": _structure_int(atr, "n", 14),
+        },
+        "keltner": {
+            "ema_n": _structure_int(keltner, "ema_n", 20),
+            "atr_n": _structure_int(keltner, "atr_n", 20),
         },
     }
 
@@ -216,12 +222,14 @@ def _factor_daily_features(closes, volumes):
     detail = {
         "ma20": None,
         "ma60": None,
+        "ma_trend": None,
         "vol10": None,
         "vol20": None,
         "vol_need": 1,
         "vol_streak": 0,
         "mid_n": 0,
         "slow_n": 0,
+        "trend_n": 0,
         "i": -1,
         "price": None,
         "vol": None,
@@ -239,10 +247,16 @@ def _factor_daily_features(closes, volumes):
         slow_n = int(d_ma.get("slow") or 0)
     except (TypeError, ValueError):
         slow_n = 0
+    try:
+        trend_n = int(d_ma.get("trend") or 0)
+    except (TypeError, ValueError):
+        trend_n = 0
     detail["mid_n"] = mid_n
     detail["slow_n"] = slow_n
+    detail["trend_n"] = trend_n
     ma20 = _ema(closes, mid_n) if mid_n > 0 else None
     ma60 = _ema(closes, slow_n) if slow_n > 0 else None
+    ma_trend = _ema(closes, trend_n) if trend_n > 0 else None
     raw_vn = _factor_param(None, "pullback_vol", "vol_n")
     raw_dn = _factor_param(None, "vol_dry", "n")
     try:
@@ -267,12 +281,14 @@ def _factor_daily_features(closes, volumes):
     vol = float(volumes[i])
     m20 = _last_valid(ma20, i) if ma20 is not None else None
     m60 = _last_valid(ma60, i) if ma60 is not None else None
+    m_trend = _last_valid(ma_trend, i) if ma_trend is not None else None
     v10 = _last_valid(vol10, i)
     v20 = _last_valid(vol20, i)
     detail.update(
         {
             "ma20": m20,
             "ma60": m60,
+            "ma_trend": m_trend,
             "vol10": vol10,
             "vol20": vol20,
             "price": price,
@@ -305,6 +321,17 @@ def _build_factor_ctx(
         atr_n = 0
     atr_arr = _calc_atr(highs, lows, closes, atr_n) if atr_n > 0 else None
     atr = _last_valid(atr_arr) if atr_arr is not None else None
+    try:
+        kc_win = _structure_windows()["keltner"]
+        kc_ema_n = int(kc_win["ema_n"] or 0)
+        kc_atr_n = int(kc_win["atr_n"] or 0)
+    except (TypeError, ValueError, KeyError):
+        kc_ema_n = 0
+        kc_atr_n = 0
+    kc_mid_arr = _ema(closes, kc_ema_n) if kc_ema_n > 0 and closes is not None else None
+    kc_atr_arr = _calc_atr(highs, lows, closes, kc_atr_n) if kc_atr_n > 0 else None
+    kc_mid = _last_valid(kc_mid_arr) if kc_mid_arr is not None else None
+    kc_atr = _last_valid(kc_atr_arr) if kc_atr_arr is not None else None
     market = {
         "close": price,
         "closes": closes,
@@ -316,10 +343,12 @@ def _build_factor_ctx(
         "daily_detail": daily,
         "ma20": daily.get("ma20"),
         "ma60": daily.get("ma60"),
+        "ma_trend": daily.get("ma_trend"),
         "vol10": daily.get("vol10"),
         "vol20": daily.get("vol20"),
         "mid_n": daily.get("mid_n"),
         "slow_n": daily.get("slow_n"),
+        "trend_n": daily.get("trend_n"),
         "i": daily.get("i"),
         "vol": daily.get("vol"),
         "v10": daily.get("v10"),
@@ -327,6 +356,10 @@ def _build_factor_ctx(
         "vol_need": daily.get("vol_need"),
         "atr": atr,
         "atr_n": atr_n,
+        "kc_mid": kc_mid,
+        "kc_atr": kc_atr,
+        "kc_ema_n": kc_ema_n,
+        "kc_atr_n": kc_atr_n,
     }
     return {
         "market": market,

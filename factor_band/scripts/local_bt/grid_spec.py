@@ -28,6 +28,7 @@ _LEAVES: dict[str, Any] = {}
 STRUCTURE_KEYS = (
     "d_ma.mid",
     "d_ma.slow",
+    "d_ma.trend",
     "w_ma.fast",
     "w_ma.mid",
     "w_ma.life",
@@ -35,8 +36,10 @@ STRUCTURE_KEYS = (
     "macd.slow",
     "macd.signal",
     "atr.n",
+    "keltner.ema_n",
+    "keltner.atr_n",
 )
-STRUCTURE_ROOTS = frozenset({"d_ma", "w_ma", "macd", "atr"})
+STRUCTURE_ROOTS = frozenset({"d_ma", "w_ma", "macd", "atr", "keltner"})
 MONEY_KEYS = (
     "CASH_RATIO",
     "BOOK_LOT_MAX",
@@ -145,6 +148,7 @@ PARAM_LABELS = {
     "TRADE_BUDGET": "固定预算",
     "d_ma.mid": "日线中均线",
     "d_ma.slow": "日线慢均线",
+    "d_ma.trend": "日线趋势均线",
     "w_ma.fast": "周线快均线",
     "w_ma.mid": "周线中均线",
     "w_ma.life": "周线生命线",
@@ -152,6 +156,8 @@ PARAM_LABELS = {
     "macd.slow": "MACD 慢线",
     "macd.signal": "MACD 信号",
     "atr.n": "日线ATR窗",
+    "keltner.ema_n": "肯特纳EMA窗",
+    "keltner.atr_n": "肯特纳ATR窗",
 }
 ABBREV_FIXED = {
     "SCALE_ENABLE": "se",
@@ -164,6 +170,7 @@ ABBREV_FIXED = {
     "TRADE_BUDGET": "tb",
     "d_ma.mid": "dmm",
     "d_ma.slow": "dms",
+    "d_ma.trend": "dmt",
     "w_ma.fast": "wmf",
     "w_ma.mid": "wmm",
     "w_ma.life": "wml",
@@ -171,6 +178,8 @@ ABBREV_FIXED = {
     "macd.slow": "mcs",
     "macd.signal": "mcg",
     "atr.n": "atr",
+    "keltner.ema_n": "kem",
+    "keltner.atr_n": "kat",
 }
 DEFAULT_SCAN = {
     "stop_loss.pct": "6,10",
@@ -1162,7 +1171,7 @@ def family_value_label(family: str, value: Any) -> str:
         if fv <= 0:
             return "ATR止损关闭"
         return "ATR止损 %gx" % fv
-    if family in ("d_ma.mid", "d_ma.slow", "atr.n"):
+    if family in ("d_ma.mid", "d_ma.slow", "d_ma.trend", "atr.n", "keltner.ema_n", "keltner.atr_n"):
         try:
             iv = int(value)
         except (TypeError, ValueError):

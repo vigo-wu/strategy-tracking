@@ -57,6 +57,7 @@ _EXPECTED_FP = {
         ]
     },
     "time_force": {"bars": 30, "arm": 0.03},
+    "keltner_vol": {"k": 2.0, "ratio": 0.9, "vol_n": 10, "confirm_days": 2},
 }
 
 _EXPECTED_CATALOG_HEAD = (
@@ -116,10 +117,11 @@ class CatalogContractTests(unittest.TestCase):
         ns = _load_config_ns()
         fp = ns["RECIPE"]["factor_params"]
         self.assertNotIn("weekly_bear", fp)
+        self.assertNotIn("above_ema", fp)
         self.assertEqual(fp, _EXPECTED_FP)
 
     def test_recipe_fingerprint_unchanged(self) -> None:
-        self.assertEqual(recipe_fingerprint({}), "c167b7d0")
+        self.assertEqual(recipe_fingerprint({}), "2f366c24")
 
     def test_catalog_axis_order(self) -> None:
         ids = list(catalog_ids())
@@ -137,6 +139,10 @@ class CatalogContractTests(unittest.TestCase):
                 "w_bias.hard",
                 "w_slope.low",
                 "w_slope.slope_weeks",
+                "keltner_vol.k",
+                "keltner_vol.ratio",
+                "keltner_vol.vol_n",
+                "keltner_vol.confirm_days",
             ),
         )
         self.assertEqual(

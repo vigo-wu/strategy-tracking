@@ -42,11 +42,12 @@ LOT_ADD_FRAC = 0.30
 TRADE_BUDGET = 100000.0
 
 # ---- 周线过滤（跨周期；主图仍是日线）----
-# 周/日均线周期、MACD 窗与 ATR 窗在 RECIPE.structure（字面量）。
+# 周/日均线周期、MACD 窗、ATR 窗与肯特纳窗在 RECIPE.structure（字面量）。
 # 价格均线算法由 ctx / 因子调用点直调 _ema（量均始终 _sma；MACD 仍 _ema）。
-# 日线：中线→回踩/无量阴跌；慢线→回踩支撑 + 时间成本地板。<=0 关该条。
+# 日线：中线→回踩/无量阴跌；慢线→回踩支撑 + 时间成本地板；trend→above_ema。<=0 关该条。
 # 周线：快/生命线（5/34）；mid=13 仅日志多头。取数 need 另钳原 MA55 暖机地板。
 # ATR：威尔德平滑窗 atr.n；<=0 关 atr_stop。
+# 肯特纳：中轨 EMA 窗 keltner.ema_n，带宽 ATR 窗 keltner.atr_n（与 atr.n 独立）；<=0 关。
 
 # 盈利后加仓：门槛叶子 scale_arm（峰值浮盈 / 持仓日 / 周柱）在 RECIPE.scale_in；
 #   回踩加仓仍受 chase；破平台/金叉不受
@@ -58,51 +59,56 @@ SCALE_ONCE_PER_ROUND = True
 SCALE_LOTS = True
 
 # 默认 Recipe：四槽布尔式。因子数字在 factors/catalog.py（写入 factor_params）；
-# 均线/MACD/ATR 窗真源 structure。scale_once / 满槽 / 资金不进表。
+# 均线/MACD/ATR/肯特纳 窗真源 structure。scale_once / 满槽 / 资金不进表。
 # scale_out 恒 false：减仓未启用。
 RECIPE = {
     "entry": [
         "and",
-        ["not", "chase"],
-        ["not", "vol_dry"],
-        ["not", "w_bias"],
-        ["not", "w_slope"],
-        ["not", "weekly_bear"],
-        "pullback_vol",
+        # ["not", "chase"],
+        # ["not", "vol_dry"],
+        # ["not", "w_bias"],
+        # ["not", "w_slope"],
+        # ["not", "weekly_bear"],
+        "above_ema",
+        "keltner_vol",
     ],
-    "scale_in": [
-        "and",
-        ["not", "vol_dry"],
-        ["not", "w_bias"],
-        ["not", "w_slope"],
-        ["not", "weekly_bear"],
-        [
-            "or",
-            ["and", "pullback_vol", ["not", "chase"]],
-            "plat_break",
-            "w_macd_golden",
-        ],
-        "scale_arm",
-    ],
+    "scale_in": False,
+    # [
+    #     "and",
+    #     ["not", "vol_dry"],
+    #     ["not", "w_bias"],
+    #     ["not", "w_slope"],
+    #     ["not", "weekly_bear"],
+    #     "above_ema",
+    #     [
+    #         "or",
+    #         ["and", "keltner_vol", ["not", "chase"]],
+    #         "plat_break",
+    #         "w_macd_golden",
+    #     ],
+    #     "scale_arm",
+    # ],
     "exit": [
         "or",
-        "weekly_bear_confirm",
+        # "weekly_bear_confirm",
         # "stop_loss",
         "atr_stop",
         # "trail_stop",
         "atr_trail_stop",
-        "time_force",
+        # "time_force",
     ],
     "scale_out": False,
     "structure": {
-        # 日线中/慢均线；<=0 关该条
-        "d_ma": {"mid": 20, "slow": 60},
+        # 日线中/慢/趋势均线；<=0 关该条
+        "d_ma": {"mid": 20, "slow": 60, "trend": 120},
         # 周线快/中/生命线；mid 仅日志 weekly_bull
         "w_ma": {"fast": 5, "mid": 13, "life": 34},
         # MACD DIF/DEA/柱
         "macd": {"fast": 12, "slow": 26, "signal": 9},
         # 日线威尔德 ATR；<=0 关 atr_stop / atr_trail_stop
         "atr": {"n": 14},
+        # 肯特纳中轨 EMA / 带宽 ATR；与 atr.n 独立；<=0 关
+        "keltner": {"ema_n": 20, "atr_n": 20},
     },
 }
 
