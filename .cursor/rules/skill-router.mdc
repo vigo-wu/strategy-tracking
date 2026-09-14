@@ -13,9 +13,6 @@ alwaysApply: true
 | 策略→QMT 脚本、xtquant、`handlebar`/`passorder`、联调踩坑（0xb9、T+1、孤儿仓、回测盈利） | `.cursor/skills/qmt-model-script/SKILL.md` |
 | 参数面板、`panel.xml`、`formulaLayout`、新建/编辑策略交易、bind | `.cursor/skills/qmt-param-panel/SKILL.md` |
 | 回测 log→报告、成交表、权益曲线、持仓 K 线、`generate_report.py` | `.cursor/skills/qmt-backtest-report/SKILL.md` |
-| Sharpe 是否真实、过拟合、DSR、PBO、Haircut、MinTRL | `.cursor/skills/skill-backtest-overfit/SKILL.md` |
-| 因子正交化/中性化、剥离行业市值风格、残差因子 | `.cursor/skills/skill-factor-orthogonalize/SKILL.md` |
-| 批量把 OHLCV alpha 做成 QuantSkills 因子 Skill 并验证 | `.cursor/skills/skill-quant-factor-skill-factory/SKILL.md` |
 | 网格回测、最优参数、实跑扫参、STOP_LOSS/TRAIL/TIME_FORCE 确认 | `.cursor/skills/qmt-local-bt-grid/SKILL.md` |
 | 实盘评估、随机组合回放、能否上实盘、稳健门（参数锁定后） | `.cursor/skills/qmt-local-bt-robust/SKILL.md` |
 | 加/删因子、登记、启用、卸下、除名、加减指标、catalog、LEAVES、`indicators/` | `.cursor/skills/qmt-hlband-extend/SKILL.md` |
