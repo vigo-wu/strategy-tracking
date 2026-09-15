@@ -18,9 +18,9 @@
 | 文件 | 符号（主） | 做什么 |
 | :--- | :--- | :--- |
 | [ctx.py](ctx.py) | `_factor_param` `_factor_params_apply_global` `_structure_windows` `_structure_apply_global` `_LEAF_MARKET_NEED` `_market_need` `_weekly_market_features` `_build_factor_ctx` `_factor_ctx_bind_state` | 组 `ctx = {market, state, clock}`；按启用叶子闸预计算（日线 EMA/量均、ATR、肯特纳、周线 MA/MACD）。`daily_ready` = 日线 `closes` 且 `i>=2`。`weekly_bull` 只在这里算，仅日志 |
-| [catalog.py](catalog.py) | `LEAVES` `_leaves_factor_params` | 叶子登记 / 默认阈值 / 网格轴元数据；整表写入 `RECIPE.factor_params`（`weekly_bear` / `above_ema` 无键） |
+| [catalog.py](catalog.py) | `LEAVES` `_leaves_factor_params` | 叶子登记 / 默认阈值 / 网格轴元数据；整表写入 `RECIPE.factor_params`（`above_ema` 无键） |
 | [registry.py](registry.py) | `_factor_registry` `_factor_eval` `_factor_hit` | 按 `LEAVES` 取 `_factor_eval_<id>`；缺函数启动时报错 |
-| [expr.py](expr.py) | `_recipe_hit` `_recipe_leaf_ids` `_recipe_compute_leaves` | `and` / `or` / `not`；`False`/`None` = 恒假；启用叶子 + `weekly_bear_confirm` / `scale_in` 特例 |
+| [expr.py](expr.py) | `_recipe_hit` `_recipe_leaf_ids` `_recipe_compute_leaves` | `and` / `or` / `not`；`False`/`None` = 恒假；启用叶子 + `scale_in` 特例 |
 | [slots.py](slots.py) | `_eval_*_slot` `_eval_recipe_slots` `_recipe_fingerprint` | 四个槽位 → `{hit, reasons, detail}`；reasons 用叶子 id |
 | [intent.py](intent.py) | `_arbitrate_intent` | `{side, target: open\|add\|flat\|reduce, lot_ids?, frac?, reasons[]}`。优先级写死：`flat > reduce > add > open` |
 
@@ -50,12 +50,10 @@ config.py
 
 | 槽 | 形态 | 备注 |
 | :--- | :--- | :--- |
-| `entry` | `¬chase ∧ ¬vol_dry ∧ ¬w_bias ∧ ¬w_slope ∧ ¬weekly_bear ∧ above_ema ∧ keltner_vol` | 未命中 reasons 为第一个挡住的叶子 |
-| `scale_in` | `¬vol_dry ∧ ¬w_bias ∧ ¬w_slope ∧ ¬weekly_bear ∧ above_ema ∧ ((keltner_vol ∧ ¬chase) ∨ plat_break ∨ w_macd_golden) ∧ scale_arm` | 破平台/金叉**不受** chase；通道内缩量加仓受。`above_ema` 在 `or` 外。`scale_arm` 在表达式末。`scale_once` / 满槽在 `_scale_gate` |
-| `exit` | `weekly_bear_confirm ∨ atr_stop ∨ atr_trail_stop ∨ time_force` | or 短路；主因=第一个命中叶子。`stop_loss` / `trail_stop` 叶子仍在，默认 AST 不引用 |
+| `entry` | `above_ema ∧ keltner_vol` | 未命中 reasons 为第一个挡住的叶子 |
+| `scale_in` | `false` | **加仓未启用**。`scale_arm` 仍登记；启用时由 `_recipe_compute_leaves` 特例拉入。`scale_once` / 满槽在 `_scale_gate` |
+| `exit` | `atr_stop ∨ atr_trail_stop` | or 短路；主因=第一个命中叶子。`stop_loss` / `trail_stop` / `time_force` 叶子仍在，默认 AST 不引用 |
 | `scale_out` | `false` | **减仓未启用**。Intent 预留 `reduce`，strategy 忽略 |
-
-`weekly_bear` = 当天空头（禁开/撤买）。确认清仓用独立叶子 `weekly_bear_confirm`（读 streak）。`_update_w_bear_streak` 不进 `eval`。
 
 网格 / 参数指纹预检打 `recipe=` 指纹（表达式 + 折进表的 `factor_params` + `structure`）。apply 进表后再算，`overrides` 袋为空。默认哈希会变；参数指纹预检重算，不对历史档案旧哈希。算法与 `local_bt/grid_spec.recipe_fingerprint` 同一套。不要做全因子 `2^n` 开关。AST / 指标周期窗不上 `panel.xml`。
 

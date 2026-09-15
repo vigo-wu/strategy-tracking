@@ -188,8 +188,6 @@ def _init_impl(C):
             A.round_scaled = False
             A._confirmed_eval_day = ""
             A._fallback_done_day = ""
-            A._w_bear_streak = 0
-            A._w_bear_last_day = ""
             A._skip_sell_eval_day = ""
             A._last_add_day = ""
             A._last_add_signal = ""
@@ -231,10 +229,6 @@ def _init_impl(C):
                 A._confirmed_eval_day = ""
             if not hasattr(A, "_fallback_done_day"):
                 A._fallback_done_day = ""
-            if not hasattr(A, "_w_bear_streak"):
-                A._w_bear_streak = 0
-            if not hasattr(A, "_w_bear_last_day"):
-                A._w_bear_last_day = ""
             if not hasattr(A, "_skip_sell_eval_day"):
                 A._skip_sell_eval_day = ""
             if not hasattr(A, "_last_add_day"):
@@ -342,8 +336,6 @@ def _init_impl(C):
         _trail_arm(),
         "trail_tiers=",
         _trail_tiers_json(),
-        "chase<",
-        _factor_param(None, "chase", "max_pct"),
         "scale=",
         SCALE_ENABLE,
         "scale_lots=",
@@ -356,14 +348,6 @@ def _init_impl(C):
         _factor_param(None, "scale_arm", "bars"),
         "scale_w_hist=",
         _factor_param(None, "scale_arm", "hist_min"),
-        "scale_plat=",
-        "%d/%.2f"
-        % (
-            int(_factor_param(None, "plat_break", "lookback") or 20),
-            float(_factor_param(None, "plat_break", "max_range") or 0.10),
-        ),
-        "scale_w_expand=",
-        _factor_param(None, "w_macd_golden", "hist_expand"),
         "time_force_bars=",
         _factor_param(None, "time_force", "bars"),
         "time_force_min_ret=",
@@ -403,9 +387,6 @@ def _init_impl(C):
         scale_arm=_factor_param(None, "scale_arm", "arm"),
         scale_arm_bars=_factor_param(None, "scale_arm", "bars"),
         scale_w_hist_min=_factor_param(None, "scale_arm", "hist_min"),
-        scale_plat_lookback=_factor_param(None, "plat_break", "lookback"),
-        scale_plat_max_range=_factor_param(None, "plat_break", "max_range"),
-        scale_w_hist_expand=_factor_param(None, "w_macd_golden", "hist_expand"),
         stop=_factor_param(None, "stop_loss", "pct"),
         trail_arm=_trail_arm(),
         time_force_bars=_factor_param(None, "time_force", "bars"),

@@ -683,8 +683,6 @@ def _active_leaf_ids(ns: Mapping[str, Any] | None = None) -> frozenset[str] | No
     used: set[str] = set()
     for slot in ("entry", "scale_in", "exit", "scale_out"):
         used |= _ast_leaf_ids(rec.get(slot))
-    if "weekly_bear_confirm" in used:
-        used.add("weekly_bear")
     scale_in = rec.get("scale_in")
     if scale_in is not False and scale_in is not None:
         used.add("scale_arm")

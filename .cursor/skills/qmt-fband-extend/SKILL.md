@@ -57,7 +57,7 @@ description: >-
 - [ ] 6. 只改 lib/NAV.md 清单（启用走 B，不改 Recipe分类 / factors/NAV 四个槽位草图）
 ```
 
-1. **`LEAVES`**：无阈值因子（如 `weekly_bear`）`params` 留空，**不要**写出空 `{}` 进 `factor_params`。网格轴序用 `params[].axis`。`default` 类型须稳定，见 [reference-catalog.md](reference-catalog.md) 的类型安全防错警告。
+1. **`LEAVES`**：无阈值因子（如 `above_ema`）`params` 留空，**不要**写出空 `{}` 进 `factor_params`。网格轴序用 `params[].axis`。`default` 类型须稳定，见 [reference-catalog.md](reference-catalog.md) 的类型安全防错警告。
 2. **`lib/<id>.py`**：阈值只读 `_factor_param(ctx, id, key)`；窗只读 `_structure_windows()`。不写死数字。不读现金 / 账本 / pending，不调用 `passorder`。文件名 = id。中文名写 `LEAVES.label`（买卖不同用 `label_buy`），不要改成交 reason 码。
 3. **不要改**：`registry.py`、`_deploy_qmt_gbk.py` 的 lib 段、`grid_spec` 的 `ENTRY_KEYS` 等（从表推）。
 4. 因子读不到的列 → 先走 **C. 加指标**，再在 `ctx.py` 装进 `ctx.market`，并写 `_LEAF_MARKET_NEED`。
@@ -113,7 +113,7 @@ description: >-
 ```
 
 未从 `LEAVES` 删除却删了文件 → deploy 报 missing。未删文件却删了表 → 孤儿报错。  
-`weekly_bear` / `time_force` 在 `strategy.py` / `ctx.py` 有特例逻辑，不能只删 lib。
+`time_force` 在 `strategy.py` / `ctx.py` 有特例逻辑，不能只删 lib。
 
 ---
 

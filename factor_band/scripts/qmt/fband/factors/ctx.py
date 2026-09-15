@@ -208,27 +208,17 @@ _MARKET_TAGS = frozenset(
         "d_ma_slow",
         "d_ma_trend",
         "vol_pb",
-        "vol_dry",
         "vol_kc",
         "atr",
         "keltner",
         "weekly",
-        "plat",
     }
 )
 
 _LEAF_MARKET_NEED = {
     "pullback_vol": frozenset({"d_ma_mid", "d_ma_slow", "vol_pb"}),
-    "chase": frozenset(),
-    "vol_dry": frozenset({"d_ma_mid", "vol_dry"}),
-    "w_bias": frozenset({"weekly"}),
-    "w_slope": frozenset({"weekly"}),
-    "weekly_bear": frozenset({"weekly"}),
-    "weekly_bear_confirm": frozenset({"weekly"}),
     "keltner_vol": frozenset({"keltner", "vol_kc"}),
     "above_ema": frozenset({"d_ma_trend"}),
-    "plat_break": frozenset({"plat"}),
-    "w_macd_golden": frozenset({"weekly"}),
     "scale_arm": frozenset({"weekly"}),
     "stop_loss": frozenset(),
     "atr_stop": frozenset({"atr"}),
@@ -297,41 +287,18 @@ def _weekly_market_features(closes_w):
     h1 = _last_valid(hist, i - 1)
     d1 = _last_valid(dif, i - 1)
     e1 = _last_valid(dea, i - 1)
-    d2 = _last_valid(dif, i - 2) if i >= 2 else None
-    e2 = _last_valid(dea, i - 2) if i >= 2 else None
-    golden_now = _cross_up(d1, e1, d0, e0)
-    golden_prev = _cross_up(d2, e2, d1, e1) if i >= 2 else False
-    raw_slope = _factor_param(None, "w_slope", "slope_weeks")
-    try:
-        slope_weeks = int(raw_slope if raw_slope is not None else 2)
-    except (TypeError, ValueError):
-        slope_weeks = 2
-    if not slope_weeks:
-        slope_weeks = 2
-    slope_up_n = False
-    if slope_weeks > 0 and i >= slope_weeks:
-        slope_up_n = True
-        for k in range(slope_weeks):
-            a = _last_valid(ma30, i - k)
-            b = _last_valid(ma30, i - k - 1)
-            if a is None or b is None or not (a > b):
-                slope_up_n = False
-                break
     detail.update(
         {
             "ma5": m5,
             "ma10": m10,
             "ma30": m30,
             "ma30_prev": m30_prev,
-            "ma30_slope_up2": slope_up_n,
             "dif": d0,
             "dea": e0,
             "dif_prev": d1,
             "dea_prev": e1,
             "hist": h0,
             "hist_prev": h1,
-            "macd_golden_now": golden_now,
-            "macd_golden_prev": golden_prev,
             "close": c,
         }
     )
@@ -417,13 +384,6 @@ def _factor_daily_features(closes, volumes, need=None):
             except (TypeError, ValueError):
                 vol_n = 10
             vol10 = _sma(volumes, vol_n) if vol_n > 0 else None
-        if "vol_dry" in need:
-            raw_dn = _factor_param(None, "vol_dry", "n")
-            try:
-                dry_n = int(20 if raw_dn is None else raw_dn)
-            except (TypeError, ValueError):
-                dry_n = 20
-            vol20 = _sma(volumes, dry_n) if dry_n > 0 else None
     i = len(closes) - 1
     vol_need = _vol_pullback_confirm_need() if "vol_pb" in need else 1
     detail["vol_need"] = vol_need
@@ -436,7 +396,7 @@ def _factor_daily_features(closes, volumes, need=None):
     m60 = _last_valid(ma60, i) if ma60 is not None else None
     m_trend = _last_valid(ma_trend, i) if ma_trend is not None else None
     v10 = _last_valid(vol10, i) if vol10 is not None else None
-    v20 = _last_valid(vol20, i) if vol20 is not None else None
+    v20 = None
     detail.update(
         {
             "ma20": m20,

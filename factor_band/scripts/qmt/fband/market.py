@@ -574,14 +574,6 @@ def _ohlcv_need_1d():
         except (TypeError, ValueError):
             vol_n = 10
         parts.append(vol_n + max(0, confirm_n - 1))
-    if "vol_dry" in need:
-        raw_dn = _factor_param(None, "vol_dry", "n")
-        try:
-            dry_n = int(20 if raw_dn is None else raw_dn)
-        except (TypeError, ValueError):
-            dry_n = 20
-        if dry_n > 0:
-            parts.append(dry_n)
     if "vol_kc" in need:
         raw_kvn = _factor_param(None, "keltner_vol", "vol_n")
         raw_kvc = _factor_param(None, "keltner_vol", "confirm_days")
@@ -614,13 +606,6 @@ def _ohlcv_need_1d():
             parts.append(kc_ema_n)
         if kc_atr_n > 0:
             parts.append(kc_atr_n)
-    if "plat" in need:
-        raw_plat = _factor_param(None, "plat_break", "lookback")
-        try:
-            plat_n = int(20 if raw_plat is None else raw_plat)
-        except (TypeError, ValueError):
-            plat_n = 20
-        parts.append(plat_n + 2)
     return max(parts) + 10
 
 

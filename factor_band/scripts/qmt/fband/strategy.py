@@ -17,84 +17,8 @@ def _bar_tag(dt):
     return dt.strftime("%Y%m%d%H%M%S")
 
 
-def _eval_weekly(closes_w):
-    """返回 (bull, bear, detail)。bull 仅日志；bear = 当天空头叶子。"""
-    detail = _weekly_market_features(closes_w)
-    bull = _weekly_bull_from_detail(detail)
-    bear = _factor_hit("weekly_bear", {"market": {"w_detail": detail}})
-    return bull, bear, detail
-
-
-def _update_w_bear_streak(weekly_bear, sig_day, track):
-    """
-    连续 N 个信号日仍周线空头才确认清仓。
-    track=False（实盘盘中 exec）不改计数，避免半成品 K 抖动。
-    返回 (force_empty, streak)。
-    """
-    need = _w_bear_confirm_need()
-    sig_day = str(sig_day or "")
-    streak = int(getattr(A, "_w_bear_streak", 0) or 0)
-    last = str(getattr(A, "_w_bear_last_day", "") or "")
-    if not track:
-        return bool(weekly_bear) and streak >= need, streak
-    if not sig_day:
-        return False, streak
-
-    prev_streak = streak
-    prev_last = last
-    changed = False
-
-    if sig_day == last:
-        # 同一信号日：confirm 窗内可能先空后翻多（或相反），须跟最终电平
-        if weekly_bear:
-            if streak <= 0:
-                streak = 1
-                changed = True
-        else:
-            if streak > 0:
-                streak = 0
-                changed = True
-    elif weekly_bear:
-        if streak > 0 and last and sig_day > last:
-            streak = streak + 1
-        else:
-            streak = 1
-        changed = True
-    else:
-        streak = 0
-        changed = True
-
-    A._w_bear_streak = int(streak)
-    A._w_bear_last_day = sig_day
-    if changed or (sig_day != prev_last):
-        if not getattr(A, "is_backtest", False):
-            _save_state()
-        if weekly_bear and (streak != prev_streak or sig_day != prev_last):
-            print(
-                "%s w_bear streak=%d/%d day=%s"
-                % (STRATEGY_NAME, streak, need, sig_day)
-            )
-            _event_log(
-                "w_bear_streak",
-                streak=streak,
-                need=need,
-                signal_day=sig_day,
-            )
-        elif (not weekly_bear) and prev_streak:
-            print(
-                "%s w_bear streak reset day=%s (was %d)"
-                % (STRATEGY_NAME, sig_day, prev_streak)
-            )
-            _event_log(
-                "w_bear_streak_reset",
-                signal_day=sig_day,
-                was=prev_streak,
-            )
-    return streak >= need, streak
-
-
 def _is_weekly_flatten(reason=None, reasons=None):
-    """清仓周空：新码 weekly_bear_confirm，盘上旧 pending 仍可能是 weekly_bear。"""
+    """历史周空清仓 reason 码（旧 pending / 账本仍可能出现）。"""
     codes = ("weekly_bear_confirm", "weekly_bear")
     if reason and str(reason) in codes:
         return True
@@ -283,9 +207,6 @@ def _eval_lot_sell(price, closes, lot, highs=None, lows=None, base_ctx=None):
             lows,
             {},
             price,
-            state={
-                "w_bear_streak": int(getattr(A, "_w_bear_streak", 0) or 0),
-            },
         )
     ctx = _bind_exit_ctx(base_ctx, lot=lot)
     slot = _eval_exit_slot(ctx)
@@ -691,7 +612,7 @@ def _log_sell_lot_can_use(now, day, lot_ids, want_vol, reason):
     if risk:
         print(
             "%s WARN SELL lots=%s opened today; broker can_use may fill older lots, "
-            "not necessarily lots=%s (plat_break add same-day trail is the typical case)"
+            "not necessarily lots=%s (same-day add then sell is the typical case)"
             % (STRATEGY_NAME, same_day_target, lot_ids)
         )
         _event_log(
@@ -842,10 +763,6 @@ _SELL_LABELS = {
     "skip_add_bar": "加仓成交后当日不评卖",
 }
 _BUY_LABELS = {
-    "chase_skip": "追高过滤跳过",
-    "w_bias_skip": "周线高位乖离禁开",
-    "w_slope_skip": "低位周线MA34未连升禁开",
-    "vol_dry_skip": "无量阴跌禁开",
     "scale_once": "本轮已加仓",
     "book_lot_cap": "跟踪池已满三笔跳过买入",
     "buy_cap": "账户或单标的额度已满跳过开仓",
@@ -1376,7 +1293,7 @@ def _handle_stock(C, ctx):
         sig_day_daily = day
         sig_day_weekly = day
     elif need_fallback or (live_cc and phase == "exec"):
-        # 开盘兜底 / 盘中执行：日 K 去掉未收盘根，避免未完成日线误触 vol_dry 等；
+        # 开盘兜底 / 盘中执行：日 K 去掉未收盘根，避免未完成日线误触；
         # 周 K 已在 _get_ohlcv_1w 丢掉未收盘周，与 confirm/回测一致
         # 日信号日=上一完整交易日；周线 streak 仍按今日计（看的是上一完整周）
         prev_d = True
@@ -1426,24 +1343,10 @@ def _handle_stock(C, ctx):
         lows_s,
         w_detail,
         price,
-        clock={"sig_day": sig_day_daily, "track_bear": False},
+        clock={"sig_day": sig_day_daily},
     )
-    weekly_bear = False
-    if "weekly_bear" in compute_leaves:
-        weekly_bear = _factor_hit("weekly_bear", fctx)
-    # 清仓二次确认只在 bt / confirm / 开盘兜底累计；盘中 exec 不改 streak
-    track_bear = (not live_cc) or (phase == "confirm") or bool(need_fallback)
-    if "weekly_bear_confirm" in compute_leaves:
-        w_bear_confirmed, w_bear_n = _update_w_bear_streak(
-            weekly_bear, sig_day_weekly, track=track_bear
-        )
-    else:
-        w_bear_confirmed = False
-        w_bear_n = int(getattr(A, "_w_bear_streak", 0) or 0)
     fctx = _factor_ctx_bind_state(
         fctx,
-        w_bear_streak=w_bear_n,
-        w_bear_confirmed=w_bear_confirmed,
         cost=_pos_cost_price(),
     )
     entry_slot = _eval_entry_slot(fctx)
@@ -1563,7 +1466,7 @@ def _handle_stock(C, ctx):
             day,
             hhmm,
             "n1d=%d n1w=%d close=%.4f sig_d=%s sig_w=%s phase=%s prev_d=%s prev_w=%s "
-            "w_bull=%s w_bear=%s w_bn=%s/%s w_ma5=%s w_ma30=%s w_hist=%s "
+            "w_bull=%s w_ma5=%s w_ma30=%s w_hist=%s "
             "buy=%s buyR=%s scale=%s scaleR=%s sell=%s sellR=%s "
             "hold=%s nlot=%s ret=%s pe=%s px=%s bt_held=%s avail=%s"
             % (
@@ -1576,9 +1479,6 @@ def _handle_stock(C, ctx):
                 prev_d,
                 prev_w,
                 weekly_bull,
-                weekly_bear,
-                w_bear_n,
-                _w_bear_confirm_need(),
                 None if w_detail.get("ma5") is None else round(w_detail["ma5"], 4),
                 None if w_detail.get("ma30") is None else round(w_detail["ma30"], 4),
                 None if w_detail.get("hist") is None else round(w_detail["hist"], 4),
@@ -1613,9 +1513,6 @@ def _handle_stock(C, ctx):
             prev_d=prev_d,
             prev_w=prev_w,
             w_bull=weekly_bull,
-            w_bear=weekly_bear,
-            w_bn=w_bear_n,
-            w_bn_need=_w_bear_confirm_need(),
             w_ma5=None if w_detail.get("ma5") is None else round(w_detail["ma5"], 4),
             w_ma30=None if w_detail.get("ma30") is None else round(w_detail["ma30"], 4),
             w_hist=None if w_detail.get("hist") is None else round(w_detail["hist"], 4),

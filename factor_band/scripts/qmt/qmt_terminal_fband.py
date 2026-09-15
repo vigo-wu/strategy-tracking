@@ -55,13 +55,12 @@ TRADE_BUDGET = 100000.0
 # 均线/MACD/ATR/肯特纳窗在 RECIPE.structure（字面量）。
 # 价格均线：structure.ema|sma × 周期键（对齐 _VALID_PERIODS：1d/1w/…）× mid/slow/trend。
 # 调用点直调 _ema 读 ema.*，直调 _sma 读 sma.*（量均窗仍在 factor_params；MACD 仍 _ema）。
-# 日线 mid→回踩/无量阴跌；slow→回踩支撑 + 时间成本地板；trend→above_ema。<=0 关该条。
+# 日线 mid→回踩；slow→回踩支撑 + 时间成本地板；trend→above_ema。<=0 关该条。
 # 周线 mid/slow/trend（5/13/34）；mid 仅日志多头。取数 need 另钳原 MA55 暖机地板。
 # ATR：威尔德平滑窗 atr.n；<=0 关 atr_stop。
 # 肯特纳：中轨 EMA 窗 keltner.ema_n，带宽 ATR 窗 keltner.atr_n（与 atr.n 独立）；<=0 关。
 
 # 盈利后加仓：门槛叶子 scale_arm（峰值浮盈 / 持仓日 / 周柱）在 RECIPE.scale_in；
-#   回踩加仓仍受 chase；破平台/金叉不受
 #   执行日若已触发卖点则取消加仓
 # SCALE_ONCE_PER_ROUND：同一轮只加一次
 # SCALE_LOTS=True：每笔独立成本/峰值/止盈
@@ -75,33 +74,12 @@ SCALE_LOTS = True
 RECIPE = {
     "entry": [
         "and",
-        # ["not", "chase"],
-        # ["not", "vol_dry"],
-        # ["not", "w_bias"],
-        # ["not", "w_slope"],
-        # ["not", "weekly_bear"],
         "above_ema",
         "keltner_vol",
     ],
     "scale_in": False,
-    # [
-    #     "and",
-    #     ["not", "vol_dry"],
-    #     ["not", "w_bias"],
-    #     ["not", "w_slope"],
-    #     ["not", "weekly_bear"],
-    #     "above_ema",
-    #     [
-    #         "or",
-    #         ["and", "keltner_vol", ["not", "chase"]],
-    #         "plat_break",
-    #         "w_macd_golden",
-    #     ],
-    #     "scale_arm",
-    # ],
     "exit": [
         "or",
-        # "weekly_bear_confirm",
         # "stop_loss",
         "atr_stop",
         "atr_trail_stop",
@@ -244,78 +222,6 @@ LEAVES = {
             },
         },
     },
-    "chase": {
-        "label": "追高过滤跳过",
-        "group": "entry",
-        "params": {
-            "max_pct": {
-                "default": 0.05,
-                "percent": True,
-                "abbrev": "ch",
-                "label": "追高禁开",
-                "axis": 6,
-            },
-        },
-    },
-    "vol_dry": {
-        "label": "无量阴跌禁开",
-        "group": "entry",
-        "params": {
-            "ratio": {
-                "default": 0.60,
-                "percent": True,
-                "abbrev": "vdr",
-                "label": "无量阴跌比例",
-                "axis": 4,
-            },
-            "n": {
-                "default": 20,
-                "percent": False,
-                "abbrev": "vdn",
-                "label": "无量窗口",
-                "axis": 5,
-            },
-        },
-    },
-    "w_bias": {
-        "label": "周线高位乖离禁开",
-        "group": "entry",
-        "params": {
-            "hard": {
-                "default": 0.08,
-                "percent": True,
-                "abbrev": "wb",
-                "label": "周线高位禁开",
-                "axis": 7,
-            },
-        },
-    },
-    "w_slope": {
-        "label": "低位周线MA34未连升禁开",
-        "group": "entry",
-        "params": {
-            "low": {
-                "default": 0.02,
-                "percent": True,
-                "abbrev": "wl",
-                "label": "低位乖离",
-                "axis": 8,
-            },
-            "slope_weeks": {
-                "default": 2,
-                "percent": False,
-                "abbrev": "ws",
-                "label": "低位斜率周数",
-                "axis": 9,
-            },
-        },
-    },
-    "weekly_bear": {
-        "label": "周线转空强制清仓",
-        "label_buy": "周线空头禁开",
-        "group": "entry",
-        "params": {},
-    },
     "keltner_vol": {
         "label": "通道内缩量",
         "group": "entry",
@@ -362,59 +268,6 @@ LEAVES = {
         "group": "entry",
         "params": {},
     },
-    "weekly_bear_confirm": {
-        "label": "周线转空强制清仓",
-        "group": "exit",
-        "params": {
-            "days": {
-                "default": 2,
-                "percent": False,
-                "abbrev": "wbc",
-                "label": "周线空确认日",
-                "axis": 3,
-            },
-        },
-    },
-    "plat_break": {
-        "label": "加仓-日线突破前期平台",
-        "group": "scale",
-        "params": {
-            "lookback": {
-                "default": 20,
-                "percent": False,
-                "abbrev": "spl",
-                "label": "平台回看",
-                "axis": 0,
-            },
-            "max_range": {
-                "default": 0.10,
-                "percent": True,
-                "abbrev": "spr",
-                "label": "平台振幅",
-                "axis": 1,
-            },
-            "break_buf": {
-                "default": 0.0,
-                "percent": False,
-                "abbrev": "spb",
-                "label": "平台突破缓冲",
-                "axis": 2,
-            },
-        },
-    },
-    "w_macd_golden": {
-        "label": "加仓-周线MACD金叉柱放大",
-        "group": "scale",
-        "params": {
-            "hist_expand": {
-                "default": 1.2,
-                "percent": False,
-                "abbrev": "she",
-                "label": "金叉柱放大",
-                "axis": 3,
-            },
-        },
-    },
     "scale_arm": {
         "label": "加仓-浮盈持仓周柱门槛",
         "group": "scale",
@@ -424,21 +277,21 @@ LEAVES = {
                 "percent": True,
                 "abbrev": "sa",
                 "label": "加仓门槛",
-                "axis": 4,
+                "axis": 0,
             },
             "bars": {
                 "default": 8,
                 "percent": False,
                 "abbrev": "sab",
                 "label": "加仓持仓日",
-                "axis": 5,
+                "axis": 1,
             },
             "hist_min": {
                 "default": -0.01,
                 "percent": False,
                 "abbrev": "swh",
                 "label": "加仓周柱下限",
-                "axis": 6,
+                "axis": 2,
             },
         },
     },
@@ -918,11 +771,6 @@ def _state_extra_load(raw):
     A.time_force_trend_skip = bool(raw.get("time_force_trend_skip"))
     A._confirmed_eval_day = str(raw.get("confirmed_eval_day", "") or "")
     A._fallback_done_day = str(raw.get("fallback_done_day", "") or "")
-    try:
-        A._w_bear_streak = int(raw.get("w_bear_streak", 0) or 0)
-    except Exception:
-        A._w_bear_streak = 0
-    A._w_bear_last_day = str(raw.get("w_bear_last_day", "") or "")
     A.round_scaled = bool(raw.get("round_scaled"))
     A._skip_sell_eval_day = str(raw.get("skip_sell_eval_day", "") or "")
     A._last_add_day = str(raw.get("last_add_day", "") or "")
@@ -956,8 +804,6 @@ def _reset_stock_ctx():
     A.round_scaled = False
     A._confirmed_eval_day = ""
     A._fallback_done_day = ""
-    A._w_bear_streak = 0
-    A._w_bear_last_day = ""
     A._skip_sell_eval_day = ""
     A._last_add_day = ""
     A._last_add_signal = ""
@@ -989,8 +835,6 @@ def _state_extra_save(data):
     data["time_force_trend_skip"] = bool(getattr(A, "time_force_trend_skip", False))
     data["confirmed_eval_day"] = str(getattr(A, "_confirmed_eval_day", "") or "")
     data["fallback_done_day"] = str(getattr(A, "_fallback_done_day", "") or "")
-    data["w_bear_streak"] = int(getattr(A, "_w_bear_streak", 0) or 0)
-    data["w_bear_last_day"] = str(getattr(A, "_w_bear_last_day", "") or "")
     data["round_scaled"] = bool(getattr(A, "round_scaled", False))
     data["skip_sell_eval_day"] = str(getattr(A, "_skip_sell_eval_day", "") or "")
     data["last_add_day"] = str(getattr(A, "_last_add_day", "") or "")
@@ -3449,14 +3293,6 @@ def _ohlcv_need_1d():
         except (TypeError, ValueError):
             vol_n = 10
         parts.append(vol_n + max(0, confirm_n - 1))
-    if "vol_dry" in need:
-        raw_dn = _factor_param(None, "vol_dry", "n")
-        try:
-            dry_n = int(20 if raw_dn is None else raw_dn)
-        except (TypeError, ValueError):
-            dry_n = 20
-        if dry_n > 0:
-            parts.append(dry_n)
     if "vol_kc" in need:
         raw_kvn = _factor_param(None, "keltner_vol", "vol_n")
         raw_kvc = _factor_param(None, "keltner_vol", "confirm_days")
@@ -3489,13 +3325,6 @@ def _ohlcv_need_1d():
             parts.append(kc_ema_n)
         if kc_atr_n > 0:
             parts.append(kc_atr_n)
-    if "plat" in need:
-        raw_plat = _factor_param(None, "plat_break", "lookback")
-        try:
-            plat_n = int(20 if raw_plat is None else raw_plat)
-        except (TypeError, ValueError):
-            plat_n = 20
-        parts.append(plat_n + 2)
     return max(parts) + 10
 
 
@@ -3838,27 +3667,17 @@ _MARKET_TAGS = frozenset(
         "d_ma_slow",
         "d_ma_trend",
         "vol_pb",
-        "vol_dry",
         "vol_kc",
         "atr",
         "keltner",
         "weekly",
-        "plat",
     }
 )
 
 _LEAF_MARKET_NEED = {
     "pullback_vol": frozenset({"d_ma_mid", "d_ma_slow", "vol_pb"}),
-    "chase": frozenset(),
-    "vol_dry": frozenset({"d_ma_mid", "vol_dry"}),
-    "w_bias": frozenset({"weekly"}),
-    "w_slope": frozenset({"weekly"}),
-    "weekly_bear": frozenset({"weekly"}),
-    "weekly_bear_confirm": frozenset({"weekly"}),
     "keltner_vol": frozenset({"keltner", "vol_kc"}),
     "above_ema": frozenset({"d_ma_trend"}),
-    "plat_break": frozenset({"plat"}),
-    "w_macd_golden": frozenset({"weekly"}),
     "scale_arm": frozenset({"weekly"}),
     "stop_loss": frozenset(),
     "atr_stop": frozenset({"atr"}),
@@ -3927,41 +3746,18 @@ def _weekly_market_features(closes_w):
     h1 = _last_valid(hist, i - 1)
     d1 = _last_valid(dif, i - 1)
     e1 = _last_valid(dea, i - 1)
-    d2 = _last_valid(dif, i - 2) if i >= 2 else None
-    e2 = _last_valid(dea, i - 2) if i >= 2 else None
-    golden_now = _cross_up(d1, e1, d0, e0)
-    golden_prev = _cross_up(d2, e2, d1, e1) if i >= 2 else False
-    raw_slope = _factor_param(None, "w_slope", "slope_weeks")
-    try:
-        slope_weeks = int(raw_slope if raw_slope is not None else 2)
-    except (TypeError, ValueError):
-        slope_weeks = 2
-    if not slope_weeks:
-        slope_weeks = 2
-    slope_up_n = False
-    if slope_weeks > 0 and i >= slope_weeks:
-        slope_up_n = True
-        for k in range(slope_weeks):
-            a = _last_valid(ma30, i - k)
-            b = _last_valid(ma30, i - k - 1)
-            if a is None or b is None or not (a > b):
-                slope_up_n = False
-                break
     detail.update(
         {
             "ma5": m5,
             "ma10": m10,
             "ma30": m30,
             "ma30_prev": m30_prev,
-            "ma30_slope_up2": slope_up_n,
             "dif": d0,
             "dea": e0,
             "dif_prev": d1,
             "dea_prev": e1,
             "hist": h0,
             "hist_prev": h1,
-            "macd_golden_now": golden_now,
-            "macd_golden_prev": golden_prev,
             "close": c,
         }
     )
@@ -4047,13 +3843,6 @@ def _factor_daily_features(closes, volumes, need=None):
             except (TypeError, ValueError):
                 vol_n = 10
             vol10 = _sma(volumes, vol_n) if vol_n > 0 else None
-        if "vol_dry" in need:
-            raw_dn = _factor_param(None, "vol_dry", "n")
-            try:
-                dry_n = int(20 if raw_dn is None else raw_dn)
-            except (TypeError, ValueError):
-                dry_n = 20
-            vol20 = _sma(volumes, dry_n) if dry_n > 0 else None
     i = len(closes) - 1
     vol_need = _vol_pullback_confirm_need() if "vol_pb" in need else 1
     detail["vol_need"] = vol_need
@@ -4066,7 +3855,7 @@ def _factor_daily_features(closes, volumes, need=None):
     m60 = _last_valid(ma60, i) if ma60 is not None else None
     m_trend = _last_valid(ma_trend, i) if ma_trend is not None else None
     v10 = _last_valid(vol10, i) if vol10 is not None else None
-    v20 = _last_valid(vol20, i) if vol20 is not None else None
+    v20 = None
     detail.update(
         {
             "ma20": m20,
@@ -4218,83 +4007,6 @@ def _factor_eval_pullback_vol(ctx):
     hit = bool(near and vol_streak >= vol_need)
     return hit, {"vol_streak": vol_streak, "near": near}
 
-# === fband/factors/lib/chase.py ===
-def _factor_eval_chase(ctx):
-    market = (ctx or {}).get("market") or {}
-    if not market.get("daily_ready"):
-        return False, {}
-    closes = market.get("closes")
-    i = int(market.get("i") or 0)
-    if closes is None or i < 1:
-        return False, {}
-    price = float(market.get("close") if market.get("close") is not None else closes[i])
-    prev = float(closes[i - 1]) if closes[i - 1] else 0.0
-    if prev <= 0:
-        return False, {"prev": prev}
-    chg = (price - prev) / prev
-    return chg >= float(_factor_param(ctx, "chase", "max_pct")), {"chg": chg}
-
-# === fband/factors/lib/vol_dry.py ===
-def _factor_eval_vol_dry(ctx):
-    market = (ctx or {}).get("market") or {}
-    if not market.get("daily_ready"):
-        return False, {}
-    mid_n = int(market.get("mid_n") or 0)
-    m20 = market.get("ma20")
-    price = market.get("close")
-    v20 = market.get("v20")
-    vol = market.get("vol")
-    dry_below = (
-        mid_n > 0
-        and m20 is not None
-        and price is not None
-        and price < m20
-        and v20 is not None
-        and v20 > 0
-        and vol is not None
-        and vol < v20 * float(_factor_param(ctx, "vol_dry", "ratio"))
-    )
-    return bool(dry_below), {"dry_below": bool(dry_below)}
-
-# === fband/factors/lib/w_bias.py ===
-def _factor_eval_w_bias(ctx):
-    w_detail = ((ctx or {}).get("market") or {}).get("w_detail") or {}
-    m5 = w_detail.get("ma5")
-    m30 = w_detail.get("ma30")
-    if m5 is None or m30 is None or m30 <= 0:
-        return False, {"bias": None}
-    bias = (float(m5) - float(m30)) / float(m30)
-    return bias >= float(_factor_param(ctx, "w_bias", "hard")), {"bias": bias}
-
-# === fband/factors/lib/w_slope.py ===
-def _factor_eval_w_slope(ctx):
-    w_detail = ((ctx or {}).get("market") or {}).get("w_detail") or {}
-    m5 = w_detail.get("ma5")
-    m30 = w_detail.get("ma30")
-    if m5 is None or m30 is None or m30 <= 0:
-        return False, {"bias": None}
-    bias = (float(m5) - float(m30)) / float(m30)
-    if bias >= float(_factor_param(ctx, "w_slope", "low")):
-        return False, {"bias": bias}
-    slope_ok = bool(w_detail.get("ma30_slope_up2"))
-    return (not slope_ok), {"bias": bias, "slope_ok": slope_ok}
-
-# === fband/factors/lib/weekly_bear.py ===
-def _factor_eval_weekly_bear(ctx):
-    """当天空头（禁开/撤买）。确认清仓走 weekly_bear_confirm。"""
-    w_detail = ((ctx or {}).get("market") or {}).get("w_detail") or {}
-    c = w_detail.get("close")
-    m30 = w_detail.get("ma30")
-    d0 = w_detail.get("dif")
-    e0 = w_detail.get("dea")
-    d1 = w_detail.get("dif_prev")
-    e1 = w_detail.get("dea_prev")
-    if None in (c, m30, d0, e0):
-        return False, {}
-    death_below = _cross_down(d1, e1, d0, e0) and (d0 < 0) and (e0 < 0)
-    bear = (c < m30) or death_below
-    return bool(bear), {"death_below": bool(death_below)}
-
 # === fband/factors/lib/keltner_vol.py ===
 def _factor_eval_keltner_vol(ctx):
     market = (ctx or {}).get("market") or {}
@@ -4401,124 +4113,6 @@ def _factor_eval_above_ema(ctx):
         return False, {"n": n, "ma": ma, "price": price}
     hit = float(price) > float(ma)
     return hit, {"n": n, "ma": ma, "price": float(price)}
-
-# === fband/factors/lib/weekly_bear_confirm.py ===
-def _w_bear_confirm_need():
-    """最少 1：当天空头即可挂清仓；勿用 `x or 2`（0 会被当成缺省翻成 2）。"""
-    raw = _factor_param(None, "weekly_bear_confirm", "days")
-    try:
-        n = int(2 if raw is None else raw)
-    except Exception:
-        n = 2
-    return max(1, n)
-
-
-def _factor_eval_weekly_bear_confirm(ctx):
-    """连续 N 个信号日仍空头才确认清仓；读 streak，不改计数。"""
-    state = (ctx or {}).get("state") or {}
-    if "w_bear_confirmed" in state:
-        return bool(state.get("w_bear_confirmed")), {"streak": state.get("w_bear_streak")}
-    streak = int(state.get("w_bear_streak") or 0)
-    need = _w_bear_confirm_need()
-    return streak >= need, {"streak": streak, "need": need}
-
-# === fband/factors/lib/plat_break.py ===
-def _plat_window(highs, lows, lookback, end_i=None):
-    """不含 end_i 的回看窗口平台高低点；(plat_high, plat_low) 或 None。"""
-    if highs is None or lows is None:
-        return None
-    n = min(len(highs), len(lows))
-    lookback = int(lookback)
-    if lookback < 2 or n < lookback + 1:
-        return None
-    i = n - 1 if end_i is None else int(end_i)
-    if i < lookback:
-        return None
-    win_h = [float(x) for x in highs[i - lookback:i]]
-    win_l = [float(x) for x in lows[i - lookback:i]]
-    if not win_h or not win_l:
-        return None
-    plat_high = max(win_h)
-    plat_low = min(win_l)
-    if plat_high <= 0 or plat_low <= 0:
-        return None
-    return plat_high, plat_low
-
-
-def _factor_eval_plat_break(ctx):
-    market = (ctx or {}).get("market") or {}
-    closes = market.get("closes")
-    highs = market.get("highs")
-    lows = market.get("lows")
-    raw_lb = _factor_param(ctx, "plat_break", "lookback")
-    raw_rng = _factor_param(ctx, "plat_break", "max_range")
-    raw_buf = _factor_param(ctx, "plat_break", "break_buf")
-    try:
-        lookback = int(20 if raw_lb is None else raw_lb)
-    except (TypeError, ValueError):
-        lookback = 20
-    try:
-        max_range = float(0.10 if raw_rng is None else raw_rng)
-    except (TypeError, ValueError):
-        max_range = 0.10
-    try:
-        buf = float(0.0 if raw_buf is None else raw_buf)
-    except (TypeError, ValueError):
-        buf = 0.0
-    if lookback < 5 or max_range <= 0:
-        return False, {}
-    if closes is None or highs is None or lows is None:
-        return False, {}
-    n = len(closes)
-    if n < lookback + 1 or len(highs) != n or len(lows) != n:
-        return False, {}
-    if n < 2:
-        return False, {}
-    plat = _plat_window(highs, lows, lookback)
-    if plat is None:
-        return False, {}
-    plat_high, plat_low = plat
-    rng = (float(plat_high) - float(plat_low)) / float(plat_low)
-    if rng > max_range:
-        return False, {"range": rng}
-    hurdle = float(plat_high) * (1.0 + buf)
-    px = float(closes[-1])
-    prev = float(closes[-2])
-    if px <= hurdle:
-        return False, {"hurdle": hurdle}
-    if prev > hurdle:
-        return False, {"hurdle": hurdle, "prev": prev}
-    return True, {"plat_high": plat_high, "plat_low": plat_low}
-
-# === fband/factors/lib/w_macd_golden.py ===
-def _factor_eval_w_macd_golden(ctx):
-    w_detail = ((ctx or {}).get("market") or {}).get("w_detail") or {}
-    if not w_detail:
-        return False, {}
-    h0 = w_detail.get("hist")
-    h1 = w_detail.get("hist_prev")
-    if h0 is None or h1 is None:
-        return False, {}
-    hist = float(h0)
-    hist_prev = float(h1)
-    if hist <= 0 or hist <= hist_prev:
-        return False, {}
-    golden_now = bool(w_detail.get("macd_golden_now"))
-    golden_prev = bool(w_detail.get("macd_golden_prev"))
-    if not (golden_now or golden_prev):
-        return False, {}
-    if golden_now and (not golden_prev):
-        return True, {"golden_now": True}
-    raw_ratio = _factor_param(ctx, "w_macd_golden", "hist_expand")
-    try:
-        ratio = float(1.0 if raw_ratio is None else raw_ratio)
-    except (TypeError, ValueError):
-        ratio = 1.0
-    if ratio <= 1.0:
-        return True, {"ratio": ratio}
-    base = abs(hist_prev) if abs(hist_prev) > 1e-12 else hist
-    hit = hist >= base * ratio
-    return bool(hit), {"hist": hist, "hist_prev": hist_prev}
 
 # === fband/factors/lib/scale_arm.py ===
 def _scale_arm_threshold(ctx=None):
@@ -4996,7 +4590,7 @@ def _recipe_hit(expr, ctx):
 
 
 def _recipe_block_reasons(expr, ctx):
-    """未命中时第一个挡住的叶子。["not","chase"] 失败 → chase。"""
+    """未命中时第一个挡住的叶子。["not","leaf"] 失败 → leaf。"""
     if expr is False or expr is None or expr is True:
         return []
     if isinstance(expr, str):
@@ -5059,13 +4653,11 @@ def _recipe_leaf_ids(expr):
 
 
 def _recipe_compute_leaves(recipe=None):
-    """启用叶子 + 特例：weekly_bear_confirm→weekly_bear；scale_in 非空→scale_arm。"""
+    """启用叶子 + 特例：scale_in 非空→scale_arm。"""
     rec = recipe if recipe is not None else (globals().get("RECIPE") or {})
     used = set()
     for slot in ("entry", "scale_in", "exit", "scale_out"):
         used |= _recipe_leaf_ids(rec.get(slot))
-    if "weekly_bear_confirm" in used:
-        used.add("weekly_bear")
     scale_in = rec.get("scale_in")
     if scale_in is not False and scale_in is not None:
         used.add("scale_arm")
@@ -7980,84 +7572,8 @@ def _bar_tag(dt):
     return dt.strftime("%Y%m%d%H%M%S")
 
 
-def _eval_weekly(closes_w):
-    """返回 (bull, bear, detail)。bull 仅日志；bear = 当天空头叶子。"""
-    detail = _weekly_market_features(closes_w)
-    bull = _weekly_bull_from_detail(detail)
-    bear = _factor_hit("weekly_bear", {"market": {"w_detail": detail}})
-    return bull, bear, detail
-
-
-def _update_w_bear_streak(weekly_bear, sig_day, track):
-    """
-    连续 N 个信号日仍周线空头才确认清仓。
-    track=False（实盘盘中 exec）不改计数，避免半成品 K 抖动。
-    返回 (force_empty, streak)。
-    """
-    need = _w_bear_confirm_need()
-    sig_day = str(sig_day or "")
-    streak = int(getattr(A, "_w_bear_streak", 0) or 0)
-    last = str(getattr(A, "_w_bear_last_day", "") or "")
-    if not track:
-        return bool(weekly_bear) and streak >= need, streak
-    if not sig_day:
-        return False, streak
-
-    prev_streak = streak
-    prev_last = last
-    changed = False
-
-    if sig_day == last:
-        # 同一信号日：confirm 窗内可能先空后翻多（或相反），须跟最终电平
-        if weekly_bear:
-            if streak <= 0:
-                streak = 1
-                changed = True
-        else:
-            if streak > 0:
-                streak = 0
-                changed = True
-    elif weekly_bear:
-        if streak > 0 and last and sig_day > last:
-            streak = streak + 1
-        else:
-            streak = 1
-        changed = True
-    else:
-        streak = 0
-        changed = True
-
-    A._w_bear_streak = int(streak)
-    A._w_bear_last_day = sig_day
-    if changed or (sig_day != prev_last):
-        if not getattr(A, "is_backtest", False):
-            _save_state()
-        if weekly_bear and (streak != prev_streak or sig_day != prev_last):
-            print(
-                "%s w_bear streak=%d/%d day=%s"
-                % (STRATEGY_NAME, streak, need, sig_day)
-            )
-            _event_log(
-                "w_bear_streak",
-                streak=streak,
-                need=need,
-                signal_day=sig_day,
-            )
-        elif (not weekly_bear) and prev_streak:
-            print(
-                "%s w_bear streak reset day=%s (was %d)"
-                % (STRATEGY_NAME, sig_day, prev_streak)
-            )
-            _event_log(
-                "w_bear_streak_reset",
-                signal_day=sig_day,
-                was=prev_streak,
-            )
-    return streak >= need, streak
-
-
 def _is_weekly_flatten(reason=None, reasons=None):
-    """清仓周空：新码 weekly_bear_confirm，盘上旧 pending 仍可能是 weekly_bear。"""
+    """历史周空清仓 reason 码（旧 pending / 账本仍可能出现）。"""
     codes = ("weekly_bear_confirm", "weekly_bear")
     if reason and str(reason) in codes:
         return True
@@ -8246,9 +7762,6 @@ def _eval_lot_sell(price, closes, lot, highs=None, lows=None, base_ctx=None):
             lows,
             {},
             price,
-            state={
-                "w_bear_streak": int(getattr(A, "_w_bear_streak", 0) or 0),
-            },
         )
     ctx = _bind_exit_ctx(base_ctx, lot=lot)
     slot = _eval_exit_slot(ctx)
@@ -8654,7 +8167,7 @@ def _log_sell_lot_can_use(now, day, lot_ids, want_vol, reason):
     if risk:
         print(
             "%s WARN SELL lots=%s opened today; broker can_use may fill older lots, "
-            "not necessarily lots=%s (plat_break add same-day trail is the typical case)"
+            "not necessarily lots=%s (same-day add then sell is the typical case)"
             % (STRATEGY_NAME, same_day_target, lot_ids)
         )
         _event_log(
@@ -8805,10 +8318,6 @@ _SELL_LABELS = {
     "skip_add_bar": "加仓成交后当日不评卖",
 }
 _BUY_LABELS = {
-    "chase_skip": "追高过滤跳过",
-    "w_bias_skip": "周线高位乖离禁开",
-    "w_slope_skip": "低位周线MA34未连升禁开",
-    "vol_dry_skip": "无量阴跌禁开",
     "scale_once": "本轮已加仓",
     "book_lot_cap": "跟踪池已满三笔跳过买入",
     "buy_cap": "账户或单标的额度已满跳过开仓",
@@ -9339,7 +8848,7 @@ def _handle_stock(C, ctx):
         sig_day_daily = day
         sig_day_weekly = day
     elif need_fallback or (live_cc and phase == "exec"):
-        # 开盘兜底 / 盘中执行：日 K 去掉未收盘根，避免未完成日线误触 vol_dry 等；
+        # 开盘兜底 / 盘中执行：日 K 去掉未收盘根，避免未完成日线误触；
         # 周 K 已在 _get_ohlcv_1w 丢掉未收盘周，与 confirm/回测一致
         # 日信号日=上一完整交易日；周线 streak 仍按今日计（看的是上一完整周）
         prev_d = True
@@ -9389,24 +8898,10 @@ def _handle_stock(C, ctx):
         lows_s,
         w_detail,
         price,
-        clock={"sig_day": sig_day_daily, "track_bear": False},
+        clock={"sig_day": sig_day_daily},
     )
-    weekly_bear = False
-    if "weekly_bear" in compute_leaves:
-        weekly_bear = _factor_hit("weekly_bear", fctx)
-    # 清仓二次确认只在 bt / confirm / 开盘兜底累计；盘中 exec 不改 streak
-    track_bear = (not live_cc) or (phase == "confirm") or bool(need_fallback)
-    if "weekly_bear_confirm" in compute_leaves:
-        w_bear_confirmed, w_bear_n = _update_w_bear_streak(
-            weekly_bear, sig_day_weekly, track=track_bear
-        )
-    else:
-        w_bear_confirmed = False
-        w_bear_n = int(getattr(A, "_w_bear_streak", 0) or 0)
     fctx = _factor_ctx_bind_state(
         fctx,
-        w_bear_streak=w_bear_n,
-        w_bear_confirmed=w_bear_confirmed,
         cost=_pos_cost_price(),
     )
     entry_slot = _eval_entry_slot(fctx)
@@ -9526,7 +9021,7 @@ def _handle_stock(C, ctx):
             day,
             hhmm,
             "n1d=%d n1w=%d close=%.4f sig_d=%s sig_w=%s phase=%s prev_d=%s prev_w=%s "
-            "w_bull=%s w_bear=%s w_bn=%s/%s w_ma5=%s w_ma30=%s w_hist=%s "
+            "w_bull=%s w_ma5=%s w_ma30=%s w_hist=%s "
             "buy=%s buyR=%s scale=%s scaleR=%s sell=%s sellR=%s "
             "hold=%s nlot=%s ret=%s pe=%s px=%s bt_held=%s avail=%s"
             % (
@@ -9539,9 +9034,6 @@ def _handle_stock(C, ctx):
                 prev_d,
                 prev_w,
                 weekly_bull,
-                weekly_bear,
-                w_bear_n,
-                _w_bear_confirm_need(),
                 None if w_detail.get("ma5") is None else round(w_detail["ma5"], 4),
                 None if w_detail.get("ma30") is None else round(w_detail["ma30"], 4),
                 None if w_detail.get("hist") is None else round(w_detail["hist"], 4),
@@ -9576,9 +9068,6 @@ def _handle_stock(C, ctx):
             prev_d=prev_d,
             prev_w=prev_w,
             w_bull=weekly_bull,
-            w_bear=weekly_bear,
-            w_bn=w_bear_n,
-            w_bn_need=_w_bear_confirm_need(),
             w_ma5=None if w_detail.get("ma5") is None else round(w_detail["ma5"], 4),
             w_ma30=None if w_detail.get("ma30") is None else round(w_detail["ma30"], 4),
             w_hist=None if w_detail.get("hist") is None else round(w_detail["hist"], 4),
@@ -10602,8 +10091,6 @@ def _init_impl(C):
             A.round_scaled = False
             A._confirmed_eval_day = ""
             A._fallback_done_day = ""
-            A._w_bear_streak = 0
-            A._w_bear_last_day = ""
             A._skip_sell_eval_day = ""
             A._last_add_day = ""
             A._last_add_signal = ""
@@ -10645,10 +10132,6 @@ def _init_impl(C):
                 A._confirmed_eval_day = ""
             if not hasattr(A, "_fallback_done_day"):
                 A._fallback_done_day = ""
-            if not hasattr(A, "_w_bear_streak"):
-                A._w_bear_streak = 0
-            if not hasattr(A, "_w_bear_last_day"):
-                A._w_bear_last_day = ""
             if not hasattr(A, "_skip_sell_eval_day"):
                 A._skip_sell_eval_day = ""
             if not hasattr(A, "_last_add_day"):
@@ -10756,8 +10239,6 @@ def _init_impl(C):
         _trail_arm(),
         "trail_tiers=",
         _trail_tiers_json(),
-        "chase<",
-        _factor_param(None, "chase", "max_pct"),
         "scale=",
         SCALE_ENABLE,
         "scale_lots=",
@@ -10770,14 +10251,6 @@ def _init_impl(C):
         _factor_param(None, "scale_arm", "bars"),
         "scale_w_hist=",
         _factor_param(None, "scale_arm", "hist_min"),
-        "scale_plat=",
-        "%d/%.2f"
-        % (
-            int(_factor_param(None, "plat_break", "lookback") or 20),
-            float(_factor_param(None, "plat_break", "max_range") or 0.10),
-        ),
-        "scale_w_expand=",
-        _factor_param(None, "w_macd_golden", "hist_expand"),
         "time_force_bars=",
         _factor_param(None, "time_force", "bars"),
         "time_force_min_ret=",
@@ -10817,9 +10290,6 @@ def _init_impl(C):
         scale_arm=_factor_param(None, "scale_arm", "arm"),
         scale_arm_bars=_factor_param(None, "scale_arm", "bars"),
         scale_w_hist_min=_factor_param(None, "scale_arm", "hist_min"),
-        scale_plat_lookback=_factor_param(None, "plat_break", "lookback"),
-        scale_plat_max_range=_factor_param(None, "plat_break", "max_range"),
-        scale_w_hist_expand=_factor_param(None, "w_macd_golden", "hist_expand"),
         stop=_factor_param(None, "stop_loss", "pct"),
         trail_arm=_trail_arm(),
         time_force_bars=_factor_param(None, "time_force", "bars"),

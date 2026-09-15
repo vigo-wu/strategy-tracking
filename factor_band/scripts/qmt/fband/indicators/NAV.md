@@ -19,7 +19,7 @@
 | [atr.py](atr.py) | `_true_range` `_wilder` `_calc_atr` | 是 | 威尔德 ATR；`n` **必传**，不读 `RECIPE` / `atr.n`；`n<=0` 或长度不足 → `None` |
 | [keltner.py](keltner.py) | `_calc_keltner` | 是 | 中轨 EMA ± k×威尔德 ATR；必须在 ema / atr 之后；`ema_n` / `atr_n` / `k` **必传**，不读 `RECIPE`；`<=0` 或长度不足 → `None` |
 
-不要放进来：`chase` / `pullback_vol` / `trail_stop`（因子）以及 `_near_ma` / `_plat_window`（在 [../factors/lib/NAV.md](../factors/lib/NAV.md)）。
+不要放进来：`pullback_vol` / `trail_stop`（因子）以及 `_near_ma`（在 [../factors/lib/NAV.md](../factors/lib/NAV.md)）。
 
 ---
 

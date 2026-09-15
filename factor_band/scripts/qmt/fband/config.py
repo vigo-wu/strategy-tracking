@@ -45,13 +45,12 @@ TRADE_BUDGET = 100000.0
 # 均线/MACD/ATR/肯特纳窗在 RECIPE.structure（字面量）。
 # 价格均线：structure.ema|sma × 周期键（对齐 _VALID_PERIODS：1d/1w/…）× mid/slow/trend。
 # 调用点直调 _ema 读 ema.*，直调 _sma 读 sma.*（量均窗仍在 factor_params；MACD 仍 _ema）。
-# 日线 mid→回踩/无量阴跌；slow→回踩支撑 + 时间成本地板；trend→above_ema。<=0 关该条。
+# 日线 mid→回踩；slow→回踩支撑 + 时间成本地板；trend→above_ema。<=0 关该条。
 # 周线 mid/slow/trend（5/13/34）；mid 仅日志多头。取数 need 另钳原 MA55 暖机地板。
 # ATR：威尔德平滑窗 atr.n；<=0 关 atr_stop。
 # 肯特纳：中轨 EMA 窗 keltner.ema_n，带宽 ATR 窗 keltner.atr_n（与 atr.n 独立）；<=0 关。
 
 # 盈利后加仓：门槛叶子 scale_arm（峰值浮盈 / 持仓日 / 周柱）在 RECIPE.scale_in；
-#   回踩加仓仍受 chase；破平台/金叉不受
 #   执行日若已触发卖点则取消加仓
 # SCALE_ONCE_PER_ROUND：同一轮只加一次
 # SCALE_LOTS=True：每笔独立成本/峰值/止盈
@@ -65,33 +64,12 @@ SCALE_LOTS = True
 RECIPE = {
     "entry": [
         "and",
-        # ["not", "chase"],
-        # ["not", "vol_dry"],
-        # ["not", "w_bias"],
-        # ["not", "w_slope"],
-        # ["not", "weekly_bear"],
         "above_ema",
         "keltner_vol",
     ],
     "scale_in": False,
-    # [
-    #     "and",
-    #     ["not", "vol_dry"],
-    #     ["not", "w_bias"],
-    #     ["not", "w_slope"],
-    #     ["not", "weekly_bear"],
-    #     "above_ema",
-    #     [
-    #         "or",
-    #         ["and", "keltner_vol", ["not", "chase"]],
-    #         "plat_break",
-    #         "w_macd_golden",
-    #     ],
-    #     "scale_arm",
-    # ],
     "exit": [
         "or",
-        # "weekly_bear_confirm",
         # "stop_loss",
         "atr_stop",
         "atr_trail_stop",

@@ -35,7 +35,7 @@ def _recipe_hit(expr, ctx):
 
 
 def _recipe_block_reasons(expr, ctx):
-    """未命中时第一个挡住的叶子。["not","chase"] 失败 → chase。"""
+    """未命中时第一个挡住的叶子。["not","leaf"] 失败 → leaf。"""
     if expr is False or expr is None or expr is True:
         return []
     if isinstance(expr, str):
@@ -98,13 +98,11 @@ def _recipe_leaf_ids(expr):
 
 
 def _recipe_compute_leaves(recipe=None):
-    """启用叶子 + 特例：weekly_bear_confirm→weekly_bear；scale_in 非空→scale_arm。"""
+    """启用叶子 + 特例：scale_in 非空→scale_arm。"""
     rec = recipe if recipe is not None else (globals().get("RECIPE") or {})
     used = set()
     for slot in ("entry", "scale_in", "exit", "scale_out"):
         used |= _recipe_leaf_ids(rec.get(slot))
-    if "weekly_bear_confirm" in used:
-        used.add("weekly_bear")
     scale_in = rec.get("scale_in")
     if scale_in is not False and scale_in is not None:
         used.add("scale_arm")

@@ -34,23 +34,16 @@
 
 ```json
 ["and",
-  ["not", "chase"], ["not", "vol_dry"],
-  ["not", "w_bias"], ["not", "w_slope"],
-  ["not", "weekly_bear"],
   "above_ema",
   "keltner_vol"]
 ```
 
-加仓信号（`scale_arm` 在表达式末，避免抢成交主因）：
+加仓（现行默认 `scale_in=false`；启用示例，`scale_arm` 在表达式末）：
 
 ```json
 ["and",
-  ["not", "vol_dry"], ["not", "w_bias"],
-  ["not", "w_slope"], ["not", "weekly_bear"],
   "above_ema",
-  ["or",
-    ["and", "keltner_vol", ["not", "chase"]],
-    "plat_break", "w_macd_golden"],
+  "keltner_vol",
   "scale_arm"]
 ```
 
@@ -78,9 +71,9 @@ hit(["not", x])  = not hit(x)
 不必单独维护 gate 层。
 
 - 旧写法：先跑一堆 skip，再跑买点
-- 新写法：整棵入场式里写 `["not","chase"]`、`["not","vol_dry"]` 等
+- 新写法：整棵入场式里写 `["not","leaf"]` 等
 
-因子仍是中性的（如 `chase` = 当日追高为真）；立场由所在槽的表达式赋予。
+因子仍是中性的；立场由所在槽的表达式赋予。
 
 ---
 
@@ -98,23 +91,19 @@ Recipe 只回答「意图是否触发」；能不能成交、下多少，由仓�
 
 ## 5. 现状编码（默认 Recipe 草图）
 
-迁移第一期应用表达式**对齐**现逻辑，而不是先改语义：
-
 ```text
 entry:
-  ¬chase & ¬vol_dry & ¬w_bias & ¬w_slope & ¬weekly_bear & above_ema & keltner_vol
+  above_ema & keltner_vol
 
 scale_in:
-  ¬vol_dry & ¬w_bias & ¬w_slope & ¬weekly_bear & above_ema
-  & ((keltner_vol & ¬chase) | plat_break | w_macd_golden)
-  & scale_arm
-  # 破平台 / 金叉不受 chase；通道内缩量加仓受；above_ema 在 or 外
+  false
+  # scale_arm 仍登记；启用后由 _recipe_compute_leaves 特例拉入
   # scale_once / 满槽在仓位层
 
 exit:
-  weekly_bear_confirm | atr_stop | atr_trail_stop | time_force
+  atr_stop | atr_trail_stop
   # or 短路；主因 = 第一个命中叶子 id
-  # stop_loss / trail_stop 叶子仍在，默认 AST 不引用（源码注释关掉）
+  # stop_loss / trail_stop / time_force 叶子仍在，默认 AST 不引用
 
 scale_out:
   false   # 现行默认配置无独立减仓槽
@@ -128,34 +117,24 @@ scale_out:
 
 | 因子 | 主要读的 state |
 | :--- | :--- |
-| `chase` / `vol_dry` / `w_bias` / `w_slope` / `pullback_vol` / `keltner_vol` / `above_ema` / `plat_break` / `w_macd_golden` | 可几乎只靠 market |
+| `pullback_vol` / `keltner_vol` / `above_ema` | 可几乎只靠 market |
 | `scale_arm` | `lots` / `hold_max_ret` / `hold_bars`、`w_detail.hist` |
 | `stop_loss` / `atr_stop` / `trail_stop` / `atr_trail_stop` | `cost`、`hold_peak`（或 lot 同名字段）；`atr_stop` / `atr_trail_stop` 另读 `market.atr` |
 | `time_force` | `hold_bars`、`hold_max_ret`、`time_force_trend_skip` |
-| `weekly_bear`（当天空头，禁开/撤买） | 主要靠 `w_detail` |
-| `weekly_bear_confirm`（确认清仓） | `w_bear_streak`、`w_bear_last_day` |
 
-`eval` 只读；streak / `trend_skip` 的写回不放在 `eval` 内。
+`eval` 只读；`trend_skip` 的写回不放在 `eval` 内。
 
 ---
 
 ## 7. 第一期复合原子（现行默认配置叶子）
 
-引擎可支持细原子，但现行默认配置的叶子 **只登记** `catalog.LEAVES`（下表）。每个 id 对应 `hlband/factors/lib/<id>.py`。默认 exit AST 引用其中一部分（见 §5）。作者改 `LEAVES` 的 `default`；运行时阈值读 `RECIPE.factor_params`（catalog 整表写入，`_factor_param`），**没有** `STOP_LOSS` / `CHASE_MAX_PCT` 这类模块全局别名。均线/MACD/ATR/肯特纳窗读 `RECIPE.structure`（`_structure_windows`），`<=0` 关条。
+引擎可支持细原子，但现行默认配置的叶子 **只登记** `catalog.LEAVES`（下表）。每个 id 对应 `hlband/factors/lib/<id>.py`。默认 exit AST 引用其中一部分（见 §5）。作者改 `LEAVES` 的 `default`；运行时阈值读 `RECIPE.factor_params`（catalog 整表写入，`_factor_param`），**没有** `STOP_LOSS` 这类模块全局别名。均线/MACD/ATR/肯特纳窗读 `RECIPE.structure`（`_structure_windows`），`<=0` 关条。
 
 | id | 现逻辑 | 阈值（`factor_params`） |
 | :--- | :--- | :--- |
 | `pullback_vol` | 贴中/慢均线 + 连续缩量 | `pullback_vol.tol` / `vol_n` / `ratio` / `confirm_days`（默认 AST 不引用） |
 | `keltner_vol` | 收盘在肯特纳通道内 + 连续缩量 | `keltner_vol.k` / `ratio` / `vol_n` / `confirm_days`；窗是 `structure.keltner.*` |
 | `above_ema` | 收盘 > 日线趋势 EMA | 无叶子阈值；窗是 `structure.ema.1d.trend`（`<=0` 关闸门） |
-| `chase` | 当日涨幅过大 | `chase.max_pct` |
-| `vol_dry` | 跌破中线且无量 | `vol_dry.ratio` / `n` |
-| `w_bias` | 周线高位乖离 | `w_bias.hard` |
-| `w_slope` | 低位生命线未连升 | `w_slope.low` / `slope_weeks` |
-| `weekly_bear` | **当天空头**（破生命线 / 零轴下死叉） | 无叶子阈值；周期在 `RECIPE.structure` |
-| `weekly_bear_confirm` | **确认清仓**：streak ≥ N | `weekly_bear_confirm.days` |
-| `plat_break` | 平台突破 | `plat_break.lookback` / `max_range` / `break_buf` |
-| `w_macd_golden` | 周金叉且柱放大 | `w_macd_golden.hist_expand` |
 | `scale_arm` | 峰值浮盈 + 该笔持仓日 + 周柱下限 | `scale_arm.arm` / `bars` / `hist_min`；`arm<=0` 回落 `0.03`；`bars<=0` 不查持仓日；`hist_min` 为 `None` 关闭周柱 |
 | `stop_loss` | 收盘相对成本 | `stop_loss.pct` |
 | `atr_stop` | 收盘 <= 成本 − k×ATR | `atr_stop.k`；窗是 `structure.atr.n` |
@@ -171,14 +150,14 @@ scale_out:
 
 ## 8. 参数组
 
-作者改 `factors/catalog.py` 的 `LEAVES`；运行时读 `RECIPE.factor_params`（catalog 用 defaults 整表写入，不要给 `weekly_bear` / `above_ema` 写空 `{}`）。四个槽位的条件抽象语法树 / `structure` 仍手写在 `config.RECIPE`。叶子只读表，不读同名全局。没有 `STOP_LOSS` / `D_MA_MID` 别名。
+作者改 `factors/catalog.py` 的 `LEAVES`；运行时读 `RECIPE.factor_params`（catalog 用 defaults 整表写入，不要给 `above_ema` 写空 `{}`）。四个槽位的条件抽象语法树 / `structure` 仍手写在 `config.RECIPE`。叶子只读表，不读同名全局。没有 `STOP_LOSS` / `D_MA_MID` 别名。
 
 加普通因子：`LEAVES` + `lib/<id>.py` + 必要时改四个槽位的条件抽象语法树。不要手改 `registry` / `MODULE_ORDER` / `grid_spec` 白名单。公式仍留在 `lib/`，不做成配置字符串。
 
 | 住哪 | 例子 | 说明 |
 | :--- | :--- | :--- |
 | `RECIPE` 四个槽位 AST | `entry` / `scale_in` / `exit` / `scale_out` | 无数字；默认盘启用写这里 |
-| `catalog.LEAVES` → `RECIPE.factor_params` | `stop_loss.pct`、`atr_stop.k`、`atr_trail_stop.k1` / `k2`、`time_force.arm`、`chase.max_pct`、`trail_stop.tiers`、`scale_arm.arm` / `bars` / `hist_min` | 作者改 `LEAVES`；运行时 `_factor_param` |
+| `catalog.LEAVES` → `RECIPE.factor_params` | `stop_loss.pct`、`atr_stop.k`、`atr_trail_stop.k1` / `k2`、`time_force.arm`、`trail_stop.tiers`、`scale_arm.arm` / `bars` / `hist_min`、`keltner_vol.*` | 作者改 `LEAVES`；运行时 `_factor_param` |
 | `RECIPE.structure` | 见下表 | 均线/MACD/ATR/肯特纳 **窗**；`_structure_windows` |
 | 仓位 / 资金全局 | `SCALE_ENABLE`、`CASH_RATIO`、`TRADE_BUDGET` | 不上表、不上因子面板 |
 
@@ -186,14 +165,14 @@ scale_out:
 
 | 段 | 键 | 现行默认 | 用途 |
 | :--- | :--- | :--- | :--- |
-| `ema.1d` | `mid` / `slow` / `trend` | 20 / 60 / 120 | 日线回踩/无量阴跌；慢线还是 time_force 地板；`trend` 是 `above_ema`（`<=0` 关闸门） |
+| `ema.1d` | `mid` / `slow` / `trend` | 20 / 60 / 120 | 日线回踩；慢线还是 time_force 地板；`trend` 是 `above_ema`（`<=0` 关闸门） |
 | `ema.1w` | `mid` / `slow` / `trend` | 5 / 13 / 34 | 周线快/中/生命线（原 `w_ma.fast/mid/life`）；`slow` 仅日志 `weekly_bull` |
 | `sma.1d` / `sma.1w` | `mid` / `slow` / `trend` | 全 0 | 价格 SMA 窗；现行盘无调用点；`<=0` 关条 |
 | `macd` | `fast` / `slow` / `signal` | 12 / 26 / 9 | 周线 DIF/DEA/柱 |
 | `atr` | `n` | 14 | 日线威尔德 ATR；`<=0` 关 `atr_stop` / `atr_trail_stop` |
 | `keltner` | `ema_n` / `atr_n` | 20 / 20 | 肯特纳中轨 EMA / 带宽 ATR（与 `atr.n` 独立）；`<=0` 关 |
 
-读取指标周期窗：调用方先 `_structure_windows()`，再把 `n` 传给 `_ema` / `_sma` / `_calc_macd`（三窗必传）/ `_calc_atr` / `_calc_keltner`（`ema_n` / `atr_n` / `k` 必传；`k` 不上 `structure`）。`_ema` 读 `ema.*`，`_sma` 读 `sma.*`。网格覆盖 `_structure_apply_global`，**递归**按算法→周期→窗合并。QMT 暖机（`market._ohlcv_need_*`）同周期对 `ema`/`sma` 窗取 max（`>0`）。旧 `d_ma`/`w_ma` 段写入即报错。量均窗仍在 `factor_params`（`pullback_vol.vol_n` / `vol_dry.n`）。
+读取指标周期窗：调用方先 `_structure_windows()`，再把 `n` 传给 `_ema` / `_sma` / `_calc_macd`（三窗必传）/ `_calc_atr` / `_calc_keltner`（`ema_n` / `atr_n` / `k` 必传；`k` 不上 `structure`）。`_ema` 读 `ema.*`，`_sma` 读 `sma.*`。网格覆盖 `_structure_apply_global`，**递归**按算法→周期→窗合并。QMT 暖机（`market._ohlcv_need_*`）同周期对 `ema`/`sma` 窗取 max（`>0`）。旧 `d_ma`/`w_ma` 段写入即报错。量均窗仍在 `factor_params`（`pullback_vol.vol_n` / `keltner_vol.vol_n`）。
 
 网格：因子轴元数据（分组 / 短名 / percent / kind）来自 `LEAVES`，侧栏只含买入 `entry`、加仓 `scale_in`、卖出 `exit`、减仓 `scale_out` 四个槽位已启用叶子的阈值（现行默认配置的 `stop_loss` 登记保留、不上轴）。轴 id 仍是点路径（`stop_loss.pct` / `atr_stop.k` / `atr_trail_stop.k1` / `k2` / `time_force.arm` / `scale_arm.arm` / `scale_arm.bars` / `scale_arm.hist_min` / `ema.1d.mid` / `ema.1d.trend` / `atr.n` / `keltner.ema_n` / `keltner.atr_n` / `keltner_vol.k`）；短 id 如 `e1dm15` / `e1dt` / `ask` / `atk1` / `atk2` / `tfa` / `sa` / `sab` / `swh` / `atr` / `kem` / `kat` / `kvk`。`sma.*` 不上轴。`atr_stop.k` / `atr_trail_stop.k1` / `k2` 是浮点倍数轴（`LEAVES` 默认 `2.0`，可扫 `1.5`），**不是**百分比轴。格子 `overrides` 形态不变，必须写成：
 

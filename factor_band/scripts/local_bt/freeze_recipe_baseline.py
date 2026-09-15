@@ -92,44 +92,28 @@ def _eval_cases(ns: dict) -> list[dict]:
     highs = [c + 0.1 for c in closes]
     lows = [c - 0.1 for c in closes]
     closes_w = [10.0 + 0.05 * i for i in range(50)]
-    bull, bear, detail = ns["_eval_weekly"](closes_w)
+    detail = ns["_weekly_market_features"](closes_w)
+    bull = ns["_weekly_bull_from_detail"](detail)
     ctx = ns["_build_factor_ctx"](closes, vols, highs, lows, detail, None)
     entry = ns["_eval_entry_slot"](ctx)
     cases.append(
         {
             "id": "trend_up",
             "weekly_bull": bool(bull),
-            "weekly_bear": bool(bear),
             "buy_ok": bool(entry.get("hit")),
             "buy_reasons": list(entry.get("reasons") or []),
-            "w_bias": bool(ns["_factor_hit"]("w_bias", ctx)),
-            "w_slope": bool(ns["_factor_hit"]("w_slope", ctx)),
+            "above_ema": bool(ns["_factor_hit"]("above_ema", ctx)),
+            "keltner_vol": bool(ns["_factor_hit"]("keltner_vol", ctx)),
         }
     )
 
-    chase_c = list(closes)
-    chase_c[-1] = chase_c[-2] * 1.08
-    chase_ctx = ns["_build_factor_ctx"](chase_c, vols, highs, lows, detail, None)
-    entry = ns["_eval_entry_slot"](chase_ctx)
+    below_c = list(closes)
+    below_c[-1] = 1.0
+    below_ctx = ns["_build_factor_ctx"](below_c, vols, highs, lows, detail, None)
+    entry = ns["_eval_entry_slot"](below_ctx)
     cases.append(
         {
-            "id": "chase",
-            "buy_ok": bool(entry.get("hit")),
-            "buy_reasons": list(entry.get("reasons") or []),
-        }
-    )
-
-    dry_c = list(closes)
-    dry_v = list(vols)
-    dry_c[-1] = 8.0
-    dry_v[-1] = 1.0e4
-    dry_h = [c + 0.1 for c in dry_c]
-    dry_l = [c - 0.1 for c in dry_c]
-    dry_ctx = ns["_build_factor_ctx"](dry_c, dry_v, dry_h, dry_l, detail, None)
-    entry = ns["_eval_entry_slot"](dry_ctx)
-    cases.append(
-        {
-            "id": "vol_dry",
+            "id": "below_ema",
             "buy_ok": bool(entry.get("hit")),
             "buy_reasons": list(entry.get("reasons") or []),
         }
@@ -145,7 +129,7 @@ def _eval_cases(ns: dict) -> list[dict]:
         "time_force_trend_skip": False,
     }
     ok, rs = ns["_eval_lot_sell"](9.0, closes, lot)
-    cases.append({"id": "stop_loss", "sell_ok": bool(ok), "sell_reasons": list(rs)})
+    cases.append({"id": "atrish", "sell_ok": bool(ok), "sell_reasons": list(rs)})
 
     lot_t = dict(lot)
     lot_t["hold_peak"] = 11.2
@@ -165,45 +149,16 @@ def _eval_cases(ns: dict) -> list[dict]:
     entry = ns["_eval_entry_slot"](pb_ctx)
     cases.append(
         {
-            "id": "pullback",
+            "id": "near_mid",
             "buy_ok": bool(entry.get("hit")),
             "buy_reasons": list(entry.get("reasons") or []),
         }
     )
 
-    bear_w = [12.0] * 40 + [8.0] * 10
-    bull, bear, detail = ns["_eval_weekly"](bear_w)
-    bear_ctx = ns["_build_factor_ctx"](closes, vols, highs, lows, detail, None)
+    scale = ns["_eval_scale_in_slot"](ctx)
     cases.append(
         {
-            "id": "weekly_bear_day",
-            "weekly_bull": bool(bull),
-            "weekly_bear": bool(bear),
-            "w_bias": bool(ns["_factor_hit"]("w_bias", bear_ctx)),
-            "w_slope": bool(ns["_factor_hit"]("w_slope", bear_ctx)),
-        }
-    )
-
-    plat_c = [10.0] * 30 + [10.3]
-    plat_h = [10.05] * 30 + [10.35]
-    plat_l = [9.95] * 30 + [10.2]
-    plat_ctx = ns["_build_factor_ctx"](plat_c, None, plat_h, plat_l, detail, None)
-    market = dict(plat_ctx.get("market") or {})
-    w_detail = dict(market.get("w_detail") or {})
-    w_detail["hist"] = 0.0
-    market["w_detail"] = w_detail
-    plat_ctx = dict(plat_ctx)
-    plat_ctx["market"] = market
-    plat_ctx = ns["_factor_ctx_bind_state"](
-        plat_ctx,
-        lots=[{"hold_max_ret": 0.04, "hold_bars": 10}],
-    )
-    plat = bool(ns["_factor_hit"]("plat_break", plat_ctx))
-    scale = ns["_eval_scale_in_slot"](plat_ctx)
-    cases.append(
-        {
-            "id": "plat_break",
-            "plat": plat,
+            "id": "scale_in_off",
             "scale_ok": bool(scale.get("hit")),
             "scale_reasons": list(scale.get("reasons") or []),
         }

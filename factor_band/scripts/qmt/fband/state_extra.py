@@ -22,11 +22,6 @@ def _state_extra_load(raw):
     A.time_force_trend_skip = bool(raw.get("time_force_trend_skip"))
     A._confirmed_eval_day = str(raw.get("confirmed_eval_day", "") or "")
     A._fallback_done_day = str(raw.get("fallback_done_day", "") or "")
-    try:
-        A._w_bear_streak = int(raw.get("w_bear_streak", 0) or 0)
-    except Exception:
-        A._w_bear_streak = 0
-    A._w_bear_last_day = str(raw.get("w_bear_last_day", "") or "")
     A.round_scaled = bool(raw.get("round_scaled"))
     A._skip_sell_eval_day = str(raw.get("skip_sell_eval_day", "") or "")
     A._last_add_day = str(raw.get("last_add_day", "") or "")
@@ -60,8 +55,6 @@ def _reset_stock_ctx():
     A.round_scaled = False
     A._confirmed_eval_day = ""
     A._fallback_done_day = ""
-    A._w_bear_streak = 0
-    A._w_bear_last_day = ""
     A._skip_sell_eval_day = ""
     A._last_add_day = ""
     A._last_add_signal = ""
@@ -93,8 +86,6 @@ def _state_extra_save(data):
     data["time_force_trend_skip"] = bool(getattr(A, "time_force_trend_skip", False))
     data["confirmed_eval_day"] = str(getattr(A, "_confirmed_eval_day", "") or "")
     data["fallback_done_day"] = str(getattr(A, "_fallback_done_day", "") or "")
-    data["w_bear_streak"] = int(getattr(A, "_w_bear_streak", 0) or 0)
-    data["w_bear_last_day"] = str(getattr(A, "_w_bear_last_day", "") or "")
     data["round_scaled"] = bool(getattr(A, "round_scaled", False))
     data["skip_sell_eval_day"] = str(getattr(A, "_skip_sell_eval_day", "") or "")
     data["last_add_day"] = str(getattr(A, "_last_add_day", "") or "")

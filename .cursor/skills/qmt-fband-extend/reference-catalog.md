@@ -9,7 +9,7 @@
 | 键 | 必填 | 说明 |
 | :--- | :--- | :--- |
 | `label` | 是 | 日志中文名（现行默认配置的买卖文案，不要为网格短名改） |
-| `label_buy` | 否 | 仅买卖用词不同时（如 `weekly_bear`） |
+| `label_buy` | 否 | 仅买卖用词不同时（可选） |
 | `group` | 是 | 只用于网格侧栏：`entry` / `exit` / `scale`。不是槽立场，不限制 AST 引用 |
 | `params` | 是 | 无阈值用 `{}`；`_leaves_factor_params` 跳过空表，不写进 `factor_params` |
 
@@ -27,7 +27,7 @@
 | `off` | `le0`：`<=0` 标 `off`。`stop_loss.pct` 必须 `off: None`（0 是更紧，不是关规则） |
 | `axis` | 同 `group` 内排序。`time_force.bars` 与 `arm` 不要靠插入序硬挨 |
 
-`weekly_bear_confirm.days` 启用后才进网格出场组、不设 `kind`。
+`time_force.bars` / `arm` 启用后才进网格出场组；出场轴写 `kind`。
 
 `kind` 只写在网格出场轴上。写到入场/加仓会被当成出场松紧。
 
