@@ -208,57 +208,80 @@ _MARKET_TAGS = frozenset(
     }
 )
 
-_LEAF_MARKET_NEED = {
-    "keltner_vol": frozenset({"keltner", "vol_kc"}),
-    "above_ema": frozenset({"d_ma_trend"}),
-    "scale_arm": frozenset(),
-    "stop_loss": frozenset(),
-    "atr_stop": frozenset({"atr"}),
-    "trail_stop": frozenset(),
-    "atr_trail_stop": frozenset({"atr"}),
-    "time_force": frozenset({"d_ma_slow"}),
-}
+
+_LEAVES_NEED_OK = False
+
+
+def _leaf_need_tags(fid, leaf=None):
+    """LEAVES[id].need → frozenset。缺键 / 非法标签报错。"""
+    if leaf is None:
+        leaf = ((globals().get("LEAVES") or {}).get(str(fid)) or None)
+    if not isinstance(leaf, dict) or "need" not in leaf:
+        raise ValueError("LEAVES.%s 缺 need" % fid)
+    raw = leaf.get("need")
+    if raw is None:
+        raise ValueError("LEAVES.%s.need 不能为 None" % fid)
+    tags = frozenset(str(t) for t in raw)
+    bad = tags - _MARKET_TAGS
+    if bad:
+        raise ValueError(
+            "LEAVES.%s.need 非法标签 %s" % (fid, ",".join(sorted(bad)))
+        )
+    return tags
+
+
+def _validate_leaves_need():
+    """组表时扫全表 need。"""
+    global _LEAVES_NEED_OK
+    if _LEAVES_NEED_OK:
+        return
+    leaves = globals().get("LEAVES") or {}
+    for fid, leaf in leaves.items():
+        _leaf_need_tags(fid, leaf)
+    _LEAVES_NEED_OK = True
 
 
 def _market_need(recipe=None):
     """启用叶子对应的 ctx / 暖机标签。未知 AST id → 全标签。"""
+    _validate_leaves_need()
     walk = globals().get("_recipe_compute_leaves")
     if not callable(walk):
         return set(_MARKET_TAGS)
+    leaves = globals().get("LEAVES") or {}
     out = set()
     for fid in walk(recipe):
-        tags = _LEAF_MARKET_NEED.get(str(fid))
-        if tags is None:
+        key = str(fid)
+        if key not in leaves:
             return set(_MARKET_TAGS)
-        out |= set(tags)
+        out |= set(_leaf_need_tags(key, leaves.get(key)))
     return out
 
 
 def _weekly_market_features(closes_w):
     """周线 MA 进 ctx.market；不判多空。"""
     detail = {
-        "ma5": None,
-        "ma30": None,
+        "w_mid": None,
+        "w_trend": None,
         "close": None,
     }
     win = _structure_windows()
     w_ema = win["ema"]["1w"]
-    ma5 = _ema(closes_w, w_ema["mid"])
-    ma30 = _ema(closes_w, w_ema["trend"])
-    if ma5 is None or ma30 is None:
+    mid_arr = _ema(closes_w, w_ema["mid"])
+    trend_arr = _ema(closes_w, w_ema["trend"])
+    if mid_arr is None or trend_arr is None:
         return detail
     i = len(closes_w) - 1
     if i < 1:
         return detail
     c = float(closes_w[i])
-    m5 = _last_valid(ma5, i)
-    m30 = _last_valid(ma30, i)
-    m30_prev = _last_valid(ma30, i - 1)
+    m_mid = _last_valid(mid_arr, i)
+    m_trend = _last_valid(trend_arr, i)
+    m_trend_prev = _last_valid(trend_arr, i - 1)
     detail.update(
         {
-            "ma5": m5,
-            "ma30": m30,
-            "ma30_prev": m30_prev,
+            "w_mid": m_mid,
+            "w_trend": m_trend,
+            "w_trend_prev": m_trend_prev,
             "close": c,
         }
     )
@@ -267,9 +290,9 @@ def _weekly_market_features(closes_w):
 
 def _factor_daily_features(closes, volumes, need=None):
     detail = {
-        "ma20": None,
-        "ma60": None,
-        "ma_trend": None,
+        "d_mid": None,
+        "d_slow": None,
+        "d_trend": None,
         "vol10": None,
         "vol20": None,
         "vol_need": 1,
@@ -303,17 +326,17 @@ def _factor_daily_features(closes, volumes, need=None):
     detail["mid_n"] = mid_n
     detail["slow_n"] = slow_n
     detail["trend_n"] = trend_n
-    ma20 = (
+    mid_arr = (
         _ema(closes, mid_n)
         if ("d_ma_mid" in need and mid_n > 0)
         else None
     )
-    ma60 = (
+    slow_arr = (
         _ema(closes, slow_n)
         if ("d_ma_slow" in need and slow_n > 0)
         else None
     )
-    ma_trend = (
+    trend_arr = (
         _ema(closes, trend_n)
         if ("d_ma_trend" in need and trend_n > 0)
         else None
@@ -327,16 +350,16 @@ def _factor_daily_features(closes, volumes, need=None):
         return False, detail
     price = float(closes[i])
     vol = float(volumes[i]) if volumes is not None else None
-    m20 = _last_valid(ma20, i) if ma20 is not None else None
-    m60 = _last_valid(ma60, i) if ma60 is not None else None
-    m_trend = _last_valid(ma_trend, i) if ma_trend is not None else None
+    m_mid = _last_valid(mid_arr, i) if mid_arr is not None else None
+    m_slow = _last_valid(slow_arr, i) if slow_arr is not None else None
+    m_trend = _last_valid(trend_arr, i) if trend_arr is not None else None
     v10 = _last_valid(vol10, i) if vol10 is not None else None
     v20 = None
     detail.update(
         {
-            "ma20": m20,
-            "ma60": m60,
-            "ma_trend": m_trend,
+            "d_mid": m_mid,
+            "d_slow": m_slow,
+            "d_trend": m_trend,
             "vol10": vol10,
             "vol20": vol20,
             "price": price,
@@ -405,9 +428,9 @@ def _build_factor_ctx(
         "w_detail": w_detail or {},
         "daily_ready": ready,
         "daily_detail": daily,
-        "ma20": daily.get("ma20"),
-        "ma60": daily.get("ma60"),
-        "ma_trend": daily.get("ma_trend"),
+        "d_mid": daily.get("d_mid"),
+        "d_slow": daily.get("d_slow"),
+        "d_trend": daily.get("d_trend"),
         "vol10": daily.get("vol10"),
         "vol20": daily.get("vol20"),
         "mid_n": daily.get("mid_n"),

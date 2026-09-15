@@ -42,7 +42,7 @@ MAE 为何不可信、本轮数字：需要时再读 [reference-lessons.md](refe
 6. **时空双重隔离**：时间用 `tune_*` / `check_*`；空间用 `tune_stocks` / `holdout_stocks`（盲测只否决、不参与格子比大小）。`mode=off` 时无空间门。
 7. 每格写入主题 `report/grid/<sweep>/<cell>/`，**不得覆盖** `report/front_ratio/` 等基线 log。
 8. **全局单层多进程池**（禁止格间×格内嵌套 ProcessPool）：`--workers` / `grid_workers` = 全局进程数。`<=0` 自动 `min(walk 数, CPU)`；`1` 全串行；`>=2` 铺平**当前组**各格 walk 进同一池（不夹 16）。一次只提交一组，禁止把全部格子塞进同一个池。格内最多 2 段（tune + holdout）。进度 = (已完成 walk + 在跑 bar 分数) / `(本组格数 × n_jobs)`，参数指纹预检不占分母。
-9. 每格先跑参数指纹预检（Dummy Context Check，不回放 K 线）校验指纹：`stop=` / `time_force_bars=`；`time_force_min_ret=` = `time_force.arm`（标签名不改）；`trail_arm=` = `trail_stop.tiers` 档1 `peak_lo`（与让路脱钩）。扫 `trail_stop.tiers` 时核 compact `trail_tiers=` JSON（整表相等）。改档1 不得改 `time_force_min_ret=`。不一致则停。通过后该格全部 walk 再跑。
+9. 每格先跑参数指纹预检（Dummy Context Check，不回放 K 线）必核 `recipe=`。人读 init 字段是启用叶子的点路径（`atr_stop.k=`、`ema.1d.trend=`）。该格 `overrides.factor_params` 且叶子已启用时再核对应路径（`trail_stop.tiers` 用 compact JSON）。卸下叶子的覆盖只走 `recipe=` 全表哈希。启用集合读不到则字段级跳过，只核 `recipe=`。不一致则停。通过后该格全部 walk 再跑。
 10. **分组续跑**：`report/grid/<sweep>/progress.json`。已 `done` 的组跳过；未跑完的组标 `dirty`，继续时**整组清空重跑**。`--resume` 不 prune。`--cell` 与 `--resume` / `--batch-size>0` 互斥。CLI `--batch-size` 默认 0（一组=现状）；UI 默认 10。UI 暂停须杀进程树，再用操作系统命令行双重核对 pid（Win11 走 CIM，不依赖 wmic）：cmdline 证明已死或 pid 不存在才标 dirty / 删目录；命令行读不到且 pid 仍在则**不**自动删目录，防止残留进程导致误删。CLI 可用 `pause.flag`。summarize 只传已 done 的格子 id。未跑完时推荐只基于已完成组。格子数>8 只 WARN、**不阻断、不等确认**。
 11. **默认不改 `config.py`、不 deploy**。用户说「按建议修改」再改片段并部署。
 

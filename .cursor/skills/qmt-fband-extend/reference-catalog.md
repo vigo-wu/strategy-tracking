@@ -11,6 +11,7 @@
 | `label` | 是 | 日志中文名（现行默认配置的买卖文案，不要为网格短名改） |
 | `label_buy` | 否 | 仅买卖用词不同时（可选） |
 | `group` | 是 | 只用于网格侧栏：`entry` / `exit` / `scale`。不是槽立场，不限制 AST 引用 |
+| `need` | 是 | 预计算标签元组，取值 ⊆ `_MARKET_TAGS`（`d_ma_mid` / `d_ma_slow` / `d_ma_trend` / `vol_kc` / `atr` / `keltner` / `weekly`）。可空 `()`。不是网格字段，不进 `factor_params`。缺键或非法标签在 ctx 组表时报错 |
 | `params` | 是 | 无阈值用 `{}`；`_leaves_factor_params` 跳过空表，不写进 `factor_params` |
 
 `LEAVES` 插入序 = `lib/` 拼包序。网格轴序另用 `params[].axis`（同 `group` 内数字越小越靠前）。
@@ -60,7 +61,7 @@
 
 ## 加完自检
 
-- `LEAVES` id ↔ `lib/<id>.py` ↔ `_factor_eval_<id>` ↔ `_LEAF_MARKET_NEED`
+- `LEAVES` id ↔ `lib/<id>.py` ↔ `_factor_eval_<id>` ↔ `LEAVES.need`
 - 四个槽位 AST 里出现的 id ⊆ `LEAVES`（启用 ⊆ 登记）
 - 无阈值因子不在 `factor_params`
 - 新因子轴在**登记且 AST 启用后**出现在 `catalog_ids()`；新结构轴出现在 `STRUCTURE_KEYS`

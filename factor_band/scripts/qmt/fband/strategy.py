@@ -1459,14 +1459,8 @@ def _handle_stock(C, ctx):
         A.ready_logged = True
         if not getattr(A, "is_backtest", False):
             A._bar_status_at = now
-        print(
-            "%s" % STRATEGY_NAME,
-            day,
-            hhmm,
+        status_bits = [
             "n1d=%d n1w=%d close=%.4f sig_d=%s sig_w=%s phase=%s prev_d=%s prev_w=%s "
-            "w_ma5=%s w_ma30=%s "
-            "buy=%s buyR=%s scale=%s scaleR=%s sell=%s sellR=%s "
-            "hold=%s nlot=%s ret=%s pe=%s px=%s bt_held=%s avail=%s"
             % (
                 len(closes_s),
                 0 if closes_ws is None else len(closes_ws),
@@ -1476,16 +1470,41 @@ def _handle_stock(C, ctx):
                 phase,
                 prev_d,
                 prev_w,
-                None if w_detail.get("ma5") is None else round(w_detail["ma5"], 4),
-                None if w_detail.get("ma30") is None else round(w_detail["ma30"], 4),
+            )
+        ]
+        bar_fields = {
+            "day": day,
+            "hhmm": hhmm,
+            "n1d": len(closes_s),
+            "n1w": 0 if closes_ws is None else len(closes_ws),
+            "close": round(price, 6),
+            "sig_d": sig_day_daily,
+            "sig_w": sig_day_weekly,
+            "phase": phase,
+            "prev_d": prev_d,
+            "prev_w": prev_w,
+        }
+        if need_weekly:
+            w_mid = None if w_detail.get("w_mid") is None else round(w_detail["w_mid"], 4)
+            w_trend = (
+                None if w_detail.get("w_trend") is None else round(w_detail["w_trend"], 4)
+            )
+            status_bits.append("w_mid=%s w_trend=%s " % (w_mid, w_trend))
+            bar_fields["w_mid"] = w_mid
+            bar_fields["w_trend"] = w_trend
+        scale_r = (
+            ",".join(scale_reasons)
+            if scale_sig and scale_reasons
+            else (scale_why or (",".join(scale_reasons) if scale_reasons else "-"))
+        )
+        status_bits.append(
+            "buy=%s buyR=%s scale=%s scaleR=%s sell=%s sellR=%s "
+            "hold=%s nlot=%s ret=%s pe=%s px=%s bt_held=%s avail=%s"
+            % (
                 buy_sig,
                 ",".join(buy_reasons) if buy_reasons else "-",
                 scale_sig,
-                (
-                    ",".join(scale_reasons)
-                    if scale_sig and scale_reasons
-                    else (scale_why or (",".join(scale_reasons) if scale_reasons else "-"))
-                ),
+                scale_r,
                 sell_ok,
                 ",".join(sell_reasons) if sell_reasons else "-",
                 holding,
@@ -1495,37 +1514,25 @@ def _handle_stock(C, ctx):
                 px_now,
                 _bt_held_vol() if bt else "-",
                 _bt_available_vol() if bt else "-",
-            ),
+            )
         )
-        _bar_log(
-            day=day,
-            hhmm=hhmm,
-            n1d=len(closes_s),
-            n1w=0 if closes_ws is None else len(closes_ws),
-            close=round(price, 6),
-            sig_d=sig_day_daily,
-            sig_w=sig_day_weekly,
-            phase=phase,
-            prev_d=prev_d,
-            prev_w=prev_w,
-            w_ma5=None if w_detail.get("ma5") is None else round(w_detail["ma5"], 4),
-            w_ma30=None if w_detail.get("ma30") is None else round(w_detail["ma30"], 4),
-            buy=buy_sig,
-            buyR=",".join(buy_reasons) if buy_reasons else "-",
-            scale=scale_sig,
-            scaleR=(
-                ",".join(scale_reasons)
-                if scale_sig and scale_reasons
-                else (scale_why or (",".join(scale_reasons) if scale_reasons else "-"))
-            ),
-            sell=bool(sell_ok),
-            sellR=",".join(sell_reasons) if sell_reasons else "-",
-            hold=holding,
-            nlot=_pos_lots() if holding else 0,
-            ret=None if ret_pct is None else round(ret_pct * 100.0, 4),
-            pe=pe_now,
-            px=px_now,
+        print("%s" % STRATEGY_NAME, day, hhmm, "".join(status_bits))
+        bar_fields.update(
+            {
+                "buy": buy_sig,
+                "buyR": ",".join(buy_reasons) if buy_reasons else "-",
+                "scale": scale_sig,
+                "scaleR": scale_r,
+                "sell": bool(sell_ok),
+                "sellR": ",".join(sell_reasons) if sell_reasons else "-",
+                "hold": holding,
+                "nlot": _pos_lots() if holding else 0,
+                "ret": None if ret_pct is None else round(ret_pct * 100.0, 4),
+                "pe": pe_now,
+                "px": px_now,
+            }
         )
+        _bar_log(**bar_fields)
 
     # ---- 先执行挂起的卖/买（尾盘按收盘价；隔夜残留开盘按开盘价）----
     if _try_exec_pending_exit(C, now, now_s, day, tag, exec_open_px, exec_last_px, holding):

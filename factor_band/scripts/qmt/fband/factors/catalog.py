@@ -1,11 +1,12 @@
 # === fband/factors/catalog.py ===
-# 叶子登记 / 默认阈值 / 网格轴元数据。运行时写入 RECIPE.factor_params。
+# 叶子登记 / need / 默认阈值 / 网格轴元数据。运行时写入 RECIPE.factor_params。
 # 文件名 = id；_factor_eval_<id> 在 lib/<id>.py。
 
 LEAVES = {
     "keltner_vol": {
         "label": "通道内缩量",
         "group": "entry",
+        "need": ("keltner", "vol_kc"),
         "params": {
             "k": {
                 "default": 2.0,
@@ -47,11 +48,13 @@ LEAVES = {
     "above_ema": {
         "label": "价在趋势均线上",
         "group": "entry",
+        "need": ("d_ma_trend",),
         "params": {},
     },
     "scale_arm": {
         "label": "加仓-浮盈持仓门槛",
         "group": "scale",
+        "need": (),
         "params": {
             "arm": {
                 "default": 0.03,
@@ -72,6 +75,7 @@ LEAVES = {
     "stop_loss": {
         "label": "硬止损",
         "group": "exit",
+        "need": (),
         "params": {
             "pct": {
                 "default": 0.08,
@@ -87,6 +91,7 @@ LEAVES = {
     "atr_stop": {
         "label": "ATR止损",
         "group": "exit",
+        "need": ("atr",),
         "params": {
             "k": {
                 "default": 2.0,
@@ -102,6 +107,7 @@ LEAVES = {
     "trail_stop": {
         "label": "卖点1-移动止盈回撤",
         "group": "exit",
+        "need": (),
         "params": {
             "tiers": {
                 "default": [
@@ -120,6 +126,7 @@ LEAVES = {
     "atr_trail_stop": {
         "label": "ATR移动止盈",
         "group": "exit",
+        "need": ("atr",),
         "params": {
             "k1": {
                 "default": 2.0,
@@ -144,6 +151,7 @@ LEAVES = {
     "time_force": {
         "label": "卖点2-时间成本智能平仓",
         "group": "exit",
+        "need": ("d_ma_slow",),
         "params": {
             "bars": {
                 "default": 30,

@@ -48,18 +48,15 @@ from grid_spec import (  # noqa: E402
     YEAR_WINDOW_KEYS,
     GridSpecError,
     apply_year_windows,
-    deep_merge_factor_params,
     fill_year_windows,
     flatten_factor_params,
-    flatten_structure,
-    is_structure_path,
     json_ready,
-    nest_factor_path,
     overrides_has_trail_tiers,
     recipe_fingerprint,
     reject_retired_min_ret,
     struct_eq,
     unused_factor_override_leaves,
+    _active_leaf_ids,
 )
 from grid_progress import (  # noqa: E402
     STATUS_DIRTY,
@@ -99,10 +96,6 @@ from trades_csv import trades_csv_path  # noqa: E402
 WARN_CELL_SOFT = 8
 WARN_JOBS_SOFT = 12
 WALK_PROGRESS_QUEUE_MAX = 256
-RE_STOP = re.compile(r"\bstop=\s*([0-9.eE+-]+)")
-RE_TFB = re.compile(r"\btime_force_bars=\s*(-?\d+)")
-RE_TFM = re.compile(r"\btime_force_min_ret=\s*([0-9.eE+-]+)")
-RE_ARM = re.compile(r"\btrail_arm=\s*([0-9.eE+-]+|None)")
 RE_RECIPE = re.compile(r"recipe=\s*([0-9a-fA-F]+)")
 
 _CSV_INDEX: dict[tuple[str, str], Path] = {}
@@ -438,49 +431,15 @@ def load_book_lock() -> list[tuple[str, str, str]]:
     return out
 
 
-def _fp_table_from_defaults(defaults: Mapping[str, Any] | None) -> dict[str, Any]:
-    table: dict[str, Any] = {}
-    for key, val in dict(defaults or {}).items():
-        ks = str(key)
-        if "." not in ks or is_structure_path(ks):
-            continue
-        table = deep_merge_factor_params(table, nest_factor_path(ks, val))
-    return table
-
-
 def expected_fingerprint(
     defaults: dict[str, Any],
     overrides: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    ov = overrides or {}
-    incoming = ov.get("factor_params") if isinstance(ov.get("factor_params"), dict) else {}
-    fp = deep_merge_factor_params(_fp_table_from_defaults(defaults), incoming)
-    stop = float((fp.get("stop_loss") or {}).get("pct"))
-    time_force_bars = int((fp.get("time_force") or {}).get("bars"))
-    trail_arm = None
-    try:
-        trail_arm = float(fp["trail_stop"]["tiers"][0][0])
-    except (IndexError, TypeError, ValueError, KeyError):
-        trail_arm = None
-    tf_arm = None
-    try:
-        raw_arm = (fp.get("time_force") or {}).get("arm")
-        if raw_arm is not None:
-            tf_arm = float(raw_arm)
-    except (TypeError, ValueError):
-        tf_arm = None
-    if tf_arm is None:
-        tf_arm = 0.03
-    out = {
-        "stop": stop,
-        "time_force_bars": time_force_bars,
-        "time_force_min_ret": float(tf_arm),
-        "trail_arm": trail_arm,
+    ov = dict(overrides or {})
+    return {
+        "recipe": recipe_fingerprint(overrides=ov),
+        "overrides": ov,
     }
-    if overrides_has_trail_tiers(ov):
-        out["trail_tiers"] = json_ready((fp.get("trail_stop") or {}).get("tiers"))
-    out["recipe"] = recipe_fingerprint(overrides=ov)
-    return out
 
 
 def _extract_tagged_json(text: str, tag: str) -> tuple[Any, bool]:
@@ -499,32 +458,11 @@ def _extract_tagged_json(text: str, tag: str) -> tuple[Any, bool]:
 
 
 def parse_fingerprint(text: str) -> dict[str, Any]:
-    stop_m = RE_STOP.search(text)
-    tfb_m = RE_TFB.search(text)
-    tfm_m = RE_TFM.search(text)
-    arm_m = RE_ARM.search(text)
-    arm: float | None
-    if arm_m is None:
-        arm = None
-    elif arm_m.group(1) in ("None", "none"):
-        arm = None
-    else:
-        arm = float(arm_m.group(1))
-    tiers, has_tiers = _extract_tagged_json(text, "trail_tiers=")
     rec_hits = RE_RECIPE.findall(text)
     recipe = rec_hits[-1] if rec_hits else None
     return {
-        "stop": None if stop_m is None else float(stop_m.group(1)),
-        "time_force_bars": None if tfb_m is None else int(tfb_m.group(1)),
-        "time_force_min_ret": None if tfm_m is None else float(tfm_m.group(1)),
-        "trail_arm": arm,
-        "trail_tiers": tiers,
         "recipe": recipe,
         "has_recipe": bool(rec_hits),
-        "has_trail_arm": arm_m is not None,
-        "has_trail_tiers": has_tiers,
-        "has_stop": stop_m is not None,
-        "has_tfb": tfb_m is not None,
     }
 
 
@@ -537,50 +475,71 @@ def _num_eq(a: Any, b: Any, eps: float = 1e-9) -> bool:
         return False
 
 
+def _extract_path_scalar(text: str, path: str) -> tuple[Any, bool]:
+    m = re.search(r"(?<![\w.])%s=\s*(\S+)" % re.escape(path), text)
+    if m is None:
+        return None, False
+    raw = str(m.group(1) or "")
+    if raw in ("None", "none"):
+        return None, True
+    try:
+        return int(raw), True
+    except ValueError:
+        pass
+    try:
+        return float(raw), True
+    except ValueError:
+        return raw, True
+
+
+def _assert_override_paths(text: str, overrides: Mapping[str, Any], *, label: str) -> None:
+    fp = overrides.get("factor_params") if isinstance(overrides.get("factor_params"), dict) else {}
+    if not fp:
+        return
+    active = _active_leaf_ids()
+    if active is None:
+        return
+    for fid, block in fp.items():
+        if str(fid) not in active:
+            continue
+        if not isinstance(block, dict):
+            continue
+        for key, val in block.items():
+            path = "%s.%s" % (fid, key)
+            if str(key) == "tiers":
+                got, found = _extract_tagged_json(text, path + "=")
+                if (not found) or (not struct_eq(got, json_ready(val))):
+                    raise GridError(
+                        "指纹 %s 不符 log=%s got=%s expected=%s"
+                        % (path, label, got, json_ready(val))
+                    )
+                continue
+            got, found = _extract_path_scalar(text, path)
+            if (not found) or (
+                (not _num_eq(got, val)) and got != val
+            ):
+                raise GridError(
+                    "指纹 %s 不符 log=%s got=%s expected=%s"
+                    % (path, label, got, val)
+                )
+
+
 def assert_fingerprint_text(
     text: str,
     expected: dict[str, Any],
     *,
-    need_trail: bool,
+    need_trail: bool = False,
     source: str = "",
 ) -> None:
     label = source or "probe"
     got = parse_fingerprint(text)
-    if not got["has_stop"] or not _num_eq(got["stop"], expected["stop"]):
+    if (not got["has_recipe"]) or got.get("recipe") != expected.get("recipe"):
         raise GridError(
-            "指纹 stop 不符 log=%s got=%s expected=%s" % (label, got["stop"], expected["stop"])
+            "指纹 recipe 不符 log=%s got=%s expected=%s"
+            % (label, got.get("recipe"), expected.get("recipe"))
         )
-    if not got["has_tfb"] or got["time_force_bars"] != expected["time_force_bars"]:
-        raise GridError(
-            "指纹 time_force_bars 不符 log=%s got=%s expected=%s"
-            % (label, got["time_force_bars"], expected["time_force_bars"])
-        )
-    if got["time_force_min_ret"] is not None and not _num_eq(
-        got["time_force_min_ret"], expected["time_force_min_ret"]
-    ):
-        raise GridError(
-            "指纹 time_force_min_ret 不符 log=%s got=%s expected=%s"
-            % (label, got["time_force_min_ret"], expected["time_force_min_ret"])
-        )
-    if need_trail:
-        if not got["has_trail_arm"] or not _num_eq(got["trail_arm"], expected["trail_arm"]):
-            raise GridError(
-                "指纹 trail_arm 不符 log=%s got=%s expected=%s"
-                % (label, got.get("trail_arm"), expected["trail_arm"])
-            )
-        if not got.get("has_trail_tiers") or not struct_eq(
-            got.get("trail_tiers"), expected.get("trail_tiers")
-        ):
-            raise GridError(
-                "指纹 trail_tiers 不符 log=%s got=%s expected=%s"
-                % (label, got.get("trail_tiers"), expected.get("trail_tiers"))
-            )
-    if expected.get("recipe") and got.get("has_recipe"):
-        if got.get("recipe") != expected.get("recipe"):
-            raise GridError(
-                "指纹 recipe 不符 log=%s got=%s expected=%s"
-                % (label, got.get("recipe"), expected.get("recipe"))
-            )
+    ov = expected.get("overrides") if isinstance(expected.get("overrides"), dict) else {}
+    _assert_override_paths(text, ov, label=label)
 
 
 def assert_fingerprint(

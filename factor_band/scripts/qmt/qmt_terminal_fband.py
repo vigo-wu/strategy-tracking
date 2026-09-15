@@ -184,13 +184,14 @@ _VALID_PERIODS = (
 )
 
 # === fband/factors/catalog.py ===
-# 叶子登记 / 默认阈值 / 网格轴元数据。运行时写入 RECIPE.factor_params。
+# 叶子登记 / need / 默认阈值 / 网格轴元数据。运行时写入 RECIPE.factor_params。
 # 文件名 = id；_factor_eval_<id> 在 lib/<id>.py。
 
 LEAVES = {
     "keltner_vol": {
         "label": "通道内缩量",
         "group": "entry",
+        "need": ("keltner", "vol_kc"),
         "params": {
             "k": {
                 "default": 2.0,
@@ -232,11 +233,13 @@ LEAVES = {
     "above_ema": {
         "label": "价在趋势均线上",
         "group": "entry",
+        "need": ("d_ma_trend",),
         "params": {},
     },
     "scale_arm": {
         "label": "加仓-浮盈持仓门槛",
         "group": "scale",
+        "need": (),
         "params": {
             "arm": {
                 "default": 0.03,
@@ -257,6 +260,7 @@ LEAVES = {
     "stop_loss": {
         "label": "硬止损",
         "group": "exit",
+        "need": (),
         "params": {
             "pct": {
                 "default": 0.08,
@@ -272,6 +276,7 @@ LEAVES = {
     "atr_stop": {
         "label": "ATR止损",
         "group": "exit",
+        "need": ("atr",),
         "params": {
             "k": {
                 "default": 2.0,
@@ -287,6 +292,7 @@ LEAVES = {
     "trail_stop": {
         "label": "卖点1-移动止盈回撤",
         "group": "exit",
+        "need": (),
         "params": {
             "tiers": {
                 "default": [
@@ -305,6 +311,7 @@ LEAVES = {
     "atr_trail_stop": {
         "label": "ATR移动止盈",
         "group": "exit",
+        "need": ("atr",),
         "params": {
             "k1": {
                 "default": 2.0,
@@ -329,6 +336,7 @@ LEAVES = {
     "time_force": {
         "label": "卖点2-时间成本智能平仓",
         "group": "exit",
+        "need": ("d_ma_slow",),
         "params": {
             "bars": {
                 "default": 30,
@@ -3591,57 +3599,80 @@ _MARKET_TAGS = frozenset(
     }
 )
 
-_LEAF_MARKET_NEED = {
-    "keltner_vol": frozenset({"keltner", "vol_kc"}),
-    "above_ema": frozenset({"d_ma_trend"}),
-    "scale_arm": frozenset(),
-    "stop_loss": frozenset(),
-    "atr_stop": frozenset({"atr"}),
-    "trail_stop": frozenset(),
-    "atr_trail_stop": frozenset({"atr"}),
-    "time_force": frozenset({"d_ma_slow"}),
-}
+
+_LEAVES_NEED_OK = False
+
+
+def _leaf_need_tags(fid, leaf=None):
+    """LEAVES[id].need → frozenset。缺键 / 非法标签报错。"""
+    if leaf is None:
+        leaf = ((globals().get("LEAVES") or {}).get(str(fid)) or None)
+    if not isinstance(leaf, dict) or "need" not in leaf:
+        raise ValueError("LEAVES.%s 缺 need" % fid)
+    raw = leaf.get("need")
+    if raw is None:
+        raise ValueError("LEAVES.%s.need 不能为 None" % fid)
+    tags = frozenset(str(t) for t in raw)
+    bad = tags - _MARKET_TAGS
+    if bad:
+        raise ValueError(
+            "LEAVES.%s.need 非法标签 %s" % (fid, ",".join(sorted(bad)))
+        )
+    return tags
+
+
+def _validate_leaves_need():
+    """组表时扫全表 need。"""
+    global _LEAVES_NEED_OK
+    if _LEAVES_NEED_OK:
+        return
+    leaves = globals().get("LEAVES") or {}
+    for fid, leaf in leaves.items():
+        _leaf_need_tags(fid, leaf)
+    _LEAVES_NEED_OK = True
 
 
 def _market_need(recipe=None):
     """启用叶子对应的 ctx / 暖机标签。未知 AST id → 全标签。"""
+    _validate_leaves_need()
     walk = globals().get("_recipe_compute_leaves")
     if not callable(walk):
         return set(_MARKET_TAGS)
+    leaves = globals().get("LEAVES") or {}
     out = set()
     for fid in walk(recipe):
-        tags = _LEAF_MARKET_NEED.get(str(fid))
-        if tags is None:
+        key = str(fid)
+        if key not in leaves:
             return set(_MARKET_TAGS)
-        out |= set(tags)
+        out |= set(_leaf_need_tags(key, leaves.get(key)))
     return out
 
 
 def _weekly_market_features(closes_w):
     """周线 MA 进 ctx.market；不判多空。"""
     detail = {
-        "ma5": None,
-        "ma30": None,
+        "w_mid": None,
+        "w_trend": None,
         "close": None,
     }
     win = _structure_windows()
     w_ema = win["ema"]["1w"]
-    ma5 = _ema(closes_w, w_ema["mid"])
-    ma30 = _ema(closes_w, w_ema["trend"])
-    if ma5 is None or ma30 is None:
+    mid_arr = _ema(closes_w, w_ema["mid"])
+    trend_arr = _ema(closes_w, w_ema["trend"])
+    if mid_arr is None or trend_arr is None:
         return detail
     i = len(closes_w) - 1
     if i < 1:
         return detail
     c = float(closes_w[i])
-    m5 = _last_valid(ma5, i)
-    m30 = _last_valid(ma30, i)
-    m30_prev = _last_valid(ma30, i - 1)
+    m_mid = _last_valid(mid_arr, i)
+    m_trend = _last_valid(trend_arr, i)
+    m_trend_prev = _last_valid(trend_arr, i - 1)
     detail.update(
         {
-            "ma5": m5,
-            "ma30": m30,
-            "ma30_prev": m30_prev,
+            "w_mid": m_mid,
+            "w_trend": m_trend,
+            "w_trend_prev": m_trend_prev,
             "close": c,
         }
     )
@@ -3650,9 +3681,9 @@ def _weekly_market_features(closes_w):
 
 def _factor_daily_features(closes, volumes, need=None):
     detail = {
-        "ma20": None,
-        "ma60": None,
-        "ma_trend": None,
+        "d_mid": None,
+        "d_slow": None,
+        "d_trend": None,
         "vol10": None,
         "vol20": None,
         "vol_need": 1,
@@ -3686,17 +3717,17 @@ def _factor_daily_features(closes, volumes, need=None):
     detail["mid_n"] = mid_n
     detail["slow_n"] = slow_n
     detail["trend_n"] = trend_n
-    ma20 = (
+    mid_arr = (
         _ema(closes, mid_n)
         if ("d_ma_mid" in need and mid_n > 0)
         else None
     )
-    ma60 = (
+    slow_arr = (
         _ema(closes, slow_n)
         if ("d_ma_slow" in need and slow_n > 0)
         else None
     )
-    ma_trend = (
+    trend_arr = (
         _ema(closes, trend_n)
         if ("d_ma_trend" in need and trend_n > 0)
         else None
@@ -3710,16 +3741,16 @@ def _factor_daily_features(closes, volumes, need=None):
         return False, detail
     price = float(closes[i])
     vol = float(volumes[i]) if volumes is not None else None
-    m20 = _last_valid(ma20, i) if ma20 is not None else None
-    m60 = _last_valid(ma60, i) if ma60 is not None else None
-    m_trend = _last_valid(ma_trend, i) if ma_trend is not None else None
+    m_mid = _last_valid(mid_arr, i) if mid_arr is not None else None
+    m_slow = _last_valid(slow_arr, i) if slow_arr is not None else None
+    m_trend = _last_valid(trend_arr, i) if trend_arr is not None else None
     v10 = _last_valid(vol10, i) if vol10 is not None else None
     v20 = None
     detail.update(
         {
-            "ma20": m20,
-            "ma60": m60,
-            "ma_trend": m_trend,
+            "d_mid": m_mid,
+            "d_slow": m_slow,
+            "d_trend": m_trend,
             "vol10": vol10,
             "vol20": vol20,
             "price": price,
@@ -3788,9 +3819,9 @@ def _build_factor_ctx(
         "w_detail": w_detail or {},
         "daily_ready": ready,
         "daily_detail": daily,
-        "ma20": daily.get("ma20"),
-        "ma60": daily.get("ma60"),
-        "ma_trend": daily.get("ma_trend"),
+        "d_mid": daily.get("d_mid"),
+        "d_slow": daily.get("d_slow"),
+        "d_trend": daily.get("d_trend"),
         "vol10": daily.get("vol10"),
         "vol20": daily.get("vol20"),
         "mid_n": daily.get("mid_n"),
@@ -3923,7 +3954,7 @@ def _factor_eval_above_ema(ctx):
     price = market.get("close")
     if price is None:
         price = market.get("daily_detail", {}).get("price")
-    ma = market.get("ma_trend")
+    ma = market.get("d_trend")
     if price is None or ma is None:
         return False, {"n": n, "ma": ma, "price": price}
     hit = float(price) > float(ma)
@@ -4196,7 +4227,7 @@ def _factor_eval_atr_trail_stop(ctx):
 
 # === fband/factors/lib/time_force.py ===
 def _trail_arm():
-    """trail_stop 档 1 起步 peak_lo；只给 init trail_arm=，不给 time_force 让路。"""
+    """trail_stop 档 1 起步 peak_lo；只给启用叶子的 init 点路径，不给 time_force 让路。"""
     tiers = _factor_param(None, "trail_stop", "tiers")
     try:
         return float(tiers[0][0])
@@ -4236,7 +4267,7 @@ def _time_force_already_skip(lot):
     return bool(lot.get("time_force_trend_skip"))
 
 
-def _time_force_mark_skip(lot, peak_ret, hold_bars, m60):
+def _time_force_mark_skip(lot, peak_ret, hold_bars, d_slow):
     if lot is None:
         A.time_force_trend_skip = True
         lid = None
@@ -4244,13 +4275,13 @@ def _time_force_mark_skip(lot, peak_ret, hold_bars, m60):
         lot["time_force_trend_skip"] = True
         lid = lot.get("id")
     print(
-        "%s time_force skip trend peak=%.2f%% ma60=%.4f hold=%s lot=%s"
-        % (STRATEGY_NAME, float(peak_ret) * 100.0, m60, hold_bars, lid)
+        "%s time_force skip trend peak=%.2f%% d_slow=%.4f hold=%s lot=%s"
+        % (STRATEGY_NAME, float(peak_ret) * 100.0, d_slow, hold_bars, lid)
     )
     _event_log(
         "time_force_skip_trend",
         peak_ret=peak_ret,
-        ma60=m60,
+        d_slow=d_slow,
         hold_bars=hold_bars,
         lot_id=lid,
     )
@@ -4279,17 +4310,17 @@ def _time_force_hit(price, closes, hold_bars, lot=None, ctx=None):
         return False
     if hold_bars is None or int(hold_bars) <= bars_lim:
         return False
-    ma60_arr = _ema(closes, slow_n)
-    if ma60_arr is None:
+    ma_slow_arr = _ema(closes, slow_n)
+    if ma_slow_arr is None:
         return False
     i = len(closes) - 1
-    ma60 = _last_valid(ma60_arr, i)
-    if ma60 is None or price is None:
+    ma_slow = _last_valid(ma_slow_arr, i)
+    if ma_slow is None or price is None:
         return False
     px = float(price)
-    m60 = float(ma60)
+    d_slow = float(ma_slow)
 
-    if px < m60:
+    if px < d_slow:
         return True
 
     min_ret = _time_force_min_ret(ctx)
@@ -4297,7 +4328,7 @@ def _time_force_hit(price, closes, hold_bars, lot=None, ctx=None):
     already = _time_force_already_skip(lot)
     if min_ret > 0 and (already or peak_ret >= min_ret):
         if not already:
-            _time_force_mark_skip(lot, peak_ret, hold_bars, m60)
+            _time_force_mark_skip(lot, peak_ret, hold_bars, d_slow)
         return False
 
     return True
@@ -4565,6 +4596,51 @@ def _recipe_fingerprint(overrides=None, recipe=None):
         h ^= ord(ch)
         h = (h * 16777619) & 0xFFFFFFFF
     return "%08x" % h
+
+
+def _recipe_log_value(fid, key, raw):
+    if str(fid) == "trail_stop" and str(key) == "tiers":
+        return json.dumps(
+            _factor_tiers_as_lists(raw), ensure_ascii=True, separators=(",", ":")
+        )
+    return raw
+
+
+def _recipe_log_structure_kv(need, win):
+    rows = []
+    if "d_ma_mid" in need:
+        rows.append(("ema.1d.mid", win["ema"]["1d"]["mid"]))
+    if "d_ma_slow" in need:
+        rows.append(("ema.1d.slow", win["ema"]["1d"]["slow"]))
+    if "d_ma_trend" in need:
+        rows.append(("ema.1d.trend", win["ema"]["1d"]["trend"]))
+    if "weekly" in need:
+        rows.append(("ema.1w.mid", win["ema"]["1w"]["mid"]))
+        rows.append(("ema.1w.trend", win["ema"]["1w"]["trend"]))
+    if "atr" in need:
+        rows.append(("atr.n", win["atr"]["n"]))
+    if "keltner" in need:
+        rows.append(("keltner.ema_n", win["keltner"]["ema_n"]))
+        rows.append(("keltner.atr_n", win["keltner"]["atr_n"]))
+    return rows
+
+
+def _recipe_log_kv():
+    """启用叶子因子数字 + _market_need 用到的指标周期窗。点路径，只给 init。"""
+    need = _market_need()
+    win = _structure_windows()
+    out = list(_recipe_log_structure_kv(need, win))
+    leaves = globals().get("LEAVES") or {}
+    walk = globals().get("_recipe_compute_leaves")
+    used = walk() if callable(walk) else set()
+    for fid, leaf in leaves.items():
+        if str(fid) not in used:
+            continue
+        params = (leaf or {}).get("params") or {}
+        for key in params:
+            raw = _factor_param(None, fid, key)
+            out.append(("%s.%s" % (fid, key), _recipe_log_value(fid, key, raw)))
+    return out
 
 
 def _slot_result(hit, reasons=None, detail=None, extra=None):
@@ -8810,14 +8886,8 @@ def _handle_stock(C, ctx):
         A.ready_logged = True
         if not getattr(A, "is_backtest", False):
             A._bar_status_at = now
-        print(
-            "%s" % STRATEGY_NAME,
-            day,
-            hhmm,
+        status_bits = [
             "n1d=%d n1w=%d close=%.4f sig_d=%s sig_w=%s phase=%s prev_d=%s prev_w=%s "
-            "w_ma5=%s w_ma30=%s "
-            "buy=%s buyR=%s scale=%s scaleR=%s sell=%s sellR=%s "
-            "hold=%s nlot=%s ret=%s pe=%s px=%s bt_held=%s avail=%s"
             % (
                 len(closes_s),
                 0 if closes_ws is None else len(closes_ws),
@@ -8827,16 +8897,41 @@ def _handle_stock(C, ctx):
                 phase,
                 prev_d,
                 prev_w,
-                None if w_detail.get("ma5") is None else round(w_detail["ma5"], 4),
-                None if w_detail.get("ma30") is None else round(w_detail["ma30"], 4),
+            )
+        ]
+        bar_fields = {
+            "day": day,
+            "hhmm": hhmm,
+            "n1d": len(closes_s),
+            "n1w": 0 if closes_ws is None else len(closes_ws),
+            "close": round(price, 6),
+            "sig_d": sig_day_daily,
+            "sig_w": sig_day_weekly,
+            "phase": phase,
+            "prev_d": prev_d,
+            "prev_w": prev_w,
+        }
+        if need_weekly:
+            w_mid = None if w_detail.get("w_mid") is None else round(w_detail["w_mid"], 4)
+            w_trend = (
+                None if w_detail.get("w_trend") is None else round(w_detail["w_trend"], 4)
+            )
+            status_bits.append("w_mid=%s w_trend=%s " % (w_mid, w_trend))
+            bar_fields["w_mid"] = w_mid
+            bar_fields["w_trend"] = w_trend
+        scale_r = (
+            ",".join(scale_reasons)
+            if scale_sig and scale_reasons
+            else (scale_why or (",".join(scale_reasons) if scale_reasons else "-"))
+        )
+        status_bits.append(
+            "buy=%s buyR=%s scale=%s scaleR=%s sell=%s sellR=%s "
+            "hold=%s nlot=%s ret=%s pe=%s px=%s bt_held=%s avail=%s"
+            % (
                 buy_sig,
                 ",".join(buy_reasons) if buy_reasons else "-",
                 scale_sig,
-                (
-                    ",".join(scale_reasons)
-                    if scale_sig and scale_reasons
-                    else (scale_why or (",".join(scale_reasons) if scale_reasons else "-"))
-                ),
+                scale_r,
                 sell_ok,
                 ",".join(sell_reasons) if sell_reasons else "-",
                 holding,
@@ -8846,37 +8941,25 @@ def _handle_stock(C, ctx):
                 px_now,
                 _bt_held_vol() if bt else "-",
                 _bt_available_vol() if bt else "-",
-            ),
+            )
         )
-        _bar_log(
-            day=day,
-            hhmm=hhmm,
-            n1d=len(closes_s),
-            n1w=0 if closes_ws is None else len(closes_ws),
-            close=round(price, 6),
-            sig_d=sig_day_daily,
-            sig_w=sig_day_weekly,
-            phase=phase,
-            prev_d=prev_d,
-            prev_w=prev_w,
-            w_ma5=None if w_detail.get("ma5") is None else round(w_detail["ma5"], 4),
-            w_ma30=None if w_detail.get("ma30") is None else round(w_detail["ma30"], 4),
-            buy=buy_sig,
-            buyR=",".join(buy_reasons) if buy_reasons else "-",
-            scale=scale_sig,
-            scaleR=(
-                ",".join(scale_reasons)
-                if scale_sig and scale_reasons
-                else (scale_why or (",".join(scale_reasons) if scale_reasons else "-"))
-            ),
-            sell=bool(sell_ok),
-            sellR=",".join(sell_reasons) if sell_reasons else "-",
-            hold=holding,
-            nlot=_pos_lots() if holding else 0,
-            ret=None if ret_pct is None else round(ret_pct * 100.0, 4),
-            pe=pe_now,
-            px=px_now,
+        print("%s" % STRATEGY_NAME, day, hhmm, "".join(status_bits))
+        bar_fields.update(
+            {
+                "buy": buy_sig,
+                "buyR": ",".join(buy_reasons) if buy_reasons else "-",
+                "scale": scale_sig,
+                "scaleR": scale_r,
+                "sell": bool(sell_ok),
+                "sellR": ",".join(sell_reasons) if sell_reasons else "-",
+                "hold": holding,
+                "nlot": _pos_lots() if holding else 0,
+                "ret": None if ret_pct is None else round(ret_pct * 100.0, 4),
+                "pe": pe_now,
+                "px": px_now,
+            }
         )
+        _bar_log(**bar_fields)
 
     # ---- 先执行挂起的卖/买（尾盘按收盘价；隔夜残留开盘按开盘价）----
     if _try_exec_pending_exit(C, now, now_s, day, tag, exec_open_px, exec_last_px, holding):
@@ -9765,26 +9848,6 @@ def _register_live_timer(C):
     _event_log("run_time_fail", error=str(last_err))
 
 
-def _trail_tiers_json():
-    """整表 compact JSON；网格指纹 trail_tiers=。"""
-    tiers = _factor_param(None, "trail_stop", "tiers") or ()
-    out = []
-    for row in tiers:
-        seq = list(row)
-        while len(seq) < 4:
-            seq.append(None)
-        lo, hi, gb, fl = seq[0], seq[1], seq[2], seq[3]
-        out.append(
-            [
-                float(lo),
-                None if hi is None else float(hi),
-                float(gb),
-                None if fl is None else float(fl),
-            ]
-        )
-    return json.dumps(out, separators=(",", ":"))
-
-
 def init(C):
     A.busy = False
     A._hb_at = None
@@ -9967,8 +10030,8 @@ def _init_impl(C):
         )
     )
 
-    _win = _structure_windows()
-    print(
+    recipe_kv = _recipe_log_kv()
+    init_bits = [
         "%s %s init" % (STRATEGY_NAME, STRATEGY_VER),
         "chart=",
         getattr(A, "chart_stock", "") or "-",
@@ -10006,107 +10069,84 @@ def _init_impl(C):
         BOOK_LOT_MAX,
         "book_freeze=",
         "%s/%s" % (BOOK_FREEZE_CLOSE, BOOK_FREEZE_OPEN),
-        "wMA=",
-        "%d/%d" % (_win["ema"]["1w"]["mid"], _win["ema"]["1w"]["trend"]),
-        "dMA=",
-        "%d/%d/%d"
-        % (_win["ema"]["1d"]["mid"], _win["ema"]["1d"]["slow"], _win["ema"]["1d"]["trend"]),
-        "atr=",
-        int(_win["atr"]["n"]),
-        "kc=",
-        "%d/%d" % (_win["keltner"]["ema_n"], _win["keltner"]["atr_n"]),
-        "stop=",
-        _factor_param(None, "stop_loss", "pct"),
-        "atr_stop=",
-        _factor_param(None, "atr_stop", "k"),
-        "atr_trail=",
-        "%s/%s"
-        % (
-            _factor_param(None, "atr_trail_stop", "k1"),
-            _factor_param(None, "atr_trail_stop", "k2"),
-        ),
-        "trail_arm=",
-        _trail_arm(),
-        "trail_tiers=",
-        _trail_tiers_json(),
         "scale=",
         SCALE_ENABLE,
         "scale_lots=",
         SCALE_LOTS,
         "scale_once=",
         SCALE_ONCE_PER_ROUND,
-        "scale_arm=",
-        _factor_param(None, "scale_arm", "arm"),
-        "scale_arm_bars=",
-        _factor_param(None, "scale_arm", "bars"),
-        "time_force_bars=",
-        _factor_param(None, "time_force", "bars"),
-        "time_force_min_ret=",
-        _time_force_min_ret(),
-        "recipe=",
-        _recipe_fingerprint(),
-        "close_exec=",
-        "%s-%s" % (
-            globals().get("PENDING_EXEC_START", "145600"),
-            globals().get("PENDING_EXEC_END", "145700"),
-        ),
-        "open_exec=",
-        "%s-%s" % (
-            globals().get("OPEN_EXEC_START", "093000"),
-            globals().get("OPEN_EXEC_END", "094500"),
-        ),
-        "confirm=",
-        "%s-%s" % (
-            globals().get("SIGNAL_CONFIRM_START", "145600"),
-            globals().get("SIGNAL_CONFIRM_END", "150000"),
-        ),
+    ]
+    for k, v in recipe_kv:
+        init_bits.extend(["%s=" % k, v])
+    init_bits.extend(
+        [
+            "recipe=",
+            _recipe_fingerprint(),
+            "close_exec=",
+            "%s-%s"
+            % (
+                globals().get("PENDING_EXEC_START", "145600"),
+                globals().get("PENDING_EXEC_END", "145700"),
+            ),
+            "open_exec=",
+            "%s-%s"
+            % (
+                globals().get("OPEN_EXEC_START", "093000"),
+                globals().get("OPEN_EXEC_END", "094500"),
+            ),
+            "confirm=",
+            "%s-%s"
+            % (
+                globals().get("SIGNAL_CONFIRM_START", "145600"),
+                globals().get("SIGNAL_CONFIRM_END", "150000"),
+            ),
+        ]
     )
-    _event_log(
-        "init",
-        acct=A.acct,
-        acct_type=A.acct_type,
-        period=A.period,
-        dividend=_dividend_type(),
-        chart_div=_chart_dividend(C) or "",
-        backtest=A.is_backtest,
-        dry_run=DRY_RUN,
-        budget_base=_cfg_budget_base(),
-        budget=_trade_budget_cap(),
-        scale=SCALE_ENABLE,
-        scale_lots=SCALE_LOTS,
-        scale_once=SCALE_ONCE_PER_ROUND,
-        scale_arm=_factor_param(None, "scale_arm", "arm"),
-        scale_arm_bars=_factor_param(None, "scale_arm", "bars"),
-        stop=_factor_param(None, "stop_loss", "pct"),
-        trail_arm=_trail_arm(),
-        time_force_bars=_factor_param(None, "time_force", "bars"),
-        time_force_min_ret=_time_force_min_ret(),
-        close_exec="%s-%s"
+    print(*init_bits)
+    init_event = {
+        "acct": A.acct,
+        "acct_type": A.acct_type,
+        "period": A.period,
+        "dividend": _dividend_type(),
+        "chart_div": _chart_dividend(C) or "",
+        "backtest": A.is_backtest,
+        "dry_run": DRY_RUN,
+        "budget_base": _cfg_budget_base(),
+        "budget": _trade_budget_cap(),
+        "scale": SCALE_ENABLE,
+        "scale_lots": SCALE_LOTS,
+        "scale_once": SCALE_ONCE_PER_ROUND,
+        "close_exec": "%s-%s"
         % (
             globals().get("PENDING_EXEC_START", "145600"),
             globals().get("PENDING_EXEC_END", "145700"),
         ),
-        open_exec="%s-%s"
+        "open_exec": "%s-%s"
         % (
             globals().get("OPEN_EXEC_START", "093000"),
             globals().get("OPEN_EXEC_END", "094500"),
         ),
-        confirm="%s-%s"
+        "confirm": "%s-%s"
         % (
             globals().get("SIGNAL_CONFIRM_START", "145600"),
             globals().get("SIGNAL_CONFIRM_END", "150000"),
         ),
-        book_n=_cfg_book_n(),
-        book_stocks=len(_book_stock_set()),
-        watch=len(getattr(A, "watch", None) or []),
-        chart=getattr(A, "chart_stock", "") or "",
-        ohlcv_policy=str(globals().get("LIVE_OHLCV_POLICY") or ""),
-        cash_ratio=CASH_RATIO,
-        lot_open_frac=LOT_OPEN_FRAC,
-        lot_add_frac=LOT_ADD_FRAC,
-        book_lot_max=BOOK_LOT_MAX,
-        log_dir=str(globals().get("LOG_DIR") or ""),
-    )
+        "book_n": _cfg_book_n(),
+        "book_stocks": len(_book_stock_set()),
+        "watch": len(getattr(A, "watch", None) or []),
+        "chart": getattr(A, "chart_stock", "") or "",
+        "ohlcv_policy": str(globals().get("LIVE_OHLCV_POLICY") or ""),
+        "cash_ratio": CASH_RATIO,
+        "lot_open_frac": LOT_OPEN_FRAC,
+        "lot_add_frac": LOT_ADD_FRAC,
+        "book_lot_max": BOOK_LOT_MAX,
+        "log_dir": str(globals().get("LOG_DIR") or ""),
+        "recipe": _recipe_fingerprint(),
+    }
+    for k, v in recipe_kv:
+        if k not in init_event:
+            init_event[k] = v
+    _event_log("init", **init_event)
 
 
 def handlebar(C):

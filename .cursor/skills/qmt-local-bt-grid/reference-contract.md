@@ -12,9 +12,9 @@
    - `out_dir` 由调用方指定；批量 payload 带 `overrides` 透传到子进程。
 2. **隔离产物目录**：`report/grid/<sweep>/<cell>/<sample>/<div>/`。禁止写回基线 `report/<div>/`。
 3. **init 指纹**（写进同一份 log，供 runner 校验）
-   - 必有：`stop=`、`time_force_bars=`（若策略有这两项）。
-   - `time_force_min_ret=` = `time_force.arm`（标签名不改；不要从 trail 档1 推）。
-   - 扫阶梯止盈：`trail_arm=` = `trail_stop.tiers` 档 1 的 `peak_lo`（与让路脱钩）；另打 compact `trail_tiers=` JSON，参数指纹预检按整表相等（起步相同、giveback 不同也要能抓到）。
+   - 必有：`recipe=`（表达式 + 折进表的全表 `factor_params` + `structure`）。
+   - 人读字段是启用叶子的点路径（如 `atr_stop.k=`、`keltner_vol.vol_n=`、`ema.1d.trend=`），由 `_recipe_log_kv` 展开；卸下叶子不打。
+   - 该格 `overrides.factor_params` 且叶子已启用时，参数指纹预检再核对应路径；`trail_stop.tiers` 用 compact JSON。未启用叶子的覆盖只走 `recipe=`。启用集合读不到则字段级跳过，只核 `recipe=`。
 4. **主样本 walk**：默认 config `BOOK_STOCKS` 一段 `run_book_backtest`（`year_start0101`–`year_end1231`）。`asset_split.mode=random_from_csv` 时调参 / 盲测 **各一段**（名单写入 `freeze.json` / `spec.json`；CSV 仍用 `csv_for`）。禁止 stock×年独立 10 万账户，禁止 `tune∪holdout` 同一钱包。
 5. **空间隔离（可选）**：`asset_split` 见 skill 示例 `stop_loss_space.json`。选参主 KPI 仅 tune 股；holdout × 验收年复用 `gate` 否决（无覆盖不得过门）。
 6. **过门 `gate`**：绝对合格线（可逐项禁用）+ 可选相对 base + 可选卡玛同向；指标用 `windows.check.*`；排序用验收期卡玛 Δ。写入 spec/freeze/summary；只汇总可 `--gate-json` / 侧栏覆盖。
@@ -77,6 +77,6 @@ JSON 可序列化。元组在 JSON 里用数组；`null` = Python `None`。
 
 1. **`overrides` 注入**：`run.py` 在 `_exec_bundle()` 之后与 `init()` 之后各写一次（防止 `_apply_panel` 把资金/开关打回默认）；`book_backtest.py` 的 `run_book_backtest` 接受 `overrides`，资金键 `compound_backtest` / `wallet_cash`。
 2. **隔离产物目录**：`report/grid/<sweep>/<cell>/<sample>/<div>/`。禁止写回基线 `report/<div>/`。`out_dir` 由调用方指定。
-3. **init 指纹字段**：同一份 log 打出 `stop=` / `time_force_bars=` / `trail_arm=` / `trail_tiers=` JSON（标签名不改）。参数指纹预检按这些字段校验。
+3. **init 指纹字段**：同一份 log 打出 `recipe=`。人读字段是启用叶子的点路径。参数指纹预检必核 `recipe=`；格子 overrides 且已启用的路径可选核对。启用集合读不到则字段级跳过。
 4. **主样本 walk 限制**：默认 `BOOK_STOCKS` 一段 `run_book_backtest`。`asset_split.mode=random_from_csv` 时调参 / 盲测各一段。禁止 stock×年独立账户，禁止 `tune∪holdout` 同一钱包。主题 `grid_run.py` 提供 book walk 列表（不是 stock×年）。
 5. **全局单层多进程池 / 禁止嵌套**：格间池不得再套格内池；一次只提交一组。参数指纹预检在主进程串行通过后再铺 walk。

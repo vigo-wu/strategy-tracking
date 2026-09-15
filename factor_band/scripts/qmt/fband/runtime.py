@@ -72,26 +72,6 @@ def _register_live_timer(C):
     _event_log("run_time_fail", error=str(last_err))
 
 
-def _trail_tiers_json():
-    """整表 compact JSON；网格指纹 trail_tiers=。"""
-    tiers = _factor_param(None, "trail_stop", "tiers") or ()
-    out = []
-    for row in tiers:
-        seq = list(row)
-        while len(seq) < 4:
-            seq.append(None)
-        lo, hi, gb, fl = seq[0], seq[1], seq[2], seq[3]
-        out.append(
-            [
-                float(lo),
-                None if hi is None else float(hi),
-                float(gb),
-                None if fl is None else float(fl),
-            ]
-        )
-    return json.dumps(out, separators=(",", ":"))
-
-
 def init(C):
     A.busy = False
     A._hb_at = None
@@ -274,8 +254,8 @@ def _init_impl(C):
         )
     )
 
-    _win = _structure_windows()
-    print(
+    recipe_kv = _recipe_log_kv()
+    init_bits = [
         "%s %s init" % (STRATEGY_NAME, STRATEGY_VER),
         "chart=",
         getattr(A, "chart_stock", "") or "-",
@@ -313,107 +293,84 @@ def _init_impl(C):
         BOOK_LOT_MAX,
         "book_freeze=",
         "%s/%s" % (BOOK_FREEZE_CLOSE, BOOK_FREEZE_OPEN),
-        "wMA=",
-        "%d/%d" % (_win["ema"]["1w"]["mid"], _win["ema"]["1w"]["trend"]),
-        "dMA=",
-        "%d/%d/%d"
-        % (_win["ema"]["1d"]["mid"], _win["ema"]["1d"]["slow"], _win["ema"]["1d"]["trend"]),
-        "atr=",
-        int(_win["atr"]["n"]),
-        "kc=",
-        "%d/%d" % (_win["keltner"]["ema_n"], _win["keltner"]["atr_n"]),
-        "stop=",
-        _factor_param(None, "stop_loss", "pct"),
-        "atr_stop=",
-        _factor_param(None, "atr_stop", "k"),
-        "atr_trail=",
-        "%s/%s"
-        % (
-            _factor_param(None, "atr_trail_stop", "k1"),
-            _factor_param(None, "atr_trail_stop", "k2"),
-        ),
-        "trail_arm=",
-        _trail_arm(),
-        "trail_tiers=",
-        _trail_tiers_json(),
         "scale=",
         SCALE_ENABLE,
         "scale_lots=",
         SCALE_LOTS,
         "scale_once=",
         SCALE_ONCE_PER_ROUND,
-        "scale_arm=",
-        _factor_param(None, "scale_arm", "arm"),
-        "scale_arm_bars=",
-        _factor_param(None, "scale_arm", "bars"),
-        "time_force_bars=",
-        _factor_param(None, "time_force", "bars"),
-        "time_force_min_ret=",
-        _time_force_min_ret(),
-        "recipe=",
-        _recipe_fingerprint(),
-        "close_exec=",
-        "%s-%s" % (
-            globals().get("PENDING_EXEC_START", "145600"),
-            globals().get("PENDING_EXEC_END", "145700"),
-        ),
-        "open_exec=",
-        "%s-%s" % (
-            globals().get("OPEN_EXEC_START", "093000"),
-            globals().get("OPEN_EXEC_END", "094500"),
-        ),
-        "confirm=",
-        "%s-%s" % (
-            globals().get("SIGNAL_CONFIRM_START", "145600"),
-            globals().get("SIGNAL_CONFIRM_END", "150000"),
-        ),
+    ]
+    for k, v in recipe_kv:
+        init_bits.extend(["%s=" % k, v])
+    init_bits.extend(
+        [
+            "recipe=",
+            _recipe_fingerprint(),
+            "close_exec=",
+            "%s-%s"
+            % (
+                globals().get("PENDING_EXEC_START", "145600"),
+                globals().get("PENDING_EXEC_END", "145700"),
+            ),
+            "open_exec=",
+            "%s-%s"
+            % (
+                globals().get("OPEN_EXEC_START", "093000"),
+                globals().get("OPEN_EXEC_END", "094500"),
+            ),
+            "confirm=",
+            "%s-%s"
+            % (
+                globals().get("SIGNAL_CONFIRM_START", "145600"),
+                globals().get("SIGNAL_CONFIRM_END", "150000"),
+            ),
+        ]
     )
-    _event_log(
-        "init",
-        acct=A.acct,
-        acct_type=A.acct_type,
-        period=A.period,
-        dividend=_dividend_type(),
-        chart_div=_chart_dividend(C) or "",
-        backtest=A.is_backtest,
-        dry_run=DRY_RUN,
-        budget_base=_cfg_budget_base(),
-        budget=_trade_budget_cap(),
-        scale=SCALE_ENABLE,
-        scale_lots=SCALE_LOTS,
-        scale_once=SCALE_ONCE_PER_ROUND,
-        scale_arm=_factor_param(None, "scale_arm", "arm"),
-        scale_arm_bars=_factor_param(None, "scale_arm", "bars"),
-        stop=_factor_param(None, "stop_loss", "pct"),
-        trail_arm=_trail_arm(),
-        time_force_bars=_factor_param(None, "time_force", "bars"),
-        time_force_min_ret=_time_force_min_ret(),
-        close_exec="%s-%s"
+    print(*init_bits)
+    init_event = {
+        "acct": A.acct,
+        "acct_type": A.acct_type,
+        "period": A.period,
+        "dividend": _dividend_type(),
+        "chart_div": _chart_dividend(C) or "",
+        "backtest": A.is_backtest,
+        "dry_run": DRY_RUN,
+        "budget_base": _cfg_budget_base(),
+        "budget": _trade_budget_cap(),
+        "scale": SCALE_ENABLE,
+        "scale_lots": SCALE_LOTS,
+        "scale_once": SCALE_ONCE_PER_ROUND,
+        "close_exec": "%s-%s"
         % (
             globals().get("PENDING_EXEC_START", "145600"),
             globals().get("PENDING_EXEC_END", "145700"),
         ),
-        open_exec="%s-%s"
+        "open_exec": "%s-%s"
         % (
             globals().get("OPEN_EXEC_START", "093000"),
             globals().get("OPEN_EXEC_END", "094500"),
         ),
-        confirm="%s-%s"
+        "confirm": "%s-%s"
         % (
             globals().get("SIGNAL_CONFIRM_START", "145600"),
             globals().get("SIGNAL_CONFIRM_END", "150000"),
         ),
-        book_n=_cfg_book_n(),
-        book_stocks=len(_book_stock_set()),
-        watch=len(getattr(A, "watch", None) or []),
-        chart=getattr(A, "chart_stock", "") or "",
-        ohlcv_policy=str(globals().get("LIVE_OHLCV_POLICY") or ""),
-        cash_ratio=CASH_RATIO,
-        lot_open_frac=LOT_OPEN_FRAC,
-        lot_add_frac=LOT_ADD_FRAC,
-        book_lot_max=BOOK_LOT_MAX,
-        log_dir=str(globals().get("LOG_DIR") or ""),
-    )
+        "book_n": _cfg_book_n(),
+        "book_stocks": len(_book_stock_set()),
+        "watch": len(getattr(A, "watch", None) or []),
+        "chart": getattr(A, "chart_stock", "") or "",
+        "ohlcv_policy": str(globals().get("LIVE_OHLCV_POLICY") or ""),
+        "cash_ratio": CASH_RATIO,
+        "lot_open_frac": LOT_OPEN_FRAC,
+        "lot_add_frac": LOT_ADD_FRAC,
+        "book_lot_max": BOOK_LOT_MAX,
+        "log_dir": str(globals().get("LOG_DIR") or ""),
+        "recipe": _recipe_fingerprint(),
+    }
+    for k, v in recipe_kv:
+        if k not in init_event:
+            init_event[k] = v
+    _event_log("init", **init_event)
 
 
 def handlebar(C):

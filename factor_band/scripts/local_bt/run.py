@@ -257,7 +257,7 @@ def run_init_probe(
     *,
     log_path: str | Path | None = None,
 ) -> str:
-    """只跑 init()（dummy K 线），写出含 stop=/trail_tiers= 的指纹日志。"""
+    """只跑 init()（dummy K 线），写出含 recipe= 的指纹日志。"""
     ns = _exec_bundle()
     install_config_overrides(ns, overrides)
     ctx = _probe_mock_context()

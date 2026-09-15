@@ -4,7 +4,7 @@
 
 因子不决定买/卖/加/减；立场由 Recipe 所在槽赋予。同一原子可进多槽（如 `keltner_vol` 开仓+加仓）。
 
-**契约**：[架构.md](../../../../docs/架构重构/架构.md) §2.4–2.7、[Recipe分类.md](../../../../docs/架构重构/Recipe分类.md)。  
+**契约**：[架构.md](../../../../docs/架构说明/架构.md) §2.4–2.7、[Recipe分类.md](../../../../docs/架构说明/Recipe分类.md)。  
 **默认表达式**：[config.py](../config.py) 的 `RECIPE` 四个槽位条件抽象语法树（买入 `entry`、加仓 `scale_in`、卖出 `exit`、减仓 `scale_out`，无数字）。作者改 [catalog.py](catalog.py) 的 `LEAVES`；运行时阈值只读已写入的 `RECIPE.factor_params`。均线/ATR/肯特纳窗只读 `structure`。  
 **上游指标**：[../indicators/NAV.md](../indicators/NAV.md)。  
 **消费**：`strategy.py` 组 ctx → 评槽 → Intent → 挂 pending；`budget.py` / `qmt_common` 订单不进本目录。
@@ -17,11 +17,11 @@
 
 | 文件 | 符号（主） | 做什么 |
 | :--- | :--- | :--- |
-| [ctx.py](ctx.py) | `_factor_param` `_factor_params_apply_global` `_structure_windows` `_structure_apply_global` `_LEAF_MARKET_NEED` `_market_need` `_weekly_market_features` `_build_factor_ctx` `_factor_ctx_bind_state` | 组 `ctx = {market, state, clock}`；按启用叶子闸预计算（日线 EMA、ATR、肯特纳、周线 MA）。`daily_ready` = 日线 `closes` 且 `i>=2` |
-| [catalog.py](catalog.py) | `LEAVES` `_leaves_factor_params` | 叶子登记 / 默认阈值 / 网格轴元数据；整表写入 `RECIPE.factor_params`（`above_ema` 无键） |
+| [ctx.py](ctx.py) | `_factor_param` `_factor_params_apply_global` `_structure_windows` `_structure_apply_global` `_market_need` `_weekly_market_features` `_build_factor_ctx` `_factor_ctx_bind_state` | 组 `ctx = {market, state, clock}`；`need` 读 `LEAVES`；行情键 `d_mid` / `d_slow` / `d_trend`、周线 `w_mid` / `w_trend`。`daily_ready` = 日线 `closes` 且 `i>=2` |
+| [catalog.py](catalog.py) | `LEAVES` `_leaves_factor_params` | 叶子登记 / `need` / 默认阈值 / 网格轴元数据；整表写入 `RECIPE.factor_params`（`above_ema` 无键） |
 | [registry.py](registry.py) | `_factor_registry` `_factor_eval` `_factor_hit` | 按 `LEAVES` 取 `_factor_eval_<id>`；缺函数启动时报错 |
 | [expr.py](expr.py) | `_recipe_hit` `_recipe_leaf_ids` `_recipe_compute_leaves` | `and` / `or` / `not`；`False`/`None` = 恒假；启用叶子 + `scale_in` 特例 |
-| [slots.py](slots.py) | `_eval_*_slot` `_eval_recipe_slots` `_recipe_fingerprint` | 四个槽位 → `{hit, reasons, detail}`；reasons 用叶子 id |
+| [slots.py](slots.py) | `_eval_*_slot` `_eval_recipe_slots` `_recipe_fingerprint` `_recipe_log_kv` | 四个槽位 → `{hit, reasons, detail}`；reasons 用叶子 id；init 点路径只打启用叶子 + `_market_need` 窗 |
 | [intent.py](intent.py) | `_arbitrate_intent` | `{side, target: open\|add\|flat\|reduce, lot_ids?, frac?, reasons[]}`。优先级写死：`flat > reduce > add > open` |
 
 `intent.py` 是仓位层胶水，不是因子叶子。账本 / 50·30·剩余 / `_scale_gate` 仍在 `budget.py` / `strategy.py`。
@@ -46,7 +46,7 @@ config.py
 
 ## 默认四个槽位（现行默认配置）
 
-唯一可信数据源是 `config.RECIPE`。四个槽位草图与阈值约定见 [Recipe分类.md](../../../../docs/架构重构/Recipe分类.md)。
+唯一可信数据源是 `config.RECIPE`。四个槽位草图与阈值约定见 [Recipe分类.md](../../../../docs/架构说明/Recipe分类.md)。
 
 | 槽 | 形态 | 备注 |
 | :--- | :--- | :--- |
@@ -61,8 +61,8 @@ config.py
 
 ## 加因子 / 改 Recipe
 
-1. [catalog.py](catalog.py) 的 `LEAVES` 加一行：`label` / `group` / `params`（`default` 类型与现行默认配置一致；无阈值叶子不要写空 `{}` 进表）。网格轴序用 `params[].axis`。
-2. `lib/<id>.py` 写 `_factor_eval_<id>(ctx) → (bool, detail)`，阈值读 `_factor_param(ctx, id, key)`（运行时 `RECIPE.factor_params`），**不写死数字、不做成配置表达式**。均线/ATR/肯特纳窗读 `_structure_windows()`（`RECIPE.structure`）。在 `_LEAF_MARKET_NEED` 登记预计算标签（漏登记则该叶子相关预计算可能跳过；未知 AST id 运行时按全标签算）。
+1. [catalog.py](catalog.py) 的 `LEAVES` 加一行：`label` / `group` / `need` / `params`（`default` 类型与现行默认配置一致；无阈值叶子不要写空 `{}` 进表）。网格轴序用 `params[].axis`。
+2. `lib/<id>.py` 写 `_factor_eval_<id>(ctx) → (bool, detail)`，阈值读 `_factor_param(ctx, id, key)`（运行时 `RECIPE.factor_params`），**不写死数字、不做成配置表达式**。均线/ATR/肯特纳窗读 `_structure_windows()`（`RECIPE.structure`）。`LEAVES.need` 登记预计算标签（缺键或非法标签在 ctx 组表时报错；未知 AST id 运行时按全标签算）。
 3. 默认盘要启用：改 `config.RECIPE` 四个槽位的条件抽象语法树引用该 id。不要手改 `registry` / `MODULE_ORDER` / `grid_spec` 白名单。
 4. 网格覆盖仍是 `overrides.factor_params` / `overrides.structure`，由 `_factor_params_apply_global` / `_structure_apply_global` 按段再按 key 合并。新序列仍改 `indicators/` + `ctx.py`。
 5. 不要改 `_handle` 才能加叶子；仓位门槛不要写进布尔式。

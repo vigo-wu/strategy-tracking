@@ -86,6 +86,51 @@ def _recipe_fingerprint(overrides=None, recipe=None):
     return "%08x" % h
 
 
+def _recipe_log_value(fid, key, raw):
+    if str(fid) == "trail_stop" and str(key) == "tiers":
+        return json.dumps(
+            _factor_tiers_as_lists(raw), ensure_ascii=True, separators=(",", ":")
+        )
+    return raw
+
+
+def _recipe_log_structure_kv(need, win):
+    rows = []
+    if "d_ma_mid" in need:
+        rows.append(("ema.1d.mid", win["ema"]["1d"]["mid"]))
+    if "d_ma_slow" in need:
+        rows.append(("ema.1d.slow", win["ema"]["1d"]["slow"]))
+    if "d_ma_trend" in need:
+        rows.append(("ema.1d.trend", win["ema"]["1d"]["trend"]))
+    if "weekly" in need:
+        rows.append(("ema.1w.mid", win["ema"]["1w"]["mid"]))
+        rows.append(("ema.1w.trend", win["ema"]["1w"]["trend"]))
+    if "atr" in need:
+        rows.append(("atr.n", win["atr"]["n"]))
+    if "keltner" in need:
+        rows.append(("keltner.ema_n", win["keltner"]["ema_n"]))
+        rows.append(("keltner.atr_n", win["keltner"]["atr_n"]))
+    return rows
+
+
+def _recipe_log_kv():
+    """启用叶子因子数字 + _market_need 用到的指标周期窗。点路径，只给 init。"""
+    need = _market_need()
+    win = _structure_windows()
+    out = list(_recipe_log_structure_kv(need, win))
+    leaves = globals().get("LEAVES") or {}
+    walk = globals().get("_recipe_compute_leaves")
+    used = walk() if callable(walk) else set()
+    for fid, leaf in leaves.items():
+        if str(fid) not in used:
+            continue
+        params = (leaf or {}).get("params") or {}
+        for key in params:
+            raw = _factor_param(None, fid, key)
+            out.append(("%s.%s" % (fid, key), _recipe_log_value(fid, key, raw)))
+    return out
+
+
 def _slot_result(hit, reasons=None, detail=None, extra=None):
     out = {"hit": bool(hit), "reasons": list(reasons or []), "detail": detail or {}}
     if extra:

@@ -3,7 +3,7 @@
 **主题目录**：`factor_band/`｜**版本**：v1.70｜**形态**：单仓骨架 / 分笔多仓｜**运行**：国金 QMT 终端模型（见 §5）；本地 CSV 回放（见 §6）  
 **参数默认值**：`factor_band/scripts/qmt/fband/config.py`（文档以该文件为准）。因子数字的唯一可信数据源（Single Source of Truth）是 `RECIPE.factor_params`；均线/ATR/肯特纳窗的唯一可信数据源是 `RECIPE.structure`。交易终端实盘环境在「模型交易 → 新建/编辑策略交易」面板只覆盖开关 / 资金基数 / 固定金额 / 可部署比例 / 加仓开关（`fband/panel.xml`）；编辑器回测无注入时用 config。买入 `entry`、加仓 `scale_in`、卖出 `exit`、减仓 `scale_out` 四个槽位的条件抽象语法树、买点窗口、时间成本、加仓细节、`SCALE_LOTS`、阶梯止盈 `trail_stop.tiers`、`RECIPE.structure` 指标周期窗、`BOOK_STOCKS` 子配置、路径仍只在 config（因子阈值和指标周期窗不上屏）。价格均线算法由调用点直调 `_ema` / `_sma`，不上配置。
 
-分层契约见 [`docs/架构重构/架构.md`](./docs/架构重构/架构.md)；叶子与四个槽位草图见 [`docs/架构重构/Recipe分类.md`](./docs/架构重构/Recipe分类.md)。跟踪池、部署文件名与历史目录名不约束标的风格。
+分层契约见 [`docs/架构说明/架构.md`](./docs/架构说明/架构.md)；叶子与四个槽位草图见 [`docs/架构说明/Recipe分类.md`](./docs/架构说明/Recipe分类.md)。跟踪池、部署文件名与历史目录名不约束标的风格。
 
 ---
 

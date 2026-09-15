@@ -13,7 +13,7 @@ description: >-
 
 主分支现行文档：[factors/NAV.md](../../../factor_band/scripts/qmt/fband/factors/NAV.md)、[lib/NAV.md](../../../factor_band/scripts/qmt/fband/factors/lib/NAV.md)、[indicators/NAV.md](../../../factor_band/scripts/qmt/fband/indicators/NAV.md)。  
 登记表字段：[reference-catalog.md](reference-catalog.md)。  
-分层契约：[架构.md](../../../factor_band/docs/架构重构/架构.md) §2。  
+分层契约：[架构.md](../../../factor_band/docs/架构说明/架构.md) §2。  
 参数契约同步：`.cursor/rules/fband-docs-sync.mdc`。  
 拼接 / 禁止手改终端文件：`qmt-common-modules`。
 
@@ -49,9 +49,9 @@ description: >-
 
 ```
 进度:
-- [ ] 1. catalog.LEAVES 加 id（label / group / params）
+- [ ] 1. catalog.LEAVES 加 id（label / group / need / params）
 - [ ] 2. factors/lib/<id>.py 写 _factor_eval_<id>
-- [ ] 3. ctx._LEAF_MARKET_NEED 登记预计算标签
+- [ ] 3. LEAVES.need 登记预计算标签（ctx 组表时校验）
 - [ ] 4. 默认盘要引用：走 B 启用
 - [ ] 5. deploy compile
 - [ ] 6. 只改 lib/NAV.md 清单（启用走 B，不改 Recipe分类 / factors/NAV 四个槽位草图）
@@ -60,8 +60,8 @@ description: >-
 1. **`LEAVES`**：无阈值因子（如 `above_ema`）`params` 留空，**不要**写出空 `{}` 进 `factor_params`。网格轴序用 `params[].axis`。`default` 类型须稳定，见 [reference-catalog.md](reference-catalog.md) 的类型安全防错警告。
 2. **`lib/<id>.py`**：阈值只读 `_factor_param(ctx, id, key)`；窗只读 `_structure_windows()`。不写死数字。不读现金 / 账本 / pending，不调用 `passorder`。文件名 = id。中文名写 `LEAVES.label`（买卖不同用 `label_buy`），不要改成交 reason 码。
 3. **不要改**：`registry.py`、`_deploy_qmt_gbk.py` 的 lib 段、`grid_spec` 的 `ENTRY_KEYS` 等（从表推）。
-4. 因子读不到的列 → 先走 **C. 加指标**，再在 `ctx.py` 装进 `ctx.market`，并写 `_LEAF_MARKET_NEED`。
-5. 只登记、不启用（仿 `stop_loss`）仍要改 `lib/NAV.md` 清单；**不必**当成分层契约变更。`_LEAF_MARKET_NEED` 仍要有行（卸下只是 AST 不引用，预计算会跳过）。
+4. 因子读不到的列 → 先走 **C. 加指标**，再在 `ctx.py` 装进 `ctx.market`，并写 `LEAVES.need`。
+5. 只登记、不启用（仿 `stop_loss`）仍要改 `lib/NAV.md` 清单；**不必**当成分层契约变更。`LEAVES.need` 仍要有行（卸下只是 AST 不引用，预计算会跳过）。
 
 ---
 
@@ -84,7 +84,7 @@ description: >-
 加:
 - [ ] 1. indicators/<名>.py 仅接受行情序列作为输入（窗由调用方传入）
 - [ ] 2. _MODULE_HEAD 插入（有依赖放后面）
-- [ ] 3. 因子要用：ctx.py 写入 ctx.market，并在 `_LEAF_MARKET_NEED` 挂上会用到该序列的叶子
+- [ ] 3. 因子要用：ctx.py 写入 ctx.market，并在 `LEAVES.need` 挂上会用到该序列的叶子
 - [ ] 4. 窗可调：RECIPE.structure + _structure_windows + 暖机 + STRUCTURE_KEYS
 - [ ] 5. deploy + 只改 indicators/NAV.md（不要顺手改 factors NAV / Recipe分类 / model.md）
 

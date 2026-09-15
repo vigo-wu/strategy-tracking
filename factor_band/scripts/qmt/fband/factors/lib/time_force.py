@@ -1,6 +1,6 @@
 # === fband/factors/lib/time_force.py ===
 def _trail_arm():
-    """trail_stop 档 1 起步 peak_lo；只给 init trail_arm=，不给 time_force 让路。"""
+    """trail_stop 档 1 起步 peak_lo；只给启用叶子的 init 点路径，不给 time_force 让路。"""
     tiers = _factor_param(None, "trail_stop", "tiers")
     try:
         return float(tiers[0][0])
@@ -40,7 +40,7 @@ def _time_force_already_skip(lot):
     return bool(lot.get("time_force_trend_skip"))
 
 
-def _time_force_mark_skip(lot, peak_ret, hold_bars, m60):
+def _time_force_mark_skip(lot, peak_ret, hold_bars, d_slow):
     if lot is None:
         A.time_force_trend_skip = True
         lid = None
@@ -48,13 +48,13 @@ def _time_force_mark_skip(lot, peak_ret, hold_bars, m60):
         lot["time_force_trend_skip"] = True
         lid = lot.get("id")
     print(
-        "%s time_force skip trend peak=%.2f%% ma60=%.4f hold=%s lot=%s"
-        % (STRATEGY_NAME, float(peak_ret) * 100.0, m60, hold_bars, lid)
+        "%s time_force skip trend peak=%.2f%% d_slow=%.4f hold=%s lot=%s"
+        % (STRATEGY_NAME, float(peak_ret) * 100.0, d_slow, hold_bars, lid)
     )
     _event_log(
         "time_force_skip_trend",
         peak_ret=peak_ret,
-        ma60=m60,
+        d_slow=d_slow,
         hold_bars=hold_bars,
         lot_id=lid,
     )
@@ -83,17 +83,17 @@ def _time_force_hit(price, closes, hold_bars, lot=None, ctx=None):
         return False
     if hold_bars is None or int(hold_bars) <= bars_lim:
         return False
-    ma60_arr = _ema(closes, slow_n)
-    if ma60_arr is None:
+    ma_slow_arr = _ema(closes, slow_n)
+    if ma_slow_arr is None:
         return False
     i = len(closes) - 1
-    ma60 = _last_valid(ma60_arr, i)
-    if ma60 is None or price is None:
+    ma_slow = _last_valid(ma_slow_arr, i)
+    if ma_slow is None or price is None:
         return False
     px = float(price)
-    m60 = float(ma60)
+    d_slow = float(ma_slow)
 
-    if px < m60:
+    if px < d_slow:
         return True
 
     min_ret = _time_force_min_ret(ctx)
@@ -101,7 +101,7 @@ def _time_force_hit(price, closes, hold_bars, lot=None, ctx=None):
     already = _time_force_already_skip(lot)
     if min_ret > 0 and (already or peak_ret >= min_ret):
         if not already:
-            _time_force_mark_skip(lot, peak_ret, hold_bars, m60)
+            _time_force_mark_skip(lot, peak_ret, hold_bars, d_slow)
         return False
 
     return True

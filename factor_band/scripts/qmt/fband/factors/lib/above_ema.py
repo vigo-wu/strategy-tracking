@@ -12,7 +12,7 @@ def _factor_eval_above_ema(ctx):
     price = market.get("close")
     if price is None:
         price = market.get("daily_detail", {}).get("price")
-    ma = market.get("ma_trend")
+    ma = market.get("d_trend")
     if price is None or ma is None:
         return False, {"n": n, "ma": ma, "price": price}
     hit = float(price) > float(ma)

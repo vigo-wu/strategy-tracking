@@ -2,7 +2,7 @@
 
 只做序列变换，算一次。无立场、无持仓、不读现金 / pending。是否调用由 `factors/ctx.py` 按启用叶子决定。
 
-**契约的唯一可信数据源**：[docs/架构重构/架构.md](../../../../docs/架构重构/架构.md) §2.3。  
+**契约的唯一可信数据源**：[docs/架构说明/架构.md](../../../../docs/架构说明/架构.md) §2.3。  
 **下游**：组装进 [../factors/NAV.md](../factors/NAV.md) 的 `ctx.market`。  
 **拼接**：[`../_deploy_qmt_gbk.py`](../../_deploy_qmt_gbk.py) `MODULE_ORDER`（片段禁止互 `import`）。
 

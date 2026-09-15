@@ -23,14 +23,14 @@ alwaysApply: true
 - `config.py` 的 `PANEL_BINDS` / 留下的全局（`SCALE_*`、资金）（**不含** `RECIPE`）
 - `_factor_param` / `_structure_windows` / `_structure_apply_global` / `_factor_params_apply_global` 签名
 - 网格轴 id、`overrides.factor_params` / `overrides.structure`、拒绝旧顶层键（不兼容 / Breaking Change）
-- `recipe=` 指纹 payload、init 日志字段（`dMA=` / `stop=`）
+- `recipe=` 指纹 payload、init 日志字段（启用叶子点路径 + `recipe=`）
 - 叶子阈值从哪读、指标函数签名（如 `_calc_atr` 的 `n` 必传）
 
 ## 改哪里（只改主分支现行文档，名与代码一致）
 
 | 变更 | 必改 |
 | :--- | :--- |
-| 分层契约 / 拒绝旧顶层键 | `docs/架构重构/架构.md` 与 `docs/架构重构/策略架构.drawio` |
+| 分层契约 / 拒绝旧顶层键 | `factor_band/docs/架构说明/架构.md` 与 `factor_band/docs/架构说明/策略架构.drawio` |
 | 网格轴 / overrides 形态 | `.cursor/skills/qmt-local-bt-grid/SKILL.md` 与 `reference-contract.md` |
 
 写现行键：`ema.1d.mid`、`stop_loss.pct`、`overrides.structure`。禁止把已删名写成唯一可信数据源（`D_MA_MID`、`d_ma`/`w_ma`、`STOP_LOSS`），除非标明「已删、顶层写入即报错」。用语按 `.cursor/rules/docs-terminology.mdc`。
