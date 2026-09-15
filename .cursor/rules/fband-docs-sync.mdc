@@ -1,16 +1,27 @@
 ---
-description: 改 FactorBand 契约（RECIPE / 覆盖形态 / 指标周期窗读取）时须在同一次变更中同步主分支现行文档，禁止旧全局名残留
+description: 库目录只改对应 NAV；RECIPE 不同步文档；分层契约 / 覆盖形态 / 读阈值 API 仍须在同一次变更中同步主分支现行文档
 alwaysApply: true
 ---
 
-# FactorBand 契约改完必须同步文档
+# FactorBand 文档同步范围
 
-改 `factor_band` 的**唯一可信数据源（Single Source of Truth）**、覆盖形态、通过 `_structure_windows()` 读取指标周期窗 / 读阈值 API、买卖语义时，必须**在同一次变更中同步修改**主分支现行文档。不要等用户再说「补文档」。只改注释或 `report/` 档案则不必。
+库变更只改对应 `NAV.md`。改 `config.RECIPE`（买入 `entry`、加仓 `scale_in`、卖出 `exit`、减仓 `scale_out` 四个槽位的条件抽象语法树、`factor_params`、`RECIPE.structure` 指标周期窗）**不改任何文档**。分层契约、`overrides` 形态、通过 `_structure_windows()` 读取指标周期窗 / 读阈值 API 变了，仍须在同一次变更中同步主分支现行文档。只改注释或 `report/` 档案则不必。
+
+## 库目录 / RECIPE（不要扩散）
+
+| 改了什么 | 文档 |
+| :--- | :--- |
+| 因子叶子 `factors/lib/<id>.py`、`catalog.LEAVES` 清单 | 只改 `factors/lib/NAV.md` |
+| 因子引擎 `factors/{ctx,catalog,expr,slots,intent,registry}.py` | 只改 `factors/NAV.md` |
+| 指标 `indicators/*.py`、`_MODULE_HEAD` | 只改 `indicators/NAV.md` |
+| `config.py` 的 `RECIPE` | **不改任何文档** |
+
+同时改叶子并在 `RECIPE` 里启用：只更新 `lib/NAV.md`，不要再改 `Recipe分类.md` 或 `factors/NAV.md` 里的四个槽位草图。阈值与 AST 以代码为准，不要求文档数字追 `RECIPE`。
 
 ## 当以下代码发生变动时，必须在同一次变更中同步更新主分支现行文档
 
-- `config.py` 的 `RECIPE` / `PANEL_BINDS` / 留下的全局（`SCALE_*`、资金）
-- `_factor_param` / `_structure_windows` / `_structure_apply_global` / `_factor_params_apply_global`
+- `config.py` 的 `PANEL_BINDS` / 留下的全局（`SCALE_*`、资金）（**不含** `RECIPE`）
+- `_factor_param` / `_structure_windows` / `_structure_apply_global` / `_factor_params_apply_global` 签名
 - 网格轴 id、`overrides.factor_params` / `overrides.structure`、拒绝旧顶层键（不兼容 / Breaking Change）
 - `recipe=` 指纹 payload、init 日志字段（`dMA=` / `stop=`）
 - 叶子阈值从哪读、指标函数签名（如 `_calc_macd` 三窗必传）
@@ -19,10 +30,7 @@ alwaysApply: true
 
 | 变更 | 必改 |
 | :--- | :--- |
-| 因子阈值 / 买入 `entry`、加仓 `scale_in`、卖出 `exit`、减仓 `scale_out` 四个槽位的条件抽象语法树 | `docs/架构重构/Recipe分类.md` §8、`factors/NAV.md`、`factors/lib/NAV.md` |
-| 均线/MACD 窗 | 同上 + `indicators/NAV.md` + `model.md` 参数表 |
 | 分层契约 / 拒绝旧顶层键 | `docs/架构重构/架构.md` 与 `docs/架构重构/策略架构.drawio` |
-| 用户可见周期/默认值 | `factor_band/model.md` |
 | 网格轴 / overrides 形态 | `.cursor/skills/qmt-local-bt-grid/SKILL.md` 与 `reference-contract.md` |
 
 写现行键：`ema.1d.mid`、`stop_loss.pct`、`overrides.structure`。禁止把已删名写成唯一可信数据源（`D_MA_MID`、`d_ma`/`w_ma`、`STOP_LOSS`），除非标明「已删、顶层写入即报错」。用语按 `.cursor/rules/docs-terminology.mdc`。
@@ -31,8 +39,10 @@ alwaysApply: true
 
 `.cursor/plans/`、`optimize/` 方案笔记、`docs/归档/`、`report/grid/` 历史档案。
 
+不要为库变更或 `RECIPE` 去改 `Recipe分类.md`、`factor_band/model.md`、非对应的 `NAV.md`。
+
 ## 收工
 
-1. 文档数字与 `config.py` 字面量一致
-2. `rg` 主分支现行文档：不应再把已删全局当现行配置（`model.md` / `架构.md` / `Recipe分类.md` / 三个 `NAV.md` / 网格 skill）；架构图用语与 `架构.md` 一致
+1. 库变更只核对应 `NAV.md`；**不要求**文档数字追 `config.py` 的 `RECIPE` 字面量
+2. `rg` 本次改过的契约文档：不应再把已删全局当现行配置（`架构.md` / 网格 skill）；架构图用语与 `架构.md` 一致
 3. 不单独为「同步文档」deploy

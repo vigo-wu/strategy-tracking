@@ -16,12 +16,13 @@ alwaysApply: true
 | 网格回测、最优参数、实跑扫参、STOP_LOSS/TRAIL/TIME_FORCE 确认 | `.cursor/skills/qmt-local-bt-grid/SKILL.md` |
 | 实盘评估、随机组合回放、能否上实盘、稳健门（参数锁定后） | `.cursor/skills/qmt-local-bt-robust/SKILL.md` |
 | 加/删因子、登记、启用、卸下、除名、加减指标、catalog、LEAVES、`indicators/` | `.cursor/skills/qmt-fband-extend/SKILL.md` |
-| 改 RECIPE / `RECIPE.structure` 指标周期窗 / 网格覆盖形态 / `_structure_windows()` | 先改代码，再按 `.cursor/rules/fband-docs-sync.mdc` 同步主分支现行文档 |
+| 改 RECIPE / `RECIPE.structure` 指标周期窗 | 先改代码；不同步文档 |
+| 网格覆盖形态 / `_structure_windows()` 签名 | 先改代码，再按 `.cursor/rules/fband-docs-sync.mdc` 同步主分支现行文档 |
 
 ## 叠加（可同时适用，不是互斥）
 
 - **新建/重构国金终端模块**：`qmt-model-script` + `qmt-common-modules`
-- **加减 FactorBand 指标/因子**：`qmt-fband-extend`；deploy 仍跟 `qmt-common-modules`；参数契约变了跟 `fband-docs-sync`
+- **加减 FactorBand 指标/因子**：`qmt-fband-extend`；deploy 仍跟 `qmt-common-modules`；只改对应 NAV；`RECIPE` 不跟文档
 - **写/改现行文档、规则、技能、架构图**：用语跟 `docs-terminology`；契约同步仍跟 `fband-docs-sync`
 - **终端改参 UI**：`qmt-param-panel`；deploy/拼接仍跟 `qmt-common-modules`
 - **QMT API 手册**（非工作流 skill）：需要 API 细节时再读 `.cursor/skills/qmt-skill/`（无 `SKILL.md`）

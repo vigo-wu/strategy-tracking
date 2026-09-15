@@ -9,7 +9,7 @@ description: >-
 
 # FactorBand 增减指标 / 因子
 
-只改 `factor_band`。先对照词表分类，再走对应清单。改完 **deploy + 单测**；参数契约变了再走 docs-sync。
+只改 `factor_band`。先对照词表分类，再走对应清单。改完 **deploy + 单测**。库变更只改对应 `NAV.md`；改 `RECIPE` 不走 docs-sync。分层契约 / `overrides` 形态 / 读阈值 API 变了再走 docs-sync。
 
 主分支现行文档：[factors/NAV.md](../../../factor_band/scripts/qmt/fband/factors/NAV.md)、[lib/NAV.md](../../../factor_band/scripts/qmt/fband/factors/lib/NAV.md)、[indicators/NAV.md](../../../factor_band/scripts/qmt/fband/indicators/NAV.md)。  
 登记表字段：[reference-catalog.md](reference-catalog.md)。  
@@ -28,7 +28,7 @@ description: >-
 | **启用 / 卸下** | 四个槽位 AST 引用或去掉该 id | 登记 / 除名 |
 | **除名** | 删 `LEAVES` 行 + 删 `lib/<id>.py` | 只从 AST 拿掉（现行默认配置的 `stop_loss` 就是登记保留、AST 不引用） |
 | **分层契约** | 谁可读 STATE / 现金 / pending；指标不读取 `RECIPE` | NAV 目录 |
-| **参数契约** | 阈值 / 指标周期窗的唯一可信数据源、overrides 形态、`_structure_windows()` / 读阈值 API、买卖语义 | 任意文档改动 |
+| **参数契约** | `overrides` 形态、`_factor_param` / `_structure_windows()` 签名、分层谁可读 STATE | 阈值数字；`RECIPE` AST；任意文档改动 |
 
 `LEAVES` 是**可作 AST 叶子的因子登记表**，不是「正在使用的叶子列表」。`group` 只是网格侧栏分组，不是槽立场；同一因子可进多槽。
 
@@ -54,7 +54,7 @@ description: >-
 - [ ] 3. ctx._LEAF_MARKET_NEED 登记预计算标签
 - [ ] 4. 默认盘要引用：走 B 启用
 - [ ] 5. 单测 + deploy compile
-- [ ] 6. 主分支现行文档（lib/NAV 清单；启用了再改 Recipe分类 四个槽位）
+- [ ] 6. 只改 lib/NAV.md 清单（启用走 B，不改 Recipe分类 / factors/NAV 四个槽位草图）
 ```
 
 1. **`LEAVES`**：无阈值因子（如 `weekly_bear`）`params` 留空，**不要**写出空 `{}` 进 `factor_params`。网格轴序用 `params[].axis`。`default` 类型须稳定，见 [reference-catalog.md](reference-catalog.md) 的类型安全防错警告。
@@ -71,7 +71,7 @@ description: >-
 进度:
 - [ ] 1. 确认 id 已在 LEAVES（否则先 A）
 - [ ] 2. config.RECIPE 四个槽位引用或去掉该 id
-- [ ] 3. 单测 + deploy；同步 Recipe分类 / factors/NAV 四个槽位草图
+- [ ] 3. 单测 + deploy（不改任何文档）
 ```
 
 格子不能改 AST。卸下 ≠ 除名：AST 去掉后求值不再命中，登记仍在；`ctx` 预计算 / 周 K 拉取按 `_market_need()` 少算。Python 列表里注释掉的字符串不会进 AST。
@@ -86,12 +86,13 @@ description: >-
 - [ ] 2. _MODULE_HEAD 插入（有依赖放后面）
 - [ ] 3. 因子要用：ctx.py 写入 ctx.market，并在 `_LEAF_MARKET_NEED` 挂上会用到该序列的叶子
 - [ ] 4. 窗可调：RECIPE.structure + _structure_windows + 暖机 + STRUCTURE_KEYS
-- [ ] 5. 单测 + deploy + indicators/NAV.md
+- [ ] 5. 单测 + deploy + 只改 indicators/NAV.md（不要顺手改 factors NAV / Recipe分类 / model.md）
 
 删:
 - [ ] 1. 确认无 ctx / 因子再调用
 - [ ] 2. 从 _MODULE_HEAD 去掉；删文件
 - [ ] 3. 若曾进 structure：config + _structure_windows + 暖机 + STRUCTURE_KEYS
+- [ ] 4. 只改 indicators/NAV.md（不要顺手改 factors NAV / Recipe分类 / model.md）
 ```
 
 `_calc_*` **必传窗**，不读 `RECIPE`。仿 `atr.py` / `macd.py`。不要新建根上 `indicators.py`。`macd` 必须在 `ema` 之后。lib 段仍由表生成，不要手插 `factors/lib/`。纯工具不成因子 id。
@@ -107,7 +108,7 @@ description: >-
 - [ ] 1. 先 B 卸下（AST 不再引用）
 - [ ] 2. 删 LEAVES 行 + 删 factors/lib/<id>.py
 - [ ] 3. 清 strategy.py / ctx.py 中的特例逻辑（streak、预计算、label 特例）
-- [ ] 4. 清单测与主分支现行文档清单
+- [ ] 4. 清单测 + 只改 lib/NAV.md（动了 ctx.py / strategy.py 特例逻辑才改 factors/NAV.md）
 - [ ] 5. deploy（孤儿 lib 会 SystemExit）
 ```
 
@@ -125,7 +126,7 @@ python factor_band/scripts/qmt/_deploy_qmt_gbk.py
 
 登记/除名再跑相关 `test_factor_expr` / 该因子单测。不要手改预览或终端 GBK。
 
-**参数契约**变了（阈值 / 指标周期窗的唯一可信数据源、`overrides` 形态、`_factor_param` / `_structure_windows` 签名、买卖语义）→ 在同一次变更中同步主分支现行文档，数字与 `catalog` / `config` 字面量一致。不改 `.cursor/plans/`、`docs/归档/`、`report/grid/`。
+只在 `overrides` 形态 / `_factor_param` / `_structure_windows` 签名 / 分层契约变化时走 `fband-docs-sync`。阈值与买入 `entry`、加仓 `scale_in`、卖出 `exit`、减仓 `scale_out` 四个槽位的条件抽象语法树以代码为准、不追文档。不改 `.cursor/plans/`、`docs/归档/`、`report/grid/`。
 
 默认**不升** `STRATEGY_VER`，除非用户要求或语义已变。加阈值会改 `recipe=` 哈希，参数指纹预检按现行默认配置重算，不要对历史档案旧哈希。
 
