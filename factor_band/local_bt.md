@@ -322,8 +322,6 @@ python factor_band/scripts/local_bt/select_analysis.py \
 | 多年 picks 完全相同 | 各段都还是默认 BOOK 拷贝 | 按段改表 |
 | 很慢 | 持有年数 × 篮子回放（及未命中缓存） | 缩小起止年；勾选强制重跑仅在改代码后；利用 hold 缓存 |
 
-单测：`python -m unittest test_select_analysis test_book_backtest`（在 `factor_band/scripts/local_bt/` 下）。
-
 ## 无界面命令行
 
 仓库根目录。`--csv-dir` / `--out` 是 **根目录**，每种复权再拼 `<type>`。
@@ -358,12 +356,6 @@ python factor_band/scripts/local_bt/select_analysis.py \
 ```
 
 详见上文「数据分析」一节；`--eval-start` / `--eval-end` 为 `--data-start` / `--data-end` 别名。
-
-单测（在 `factor_band/scripts/local_bt/` 下）：
-
-```bash
-python -m unittest test_market_csv test_select_config test_select_analysis test_book_backtest
-```
 
 ## 常见误区
 

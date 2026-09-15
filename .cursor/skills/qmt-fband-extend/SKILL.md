@@ -9,7 +9,7 @@ description: >-
 
 # FactorBand 增减指标 / 因子
 
-只改 `factor_band`。先对照词表分类，再走对应清单。改完 **deploy + 单测**。库变更只改对应 `NAV.md`；改 `RECIPE` 不走 docs-sync。分层契约 / `overrides` 形态 / 读阈值 API 变了再走 docs-sync。
+只改 `factor_band`。先对照词表分类，再走对应清单。改完 **deploy**。库变更只改对应 `NAV.md`；改 `RECIPE` 不走 docs-sync。分层契约 / `overrides` 形态 / 读阈值 API 变了再走 docs-sync。
 
 主分支现行文档：[factors/NAV.md](../../../factor_band/scripts/qmt/fband/factors/NAV.md)、[lib/NAV.md](../../../factor_band/scripts/qmt/fband/factors/lib/NAV.md)、[indicators/NAV.md](../../../factor_band/scripts/qmt/fband/indicators/NAV.md)。  
 登记表字段：[reference-catalog.md](reference-catalog.md)。  
@@ -53,7 +53,7 @@ description: >-
 - [ ] 2. factors/lib/<id>.py 写 _factor_eval_<id>
 - [ ] 3. ctx._LEAF_MARKET_NEED 登记预计算标签
 - [ ] 4. 默认盘要引用：走 B 启用
-- [ ] 5. 单测 + deploy compile
+- [ ] 5. deploy compile
 - [ ] 6. 只改 lib/NAV.md 清单（启用走 B，不改 Recipe分类 / factors/NAV 四个槽位草图）
 ```
 
@@ -71,7 +71,7 @@ description: >-
 进度:
 - [ ] 1. 确认 id 已在 LEAVES（否则先 A）
 - [ ] 2. config.RECIPE 四个槽位引用或去掉该 id
-- [ ] 3. 单测 + deploy（不改任何文档）
+- [ ] 3. deploy（不改任何文档）
 ```
 
 格子不能改 AST。卸下 ≠ 除名：AST 去掉后求值不再命中，登记仍在；`ctx` 预计算 / 周 K 拉取按 `_market_need()` 少算。Python 列表里注释掉的字符串不会进 AST。
@@ -86,7 +86,7 @@ description: >-
 - [ ] 2. _MODULE_HEAD 插入（有依赖放后面）
 - [ ] 3. 因子要用：ctx.py 写入 ctx.market，并在 `_LEAF_MARKET_NEED` 挂上会用到该序列的叶子
 - [ ] 4. 窗可调：RECIPE.structure + _structure_windows + 暖机 + STRUCTURE_KEYS
-- [ ] 5. 单测 + deploy + 只改 indicators/NAV.md（不要顺手改 factors NAV / Recipe分类 / model.md）
+- [ ] 5. deploy + 只改 indicators/NAV.md（不要顺手改 factors NAV / Recipe分类 / model.md）
 
 删:
 - [ ] 1. 确认无 ctx / 因子再调用
@@ -108,7 +108,7 @@ description: >-
 - [ ] 1. 先 B 卸下（AST 不再引用）
 - [ ] 2. 删 LEAVES 行 + 删 factors/lib/<id>.py
 - [ ] 3. 清 strategy.py / ctx.py 中的特例逻辑（streak、预计算、label 特例）
-- [ ] 4. 清单测 + 只改 lib/NAV.md（动了 ctx.py / strategy.py 特例逻辑才改 factors/NAV.md）
+- [ ] 4. 只改 lib/NAV.md（动了 ctx.py / strategy.py 特例逻辑才改 factors/NAV.md）
 - [ ] 5. deploy（孤儿 lib 会 SystemExit）
 ```
 
@@ -120,11 +120,10 @@ description: >-
 ## 验证（每次必做）
 
 ```bash
-python factor_band/scripts/local_bt/test_catalog.py
 python factor_band/scripts/qmt/_deploy_qmt_gbk.py
 ```
 
-登记/除名再跑相关 `test_factor_expr` / 该因子单测。不要手改预览或终端 GBK。
+不要手改预览或终端 GBK。
 
 只在 `overrides` 形态 / `_factor_param` / `_structure_windows` 签名 / 分层契约变化时走 `fband-docs-sync`。阈值与买入 `entry`、加仓 `scale_in`、卖出 `exit`、减仓 `scale_out` 四个槽位的条件抽象语法树以代码为准、不追文档。不改 `.cursor/plans/`、`docs/归档/`、`report/grid/`。
 

@@ -64,7 +64,7 @@ config.py
 ## 加因子 / 改 Recipe
 
 1. [catalog.py](catalog.py) 的 `LEAVES` 加一行：`label` / `group` / `params`（`default` 类型与现行默认配置一致；无阈值叶子不要写空 `{}` 进表）。网格轴序用 `params[].axis`。
-2. `lib/<id>.py` 写 `_factor_eval_<id>(ctx) → (bool, detail)`，阈值读 `_factor_param(ctx, id, key)`（运行时 `RECIPE.factor_params`），**不写死数字、不做成配置表达式**。均线/MACD/ATR/肯特纳窗读 `_structure_windows()`（`RECIPE.structure`）。在 `_LEAF_MARKET_NEED` 登记预计算标签（漏登记则 catalog 单测红；未知 AST id 运行时按全标签算）。
+2. `lib/<id>.py` 写 `_factor_eval_<id>(ctx) → (bool, detail)`，阈值读 `_factor_param(ctx, id, key)`（运行时 `RECIPE.factor_params`），**不写死数字、不做成配置表达式**。均线/MACD/ATR/肯特纳窗读 `_structure_windows()`（`RECIPE.structure`）。在 `_LEAF_MARKET_NEED` 登记预计算标签（漏登记则该叶子相关预计算可能跳过；未知 AST id 运行时按全标签算）。
 3. 默认盘要启用：改 `config.RECIPE` 四个槽位的条件抽象语法树引用该 id。不要手改 `registry` / `MODULE_ORDER` / `grid_spec` 白名单。
 4. 网格覆盖仍是 `overrides.factor_params` / `overrides.structure`，由 `_factor_params_apply_global` / `_structure_apply_global` 按段再按 key 合并。新序列仍改 `indicators/` + `ctx.py`。
 5. 不要改 `_handle` 才能加叶子；仓位门槛不要写进布尔式。
