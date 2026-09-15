@@ -90,7 +90,7 @@ def _structure_deep_merge(dst, incoming):
     return dst
 
 
-_STRUCTURE_DELETED_ROOTS = frozenset({"d_ma", "w_ma"})
+_STRUCTURE_DELETED_ROOTS = frozenset({"d_ma", "w_ma", "macd"})
 _STRUCTURE_MA_ROOTS = frozenset({"ema", "sma"})
 
 
@@ -142,7 +142,6 @@ def _structure_windows():
         raise ValueError("RECIPE.structure.sma 须为 dict")
     _structure_validate_ma_periods(ema, "ema")
     _structure_validate_ma_periods(sma, "sma")
-    macd = rec.get("macd") or {}
     atr = rec.get("atr") or {}
     keltner = rec.get("keltner") or {}
     return {
@@ -153,11 +152,6 @@ def _structure_windows():
         "sma": {
             "1d": _structure_ma_period_block(sma, "1d", (0, 0, 0)),
             "1w": _structure_ma_period_block(sma, "1w", (0, 0, 0)),
-        },
-        "macd": {
-            "fast": _structure_int(macd, "fast", 12),
-            "slow": _structure_int(macd, "slow", 26),
-            "signal": _structure_int(macd, "signal", 9),
         },
         "atr": {
             "n": _structure_int(atr, "n", 14),
@@ -207,7 +201,6 @@ _MARKET_TAGS = frozenset(
         "d_ma_mid",
         "d_ma_slow",
         "d_ma_trend",
-        "vol_pb",
         "vol_kc",
         "atr",
         "keltner",
@@ -216,10 +209,9 @@ _MARKET_TAGS = frozenset(
 )
 
 _LEAF_MARKET_NEED = {
-    "pullback_vol": frozenset({"d_ma_mid", "d_ma_slow", "vol_pb"}),
     "keltner_vol": frozenset({"keltner", "vol_kc"}),
     "above_ema": frozenset({"d_ma_trend"}),
-    "scale_arm": frozenset({"weekly"}),
+    "scale_arm": frozenset(),
     "stop_loss": frozenset(),
     "atr_stop": frozenset({"atr"}),
     "trail_stop": frozenset(),
@@ -242,35 +234,19 @@ def _market_need(recipe=None):
     return out
 
 
-def _vol_pullback_confirm_need():
-    """最少 1：当天缩量即可；勿用 `x or 2`（0 会被当成缺省翻成 2）。"""
-    raw = _factor_param(None, "pullback_vol", "confirm_days")
-    try:
-        n = int(2 if raw is None else raw)
-    except Exception:
-        n = 2
-    return max(1, n)
-
-
 def _weekly_market_features(closes_w):
-    """周线 MA/MACD 进 ctx.market；不判多空。"""
+    """周线 MA 进 ctx.market；不判多空。"""
     detail = {
         "ma5": None,
         "ma30": None,
-        "dif": None,
-        "dea": None,
-        "hist": None,
         "close": None,
     }
     win = _structure_windows()
     w_ema = win["ema"]["1w"]
-    mc = win["macd"]
     ma5 = _ema(closes_w, w_ema["mid"])
     ma30 = _ema(closes_w, w_ema["trend"])
-    macd = _calc_macd(closes_w, mc["fast"], mc["slow"], mc["signal"])
-    if ma5 is None or ma30 is None or macd is None:
+    if ma5 is None or ma30 is None:
         return detail
-    dif, dea, hist = macd
     i = len(closes_w) - 1
     if i < 1:
         return detail
@@ -278,23 +254,11 @@ def _weekly_market_features(closes_w):
     m5 = _last_valid(ma5, i)
     m30 = _last_valid(ma30, i)
     m30_prev = _last_valid(ma30, i - 1)
-    d0 = _last_valid(dif, i)
-    e0 = _last_valid(dea, i)
-    h0 = _last_valid(hist, i)
-    h1 = _last_valid(hist, i - 1)
-    d1 = _last_valid(dif, i - 1)
-    e1 = _last_valid(dea, i - 1)
     detail.update(
         {
             "ma5": m5,
             "ma30": m30,
             "ma30_prev": m30_prev,
-            "dif": d0,
-            "dea": e0,
-            "dif_prev": d1,
-            "dea_prev": e1,
-            "hist": h0,
-            "hist_prev": h1,
             "close": c,
         }
     )
@@ -356,17 +320,8 @@ def _factor_daily_features(closes, volumes, need=None):
     )
     vol10 = None
     vol20 = None
-    if volumes is not None:
-        if "vol_pb" in need:
-            raw_vn = _factor_param(None, "pullback_vol", "vol_n")
-            try:
-                vol_n = int(10 if raw_vn is None else raw_vn)
-            except (TypeError, ValueError):
-                vol_n = 10
-            vol10 = _sma(volumes, vol_n) if vol_n > 0 else None
     i = len(closes) - 1
-    vol_need = _vol_pullback_confirm_need() if "vol_pb" in need else 1
-    detail["vol_need"] = vol_need
+    detail["vol_need"] = 1
     detail["i"] = i
     if i < 0:
         return False, detail

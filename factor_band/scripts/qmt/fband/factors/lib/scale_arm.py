@@ -18,16 +18,6 @@ def _scale_arm_need_bars(ctx=None):
         return 0
 
 
-def _scale_arm_hist_min(ctx=None):
-    raw = _factor_param(ctx, "scale_arm", "hist_min", -0.01)
-    if raw is None:
-        return None
-    try:
-        return float(raw)
-    except (TypeError, ValueError):
-        return None
-
-
 def _scale_arm_hold_peak(state=None):
     st = state or {}
     peak = st.get("hold_peak")
@@ -87,7 +77,7 @@ def _scale_arm_peak(ctx=None):
 
 
 def _factor_eval_scale_arm(ctx):
-    """峰值浮盈 >= arm，且该笔持仓日 >= bars，且周柱 >= hist_min。"""
+    """峰值浮盈 >= arm，且该笔持仓日 >= bars。"""
     mx, armed_bars = _scale_arm_peak(ctx)
     arm = _scale_arm_threshold(ctx)
     detail = {"peak": mx, "armed_bars": armed_bars, "arm": arm}
@@ -97,13 +87,4 @@ def _factor_eval_scale_arm(ctx):
     detail["need_bars"] = need_bars
     if need_bars > 0 and armed_bars < need_bars:
         return False, detail
-    hist_min = _scale_arm_hist_min(ctx)
-    detail["hist_min"] = hist_min
-    if hist_min is not None:
-        w_detail = ((ctx or {}).get("market") or {}).get("w_detail") or {}
-        h = w_detail.get("hist")
-        if h is not None:
-            detail["hist"] = float(h)
-            if float(h) < float(hist_min):
-                return False, detail
     return True, detail

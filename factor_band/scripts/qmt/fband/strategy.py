@@ -1464,7 +1464,7 @@ def _handle_stock(C, ctx):
             day,
             hhmm,
             "n1d=%d n1w=%d close=%.4f sig_d=%s sig_w=%s phase=%s prev_d=%s prev_w=%s "
-            "w_ma5=%s w_ma30=%s w_hist=%s "
+            "w_ma5=%s w_ma30=%s "
             "buy=%s buyR=%s scale=%s scaleR=%s sell=%s sellR=%s "
             "hold=%s nlot=%s ret=%s pe=%s px=%s bt_held=%s avail=%s"
             % (
@@ -1478,7 +1478,6 @@ def _handle_stock(C, ctx):
                 prev_w,
                 None if w_detail.get("ma5") is None else round(w_detail["ma5"], 4),
                 None if w_detail.get("ma30") is None else round(w_detail["ma30"], 4),
-                None if w_detail.get("hist") is None else round(w_detail["hist"], 4),
                 buy_sig,
                 ",".join(buy_reasons) if buy_reasons else "-",
                 scale_sig,
@@ -1511,7 +1510,6 @@ def _handle_stock(C, ctx):
             prev_w=prev_w,
             w_ma5=None if w_detail.get("ma5") is None else round(w_detail["ma5"], 4),
             w_ma30=None if w_detail.get("ma30") is None else round(w_detail["ma30"], 4),
-            w_hist=None if w_detail.get("hist") is None else round(w_detail["hist"], 4),
             buy=buy_sig,
             buyR=",".join(buy_reasons) if buy_reasons else "-",
             scale=scale_sig,

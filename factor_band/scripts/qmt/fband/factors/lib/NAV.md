@@ -11,10 +11,9 @@
 
 | id | 文件 | 现逻辑 | 主要读 | 阈值（`factor_params`） |
 | :--- | :--- | :--- | :--- | :--- |
-| `pullback_vol` | [pullback_vol.py](pullback_vol.py) | 贴中/慢均线 + 连续缩量 | 日线价量 | `pullback_vol.*`；中/慢线周期是 `structure.ema.1d.mid/slow`；序列由 `ctx` 直调 `_ema`（默认 AST 不引用） |
 | `keltner_vol` | [keltner_vol.py](keltner_vol.py) | 收盘在肯特纳通道内 + 连续缩量 | `kc_mid` / `kc_atr` / 量 | `keltner_vol.k` / `ratio` / `min_ratio` / `vol_n` / `confirm_days`；窗是 `structure.keltner.*`（`k<=0` 或窗 `<=0` 关；`min_ratio<=0` 关下限） |
 | `above_ema` | [above_ema.py](above_ema.py) | 收盘 > 日线趋势 EMA | `ma_trend` | 无叶子阈值；窗是 `structure.ema.1d.trend`（`<=0` 关闸门） |
-| `scale_arm` | [scale_arm.py](scale_arm.py) | 峰值浮盈 + 该笔持仓日 + 周柱下限 | `state.lots` / peak / `w_detail.hist` | `scale_arm.arm` / `bars` / `hist_min`；`arm<=0` 回落 `0.03`；`bars<=0` 不查持仓日；`hist_min` 为 `None` 不查周柱 |
+| `scale_arm` | [scale_arm.py](scale_arm.py) | 峰值浮盈 + 该笔持仓日 | `state.lots` / peak | `scale_arm.arm` / `bars`；`arm<=0` 回落 `0.03`；`bars<=0` 不查持仓日 |
 | `stop_loss` | [stop_loss.py](stop_loss.py) | 收盘相对成本 | `state.lot` / `cost` | `stop_loss.pct` |
 | `atr_stop` | [atr_stop.py](atr_stop.py) | 收盘 <= 成本 − k×ATR | `state.lot` / `market.atr` | `atr_stop.k`；窗是 `structure.atr.n`（`<=0` 关） |
 | `atr_trail_stop` | [atr_trail_stop.py](atr_trail_stop.py) | 峰值相对成本 > k1×ATR 武装；收盘<=成本或峰值回撤>=k2×ATR | `state.lot` / `hold_peak` / `market.atr` | `atr_trail_stop.k1` / `k2`；`k1<=0` 整条关；`k2<=0` 只保本 |
@@ -23,7 +22,7 @@
 
 日志 / 成交主因直接用叶子 id（`keltner_vol`、`above_ema`、`atr_stop`、`atr_trail_stop`）。历史 log 里的旧 reason 码由选股/summarize 兼容读取。
 
-不要拆 `pullback_vol` 为 `near_ma & vol_shrink`（现行默认配置仍登记该复合原子，默认 AST 不引用）。不要拆 `keltner_vol` 为 `keltner_inside & vol_shrink`。`above_ema` 无阈值，不要给它写出空 `{}`。
+不要拆 `keltner_vol` 为 `keltner_inside & vol_shrink`。`above_ema` 无阈值，不要给它写出空 `{}`。
 
 ---
 
@@ -31,8 +30,6 @@
 
 | 符号 | 写在 | 用途 |
 | :--- | :--- | :--- |
-| `_near_ma` | `pullback_vol.py` | 价距均线容差 |
-| `_vol_pullback_confirm_need` | [../ctx.py](../ctx.py) | 缩量确认日（ctx 预计算要用，故不放本目录） |
 | `_trail_tier_params` `_trail_stop_hit` | `trail_stop.py` | 阶梯止盈 |
 | `_trail_arm` `_time_force_*` | `time_force.py` | 时间成本让路读 `time_force.arm`；`_trail_arm` 只给 init `trail_arm=` |
 
@@ -42,7 +39,7 @@
 
 | 给叶子 | 不给叶子 |
 | :--- | :--- |
-| 复权 OHLCV、已算均线/MACD/ATR/肯特纳、成本、峰值、持仓日、当前 lot | 现金、全池账本、pending、T+1、`passorder` |
+| 复权 OHLCV、已算均线/ATR/肯特纳、成本、峰值、持仓日、当前 lot | 现金、全池账本、pending、T+1、`passorder` |
 
 `eval` 约定只读。例外：`time_force` 为对齐现行默认配置，命中「武装让路」时仍会写 `time_force_trend_skip`（与旧 `_time_force_hit` 相同）。不要把新的写盘塞进其它叶子。
 

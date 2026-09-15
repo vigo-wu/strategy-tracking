@@ -566,14 +566,6 @@ def _ohlcv_need_1d():
         parts.append(slow_n)
     if "d_ma_trend" in need and trend_n > 0:
         parts.append(trend_n)
-    if "vol_pb" in need:
-        confirm_n = _vol_pullback_confirm_need()
-        raw_vn = _factor_param(None, "pullback_vol", "vol_n")
-        try:
-            vol_n = int(10 if raw_vn is None else raw_vn)
-        except (TypeError, ValueError):
-            vol_n = 10
-        parts.append(vol_n + max(0, confirm_n - 1))
     if "vol_kc" in need:
         raw_kvn = _factor_param(None, "keltner_vol", "vol_n")
         raw_kvc = _factor_param(None, "keltner_vol", "confirm_days")
@@ -611,9 +603,8 @@ def _ohlcv_need_1d():
 
 def _ohlcv_need_1w_bars():
     # 55 = 原 W_MA_SLOW 暖机地板，不是均线周期
-    win = _structure_windows()
     w_life = _structure_ma_need_n("1w", "trend")
-    return max(w_life, int(win["macd"]["slow"]) + int(win["macd"]["signal"]), 55) + 5
+    return max(w_life, 55) + 5
 
 
 def _ohlcv_need_1w():

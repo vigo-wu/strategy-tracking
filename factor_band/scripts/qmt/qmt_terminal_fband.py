@@ -52,15 +52,15 @@ LOT_ADD_FRAC = 0.30
 TRADE_BUDGET = 100000.0
 
 # ---- 周线过滤（跨周期；主图仍是日线）----
-# 均线/MACD/ATR/肯特纳窗在 RECIPE.structure（字面量）。
+# 均线/ATR/肯特纳窗在 RECIPE.structure（字面量）。
 # 价格均线：structure.ema|sma × 周期键（对齐 _VALID_PERIODS：1d/1w/…）× mid/slow/trend。
-# 调用点直调 _ema 读 ema.*，直调 _sma 读 sma.*（量均窗仍在 factor_params；MACD 仍 _ema）。
-# 日线 mid→回踩；slow→回踩支撑 + 时间成本地板；trend→above_ema。<=0 关该条。
+# 调用点直调 _ema 读 ema.*，直调 _sma 读 sma.*（量均窗仍在 factor_params）。
+# 日线 mid 缺省仍物化；slow→时间成本地板；trend→above_ema。<=0 关该条。
 # 周线 mid/trend（5/34）；slow 默认 0、预计算不用、不上网格轴。取数 need 另钳原 MA55 暖机地板。
 # ATR：威尔德平滑窗 atr.n；<=0 关 atr_stop。
 # 肯特纳：中轨 EMA 窗 keltner.ema_n，带宽 ATR 窗 keltner.atr_n（与 atr.n 独立）；<=0 关。
 
-# 盈利后加仓：门槛叶子 scale_arm（峰值浮盈 / 持仓日 / 周柱）在 RECIPE.scale_in；
+# 盈利后加仓：门槛叶子 scale_arm（峰值浮盈 / 持仓日）在 RECIPE.scale_in；
 #   执行日若已触发卖点则取消加仓
 # SCALE_ONCE_PER_ROUND：同一轮只加一次
 # SCALE_LOTS=True：每笔独立成本/峰值/止盈
@@ -69,7 +69,7 @@ SCALE_ONCE_PER_ROUND = True
 SCALE_LOTS = True
 
 # 默认 Recipe：四槽布尔式。因子数字在 factors/catalog.py（写入 factor_params）；
-# 均线/MACD/ATR/肯特纳 窗真源 structure。scale_once / 满槽 / 资金不进表。
+# 均线/ATR/肯特纳窗只活在 structure。scale_once / 满槽 / 资金不进表。
 # scale_out 恒 false：减仓未启用。
 RECIPE = {
     "entry": [
@@ -188,40 +188,6 @@ _VALID_PERIODS = (
 # 文件名 = id；_factor_eval_<id> 在 lib/<id>.py。
 
 LEAVES = {
-    "pullback_vol": {
-        "label": "买点1-缩量回踩强支撑",
-        "group": "entry",
-        "params": {
-            "tol": {
-                "default": 0.025,
-                "percent": True,
-                "abbrev": "mt",
-                "label": "回踩容差",
-                "axis": 0,
-            },
-            "ratio": {
-                "default": 0.9,
-                "percent": True,
-                "abbrev": "vpr",
-                "label": "缩量回踩比例",
-                "axis": 1,
-            },
-            "vol_n": {
-                "default": 10,
-                "percent": False,
-                "abbrev": "vpn",
-                "label": "缩量窗口",
-                "axis": 2,
-            },
-            "confirm_days": {
-                "default": 2,
-                "percent": False,
-                "abbrev": "vpc",
-                "label": "缩量确认日",
-                "axis": 3,
-            },
-        },
-    },
     "keltner_vol": {
         "label": "通道内缩量",
         "group": "entry",
@@ -269,7 +235,7 @@ LEAVES = {
         "params": {},
     },
     "scale_arm": {
-        "label": "加仓-浮盈持仓周柱门槛",
+        "label": "加仓-浮盈持仓门槛",
         "group": "scale",
         "params": {
             "arm": {
@@ -285,13 +251,6 @@ LEAVES = {
                 "abbrev": "sab",
                 "label": "加仓持仓日",
                 "axis": 1,
-            },
-            "hist_min": {
-                "default": -0.01,
-                "percent": False,
-                "abbrev": "swh",
-                "label": "加仓周柱下限",
-                "axis": 2,
             },
         },
     },
@@ -2219,32 +2178,6 @@ def _ema(closes, n):
     out[n:] = alpha * (beta ** ks) * cs + (beta ** (ks + 1.0)) * seed
     return out
 
-# === fband/indicators/macd.py ===
-def _calc_macd(closes, fast, slow, signal):
-    """返回 (dif, dea, hist) 或 None。hist = dif - dea。三窗必传。"""
-    fast = int(fast)
-    slow = int(slow)
-    signal = int(signal)
-    c = np.asarray(closes, dtype=float)
-    if len(c) < slow + signal:
-        return None
-    ema_f = _ema(c, fast)
-    ema_s = _ema(c, slow)
-    if ema_f is None or ema_s is None:
-        return None
-    dif = ema_f - ema_s
-    start = slow - 1
-    dif_valid = dif[start:]
-    if len(dif_valid) < signal:
-        return None
-    dea_tail = _ema(dif_valid, signal)
-    if dea_tail is None:
-        return None
-    dea = np.full(len(c), np.nan, dtype=float)
-    dea[start:] = dea_tail
-    hist = dif - dea
-    return dif, dea, hist
-
 # === fband/indicators/atr.py ===
 def _true_range(highs, lows, closes):
     """真实波幅。首根 H-L，其后 max(H-L, |H-C_prev|, |L-C_prev|)。"""
@@ -3285,14 +3218,6 @@ def _ohlcv_need_1d():
         parts.append(slow_n)
     if "d_ma_trend" in need and trend_n > 0:
         parts.append(trend_n)
-    if "vol_pb" in need:
-        confirm_n = _vol_pullback_confirm_need()
-        raw_vn = _factor_param(None, "pullback_vol", "vol_n")
-        try:
-            vol_n = int(10 if raw_vn is None else raw_vn)
-        except (TypeError, ValueError):
-            vol_n = 10
-        parts.append(vol_n + max(0, confirm_n - 1))
     if "vol_kc" in need:
         raw_kvn = _factor_param(None, "keltner_vol", "vol_n")
         raw_kvc = _factor_param(None, "keltner_vol", "confirm_days")
@@ -3330,9 +3255,8 @@ def _ohlcv_need_1d():
 
 def _ohlcv_need_1w_bars():
     # 55 = 原 W_MA_SLOW 暖机地板，不是均线周期
-    win = _structure_windows()
     w_life = _structure_ma_need_n("1w", "trend")
-    return max(w_life, int(win["macd"]["slow"]) + int(win["macd"]["signal"]), 55) + 5
+    return max(w_life, 55) + 5
 
 
 def _ohlcv_need_1w():
@@ -3549,7 +3473,7 @@ def _structure_deep_merge(dst, incoming):
     return dst
 
 
-_STRUCTURE_DELETED_ROOTS = frozenset({"d_ma", "w_ma"})
+_STRUCTURE_DELETED_ROOTS = frozenset({"d_ma", "w_ma", "macd"})
 _STRUCTURE_MA_ROOTS = frozenset({"ema", "sma"})
 
 
@@ -3601,7 +3525,6 @@ def _structure_windows():
         raise ValueError("RECIPE.structure.sma 须为 dict")
     _structure_validate_ma_periods(ema, "ema")
     _structure_validate_ma_periods(sma, "sma")
-    macd = rec.get("macd") or {}
     atr = rec.get("atr") or {}
     keltner = rec.get("keltner") or {}
     return {
@@ -3612,11 +3535,6 @@ def _structure_windows():
         "sma": {
             "1d": _structure_ma_period_block(sma, "1d", (0, 0, 0)),
             "1w": _structure_ma_period_block(sma, "1w", (0, 0, 0)),
-        },
-        "macd": {
-            "fast": _structure_int(macd, "fast", 12),
-            "slow": _structure_int(macd, "slow", 26),
-            "signal": _structure_int(macd, "signal", 9),
         },
         "atr": {
             "n": _structure_int(atr, "n", 14),
@@ -3666,7 +3584,6 @@ _MARKET_TAGS = frozenset(
         "d_ma_mid",
         "d_ma_slow",
         "d_ma_trend",
-        "vol_pb",
         "vol_kc",
         "atr",
         "keltner",
@@ -3675,10 +3592,9 @@ _MARKET_TAGS = frozenset(
 )
 
 _LEAF_MARKET_NEED = {
-    "pullback_vol": frozenset({"d_ma_mid", "d_ma_slow", "vol_pb"}),
     "keltner_vol": frozenset({"keltner", "vol_kc"}),
     "above_ema": frozenset({"d_ma_trend"}),
-    "scale_arm": frozenset({"weekly"}),
+    "scale_arm": frozenset(),
     "stop_loss": frozenset(),
     "atr_stop": frozenset({"atr"}),
     "trail_stop": frozenset(),
@@ -3701,35 +3617,19 @@ def _market_need(recipe=None):
     return out
 
 
-def _vol_pullback_confirm_need():
-    """最少 1：当天缩量即可；勿用 `x or 2`（0 会被当成缺省翻成 2）。"""
-    raw = _factor_param(None, "pullback_vol", "confirm_days")
-    try:
-        n = int(2 if raw is None else raw)
-    except Exception:
-        n = 2
-    return max(1, n)
-
-
 def _weekly_market_features(closes_w):
-    """周线 MA/MACD 进 ctx.market；不判多空。"""
+    """周线 MA 进 ctx.market；不判多空。"""
     detail = {
         "ma5": None,
         "ma30": None,
-        "dif": None,
-        "dea": None,
-        "hist": None,
         "close": None,
     }
     win = _structure_windows()
     w_ema = win["ema"]["1w"]
-    mc = win["macd"]
     ma5 = _ema(closes_w, w_ema["mid"])
     ma30 = _ema(closes_w, w_ema["trend"])
-    macd = _calc_macd(closes_w, mc["fast"], mc["slow"], mc["signal"])
-    if ma5 is None or ma30 is None or macd is None:
+    if ma5 is None or ma30 is None:
         return detail
-    dif, dea, hist = macd
     i = len(closes_w) - 1
     if i < 1:
         return detail
@@ -3737,23 +3637,11 @@ def _weekly_market_features(closes_w):
     m5 = _last_valid(ma5, i)
     m30 = _last_valid(ma30, i)
     m30_prev = _last_valid(ma30, i - 1)
-    d0 = _last_valid(dif, i)
-    e0 = _last_valid(dea, i)
-    h0 = _last_valid(hist, i)
-    h1 = _last_valid(hist, i - 1)
-    d1 = _last_valid(dif, i - 1)
-    e1 = _last_valid(dea, i - 1)
     detail.update(
         {
             "ma5": m5,
             "ma30": m30,
             "ma30_prev": m30_prev,
-            "dif": d0,
-            "dea": e0,
-            "dif_prev": d1,
-            "dea_prev": e1,
-            "hist": h0,
-            "hist_prev": h1,
             "close": c,
         }
     )
@@ -3815,17 +3703,8 @@ def _factor_daily_features(closes, volumes, need=None):
     )
     vol10 = None
     vol20 = None
-    if volumes is not None:
-        if "vol_pb" in need:
-            raw_vn = _factor_param(None, "pullback_vol", "vol_n")
-            try:
-                vol_n = int(10 if raw_vn is None else raw_vn)
-            except (TypeError, ValueError):
-                vol_n = 10
-            vol10 = _sma(volumes, vol_n) if vol_n > 0 else None
     i = len(closes) - 1
-    vol_need = _vol_pullback_confirm_need() if "vol_pb" in need else 1
-    detail["vol_need"] = vol_need
+    detail["vol_need"] = 1
     detail["i"] = i
     if i < 0:
         return False, detail
@@ -3942,50 +3821,6 @@ def _factor_ctx_bind_state(ctx, **fields):
     out = dict(ctx or {})
     out["state"] = st
     return out
-
-# === fband/factors/lib/pullback_vol.py ===
-def _near_ma(price, ma, tol=None):
-    if tol is None:
-        tol = _factor_param(None, "pullback_vol", "tol")
-    tol = float(tol)
-    if price is None or ma is None or ma <= 0:
-        return False
-    return abs(float(price) - float(ma)) / float(ma) <= tol
-
-
-def _factor_eval_pullback_vol(ctx):
-    market = (ctx or {}).get("market") or {}
-    if not market.get("daily_ready"):
-        return False, {"vol_streak": 0}
-    mid_n = int(market.get("mid_n") or 0)
-    slow_n = int(market.get("slow_n") or 0)
-    price = market.get("close")
-    if price is None:
-        price = market.get("daily_detail", {}).get("price")
-    m20 = market.get("ma20")
-    m60 = market.get("ma60")
-    vol10 = market.get("vol10")
-    volumes = market.get("volumes")
-    i = int(market.get("i") or 0)
-    vol_need = int(market.get("vol_need") or _vol_pullback_confirm_need())
-    near = False
-    if mid_n > 0:
-        near = near or _near_ma(price, m20)
-    if slow_n > 0:
-        near = near or _near_ma(price, m60)
-    ratio = float(_factor_param(ctx, "pullback_vol", "ratio"))
-    vol_streak = 0
-    if volumes is None or vol10 is None:
-        return False, {"vol_streak": 0, "near": near}
-    for k in range(vol_need):
-        j = i - k
-        vma = _last_valid(vol10, j)
-        vj = float(volumes[j])
-        if vma is None or vma <= 0 or vj >= vma * ratio:
-            break
-        vol_streak += 1
-    hit = bool(near and vol_streak >= vol_need)
-    return hit, {"vol_streak": vol_streak, "near": near}
 
 # === fband/factors/lib/keltner_vol.py ===
 def _factor_eval_keltner_vol(ctx):
@@ -4114,16 +3949,6 @@ def _scale_arm_need_bars(ctx=None):
         return 0
 
 
-def _scale_arm_hist_min(ctx=None):
-    raw = _factor_param(ctx, "scale_arm", "hist_min", -0.01)
-    if raw is None:
-        return None
-    try:
-        return float(raw)
-    except (TypeError, ValueError):
-        return None
-
-
 def _scale_arm_hold_peak(state=None):
     st = state or {}
     peak = st.get("hold_peak")
@@ -4183,7 +4008,7 @@ def _scale_arm_peak(ctx=None):
 
 
 def _factor_eval_scale_arm(ctx):
-    """峰值浮盈 >= arm，且该笔持仓日 >= bars，且周柱 >= hist_min。"""
+    """峰值浮盈 >= arm，且该笔持仓日 >= bars。"""
     mx, armed_bars = _scale_arm_peak(ctx)
     arm = _scale_arm_threshold(ctx)
     detail = {"peak": mx, "armed_bars": armed_bars, "arm": arm}
@@ -4193,15 +4018,6 @@ def _factor_eval_scale_arm(ctx):
     detail["need_bars"] = need_bars
     if need_bars > 0 and armed_bars < need_bars:
         return False, detail
-    hist_min = _scale_arm_hist_min(ctx)
-    detail["hist_min"] = hist_min
-    if hist_min is not None:
-        w_detail = ((ctx or {}).get("market") or {}).get("w_detail") or {}
-        h = w_detail.get("hist")
-        if h is not None:
-            detail["hist"] = float(h)
-            if float(h) < float(hist_min):
-                return False, detail
     return True, detail
 
 # === fband/factors/lib/stop_loss.py ===
@@ -8999,7 +8815,7 @@ def _handle_stock(C, ctx):
             day,
             hhmm,
             "n1d=%d n1w=%d close=%.4f sig_d=%s sig_w=%s phase=%s prev_d=%s prev_w=%s "
-            "w_ma5=%s w_ma30=%s w_hist=%s "
+            "w_ma5=%s w_ma30=%s "
             "buy=%s buyR=%s scale=%s scaleR=%s sell=%s sellR=%s "
             "hold=%s nlot=%s ret=%s pe=%s px=%s bt_held=%s avail=%s"
             % (
@@ -9013,7 +8829,6 @@ def _handle_stock(C, ctx):
                 prev_w,
                 None if w_detail.get("ma5") is None else round(w_detail["ma5"], 4),
                 None if w_detail.get("ma30") is None else round(w_detail["ma30"], 4),
-                None if w_detail.get("hist") is None else round(w_detail["hist"], 4),
                 buy_sig,
                 ",".join(buy_reasons) if buy_reasons else "-",
                 scale_sig,
@@ -9046,7 +8861,6 @@ def _handle_stock(C, ctx):
             prev_w=prev_w,
             w_ma5=None if w_detail.get("ma5") is None else round(w_detail["ma5"], 4),
             w_ma30=None if w_detail.get("ma30") is None else round(w_detail["ma30"], 4),
-            w_hist=None if w_detail.get("hist") is None else round(w_detail["hist"], 4),
             buy=buy_sig,
             buyR=",".join(buy_reasons) if buy_reasons else "-",
             scale=scale_sig,
@@ -10225,8 +10039,6 @@ def _init_impl(C):
         _factor_param(None, "scale_arm", "arm"),
         "scale_arm_bars=",
         _factor_param(None, "scale_arm", "bars"),
-        "scale_w_hist=",
-        _factor_param(None, "scale_arm", "hist_min"),
         "time_force_bars=",
         _factor_param(None, "time_force", "bars"),
         "time_force_min_ret=",
@@ -10265,7 +10077,6 @@ def _init_impl(C):
         scale_once=SCALE_ONCE_PER_ROUND,
         scale_arm=_factor_param(None, "scale_arm", "arm"),
         scale_arm_bars=_factor_param(None, "scale_arm", "bars"),
-        scale_w_hist_min=_factor_param(None, "scale_arm", "hist_min"),
         stop=_factor_param(None, "stop_loss", "pct"),
         trail_arm=_trail_arm(),
         time_force_bars=_factor_param(None, "time_force", "bars"),

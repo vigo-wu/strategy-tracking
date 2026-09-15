@@ -24,7 +24,7 @@ alwaysApply: true
 - `_factor_param` / `_structure_windows` / `_structure_apply_global` / `_factor_params_apply_global` 签名
 - 网格轴 id、`overrides.factor_params` / `overrides.structure`、拒绝旧顶层键（不兼容 / Breaking Change）
 - `recipe=` 指纹 payload、init 日志字段（`dMA=` / `stop=`）
-- 叶子阈值从哪读、指标函数签名（如 `_calc_macd` 三窗必传）
+- 叶子阈值从哪读、指标函数签名（如 `_calc_atr` 的 `n` 必传）
 
 ## 改哪里（只改主分支现行文档，名与代码一致）
 

@@ -3,40 +3,6 @@
 # 文件名 = id；_factor_eval_<id> 在 lib/<id>.py。
 
 LEAVES = {
-    "pullback_vol": {
-        "label": "买点1-缩量回踩强支撑",
-        "group": "entry",
-        "params": {
-            "tol": {
-                "default": 0.025,
-                "percent": True,
-                "abbrev": "mt",
-                "label": "回踩容差",
-                "axis": 0,
-            },
-            "ratio": {
-                "default": 0.9,
-                "percent": True,
-                "abbrev": "vpr",
-                "label": "缩量回踩比例",
-                "axis": 1,
-            },
-            "vol_n": {
-                "default": 10,
-                "percent": False,
-                "abbrev": "vpn",
-                "label": "缩量窗口",
-                "axis": 2,
-            },
-            "confirm_days": {
-                "default": 2,
-                "percent": False,
-                "abbrev": "vpc",
-                "label": "缩量确认日",
-                "axis": 3,
-            },
-        },
-    },
     "keltner_vol": {
         "label": "通道内缩量",
         "group": "entry",
@@ -84,7 +50,7 @@ LEAVES = {
         "params": {},
     },
     "scale_arm": {
-        "label": "加仓-浮盈持仓周柱门槛",
+        "label": "加仓-浮盈持仓门槛",
         "group": "scale",
         "params": {
             "arm": {
@@ -100,13 +66,6 @@ LEAVES = {
                 "abbrev": "sab",
                 "label": "加仓持仓日",
                 "axis": 1,
-            },
-            "hist_min": {
-                "default": -0.01,
-                "percent": False,
-                "abbrev": "swh",
-                "label": "加仓周柱下限",
-                "axis": 2,
             },
         },
     },

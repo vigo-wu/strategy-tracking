@@ -31,15 +31,12 @@ STRUCTURE_KEYS = (
     "ema.1d.trend",
     "ema.1w.mid",
     "ema.1w.trend",
-    "macd.fast",
-    "macd.slow",
-    "macd.signal",
     "atr.n",
     "keltner.ema_n",
     "keltner.atr_n",
 )
-STRUCTURE_ROOTS = frozenset({"ema", "sma", "macd", "atr", "keltner"})
-DELETED_STRUCTURE_ROOTS = frozenset({"d_ma", "w_ma"})
+STRUCTURE_ROOTS = frozenset({"ema", "sma", "atr", "keltner"})
+DELETED_STRUCTURE_ROOTS = frozenset({"d_ma", "w_ma", "macd"})
 DELETED_STRUCTURE_PATHS = frozenset(
     {
         "d_ma.mid",
@@ -161,9 +158,6 @@ PARAM_LABELS = {
     "ema.1d.trend": "日线趋势均线",
     "ema.1w.mid": "周线快均线",
     "ema.1w.trend": "周线生命线",
-    "macd.fast": "MACD 快线",
-    "macd.slow": "MACD 慢线",
-    "macd.signal": "MACD 信号",
     "atr.n": "日线ATR窗",
     "keltner.ema_n": "肯特纳EMA窗",
     "keltner.atr_n": "肯特纳ATR窗",
@@ -182,9 +176,6 @@ ABBREV_FIXED = {
     "ema.1d.trend": "e1dt",
     "ema.1w.mid": "e1wm",
     "ema.1w.trend": "e1wt",
-    "macd.fast": "mcf",
-    "macd.slow": "mcs",
-    "macd.signal": "mcg",
     "atr.n": "atr",
     "keltner.ema_n": "kem",
     "keltner.atr_n": "kat",
@@ -900,7 +891,6 @@ def materialize_structure_table(raw: Mapping[str, Any] | None) -> dict[str, Any]
 
     ema = rec.get("ema") if isinstance(rec.get("ema"), dict) else {}
     sma = rec.get("sma") if isinstance(rec.get("sma"), dict) else {}
-    macd = rec.get("macd") if isinstance(rec.get("macd"), dict) else {}
     atr = rec.get("atr") if isinstance(rec.get("atr"), dict) else {}
     keltner = rec.get("keltner") if isinstance(rec.get("keltner"), dict) else {}
     return {
@@ -911,11 +901,6 @@ def materialize_structure_table(raw: Mapping[str, Any] | None) -> dict[str, Any]
         "sma": {
             "1d": _ma_period(sma, "1d", (0, 0, 0)),
             "1w": _ma_period(sma, "1w", (0, 0, 0)),
-        },
-        "macd": {
-            "fast": _iint(macd, "fast", 12),
-            "slow": _iint(macd, "slow", 26),
-            "signal": _iint(macd, "signal", 9),
         },
         "atr": {"n": _iint(atr, "n", 14)},
         "keltner": {

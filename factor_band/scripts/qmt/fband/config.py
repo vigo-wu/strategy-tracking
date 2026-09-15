@@ -42,15 +42,15 @@ LOT_ADD_FRAC = 0.30
 TRADE_BUDGET = 100000.0
 
 # ---- 周线过滤（跨周期；主图仍是日线）----
-# 均线/MACD/ATR/肯特纳窗在 RECIPE.structure（字面量）。
+# 均线/ATR/肯特纳窗在 RECIPE.structure（字面量）。
 # 价格均线：structure.ema|sma × 周期键（对齐 _VALID_PERIODS：1d/1w/…）× mid/slow/trend。
-# 调用点直调 _ema 读 ema.*，直调 _sma 读 sma.*（量均窗仍在 factor_params；MACD 仍 _ema）。
-# 日线 mid→回踩；slow→回踩支撑 + 时间成本地板；trend→above_ema。<=0 关该条。
+# 调用点直调 _ema 读 ema.*，直调 _sma 读 sma.*（量均窗仍在 factor_params）。
+# 日线 mid 缺省仍物化；slow→时间成本地板；trend→above_ema。<=0 关该条。
 # 周线 mid/trend（5/34）；slow 默认 0、预计算不用、不上网格轴。取数 need 另钳原 MA55 暖机地板。
 # ATR：威尔德平滑窗 atr.n；<=0 关 atr_stop。
 # 肯特纳：中轨 EMA 窗 keltner.ema_n，带宽 ATR 窗 keltner.atr_n（与 atr.n 独立）；<=0 关。
 
-# 盈利后加仓：门槛叶子 scale_arm（峰值浮盈 / 持仓日 / 周柱）在 RECIPE.scale_in；
+# 盈利后加仓：门槛叶子 scale_arm（峰值浮盈 / 持仓日）在 RECIPE.scale_in；
 #   执行日若已触发卖点则取消加仓
 # SCALE_ONCE_PER_ROUND：同一轮只加一次
 # SCALE_LOTS=True：每笔独立成本/峰值/止盈
@@ -59,7 +59,7 @@ SCALE_ONCE_PER_ROUND = True
 SCALE_LOTS = True
 
 # 默认 Recipe：四槽布尔式。因子数字在 factors/catalog.py（写入 factor_params）；
-# 均线/MACD/ATR/肯特纳 窗真源 structure。scale_once / 满槽 / 资金不进表。
+# 均线/ATR/肯特纳窗只活在 structure。scale_once / 满槽 / 资金不进表。
 # scale_out 恒 false：减仓未启用。
 RECIPE = {
     "entry": [

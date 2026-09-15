@@ -95,7 +95,7 @@ description: >-
 - [ ] 4. 只改 indicators/NAV.md（不要顺手改 factors NAV / Recipe分类 / model.md）
 ```
 
-`_calc_*` **必传窗**，不读 `RECIPE`。仿 `atr.py` / `macd.py`。不要新建根上 `indicators.py`。`macd` 必须在 `ema` 之后。lib 段仍由表生成，不要手插 `factors/lib/`。纯工具不成因子 id。
+`_calc_*` **必传窗**，不读 `RECIPE`。仿 `atr.py`。不要新建根上 `indicators.py`。`keltner` 必须在 `ema` / `atr` 之后。lib 段仍由表生成，不要手插 `factors/lib/`。纯工具不成因子 id。
 
 可调窗才进 `RECIPE.structure`。覆盖形态仍是 `overrides.structure`（参数契约）。
 

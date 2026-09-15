@@ -44,7 +44,6 @@ _MODULE_HEAD = [
     "indicators/util.py",
     "indicators/sma.py",
     "indicators/ema.py",
-    "indicators/macd.py",
     "indicators/atr.py",
     "indicators/keltner.py",
     "common:market_util.py",
