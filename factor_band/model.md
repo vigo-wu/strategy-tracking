@@ -13,7 +13,7 @@ FactorBand 是 **中长线 / 波段** 交易框架：日线主图找点、周线
 
 信号不写死在过程式分支。叶子登记在因子库（`factors/catalog.py` 的 `LEAVES` + `factors/lib/<id>.py`），每个因子只回答条件是否成立，**不带开仓/平仓立场**。立场由四个槽位的条件抽象语法树赋予（`config.RECIPE`）。同一叶子可进多槽（例如 `keltner_vol` 可同时作开仓与加仓）。改四个槽位的引用、`and` / `or` / `not` 即换组合；格子只覆盖 `overrides.factor_params` / `overrides.structure`，不能改 AST。仓位门槛（`scale_once` / 满槽 / 资金）不进因子库。登记 ≠ 已启用：`stop_loss` / `trail_stop` / `pullback_vol` 仍在 `LEAVES`，现行默认配置的对应槽不引用。
 
-同一根 K 四个槽位都求值，仓位仲裁优先级写死：`flat > reduce > add > open`。现行默认配置 `scale_out=false`（减仓未启用）。`weekly_bull` 只进日志，不是因子、不进四个槽位。
+同一根 K 四个槽位都求值，仓位仲裁优先级写死：`flat > reduce > add > open`。现行默认配置 `scale_out=false`（减仓未启用）。
 
 现行默认配置的组合（可改，不是框架定义）：
 
@@ -41,9 +41,7 @@ scale_out: false
 
 叶子登记在 `LEAVES`；默认盘启用哪些、如何 `and` / `or` / `not`，写在 `config.RECIPE` 四个槽位。均线/MACD/ATR/肯特纳窗只读 `RECIPE.structure`（通过 `_structure_windows()` 读取）。阈值运行时读 `RECIPE.factor_params`（catalog 用 defaults 整表写入）。
 
-周线均线为斐波那契 **MA5 / MA13 / MA34**（`RECIPE.structure.ema.1w` 的 `mid` / `slow` / `trend`，当前 5 / 13 / 34；`slow` 只给日志多头 `weekly_bull`）。周线取数 need 另钳原 MA55 暖机地板。价格均线由 `ctx` 直调 `_ema` 读 `ema.*`（量均始终 `_sma` 读量窗 `factor_params`；MACD 仍 `_ema`）。文档与日志里的 `w_ma30` 字段实际是生命线 MA34。实盘与回测都只用**上一根已收盘周 K**（丢掉今天所在自然周，周五尾盘也看上周），对齐 QMT 回测 0000 原生 `1w`。
-
-开仓不要求 `weekly_bull`。多头（MA5>MA13 且 DIF>0 且红柱且生命线未明显走平）仅用于日志。
+周线均线为斐波那契 **MA5 / MA34**（`RECIPE.structure.ema.1w` 的 `mid` / `trend`，当前 5 / 34；`slow` 默认 0、不进预计算、不上网格轴）。周线取数 need 另钳原 MA55 暖机地板。价格均线由 `ctx` 直调 `_ema` 读 `ema.*`（量均始终 `_sma` 读量窗 `factor_params`；MACD 仍 `_ema`）。文档与日志里的 `w_ma30` 字段实际是生命线 MA34。实盘与回测都只用**上一根已收盘周 K**（丢掉今天所在自然周，周五尾盘也看上周），对齐 QMT 回测 0000 原生 `1w`。
 
 ---
 
@@ -204,7 +202,7 @@ scale_out: false
 | `LOT_ADD_FRAC` | `0.30` | 第二笔 30%；全池最后一槽不锁此值，改吃剩余约 20% cap（仅 config） |
 | `ema.1d.mid` / `ema.1d.slow` | `20` / `60` | 日线中/慢均线（`RECIPE.structure.ema.1d`）；`<=0` 关该条（关慢线则 time_force 破线地板关掉） |
 | `ema.1d.trend` | `120` | 日线趋势均线（`RECIPE.structure.ema.1d`）；`above_ema` 用；`<=0` 关闸门 |
-| `ema.1w.mid` / `ema.1w.slow` / `ema.1w.trend` | `5` / `13` / `34` | 周线快/中/生命线（`RECIPE.structure.ema.1w`）；`slow` 仅日志多头 |
+| `ema.1w.mid` / `ema.1w.trend` | `5` / `34` | 周线快/生命线（`RECIPE.structure.ema.1w`）；`slow` 默认 0、不进预计算、不上网格轴 |
 | `macd.fast` / `macd.slow` / `macd.signal` | `12` / `26` / `9` | 周线 MACD 三窗（`RECIPE.structure`） |
 | `atr.n` | `14` | 日线威尔德 ATR 窗（`RECIPE.structure`）；`<=0` 关 `atr_stop` / `atr_trail_stop` |
 | `keltner.ema_n` / `keltner.atr_n` | `20` / `20` | 肯特纳中轨 EMA / 带宽 ATR 窗（`RECIPE.structure`，与 `atr.n` 独立）；`<=0` 关 |

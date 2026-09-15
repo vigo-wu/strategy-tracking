@@ -166,7 +166,7 @@ scale_out:
 | 段 | 键 | 现行默认 | 用途 |
 | :--- | :--- | :--- | :--- |
 | `ema.1d` | `mid` / `slow` / `trend` | 20 / 60 / 120 | 日线回踩；慢线还是 time_force 地板；`trend` 是 `above_ema`（`<=0` 关闸门） |
-| `ema.1w` | `mid` / `slow` / `trend` | 5 / 13 / 34 | 周线快/中/生命线（原 `w_ma.fast/mid/life`）；`slow` 仅日志 `weekly_bull` |
+| `ema.1w` | `mid` / `slow` / `trend` | 5 / 0 / 34 | 周线快/生命线（原 `w_ma.fast/life`）；`slow` 默认 0、不进预计算、不上网格轴 |
 | `sma.1d` / `sma.1w` | `mid` / `slow` / `trend` | 全 0 | 价格 SMA 窗；现行盘无调用点；`<=0` 关条 |
 | `macd` | `fast` / `slow` / `signal` | 12 / 26 / 9 | 周线 DIF/DEA/柱 |
 | `atr` | `n` | 14 | 日线威尔德 ATR；`<=0` 关 `atr_stop` / `atr_trail_stop` |

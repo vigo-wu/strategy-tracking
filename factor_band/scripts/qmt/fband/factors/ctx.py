@@ -148,7 +148,7 @@ def _structure_windows():
     return {
         "ema": {
             "1d": _structure_ma_period_block(ema, "1d", (20, 60, 120)),
-            "1w": _structure_ma_period_block(ema, "1w", (5, 13, 34)),
+            "1w": _structure_ma_period_block(ema, "1w", (5, 0, 34)),
         },
         "sma": {
             "1d": _structure_ma_period_block(sma, "1d", (0, 0, 0)),
@@ -256,7 +256,6 @@ def _weekly_market_features(closes_w):
     """周线 MA/MACD 进 ctx.market；不判多空。"""
     detail = {
         "ma5": None,
-        "ma10": None,
         "ma30": None,
         "dif": None,
         "dea": None,
@@ -267,10 +266,9 @@ def _weekly_market_features(closes_w):
     w_ema = win["ema"]["1w"]
     mc = win["macd"]
     ma5 = _ema(closes_w, w_ema["mid"])
-    ma10 = _ema(closes_w, w_ema["slow"])
     ma30 = _ema(closes_w, w_ema["trend"])
     macd = _calc_macd(closes_w, mc["fast"], mc["slow"], mc["signal"])
-    if ma5 is None or ma10 is None or ma30 is None or macd is None:
+    if ma5 is None or ma30 is None or macd is None:
         return detail
     dif, dea, hist = macd
     i = len(closes_w) - 1
@@ -278,7 +276,6 @@ def _weekly_market_features(closes_w):
         return detail
     c = float(closes_w[i])
     m5 = _last_valid(ma5, i)
-    m10 = _last_valid(ma10, i)
     m30 = _last_valid(ma30, i)
     m30_prev = _last_valid(ma30, i - 1)
     d0 = _last_valid(dif, i)
@@ -290,7 +287,6 @@ def _weekly_market_features(closes_w):
     detail.update(
         {
             "ma5": m5,
-            "ma10": m10,
             "ma30": m30,
             "ma30_prev": m30_prev,
             "dif": d0,
@@ -303,22 +299,6 @@ def _weekly_market_features(closes_w):
         }
     )
     return detail
-
-
-def _weekly_bull_from_detail(detail):
-    """仅日志；不成因子。"""
-    if not detail:
-        return False
-    m5 = detail.get("ma5")
-    m10 = detail.get("ma10")
-    m30 = detail.get("ma30")
-    m30_prev = detail.get("ma30_prev")
-    d0 = detail.get("dif")
-    h0 = detail.get("hist")
-    if None in (m5, m10, m30, d0, h0):
-        return False
-    ma30_ok = (m30_prev is None) or (m30 >= m30_prev * 0.998)
-    return (m5 > m10) and (d0 > 0) and (h0 > 0) and ma30_ok
 
 
 def _factor_daily_features(closes, volumes, need=None):

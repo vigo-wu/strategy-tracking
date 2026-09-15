@@ -46,7 +46,7 @@ TRADE_BUDGET = 100000.0
 # 价格均线：structure.ema|sma × 周期键（对齐 _VALID_PERIODS：1d/1w/…）× mid/slow/trend。
 # 调用点直调 _ema 读 ema.*，直调 _sma 读 sma.*（量均窗仍在 factor_params；MACD 仍 _ema）。
 # 日线 mid→回踩；slow→回踩支撑 + 时间成本地板；trend→above_ema。<=0 关该条。
-# 周线 mid/slow/trend（5/13/34）；mid 仅日志多头。取数 need 另钳原 MA55 暖机地板。
+# 周线 mid/trend（5/34）；slow 默认 0、预计算不用、不上网格轴。取数 need 另钳原 MA55 暖机地板。
 # ATR：威尔德平滑窗 atr.n；<=0 关 atr_stop。
 # 肯特纳：中轨 EMA 窗 keltner.ema_n，带宽 ATR 窗 keltner.atr_n（与 atr.n 独立）；<=0 关。
 

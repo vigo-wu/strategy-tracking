@@ -56,7 +56,7 @@ TRADE_BUDGET = 100000.0
 # 价格均线：structure.ema|sma × 周期键（对齐 _VALID_PERIODS：1d/1w/…）× mid/slow/trend。
 # 调用点直调 _ema 读 ema.*，直调 _sma 读 sma.*（量均窗仍在 factor_params；MACD 仍 _ema）。
 # 日线 mid→回踩；slow→回踩支撑 + 时间成本地板；trend→above_ema。<=0 关该条。
-# 周线 mid/slow/trend（5/13/34）；mid 仅日志多头。取数 need 另钳原 MA55 暖机地板。
+# 周线 mid/trend（5/34）；slow 默认 0、预计算不用、不上网格轴。取数 need 另钳原 MA55 暖机地板。
 # ATR：威尔德平滑窗 atr.n；<=0 关 atr_stop。
 # 肯特纳：中轨 EMA 窗 keltner.ema_n，带宽 ATR 窗 keltner.atr_n（与 atr.n 独立）；<=0 关。
 
@@ -3607,7 +3607,7 @@ def _structure_windows():
     return {
         "ema": {
             "1d": _structure_ma_period_block(ema, "1d", (20, 60, 120)),
-            "1w": _structure_ma_period_block(ema, "1w", (5, 13, 34)),
+            "1w": _structure_ma_period_block(ema, "1w", (5, 0, 34)),
         },
         "sma": {
             "1d": _structure_ma_period_block(sma, "1d", (0, 0, 0)),
@@ -3715,7 +3715,6 @@ def _weekly_market_features(closes_w):
     """周线 MA/MACD 进 ctx.market；不判多空。"""
     detail = {
         "ma5": None,
-        "ma10": None,
         "ma30": None,
         "dif": None,
         "dea": None,
@@ -3726,10 +3725,9 @@ def _weekly_market_features(closes_w):
     w_ema = win["ema"]["1w"]
     mc = win["macd"]
     ma5 = _ema(closes_w, w_ema["mid"])
-    ma10 = _ema(closes_w, w_ema["slow"])
     ma30 = _ema(closes_w, w_ema["trend"])
     macd = _calc_macd(closes_w, mc["fast"], mc["slow"], mc["signal"])
-    if ma5 is None or ma10 is None or ma30 is None or macd is None:
+    if ma5 is None or ma30 is None or macd is None:
         return detail
     dif, dea, hist = macd
     i = len(closes_w) - 1
@@ -3737,7 +3735,6 @@ def _weekly_market_features(closes_w):
         return detail
     c = float(closes_w[i])
     m5 = _last_valid(ma5, i)
-    m10 = _last_valid(ma10, i)
     m30 = _last_valid(ma30, i)
     m30_prev = _last_valid(ma30, i - 1)
     d0 = _last_valid(dif, i)
@@ -3749,7 +3746,6 @@ def _weekly_market_features(closes_w):
     detail.update(
         {
             "ma5": m5,
-            "ma10": m10,
             "ma30": m30,
             "ma30_prev": m30_prev,
             "dif": d0,
@@ -3762,22 +3758,6 @@ def _weekly_market_features(closes_w):
         }
     )
     return detail
-
-
-def _weekly_bull_from_detail(detail):
-    """仅日志；不成因子。"""
-    if not detail:
-        return False
-    m5 = detail.get("ma5")
-    m10 = detail.get("ma10")
-    m30 = detail.get("ma30")
-    m30_prev = detail.get("ma30_prev")
-    d0 = detail.get("dif")
-    h0 = detail.get("hist")
-    if None in (m5, m10, m30, d0, h0):
-        return False
-    ma30_ok = (m30_prev is None) or (m30 >= m30_prev * 0.998)
-    return (m5 > m10) and (d0 > 0) and (h0 > 0) and ma30_ok
 
 
 def _factor_daily_features(closes, volumes, need=None):
@@ -8887,10 +8867,8 @@ def _handle_stock(C, ctx):
 
     if need_weekly:
         w_detail = _weekly_market_features(closes_ws)
-        weekly_bull = _weekly_bull_from_detail(w_detail)
     else:
         w_detail = {}
-        weekly_bull = False
     fctx = _build_factor_ctx(
         closes_s,
         vols_s,
@@ -9021,7 +8999,7 @@ def _handle_stock(C, ctx):
             day,
             hhmm,
             "n1d=%d n1w=%d close=%.4f sig_d=%s sig_w=%s phase=%s prev_d=%s prev_w=%s "
-            "w_bull=%s w_ma5=%s w_ma30=%s w_hist=%s "
+            "w_ma5=%s w_ma30=%s w_hist=%s "
             "buy=%s buyR=%s scale=%s scaleR=%s sell=%s sellR=%s "
             "hold=%s nlot=%s ret=%s pe=%s px=%s bt_held=%s avail=%s"
             % (
@@ -9033,7 +9011,6 @@ def _handle_stock(C, ctx):
                 phase,
                 prev_d,
                 prev_w,
-                weekly_bull,
                 None if w_detail.get("ma5") is None else round(w_detail["ma5"], 4),
                 None if w_detail.get("ma30") is None else round(w_detail["ma30"], 4),
                 None if w_detail.get("hist") is None else round(w_detail["hist"], 4),
@@ -9067,7 +9044,6 @@ def _handle_stock(C, ctx):
             phase=phase,
             prev_d=prev_d,
             prev_w=prev_w,
-            w_bull=weekly_bull,
             w_ma5=None if w_detail.get("ma5") is None else round(w_detail["ma5"], 4),
             w_ma30=None if w_detail.get("ma30") is None else round(w_detail["ma30"], 4),
             w_hist=None if w_detail.get("hist") is None else round(w_detail["hist"], 4),

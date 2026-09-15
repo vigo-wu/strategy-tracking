@@ -17,7 +17,7 @@
 
 | 文件 | 符号（主） | 做什么 |
 | :--- | :--- | :--- |
-| [ctx.py](ctx.py) | `_factor_param` `_factor_params_apply_global` `_structure_windows` `_structure_apply_global` `_LEAF_MARKET_NEED` `_market_need` `_weekly_market_features` `_build_factor_ctx` `_factor_ctx_bind_state` | 组 `ctx = {market, state, clock}`；按启用叶子闸预计算（日线 EMA/量均、ATR、肯特纳、周线 MA/MACD）。`daily_ready` = 日线 `closes` 且 `i>=2`。`weekly_bull` 只在这里算，仅日志 |
+| [ctx.py](ctx.py) | `_factor_param` `_factor_params_apply_global` `_structure_windows` `_structure_apply_global` `_LEAF_MARKET_NEED` `_market_need` `_weekly_market_features` `_build_factor_ctx` `_factor_ctx_bind_state` | 组 `ctx = {market, state, clock}`；按启用叶子闸预计算（日线 EMA/量均、ATR、肯特纳、周线 MA/MACD）。`daily_ready` = 日线 `closes` 且 `i>=2` |
 | [catalog.py](catalog.py) | `LEAVES` `_leaves_factor_params` | 叶子登记 / 默认阈值 / 网格轴元数据；整表写入 `RECIPE.factor_params`（`above_ema` 无键） |
 | [registry.py](registry.py) | `_factor_registry` `_factor_eval` `_factor_hit` | 按 `LEAVES` 取 `_factor_eval_<id>`；缺函数启动时报错 |
 | [expr.py](expr.py) | `_recipe_hit` `_recipe_leaf_ids` `_recipe_compute_leaves` | `and` / `or` / `not`；`False`/`None` = 恒假；启用叶子 + `scale_in` 特例 |

@@ -30,7 +30,6 @@ STRUCTURE_KEYS = (
     "ema.1d.slow",
     "ema.1d.trend",
     "ema.1w.mid",
-    "ema.1w.slow",
     "ema.1w.trend",
     "macd.fast",
     "macd.slow",
@@ -161,7 +160,6 @@ PARAM_LABELS = {
     "ema.1d.slow": "日线慢均线",
     "ema.1d.trend": "日线趋势均线",
     "ema.1w.mid": "周线快均线",
-    "ema.1w.slow": "周线中均线",
     "ema.1w.trend": "周线生命线",
     "macd.fast": "MACD 快线",
     "macd.slow": "MACD 慢线",
@@ -183,7 +181,6 @@ ABBREV_FIXED = {
     "ema.1d.slow": "e1ds",
     "ema.1d.trend": "e1dt",
     "ema.1w.mid": "e1wm",
-    "ema.1w.slow": "e1ws",
     "ema.1w.trend": "e1wt",
     "macd.fast": "mcf",
     "macd.slow": "mcs",
@@ -909,7 +906,7 @@ def materialize_structure_table(raw: Mapping[str, Any] | None) -> dict[str, Any]
     return {
         "ema": {
             "1d": _ma_period(ema, "1d", (20, 60, 120)),
-            "1w": _ma_period(ema, "1w", (5, 13, 34)),
+            "1w": _ma_period(ema, "1w", (5, 0, 34)),
         },
         "sma": {
             "1d": _ma_period(sma, "1d", (0, 0, 0)),
@@ -1424,7 +1421,6 @@ def family_value_label(family: str, value: Any) -> str:
         "ema.1d.slow",
         "ema.1d.trend",
         "ema.1w.mid",
-        "ema.1w.slow",
         "ema.1w.trend",
         "atr.n",
         "keltner.ema_n",

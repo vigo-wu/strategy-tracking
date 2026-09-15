@@ -93,13 +93,11 @@ def _eval_cases(ns: dict) -> list[dict]:
     lows = [c - 0.1 for c in closes]
     closes_w = [10.0 + 0.05 * i for i in range(50)]
     detail = ns["_weekly_market_features"](closes_w)
-    bull = ns["_weekly_bull_from_detail"](detail)
     ctx = ns["_build_factor_ctx"](closes, vols, highs, lows, detail, None)
     entry = ns["_eval_entry_slot"](ctx)
     cases.append(
         {
             "id": "trend_up",
-            "weekly_bull": bool(bull),
             "buy_ok": bool(entry.get("hit")),
             "buy_reasons": list(entry.get("reasons") or []),
             "above_ema": bool(ns["_factor_hit"]("above_ema", ctx)),

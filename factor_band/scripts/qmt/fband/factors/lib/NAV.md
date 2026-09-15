@@ -23,7 +23,7 @@
 
 日志 / 成交主因直接用叶子 id（`keltner_vol`、`above_ema`、`atr_stop`、`atr_trail_stop`）。历史 log 里的旧 reason 码由选股/summarize 兼容读取。
 
-不要拆 `pullback_vol` 为 `near_ma & vol_shrink`（现行默认配置仍登记该复合原子，默认 AST 不引用）。不要拆 `keltner_vol` 为 `keltner_inside & vol_shrink`。`weekly_bull` 不是因子。`above_ema` 无阈值，不要给它写出空 `{}`。
+不要拆 `pullback_vol` 为 `near_ma & vol_shrink`（现行默认配置仍登记该复合原子，默认 AST 不引用）。不要拆 `keltner_vol` 为 `keltner_inside & vol_shrink`。`above_ema` 无阈值，不要给它写出空 `{}`。
 
 ---
 

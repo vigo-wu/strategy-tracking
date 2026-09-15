@@ -1332,10 +1332,8 @@ def _handle_stock(C, ctx):
 
     if need_weekly:
         w_detail = _weekly_market_features(closes_ws)
-        weekly_bull = _weekly_bull_from_detail(w_detail)
     else:
         w_detail = {}
-        weekly_bull = False
     fctx = _build_factor_ctx(
         closes_s,
         vols_s,
@@ -1466,7 +1464,7 @@ def _handle_stock(C, ctx):
             day,
             hhmm,
             "n1d=%d n1w=%d close=%.4f sig_d=%s sig_w=%s phase=%s prev_d=%s prev_w=%s "
-            "w_bull=%s w_ma5=%s w_ma30=%s w_hist=%s "
+            "w_ma5=%s w_ma30=%s w_hist=%s "
             "buy=%s buyR=%s scale=%s scaleR=%s sell=%s sellR=%s "
             "hold=%s nlot=%s ret=%s pe=%s px=%s bt_held=%s avail=%s"
             % (
@@ -1478,7 +1476,6 @@ def _handle_stock(C, ctx):
                 phase,
                 prev_d,
                 prev_w,
-                weekly_bull,
                 None if w_detail.get("ma5") is None else round(w_detail["ma5"], 4),
                 None if w_detail.get("ma30") is None else round(w_detail["ma30"], 4),
                 None if w_detail.get("hist") is None else round(w_detail["hist"], 4),
@@ -1512,7 +1509,6 @@ def _handle_stock(C, ctx):
             phase=phase,
             prev_d=prev_d,
             prev_w=prev_w,
-            w_bull=weekly_bull,
             w_ma5=None if w_detail.get("ma5") is None else round(w_detail["ma5"], 4),
             w_ma30=None if w_detail.get("ma30") is None else round(w_detail["ma30"], 4),
             w_hist=None if w_detail.get("hist") is None else round(w_detail["hist"], 4),
