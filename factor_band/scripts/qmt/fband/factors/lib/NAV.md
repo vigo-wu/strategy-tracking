@@ -12,7 +12,7 @@
 | id | 文件 | 现逻辑 | 主要读 | 阈值（`factor_params`） |
 | :--- | :--- | :--- | :--- | :--- |
 | `pullback_vol` | [pullback_vol.py](pullback_vol.py) | 贴中/慢均线 + 连续缩量 | 日线价量 | `pullback_vol.*`；中/慢线周期是 `structure.ema.1d.mid/slow`；序列由 `ctx` 直调 `_ema`（默认 AST 不引用） |
-| `keltner_vol` | [keltner_vol.py](keltner_vol.py) | 收盘在肯特纳通道内 + 连续缩量 | `kc_mid` / `kc_atr` / 量 | `keltner_vol.k` / `ratio` / `vol_n` / `confirm_days`；窗是 `structure.keltner.*`（`k<=0` 或窗 `<=0` 关） |
+| `keltner_vol` | [keltner_vol.py](keltner_vol.py) | 收盘在肯特纳通道内 + 连续缩量 | `kc_mid` / `kc_atr` / 量 | `keltner_vol.k` / `ratio` / `min_ratio` / `vol_n` / `confirm_days`；窗是 `structure.keltner.*`（`k<=0` 或窗 `<=0` 关；`min_ratio<=0` 关下限） |
 | `above_ema` | [above_ema.py](above_ema.py) | 收盘 > 日线趋势 EMA | `ma_trend` | 无叶子阈值；窗是 `structure.ema.1d.trend`（`<=0` 关闸门） |
 | `chase` | [chase.py](chase.py) | 当日涨幅过大 | 日线收盘 | `chase.max_pct` |
 | `vol_dry` | [vol_dry.py](vol_dry.py) | 跌破中线且无量 | 日线价量 | `vol_dry.ratio` / `n`；中线周期是 `structure.ema.1d.mid` |

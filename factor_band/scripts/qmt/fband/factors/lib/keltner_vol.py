@@ -31,6 +31,11 @@ def _factor_eval_keltner_vol(ctx):
         ratio = float(0.9 if raw_ratio is None else raw_ratio)
     except (TypeError, ValueError):
         ratio = 0.9
+    raw_min = _factor_param(ctx, "keltner_vol", "min_ratio")
+    try:
+        min_ratio = float(0.5 if raw_min is None else raw_min)
+    except (TypeError, ValueError):
+        min_ratio = 0.5
     raw_vn = _factor_param(ctx, "keltner_vol", "vol_n")
     try:
         vol_n = int(10 if raw_vn is None else raw_vn)
@@ -48,6 +53,7 @@ def _factor_eval_keltner_vol(ctx):
     if volumes is None or vol_sma is None:
         return False, {
             "k": k,
+            "min_ratio": min_ratio,
             "inside": inside,
             "vol_streak": 0,
             "upper": upper,
@@ -60,12 +66,19 @@ def _factor_eval_keltner_vol(ctx):
             break
         vma = _last_valid(vol_sma, j)
         vj = float(volumes[j])
-        if vma is None or vma <= 0 or vj >= vma * ratio:
+        too_low = (
+            min_ratio > 0
+            and vma is not None
+            and vma > 0
+            and vj < vma * min_ratio
+        )
+        if vma is None or vma <= 0 or vj >= vma * ratio or too_low:
             break
         vol_streak += 1
     hit = bool(inside and vol_streak >= vol_need)
     return hit, {
         "k": k,
+        "min_ratio": min_ratio,
         "inside": inside,
         "vol_streak": vol_streak,
         "upper": upper,
