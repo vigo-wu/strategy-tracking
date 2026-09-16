@@ -1,5 +1,5 @@
 # coding: utf-8
-"""解析网格各格组合 walk log → 账户盈亏 / 几何年化 / 过门推荐 JSON。
+"""解析网格各格组合 walk log → 账户盈亏 / 几何年化 / 四维综合分推荐 JSON。
 
 用法（仓库根目录）::
 
@@ -37,12 +37,13 @@ from grid_spec import (  # noqa: E402
     fill_year_windows,
     year_range_set,
 )
-from grid_gate import (  # noqa: E402
-    EPS_GATE,
-    fill_gate,
-    gate_for_json,
-    load_gate_from_sweep,
-    validate_gate,
+from grid_score import (  # noqa: E402
+    SCORE_CLOSE_PAD,
+    load_score_from_sweep,
+    score_cell,
+    score_cfg_for_json,
+    score_for_json,
+    validate_score,
 )
 
 SAMPLES = ("book",)
@@ -50,7 +51,6 @@ RE_LEGACY_LOG = re.compile(
     r"^local_bt_(\d{6})_(SZ|SH)_(\d{4})_(SMA|EMA)\.txt$",
     re.I,
 )
-EPS_PNL = 1.0
 
 
 class GridSummarizeError(ValueError):
@@ -333,15 +333,6 @@ def _load_cell_meta(cell_dir: Path) -> dict[str, Any]:
     return {"id": cell_dir.name, "label": cell_dir.name, "kind": "other", "overrides": {}}
 
 
-def _sign(val: float | None, eps: float = EPS_PNL) -> int:
-    if val is None:
-        return 0
-    x = float(val)
-    if abs(x) < eps:
-        return 0
-    return 1 if x > 0 else -1
-
-
 def _n_override_keys(overrides: Any) -> int:
     if not isinstance(overrides, dict):
         return 0
@@ -391,295 +382,83 @@ def _space_on_cells(cells: list[dict[str, Any]]) -> bool:
         book = (cell.get("samples") or {}).get("book") or {}
         if "holdout_has_coverage" in book or "holdout_n_logs" in book:
             return True
+        if book.get("holdout_windows"):
+            return True
     return False
-
-
-def _win_block(sample: dict[str, Any], period: str, *, windows_key: str = "windows") -> dict[str, Any]:
-    block = (sample.get(windows_key) or {}).get(period)
-    return block if isinstance(block, dict) else {}
-
-
-def _num(val: Any) -> float | None:
-    if val is None:
-        return None
-    try:
-        return float(val)
-    except (TypeError, ValueError):
-        return None
-
-
-def _gate_absolute_fails(
-    w: dict[str, Any],
-    gate: dict[str, Any],
-    *,
-    prefix: str = "",
-) -> list[str]:
-    g = fill_gate(gate)
-    fails: list[str] = []
-    tag = prefix or "验收期"
-
-    def miss(name: str) -> str:
-        return "%s缺%s" % (tag, name)
-
-    if g["calmar"]["enabled"]:
-        v = _num(w.get("calmar"))
-        if v is None:
-            fails.append(miss("卡玛"))
-        elif v < float(g["calmar"]["min"]) - EPS_GATE:
-            fails.append("%s卡玛未达线" % tag)
-    if g["max_dd"]["enabled"]:
-        v = _num(w.get("max_dd"))
-        if v is None:
-            fails.append(miss("回撤"))
-        elif v < float(g["max_dd"]["floor"]) - EPS_GATE:
-            fails.append("%s回撤超限" % tag)
-    if g["oos_sharpe"]["enabled"]:
-        v = _num(w.get("sharpe"))
-        if v is None:
-            fails.append(miss("夏普"))
-        elif v < float(g["oos_sharpe"]["min"]) - EPS_GATE:
-            fails.append("%s夏普未达线" % tag)
-    if g["n_trades"]["enabled"]:
-        v = _num(w.get("n_trades"))
-        if v is None:
-            fails.append(miss("笔数"))
-        elif v < float(g["n_trades"]["min"]) - EPS_GATE:
-            fails.append("%s笔数不足" % tag)
-    if g["win_rate"]["enabled"]:
-        v = _num(w.get("win_rate"))
-        if v is None:
-            fails.append(miss("胜率"))
-        elif v < float(g["win_rate"]["min"]) - EPS_GATE:
-            fails.append("%s胜率未达线" % tag)
-    if g["profit_factor"]["enabled"]:
-        v = _num(w.get("profit_factor"))
-        if v is None:
-            fails.append(miss("盈亏比"))
-        elif abs(v - 99.0) < 1e-9:
-            pass  # 无亏损视为通过绝对线
-        elif v < float(g["profit_factor"]["min"]) - EPS_GATE:
-            fails.append("%s盈亏比未达线" % tag)
-    return fails
-
-
-def _gate_relative_fails(
-    w: dict[str, Any],
-    bw: dict[str, Any],
-    gate: dict[str, Any],
-    *,
-    prefix: str = "",
-) -> list[str]:
-    g = fill_gate(gate)
-    if not g["relative_to_base"]:
-        return []
-    fails: list[str] = []
-    tag = prefix or "相对base"
-
-    def worse(name: str) -> str:
-        return "%s%s劣于base" % (tag, name)
-
-    def need(name: str) -> str:
-        return "%s缺%s无法比base" % (tag, name)
-
-    pairs = (
-        ("calmar", "卡玛", True),
-        ("max_dd", "回撤", True),  # 更高（更浅）更好
-        ("sharpe", "夏普", True),
-        ("win_rate", "胜率", True),
-        ("profit_factor", "盈亏比", True),
-    )
-    rule_key = {
-        "calmar": "calmar",
-        "max_dd": "max_dd",
-        "sharpe": "oos_sharpe",
-        "win_rate": "win_rate",
-        "profit_factor": "profit_factor",
-    }
-    for field, label, higher_better in pairs:
-        rk = rule_key[field]
-        if not g[rk]["enabled"]:
-            continue
-        a = _num(w.get(field))
-        b = _num(bw.get(field))
-        if a is None or b is None:
-            fails.append(need(label))
-            continue
-        if higher_better and a + EPS_GATE < b:
-            fails.append(worse(label))
-        elif not higher_better and a - EPS_GATE > b:
-            fails.append(worse(label))
-
-    if g["n_trades"]["enabled"]:
-        a = _num(w.get("n_trades"))
-        b = _num(bw.get("n_trades"))
-        if a is None or b is None:
-            fails.append(need("笔数"))
-        else:
-            need_n = float(g["n_trades"]["vs_base_ratio"]) * float(b)
-            if a + EPS_GATE < need_n:
-                fails.append("%s笔数相对base不足" % tag)
-    return fails
-
-
-def _calmar_delta(w: dict[str, Any], bw: dict[str, Any]) -> float | None:
-    a = _num(w.get("calmar"))
-    b = _num(bw.get("calmar"))
-    if a is None or b is None:
-        return None
-    return round(a - b, 6)
-
-
-def _eval_cell_gate(
-    book: dict[str, Any],
-    base_book: dict[str, Any] | None,
-    gate: dict[str, Any],
-    *,
-    space_on: bool,
-) -> list[str]:
-    """返回全部失败文案；空列表表示通过。无对照格时跳过相对门 / 卡玛同向。"""
-    g = fill_gate(gate)
-    w_chk = _win_block(book, "check")
-    bw_chk = _win_block(base_book or {}, "check")
-    w_tune = _win_block(book, "tune")
-    bw_tune = _win_block(base_book or {}, "tune")
-    has_baseline = base_book is not None
-
-    fails = _gate_absolute_fails(w_chk, g, prefix="验收期")
-    if has_baseline:
-        fails.extend(_gate_relative_fails(w_chk, bw_chk, g, prefix=""))
-
-    if has_baseline and g["calmar_same_sign"]:
-        d_chk = _calmar_delta(w_chk, bw_chk)
-        d_tune = _calmar_delta(w_tune, bw_tune)
-        if d_chk is None or d_tune is None:
-            fails.append("缺卡玛无法同向")
-        elif _sign(d_chk, EPS_GATE) * _sign(d_tune, EPS_GATE) < 0:
-            fails.append("调参期与验收期卡玛不同向")
-
-    if space_on:
-        cell_cov = bool(book.get("holdout_has_coverage"))
-        if not cell_cov:
-            fails.append("盲测标的无覆盖")
-        else:
-            hw = _win_block(book, "check", windows_key="holdout_windows")
-            fails.extend(_gate_absolute_fails(hw, g, prefix="盲测"))
-            if has_baseline:
-                hbw = _win_block(base_book or {}, "check", windows_key="holdout_windows")
-                fails.extend(_gate_relative_fails(hw, hbw, g, prefix="盲测"))
-
-    return fails
 
 
 def pick_recommend(
     cells: list[dict[str, Any]],
-    gate: dict[str, Any] | None = None,
+    score: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    g = validate_gate(gate)
-    base = _baseline_cell(cells)
-    has_baseline = base is not None
+    cfg = validate_score(score)
 
     def sample(cell: dict[str, Any], name: str) -> dict[str, Any]:
         return (cell.get("samples") or {}).get(name) or {}
 
-    bb = sample(base, "book") if base is not None else {}
     space_on = _space_on_cells(cells)
-    rank_warn = False
-
-    passers: list[tuple[dict[str, Any], float, int]] = []
     notes: list[dict[str, Any]] = []
+    ranked: list[tuple[dict[str, Any], float, int]] = []
 
     for cell in cells:
         b = sample(cell, "book")
-        w_chk = _win_block(b, "check")
-        bw_chk = _win_block(bb, "check") if has_baseline else {}
-        calmar = _num(w_chk.get("calmar"))
-        oos = float(b.get("oos_pnl") or 0)
-        d_calmar = _calmar_delta(w_chk, bw_chk) if has_baseline else None
-        d_oos = round(oos - float(bb.get("oos_pnl") or 0), 2) if has_baseline else None
-        d_is = (
-            round(float(b.get("is_pnl") or 0) - float(bb.get("is_pnl") or 0), 2)
-            if has_baseline
-            else None
-        )
-        fails = _eval_cell_gate(
-            b,
-            bb if has_baseline else None,
-            g,
-            space_on=space_on,
-        )
-        fail_text = "；".join(fails) if fails else None
+        sc = score_for_json(score_cell(b, space_on=space_on, cfg=cfg))
         row = {
             "id": cell["id"],
+            "label": cell.get("label") or cell["id"],
             "kind": cell.get("kind"),
-            "calmar": calmar,
-            "d_calmar": d_calmar,
-            "d_oos": d_oos,
-            "d_is": d_is,
-            "d_corner": None
-            if not (space_on and has_baseline)
-            else round(
-                float(b.get("corner_oos_pnl") or 0) - float(bb.get("corner_oos_pnl") or 0),
-                2,
-            ),
-            "fail": fail_text,
-            "fails": fails or None,
+            "s_def": sc["s_def"],
+            "s_str": sc["s_str"],
+            "s_res": sc["s_res"],
+            "s_gen": sc["s_gen"],
+            "total": sc["total"],
+            "scored": sc["scored"],
         }
         notes.append(row)
-        if not fails:
-            if calmar is None:
-                rank_warn = True
-                score = oos
-            else:
-                score = float(calmar)
-            passers.append((cell, float(score), _cell_n_diffs(cell)))
+        if sc["scored"] and sc["total"] is not None:
+            ranked.append((cell, float(sc["total"]), _cell_n_diffs(cell)))
 
     def _kind_score(n: dict[str, Any]) -> float:
-        if n.get("calmar") is not None:
-            return float(n["calmar"])
-        if n.get("d_calmar") is not None:
-            return float(n["d_calmar"])
-        return float(n.get("d_oos") or 0)
+        if n.get("total") is not None:
+            return float(n["total"])
+        return -1.0
 
     by_kind: dict[str, Any] = {}
     for kind in ("tighten", "loosen", "off", "other"):
         opts = [n for n in notes if n.get("kind") == kind]
         if not opts:
             continue
-        best = max(opts, key=_kind_score)
-        by_kind[kind] = best
+        by_kind[kind] = max(opts, key=_kind_score)
 
-    if not passers:
-        reason = "无格子过门"
-        if space_on and any(n.get("fail") and "盲测" in str(n.get("fail")) for n in notes):
-            reason = "盲测未通过或未过门"
-        return {
-            "id": None,
-            "label": None,
-            "kind": None,
-            "reason": reason,
-            "candidates": notes,
-            "by_kind": by_kind,
-            "gate": gate_for_json(g),
-        }
+    empty = {
+        "id": None,
+        "label": None,
+        "kind": None,
+        "total": None,
+        "reason": "无格子可评分",
+        "candidates": notes,
+        "by_kind": by_kind,
+        "score": score_cfg_for_json(cfg),
+    }
+    if not ranked:
+        return empty
 
-    best_score = max(p[1] for p in passers)
-    pad = max(0.05, 0.2 * abs(best_score))
-    close = [p for p in passers if p[1] >= best_score - pad]
+    best_score = max(p[1] for p in ranked)
+    close = [p for p in ranked if p[1] >= best_score - SCORE_CLOSE_PAD]
     close.sort(key=lambda p: (p[2], -p[1]))
-    picked = close[0][0]
-    reason = "过门后按验收期卡玛排序；接近则少改结构"
-    if rank_warn:
-        reason = "WARN 缺卡玛回落验收盈亏；过门后接近则少改结构"
-    if space_on and not rank_warn:
-        reason = "过门且盲测未否决；按验收期卡玛排序，接近则少改结构"
+    picked, total, _nd = close[0]
+    reason = "按四维综合分排序"
+    if space_on:
+        reason = "按四维综合分排序（空间分进入排名，盲测不再只否决）"
     return {
         "id": picked["id"],
         "label": picked.get("label") or picked["id"],
         "kind": picked.get("kind"),
+        "total": total,
         "reason": reason,
         "candidates": notes,
         "by_kind": by_kind,
-        "gate": gate_for_json(g),
+        "score": score_cfg_for_json(cfg),
     }
 
 
@@ -777,7 +556,7 @@ def legacy_sweep_reason(root: Path) -> str | None:
 
 def summarize_sweep(
     sweep_dir: str | Path,
-    gate: dict[str, Any] | None = None,
+    score: dict[str, Any] | None = None,
     cell_ids: Iterable[str] | None = None,
 ) -> dict[str, Any]:
     root = Path(sweep_dir)
@@ -791,7 +570,7 @@ def summarize_sweep(
     check = year_range_set(win["check_start"], win["check_end"])
     run = year_range_set(win["year_start"], win["year_end"])
     tune_stocks, holdout_stocks = _load_asset_lists(root)
-    gate_used = load_gate_from_sweep(root, override=gate)
+    score_used = load_score_from_sweep(root, override=score)
     spec = _load_spec_json(root)
     want = _wanted_cell_ids(spec, cell_ids)
     cells: list[dict[str, Any]] = []
@@ -815,14 +594,14 @@ def summarize_sweep(
             )
         )
     attach_deltas(cells)
-    rec = pick_recommend(cells, gate=gate_used)
+    rec = pick_recommend(cells, score=score_used)
     out = {
         "sweep": str(spec.get("sweep") or root.name),
         "sweep_dir": str(root),
         "n_cells": len(cells),
         "cells": cells,
         "recommend": rec,
-        "gate": gate_for_json(gate_used),
+        "score": score_cfg_for_json(score_used),
         "note": "MAE 反事实不得写入推荐；默认不改 config / 不 deploy",
     }
     if tune_stocks or holdout_stocks:
@@ -845,23 +624,31 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="local_bt 网格 summarize")
     ap.add_argument("--sweep-dir", required=True, help="report/grid/<sweep> 目录")
     ap.add_argument(
+        "--score-json",
+        default="",
+        help="覆盖评分配置 JSON 文件或内联对象（重算推荐）",
+    )
+    ap.add_argument(
         "--gate-json",
         default="",
-        help="覆盖过门配置 JSON 文件或内联 JSON 对象",
+        help="已忽略：过门配置不再参与推荐（请用 --score-json）",
     )
     args = ap.parse_args()
-    gate_override = None
-    raw_gate = str(args.gate_json or "").strip()
-    if raw_gate:
-        p = Path(raw_gate)
+    if str(args.gate_json or "").strip():
+        print("WARN --gate-json 已忽略，请用 --score-json", flush=True)
+    score_override = None
+    raw_score = str(args.score_json or "").strip()
+    if raw_score:
+        p = Path(raw_score)
         if p.is_file():
-            gate_override = json.loads(p.read_text(encoding="utf-8"))
+            score_override = json.loads(p.read_text(encoding="utf-8"))
         else:
-            gate_override = json.loads(raw_gate)
-    out = summarize_sweep(args.sweep_dir, gate=gate_override)
+            score_override = json.loads(raw_score)
+        score_override = validate_score(score_override)
+    out = summarize_sweep(args.sweep_dir, score=score_override)
     rec = out.get("recommend") or {}
     print("wrote", out.get("summary_path"))
-    print("recommend", rec.get("id"), rec.get("reason"))
+    print("recommend", rec.get("id"), rec.get("total"), rec.get("reason"))
 
 
 if __name__ == "__main__":

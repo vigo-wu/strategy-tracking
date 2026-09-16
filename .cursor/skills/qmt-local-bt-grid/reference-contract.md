@@ -16,8 +16,8 @@
    - 人读字段是启用叶子的点路径（如 `atr_stop.k=`、`keltner_vol.vol_n=`、`ema.1d.trend=`），由 `_recipe_log_kv` 展开；卸下叶子不打。
    - 该格 `overrides.factor_params` 且叶子已启用时，参数指纹预检再核对应路径；`trail_stop.tiers` 用 compact JSON。未启用叶子的覆盖只走 `recipe=`。启用集合读不到则字段级跳过，只核 `recipe=`。
 4. **主样本 walk**：默认 config `BOOK_STOCKS` 一段 `run_book_backtest`（`year_start0101`–`year_end1231`）。`asset_split.mode=random_from_csv` 时调参 / 盲测 **各一段**（名单写入 `freeze.json` / `spec.json`；CSV 仍用 `csv_for`）。禁止 stock×年独立 10 万账户，禁止 `tune∪holdout` 同一钱包。
-5. **空间隔离（可选）**：`asset_split` 见 skill 示例 `stop_loss_space.json`。选参主 KPI 仅 tune 股；holdout × 验收年复用 `gate` 否决（无覆盖不得过门）。
-6. **过门 `gate`**：绝对合格线（可逐项禁用）+ 可选相对 base + 可选卡玛同向；指标用 `windows.check.*`；排序用验收期卡玛 Δ。写入 spec/freeze/summary；只汇总可 `--gate-json` / 侧栏覆盖。
+5. **空间隔离（可选）**：`asset_split` 见 skill 示例 `stop_loss_space.json`。主列盈亏仍展示 tune 股；空间分用全区间夏普比进入排名（盲测不再只否决）。某格缺盲测窗则空间维 0 分，不摊权。
+6. **`score`**：写入 spec/freeze/summary。侧栏是评分维配置；只汇总按 `score` 重算推荐。`--score-json` 覆盖只汇总。续跑读磁盘 freeze/spec.`score`。旧 spec `gate` 残留可忽略（`--gate-json` WARN 后丢弃）。
 
 ## 覆盖值形态
 
@@ -68,6 +68,7 @@ JSON 可序列化。元组在 JSON 里用数组；`null` = Python `None`。
 - 几何年化 \((E_{end}/E_{start})^{1/n}-1\)，\(n=\) 窗内日历年数（空年也算）
 - 主表 `sum_pnl` / `is_pnl` / `oos_pnl` = 对应窗账户盈亏 \(E_{end}-E_{start}\)
 - 权益 = 预算 + 已实现盈亏台阶（与 robust 相同，不承诺全日盯市）
+- 推荐：`pick_recommend` 按四维综合分排序（`grid_score.score_cell`，读取 `score` 配置）；`candidates[]` 带 `s_def` / `s_str` / `s_res` / `s_gen` / `total`。无空间隔离时 `s_gen` 为 null 且权重摊到另三维。`summary.score` 写本次评分配置。
 
 年份窗口读该 sweep 的 `spec.json`。若目录仍是旧 `local_bt_{code}_{SZ|SH}_{year}_{MA}.txt`，直接报错要求重跑。
 

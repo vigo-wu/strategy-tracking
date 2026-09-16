@@ -63,7 +63,8 @@ from grid_progress import (
     worker_definitely_dead,
     worker_is_alive,
 )
-from grid_gate import EPS_GATE, default_gate, validate_gate  # noqa: E402  # path via grid_run
+from grid_score import default_score, score_cell, validate_score  # noqa: E402
+from summarize import pick_recommend  # noqa: E402
 from grid_spec import (
     YEAR_WINDOW_DEFAULTS,
     YEAR_WINDOW_KEYS,
@@ -225,60 +226,48 @@ def _ensure_state() -> None:
     ss.setdefault("grid_eligible_n", 0)
     ss.setdefault("grid_reshuffle", False)
     ss.setdefault("grid_full_span", False)
-    dg = default_gate()
-    ss.setdefault("grid_gate_relative", bool(dg["relative_to_base"]))
-    ss.setdefault("grid_gate_calmar_same_sign", bool(dg["calmar_same_sign"]))
-    ss.setdefault("grid_gate_calmar_en", bool(dg["calmar"]["enabled"]))
-    ss.setdefault("grid_gate_calmar_min", float(dg["calmar"]["min"]))
-    ss.setdefault("grid_gate_max_dd_en", bool(dg["max_dd"]["enabled"]))
-    ss.setdefault("grid_gate_max_dd_pct", abs(float(dg["max_dd"]["floor"])) * 100.0)
-    ss.setdefault("grid_gate_oos_sharpe_en", bool(dg["oos_sharpe"]["enabled"]))
-    ss.setdefault("grid_gate_oos_sharpe_min", float(dg["oos_sharpe"]["min"]))
-    ss.setdefault("grid_gate_n_trades_en", bool(dg["n_trades"]["enabled"]))
-    ss.setdefault("grid_gate_n_trades_min", int(dg["n_trades"]["min"]))
-    ss.setdefault("grid_gate_n_trades_vs_base", float(dg["n_trades"]["vs_base_ratio"]))
-    ss.setdefault("grid_gate_win_rate_en", bool(dg["win_rate"]["enabled"]))
-    ss.setdefault("grid_gate_win_rate_min", float(dg["win_rate"]["min"]))
-    ss.setdefault("grid_gate_pf_en", bool(dg["profit_factor"]["enabled"]))
-    ss.setdefault("grid_gate_pf_min", float(dg["profit_factor"]["min"]))
-    ss.setdefault("grid_sort_metric", "夏普")
+    ds = default_score()
+    ss.setdefault("grid_score_w_def", float(ds["w_def"]) * 100.0)
+    ss.setdefault("grid_score_w_str", float(ds["w_str"]) * 100.0)
+    ss.setdefault("grid_score_w_res", float(ds["w_res"]) * 100.0)
+    ss.setdefault("grid_score_w_gen", float(ds["w_gen"]) * 100.0)
+    ss.setdefault("grid_score_dd_cap_pct", float(ds["dd_cap"]) * 100.0)
+    ss.setdefault("grid_score_factor_target", float(ds["factor_target"]))
+    ss.setdefault("grid_score_pf_cap", float(ds["pf_cap"]))
+    ss.setdefault("grid_score_sharpe_target", float(ds["sharpe_target"]))
+    ss.setdefault("grid_score_n_trades_floor", int(ds["n_trades_floor"]))
+    ss.setdefault("grid_score_n_trades_full", int(ds["n_trades_full"]))
+    ss.setdefault("grid_sort_metric", "总分")
     ss.setdefault("grid_sort_dir", "降")
-    ss.setdefault("grid_sort_metric_prev", "夏普")
+    ss.setdefault("grid_sort_metric_prev", "总分")
+    ss.setdefault(_DETAIL_PAGE_SIZE_KEY, _DETAIL_PAGE_SIZE_DEFAULT)
+    ss.setdefault(_DETAIL_PAGE_KEY, 1)
+    ss.setdefault(_DETAIL_PAGE_TOKEN_KEY, "")
 
 
-def _gate_from_state() -> dict[str, Any]:
-    """从侧栏读 gate；勿在 widget 实例化后回写同名 session 键。"""
+def _score_from_state() -> dict[str, Any]:
+    """从侧栏读评分配置；勿在 widget 实例化后回写同名 session 键。"""
     ss = st.session_state
     raw = {
-        "relative_to_base": bool(ss.get("grid_gate_relative", False)),
-        "calmar_same_sign": bool(ss.get("grid_gate_calmar_same_sign", False)),
-        "calmar": {
-            "enabled": bool(ss.get("grid_gate_calmar_en", False)),
-            "min": float(ss.get("grid_gate_calmar_min") or 1.5),
-        },
-        "max_dd": {
-            "enabled": bool(ss.get("grid_gate_max_dd_en", True)),
-            "floor": -abs(float(ss.get("grid_gate_max_dd_pct") or 10.0)) / 100.0,
-        },
-        "oos_sharpe": {
-            "enabled": bool(ss.get("grid_gate_oos_sharpe_en", True)),
-            "min": float(ss.get("grid_gate_oos_sharpe_min") or 0.8),
-        },
-        "n_trades": {
-            "enabled": bool(ss.get("grid_gate_n_trades_en", False)),
-            "min": int(ss.get("grid_gate_n_trades_min") or 1),
-            "vs_base_ratio": float(ss.get("grid_gate_n_trades_vs_base") or 0.5),
-        },
-        "win_rate": {
-            "enabled": bool(ss.get("grid_gate_win_rate_en", True)),
-            "min": float(ss.get("grid_gate_win_rate_min") or 45.0),
-        },
-        "profit_factor": {
-            "enabled": bool(ss.get("grid_gate_pf_en", True)),
-            "min": float(ss.get("grid_gate_pf_min") or 1.5),
-        },
+        "w_def": float(ss.get("grid_score_w_def") or 30.0),
+        "w_str": float(ss.get("grid_score_w_str") or 25.0),
+        "w_res": float(ss.get("grid_score_w_res") or 25.0),
+        "w_gen": float(ss.get("grid_score_w_gen") or 20.0),
+        "dd_cap": float(ss.get("grid_score_dd_cap_pct") or 35.0),
+        "factor_target": float(ss.get("grid_score_factor_target") or 0.5),
+        "pf_cap": float(ss.get("grid_score_pf_cap") or 5.0),
+        "sharpe_target": float(ss.get("grid_score_sharpe_target") or 0.5),
+        "n_trades_floor": float(ss.get("grid_score_n_trades_floor") or 30.0),
+        "n_trades_full": float(ss.get("grid_score_n_trades_full") or 80.0),
     }
-    return validate_gate(raw)
+    return validate_score(raw)
+
+
+def _score_cfg_for_view() -> dict[str, Any]:
+    try:
+        return _score_from_state()
+    except ValueError:
+        return default_score()
 
 
 def _asset_split_from_state() -> dict[str, Any]:
@@ -330,7 +319,7 @@ def _current_spec(defaults: dict[str, Any]) -> dict[str, Any]:
         check_start=int(st.session_state.get("grid_check_start") or YEAR_WINDOW_DEFAULTS["check_start"]),
         check_end=int(st.session_state.get("grid_check_end") or YEAR_WINDOW_DEFAULTS["check_end"]),
         asset_split=_asset_split_from_state(),
-        gate=_gate_from_state(),
+        score=_score_cfg_for_view(),
     )
 
 
@@ -427,7 +416,7 @@ def render_grid_sidebar() -> None:
     if st.session_state.get("grid_asset_split"):
         st.caption(
             "宇宙：`%s` · 抽 N 只调参，再从剩余抽 N 只盲测（不重叠）。"
-            "盲测只否决不选参。改数量或勾选后须再点抽取，否则开跑沿用已抽名单。"
+            "盲测空间分进入排名。改数量或勾选后须再点抽取，否则开跑沿用已抽名单。"
             % DEFAULT_UNIVERSE_DIR
         )
         st.number_input(
@@ -461,121 +450,121 @@ def render_grid_sidebar() -> None:
             with st.expander("盲测标的", expanded=False):
                 st.code(", ".join(st.session_state.get("grid_holdout_stocks") or []))
 
-    with st.expander("过门合格线", expanded=False):
-        st.caption(
-            "数字未改（盈亏比 1.5 / 回撤 10% / 卡玛 0.8）。口径已是单账户组合：须用新跑的 ★现行格看线，旧 sweep 作废。"
+    with st.expander("评分维度", expanded=False):
+        st.caption("改这里再点「只汇总」会重算推荐与主表分数，不必重跑。")
+        w1, w2 = st.columns(2)
+        with w1:
+            st.number_input(
+                "防御权重%",
+                min_value=0.0,
+                max_value=100.0,
+                step=1.0,
+                format="%.0f",
+                key="grid_score_w_def",
+                disabled=busy,
+                persist_state="session",
+            )
+            st.number_input(
+                "复原权重%",
+                min_value=0.0,
+                max_value=100.0,
+                step=1.0,
+                format="%.0f",
+                key="grid_score_w_res",
+                disabled=busy,
+                persist_state="session",
+            )
+        with w2:
+            st.number_input(
+                "结构权重%",
+                min_value=0.0,
+                max_value=100.0,
+                step=1.0,
+                format="%.0f",
+                key="grid_score_w_str",
+                disabled=busy,
+                persist_state="session",
+            )
+            st.number_input(
+                "泛化权重%",
+                min_value=0.0,
+                max_value=100.0,
+                step=1.0,
+                format="%.0f",
+                key="grid_score_w_gen",
+                disabled=busy,
+                persist_state="session",
+            )
+        w_sum = (
+            float(st.session_state.get("grid_score_w_def") or 0.0)
+            + float(st.session_state.get("grid_score_w_str") or 0.0)
+            + float(st.session_state.get("grid_score_w_res") or 0.0)
+            + float(st.session_state.get("grid_score_w_gen") or 0.0)
         )
-        st.checkbox(
-            "相对 base 不劣",
-            key="grid_gate_relative",
+        st.caption("当前权重和 %.0f%%（打分时归一成 1；无盲测摊掉泛化）" % w_sum)
+        st.number_input(
+            "回撤 0 分线 %",
+            min_value=0.1,
+            max_value=100.0,
+            step=1.0,
+            format="%.1f",
+            key="grid_score_dd_cap_pct",
             disabled=busy,
             persist_state="session",
-        )
-        st.checkbox(
-            "卡玛同向（调参/验收）",
-            key="grid_gate_calmar_same_sign",
-            disabled=busy,
-            persist_state="session",
-        )
-        if not any(cell_is_current(c) for c in (st.session_state.get("grid_cells") or [])):
-            st.caption("当前预览无 ★现行 格：相对门 / 卡玛同向不生效。")
-
-        def _gate_row(
-            label: str,
-            en_key: str,
-            val_key: str,
-            *,
-            min_v: float,
-            max_v: float,
-            step: float,
-            fmt: str = "%.2f",
-            is_int: bool = False,
-        ) -> None:
-            c_en, c_val = st.columns([1, 2])
-            with c_en:
-                st.checkbox(label, key=en_key, disabled=busy, persist_state="session")
-            en = bool(st.session_state.get(en_key))
-            with c_val:
-                if is_int:
-                    st.number_input(
-                        "阈值",
-                        min_value=int(min_v),
-                        max_value=int(max_v),
-                        step=int(step),
-                        key=val_key,
-                        disabled=busy or not en,
-                        persist_state="session",
-                        label_visibility="collapsed",
-                    )
-                else:
-                    st.number_input(
-                        "阈值",
-                        min_value=float(min_v),
-                        max_value=float(max_v),
-                        step=float(step),
-                        format=fmt,
-                        key=val_key,
-                        disabled=busy or not en,
-                        persist_state="session",
-                        label_visibility="collapsed",
-                    )
-
-        _gate_row("卡玛 ≥", "grid_gate_calmar_en", "grid_gate_calmar_min", min_v=0.0, max_v=50.0, step=0.1)
-        _gate_row(
-            "回撤% ≤",
-            "grid_gate_max_dd_en",
-            "grid_gate_max_dd_pct",
-            min_v=0.0,
-            max_v=100.0,
-            step=0.5,
-            fmt="%.1f",
-        )
-        _gate_row(
-            "夏普 ≥",
-            "grid_gate_oos_sharpe_en",
-            "grid_gate_oos_sharpe_min",
-            min_v=-5.0,
-            max_v=10.0,
-            step=0.1,
-        )
-        _gate_row(
-            "笔数 ≥",
-            "grid_gate_n_trades_en",
-            "grid_gate_n_trades_min",
-            min_v=0,
-            max_v=10000,
-            step=1,
-            is_int=True,
         )
         st.number_input(
-            "笔数相对 base 比例",
-            min_value=0.0,
-            max_value=2.0,
+            "获利因子目标",
+            min_value=0.01,
+            max_value=10.0,
             step=0.05,
             format="%.2f",
-            key="grid_gate_n_trades_vs_base",
-            disabled=busy or not bool(st.session_state.get("grid_gate_n_trades_en")),
+            key="grid_score_factor_target",
+            disabled=busy,
             persist_state="session",
         )
-        _gate_row(
-            "胜率% ≥",
-            "grid_gate_win_rate_en",
-            "grid_gate_win_rate_min",
-            min_v=0.0,
-            max_v=100.0,
-            step=1.0,
-            fmt="%.1f",
+        st.number_input(
+            "盈亏比封顶",
+            min_value=0.1,
+            max_value=99.0,
+            step=0.5,
+            format="%.1f",
+            key="grid_score_pf_cap",
+            disabled=busy,
+            persist_state="session",
         )
-        _gate_row(
-            "盈亏比 ≥",
-            "grid_gate_pf_en",
-            "grid_gate_pf_min",
-            min_v=0.0,
-            max_v=99.0,
-            step=0.1,
+        st.number_input(
+            "夏普目标",
+            min_value=0.01,
+            max_value=5.0,
+            step=0.05,
+            format="%.2f",
+            key="grid_score_sharpe_target",
+            disabled=busy,
+            persist_state="session",
         )
+        n1, n2 = st.columns(2)
+        with n1:
+            st.number_input(
+                "笔数 0 分线",
+                min_value=0,
+                max_value=10000,
+                step=1,
+                key="grid_score_n_trades_floor",
+                disabled=busy,
+                persist_state="session",
+            )
+        with n2:
+            st.number_input(
+                "笔数满分线",
+                min_value=1,
+                max_value=10000,
+                step=1,
+                key="grid_score_n_trades_full",
+                disabled=busy,
+                persist_state="session",
+            )
         try:
-            _gate_from_state()
+            _score_from_state()
         except ValueError as e:
             st.error(str(e))
 
@@ -862,6 +851,7 @@ def _render_action_bar(defaults: dict[str, Any], busy: bool) -> None:
             key="grid_sum_main",
             on_click=_mark_summarize,
         )
+    st.caption("只汇总按窗 KPI 重算四维综合分；侧栏过门线只着色、不改推荐。")
     if prog:
         cap = progress_caption(prog)
         if cap:
@@ -1112,7 +1102,7 @@ def _handle_actions(defaults: dict[str, Any]) -> None:
                     for c in (spec.get("cells") or [])
                     if str(c.get("id") or "").strip()
                 ]
-            out = summarize_only(dest, gate=_gate_from_state(), cell_ids=want or None)
+            out = summarize_only(dest, score=_score_from_state(), cell_ids=want or None)
             st.session_state["grid_summary"] = out
             st.success("已汇总")
         except Exception as e:
@@ -1469,7 +1459,14 @@ _DETAIL_METRIC_COLS = (
     "几何年化%",
     "账户盈亏",
 )
+_SORT_TOTAL = "总分"
+_SORT_OPTIONS = (_SORT_TOTAL,) + _DETAIL_METRIC_COLS
 _DETAIL_GROUP_SIZE = len(_DETAIL_PERIODS)
+_DETAIL_PAGE_SIZES = (5, 10, 20)
+_DETAIL_PAGE_SIZE_DEFAULT = 5
+_DETAIL_PAGE_KEY = "grid_detail_page"
+_DETAIL_PAGE_SIZE_KEY = "grid_detail_page_size"
+_DETAIL_PAGE_TOKEN_KEY = "grid_detail_page_token"
 
 
 def _detail_window_rows(
@@ -1544,15 +1541,6 @@ def _cell_column_mean(chunk: list[dict[str, Any]], metric: str) -> float | None:
     return sum(vals) / float(len(vals))
 
 
-_COMPOSITE_METRICS: tuple[tuple[str, bool], ...] = (
-    ("夏普", True),
-    ("几何年化%", True),
-    ("回撤%", False),
-    ("盈亏比", True),
-)
-_N_DIFFS_MISSING = 10**9
-
-
 def _detail_sort_group_size(rows: list[dict[str, Any]]) -> int:
     if _detail_table_has_basket(rows):
         return _DETAIL_GROUP_SIZE * 2
@@ -1566,107 +1554,61 @@ def _iter_detail_groups(rows: list[dict[str, Any]]) -> list[list[dict[str, Any]]
     return [rows[i : i + group_size] for i in range(0, len(rows), group_size)]
 
 
-def _metric_ranks(values: list[float | None], *, descending: bool) -> list[float]:
-    """有数的排 1..k（同值平均名次）；全空该维记 k+1。"""
-    present = [i for i, v in enumerate(values) if v is not None]
-    k = len(present)
-    worst = float(k + 1)
-    ranks = [worst] * len(values)
-    if k == 0:
-        return ranks
-    ordered = sorted(
-        present,
-        key=lambda i: float(values[i]),  # type: ignore[arg-type]
-        reverse=descending,
-    )
-    i = 0
-    while i < k:
-        j = i + 1
-        pivot = values[ordered[i]]
-        while j < k and values[ordered[j]] == pivot:
-            j += 1
-        avg = ((i + 1) + j) / 2.0
-        for t in range(i, j):
-            ranks[ordered[t]] = avg
-        i = j
-    return ranks
+def _coerce_detail_page_size(raw: Any) -> int:
+    try:
+        size = int(raw)
+    except (TypeError, ValueError):
+        return _DETAIL_PAGE_SIZE_DEFAULT
+    if size in _DETAIL_PAGE_SIZES:
+        return size
+    return _DETAIL_PAGE_SIZE_DEFAULT
 
 
-def _composite_n_diffs_map(cells: list[dict[str, Any]]) -> dict[str, int]:
-    out: dict[str, int] = {}
-    for cell in cells:
-        cid = str(cell.get("id") or "")
-        if not cid:
-            continue
-        if cell_is_current(cell):
-            out[cid] = 0
-            continue
-        raw = cell.get("n_diffs")
-        if raw is None:
-            out[cid] = _N_DIFFS_MISSING
-            continue
-        try:
-            out[cid] = int(raw)
-        except (TypeError, ValueError):
-            out[cid] = _N_DIFFS_MISSING
+def _detail_page_count(n_groups: int, size: int) -> int:
+    if n_groups <= 0:
+        return 1
+    step = size if size > 0 else _DETAIL_PAGE_SIZE_DEFAULT
+    return max(1, (n_groups + step - 1) // step)
+
+
+def _slice_detail_page(
+    groups: list[list[dict[str, Any]]],
+    page: int,
+    size: int,
+) -> list[dict[str, Any]]:
+    """按整格切片；page 为 1-based。"""
+    if not groups:
+        return []
+    step = size if size > 0 else _DETAIL_PAGE_SIZE_DEFAULT
+    n_pages = _detail_page_count(len(groups), step)
+    try:
+        idx = int(page)
+    except (TypeError, ValueError):
+        idx = 1
+    idx = min(max(idx, 1), n_pages)
+    start = (idx - 1) * step
+    out: list[dict[str, Any]] = []
+    for chunk in groups[start : start + step]:
+        out.extend(chunk)
     return out
 
 
-def _pick_composite_recommend(
-    groups: list[list[dict[str, Any]]],
-    n_diffs_by_id: Mapping[str, int] | None = None,
-) -> dict[str, Any] | None:
-    """不过门：四维组内名次等权平均。全空不参选。"""
-    diffs = n_diffs_by_id or {}
-    records: list[dict[str, Any]] = []
-    for idx, chunk in enumerate(groups):
-        if not chunk:
-            continue
-        means = {
-            metric: _cell_column_mean(chunk, metric) for metric, _desc in _COMPOSITE_METRICS
-        }
-        if all(v is None for v in means.values()):
-            continue
-        records.append(
-            {
-                "idx": idx,
-                "id": str(chunk[0].get("id") or ""),
-                "label": chunk[0].get("label"),
-                "means": means,
-            }
-        )
-    if not records:
-        return None
-    n_metric = len(_COMPOSITE_METRICS)
-    rank_sum = [0.0] * len(records)
-    for metric, desc in _COMPOSITE_METRICS:
-        vals = [rec["means"][metric] for rec in records]
-        for i, rk in enumerate(_metric_ranks(vals, descending=desc)):
-            rank_sum[i] += rk
-    best_i = 0
-    best_key: tuple[float, int, int] | None = None
-    for i, rec in enumerate(records):
-        mean_rank = rank_sum[i] / float(n_metric)
-        raw_nd = diffs.get(rec["id"], _N_DIFFS_MISSING)
-        try:
-            nd = int(raw_nd)
-        except (TypeError, ValueError):
-            nd = _N_DIFFS_MISSING
-        key = (mean_rank, nd, int(rec["idx"]))
-        if best_key is None or key < best_key:
-            best_key = key
-            best_i = i
-    picked = records[best_i]
-    means = picked["means"]
-    return {
-        "id": picked["id"],
-        "label": picked["label"],
-        "mean_rank": rank_sum[best_i] / float(n_metric),
-        "夏普": means["夏普"],
-        "几何年化%": means["几何年化%"],
-        "回撤%": means["回撤%"],
-        "盈亏比": means["盈亏比"],
-    }
+def _detail_page_token() -> str:
+    ss = st.session_state
+    return "%s|%s|%s" % (
+        ss.get("grid_sweep") or "",
+        ss.get("grid_sort_metric") or "",
+        ss.get("grid_sort_dir") or "",
+    )
+
+
+def _reset_detail_page_if_context_changed() -> None:
+    """换 sweep / 表序时回到第 1 页；须在 pagination 控件实例化前写键。"""
+    ss = st.session_state
+    token = _detail_page_token()
+    if ss.get(_DETAIL_PAGE_TOKEN_KEY) != token:
+        ss[_DETAIL_PAGE_TOKEN_KEY] = token
+        ss[_DETAIL_PAGE_KEY] = 1
 
 
 def _sort_detail_groups(
@@ -1721,14 +1663,58 @@ def _reorder_main_rows(
     return out
 
 
-_DETAIL_TONE_COLS = ("夏普", "卡玛", "胜率%", "盈亏比", "几何年化%", "账户盈亏")
+def _sort_main_by_total(
+    rows: list[dict[str, Any]],
+    *,
+    descending: bool,
+) -> list[dict[str, Any]]:
+    def _key(row: dict[str, Any]) -> tuple[int, float]:
+        raw = row.get("总分")
+        if raw is None:
+            return (1, 0.0)
+        try:
+            v = float(raw)
+        except (TypeError, ValueError):
+            return (1, 0.0)
+        return (0, -v if descending else v)
+
+    return sorted(rows, key=_key)
+
+
+def _reorder_detail_to_main(
+    detail_rows: list[dict[str, Any]],
+    main_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """按主表 id 顺序重排明细组。"""
+    if not detail_rows:
+        return []
+    groups = _iter_detail_groups(detail_rows)
+    by_id: dict[str, list[dict[str, Any]]] = {}
+    for chunk in groups:
+        cid = str(chunk[0].get("id") or "") if chunk else ""
+        if cid and cid not in by_id:
+            by_id[cid] = chunk
+    out: list[dict[str, Any]] = []
+    used: set[str] = set()
+    for row in main_rows:
+        cid = str(row.get("id") or "")
+        chunk = by_id.get(cid)
+        if not chunk:
+            continue
+        out.extend(chunk)
+        used.add(cid)
+    for chunk in groups:
+        cid = str(chunk[0].get("id") or "") if chunk else ""
+        if cid in used:
+            continue
+        out.extend(chunk)
+        used.add(cid)
+    return out
+
+
+_DETAIL_TONE_COLS = ("夏普", "卡玛", "胜率%", "盈亏比", "几何年化%", "账户盈亏", "回撤%", "笔数")
 _DETAIL_PASS_COLOR = "#e74c3c"
-_DETAIL_TONE_GATE_KEYS = {
-    "夏普": "oos_sharpe",
-    "卡玛": "calmar",
-    "胜率%": "win_rate",
-    "盈亏比": "profit_factor",
-}
+_EPS_TONE = 1e-6
 _DETAIL_LABEL_WIDTH = "10em"
 
 
@@ -1750,35 +1736,34 @@ def _fmt_detail_metric(col: str, val: Any) -> str:
     return "%.2f" % x
 
 
-def _detail_metric_line(col: str, gate: dict[str, Any] | None) -> float | None:
-    """着色比较线；非着色列返回 None。对应门关闭（或无门）时比 0。"""
-    if col not in _DETAIL_TONE_COLS:
-        return None
-    key = _DETAIL_TONE_GATE_KEYS.get(col)
-    if not key:
-        return 0.0
-    g = gate or {}
-    rule = g.get(key) if isinstance(g.get(key), dict) else {}
-    if not rule.get("enabled"):
-        return 0.0
-    try:
-        return float(rule.get("min") or 0.0)
-    except (TypeError, ValueError):
-        return 0.0
-
-
 def _detail_metric_tone(
-    col: str, val: Any, gate: dict[str, Any] | None
+    col: str, val: Any, score: dict[str, Any] | None
 ) -> str | None:
     """过线返回 pass；未过线与缺值返回 None（保持默认字色）。"""
-    line = _detail_metric_line(col, gate)
-    if line is None or val is None:
+    if col not in _DETAIL_TONE_COLS or val is None:
         return None
     try:
         x = float(val)
     except (TypeError, ValueError):
         return None
-    if x + EPS_GATE >= line:
+    cfg = score or {}
+    if col == "回撤%":
+        try:
+            cap = float(cfg.get("dd_cap") or 0.35) * 100.0
+        except (TypeError, ValueError):
+            cap = 35.0
+        if x <= cap + _EPS_TONE:
+            return "pass"
+        return None
+    if col == "笔数":
+        try:
+            floor = float(cfg.get("n_trades_floor") or 30.0)
+        except (TypeError, ValueError):
+            floor = 30.0
+        if x + _EPS_TONE >= floor:
+            return "pass"
+        return None
+    if x + _EPS_TONE >= 0.0:
         return "pass"
     return None
 
@@ -1840,7 +1825,7 @@ def _detail_table_has_basket(rows: list[dict[str, Any]]) -> bool:
 
 def _detail_window_table_html(
     rows: list[dict[str, Any]],
-    gate: dict[str, Any] | None = None,
+    score: dict[str, Any] | None = None,
 ) -> str:
     pal = _detail_table_palette()
     cell_base = (
@@ -1939,7 +1924,7 @@ def _detail_window_table_html(
             )
             for col in _DETAIL_METRIC_COLS:
                 extra = ""
-                if _detail_metric_tone(col, row.get(col), gate) == "pass":
+                if _detail_metric_tone(col, row.get(col), score) == "pass":
                     extra = "color:%s;" % _DETAIL_PASS_COLOR
                 metric_style = (
                     "%s%stext-align:right;font-variant-numeric:tabular-nums;%s"
@@ -1957,7 +1942,38 @@ def _detail_window_table_html(
 
 def _render_detail_window_table(rows: list[dict[str, Any]], caption: str) -> None:
     st.caption(caption)
-    body = _detail_window_table_html(rows, gate=_gate_from_state())
+    groups = _iter_detail_groups(rows)
+    n_groups = len(groups)
+    _reset_detail_page_if_context_changed()
+    size = _DETAIL_PAGE_SIZE_DEFAULT
+    page = 1
+    if n_groups > _DETAIL_PAGE_SIZE_DEFAULT:
+        c_size, c_page = st.columns([1.4, 2.6], vertical_alignment="bottom")
+        with c_size:
+            picked = st.segmented_control(
+                "每页格数",
+                options=list(_DETAIL_PAGE_SIZES),
+                key=_DETAIL_PAGE_SIZE_KEY,
+                required=True,
+                persist_state="session",
+            )
+            size = _coerce_detail_page_size(
+                picked if picked is not None else st.session_state.get(_DETAIL_PAGE_SIZE_KEY)
+            )
+        n_pages = _detail_page_count(n_groups, size)
+        with c_page:
+            if n_pages > 1:
+                page = st.pagination(
+                    n_pages,
+                    key=_DETAIL_PAGE_KEY,
+                    persist_state="session",
+                    width="stretch",
+                )
+            start_i = (int(page) - 1) * size + 1
+            end_i = min(int(page) * size, n_groups)
+            st.caption("本页格子 %d–%d / 共 %d" % (start_i, end_i, n_groups))
+    page_rows = _slice_detail_page(groups, page, size)
+    body = _detail_window_table_html(page_rows, score=_score_cfg_for_view())
     try:
         st.html(body, width="stretch")
     except TypeError:
@@ -1996,98 +2012,6 @@ def _style_current_ids(ids: set[str]):
     return _style
 
 
-def _fail_metric_token(msg: str) -> str:
-    s = str(msg or "")
-    for name in ("卡玛", "回撤", "夏普", "笔数", "胜率", "盈亏比", "覆盖"):
-        if name in s:
-            return name
-    if "同向" in s:
-        return "同向"
-    return s[:8] if s else ""
-
-
-def _group_gate_fails(fails: Any) -> dict[str, list[str]]:
-    """把 fails 拆成 验收 / 相对 / 同向 / 盲测，指标名去重保序。"""
-    out: dict[str, list[str]] = {
-        "验收": [],
-        "相对": [],
-        "同向": [],
-        "盲测": [],
-    }
-    if isinstance(fails, str) and fails.strip():
-        items = [x.strip() for x in fails.replace("；", ";").split(";") if x.strip()]
-    elif isinstance(fails, list):
-        items = [str(x) for x in fails if x]
-    else:
-        return out
-    seen: dict[str, set[str]] = {k: set() for k in out}
-
-    def add(bucket: str, token: str) -> None:
-        if not token or token in seen[bucket]:
-            return
-        seen[bucket].add(token)
-        out[bucket].append(token)
-
-    for raw in items:
-        s = str(raw)
-        tok = _fail_metric_token(s)
-        if "同向" in s:
-            add("同向", "异号" if "不同向" in s else tok)
-        elif s.startswith("盲测") or "盲测标的" in s:
-            add("盲测", tok)
-        elif "相对base" in s or "劣于base" in s or "无法比base" in s:
-            add("相对", tok)
-        else:
-            add("验收", tok)
-    return out
-
-
-def _fail_summary_compact(groups: dict[str, list[str]]) -> str:
-    parts: list[str] = []
-    for key, label in (("验收", "验"), ("相对", "相"), ("同向", "向"), ("盲测", "盲")):
-        toks = groups.get(key) or []
-        if not toks:
-            continue
-        parts.append("%s:%s" % (label, ",".join(toks)))
-    return " · ".join(parts)
-
-
-def _render_fail_detail(notes_by_id: dict[str, Any], cells: list[dict[str, Any]]) -> None:
-    rows: list[dict[str, Any]] = []
-    for cell in cells:
-        cid = cell.get("id")
-        note = notes_by_id.get(cid) or {}
-        fails = note.get("fails")
-        if not fails and note.get("fail"):
-            fails = note.get("fail")
-        groups = _group_gate_fails(fails)
-        if not any(groups.values()):
-            continue
-        rows.append(
-            {
-                "id": cid,
-                "label": cell.get("label"),
-                "验收绝对": " ".join(groups["验收"]) or "—",
-                "相对base": " ".join(groups["相对"]) or "—",
-                "同向": " ".join(groups["同向"]) or "—",
-                "盲测": " ".join(groups["盲测"]) or "—",
-                "全部": "；".join(str(x) for x in (fails if isinstance(fails, list) else [fails])),
-            }
-        )
-    if not rows:
-        return
-    with st.expander("未过明细（按门分类）", expanded=True):
-        st.caption("按验收绝对 / 相对 base / 同向 / 盲测拆开；全部原文不丢。主表只保留是否通过。")
-        st.dataframe(
-            pd.DataFrame(rows),
-            width="stretch",
-            hide_index=True,
-            column_config={
-                "全部": st.column_config.TextColumn("全部原文", width="large"),
-            },
-        )
-
-
 def _default_sort_dir(metric: str) -> str:
     return "升" if metric == "回撤%" else "降"
 
@@ -2096,9 +2020,9 @@ def _sync_sort_dir_on_metric_change() -> None:
     """切列时重置方向：回撤%→升，其余→降。同列不改，方便手调。"""
     ss = st.session_state
     raw = ss.get("grid_sort_metric")
-    metric = str(raw or "夏普")
-    if metric not in _DETAIL_METRIC_COLS:
-        metric = "夏普"
+    metric = str(raw or _SORT_TOTAL)
+    if metric not in _SORT_OPTIONS:
+        metric = _SORT_TOTAL
     if raw != metric:
         ss["grid_sort_metric"] = metric
     prev = ss.get("grid_sort_metric_prev")
@@ -2113,32 +2037,31 @@ def _render_result_sort_bar() -> tuple[str, bool]:
     with c1:
         picked = st.pills(
             "表序",
-            options=list(_DETAIL_METRIC_COLS),
+            options=list(_SORT_OPTIONS),
             selection_mode="single",
             key="grid_sort_metric",
         )
     with c2:
         st.radio("方向", ["降", "升"], horizontal=True, key="grid_sort_dir")
-    metric = str(picked or st.session_state.get("grid_sort_metric") or "夏普")
-    if metric not in _DETAIL_METRIC_COLS:
-        metric = "夏普"
+    metric = str(picked or st.session_state.get("grid_sort_metric") or _SORT_TOTAL)
+    if metric not in _SORT_OPTIONS:
+        metric = _SORT_TOTAL
     descending = str(st.session_state.get("grid_sort_dir") or "降") != "升"
-    st.caption(
-        "表序按 %s 综合均值 · %s（调参/盲测 × 各区间等权；缺窗跳过）"
-        % (metric, "降" if descending else "升")
-    )
+    if metric == _SORT_TOTAL:
+        st.caption("表序按格子总分 · %s" % ("降" if descending else "升"))
+    else:
+        st.caption(
+            "表序按 %s 综合均值 · %s（调参/盲测 × 各区间等权；缺窗跳过）"
+            % (metric, "降" if descending else "升")
+        )
     return metric, descending
 
 
-def _default_robust_cell_id(
-    cells: list[dict[str, Any]],
-    rec_id: str,
-    composite_id: str,
-) -> str:
+def _default_robust_cell_id(cells: list[dict[str, Any]], rec_id: str) -> str:
     ids = [str(c.get("id") or "").strip() for c in cells if str(c.get("id") or "").strip()]
-    for cand in (str(rec_id or "").strip(), str(composite_id or "").strip()):
-        if cand and cand in ids:
-            return cand
+    cand = str(rec_id or "").strip()
+    if cand and cand in ids:
+        return cand
     return ids[0] if ids else ""
 
 
@@ -2151,54 +2074,74 @@ def _summary_relpath(sum_path: Path) -> str:
         return str(sum_path)
 
 
+def _round_score(val: Any, nd: int = 2) -> float | None:
+    if val is None:
+        return None
+    try:
+        return round(float(val), nd)
+    except (TypeError, ValueError):
+        return None
+
+
+def _cell_score_note(
+    cell: dict[str, Any],
+    *,
+    space_on: bool,
+    cfg: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    book = (cell.get("samples") or {}).get("book") or {}
+    sc = score_cell(book, space_on=space_on, cfg=cfg)
+    sc["label"] = cell.get("label")
+    return sc
+
+
 def _render_results() -> None:
     summary = st.session_state.get("grid_summary")
     if not isinstance(summary, dict) or not summary.get("cells"):
         return
-    rec = summary.get("recommend") or {}
+    space = summary.get("asset_split") or {}
+    win = fill_year_windows(summary)
+    cells = list(summary.get("cells") or [])
+    space_on = bool(space.get("holdout_stocks") or space.get("tune_stocks"))
+    if not space_on:
+        space_on = any(
+            bool(((c.get("samples") or {}).get("book") or {}).get("holdout_windows"))
+            for c in cells
+        )
+    cfg = _score_cfg_for_view()
+    rec = pick_recommend(cells, score=cfg)
+    score_by_id: dict[str, dict[str, Any]] = {}
+    for cell in cells:
+        cid = cell.get("id")
+        score_by_id[cid] = _cell_score_note(cell, space_on=space_on, cfg=cfg)
     rec_id = str(rec.get("id") or "").strip()
     rec_reason = str(rec.get("reason") or "")
-    space = summary.get("asset_split") or {}
-    space_on = bool(space.get("holdout_stocks") or space.get("tune_stocks"))
-    win = fill_year_windows(summary)
-    notes = rec.get("candidates") or []
-    notes_by_id = {n.get("id"): n for n in notes if isinstance(n, dict)}
-    cells = list(summary.get("cells") or [])
+    rec_total = _round_score(rec.get("total"))
     main_rows: list[dict[str, Any]] = []
     current_ids: set[str] = set()
     detail_rows: list[dict[str, Any]] = []
     for cell in cells:
         b = (cell.get("samples") or {}).get("book") or {}
-        note = notes_by_id.get(cell.get("id")) or {}
-        fails = note.get("fails")
-        if not (isinstance(fails, list) and fails) and note.get("fail"):
-            fails = note.get("fail")
-        groups = _group_gate_fails(fails)
-        compact = _fail_summary_compact(groups)
         cid = cell.get("id")
-        chk_calmar = note.get("calmar")
-        if chk_calmar is None:
-            w_chk = (b.get("windows") or {}).get("check") or {}
-            chk_calmar = w_chk.get("calmar")
+        sc = score_by_id.get(cid) or {}
         main: dict[str, Any] = {
             "id": cid,
             "label": cell.get("label"),
+            "总分": _round_score(sc.get("total")),
+            "防御": _round_score(sc.get("s_def")),
+            "结构": _round_score(sc.get("s_str")),
+            "复原": _round_score(sc.get("s_res")),
+            "泛化": None if sc.get("s_gen") is None else _round_score(sc.get("s_gen")),
             "合计": _round_pnl(b.get("sum_pnl")),
             "调参期": _round_pnl(b.get("is_pnl")),
             "验收期": _round_pnl(b.get("oos_pnl")),
-            "验收卡玛": None if chk_calmar is None else round(float(chk_calmar), 3),
         }
         if cell_is_current(cell) and cid:
             current_ids.add(str(cid))
         if "corner_oos_pnl" in b:
             main["盲测盈亏"] = _round_pnl(b.get("corner_oos_pnl"))
-        main["是否通过"] = "否" if compact else "是"
         main_rows.append(main)
         detail_rows.extend(_stack_detail_window_rows(cell, b, space_on=space_on))
-    composite = _pick_composite_recommend(
-        _iter_detail_groups(detail_rows),
-        _composite_n_diffs_map(cells),
-    )
 
     st.subheader("选参结论")
     sweep_label = str(summary.get("sweep") or "").strip()
@@ -2209,18 +2152,15 @@ def _render_results() -> None:
     if prog and done_cell_ids(prog):
         batches = prog.get("batches") or []
         if any(isinstance(b, dict) and str(b.get("status") or "") != "done" for b in batches):
-            st.caption("未跑完：推荐只基于已完成组；★现行若尚未跑完，相对门会跳过。")
+            st.caption("未跑完：推荐只基于已完成组。")
     if rec_id:
-        st.success("过门推荐 **%s** · %s" % (rec.get("label") or rec_id, rec_reason))
-    else:
-        st.warning(rec_reason or "无格子过门")
-    if composite:
-        st.info(
-            "综合推荐 **%s** · 夏普/年化/回撤/盈亏比组内名次平均（不过门）"
-            % (composite.get("label") or composite.get("id") or "")
+        tot_txt = "—" if rec_total is None else "%.2f 分" % rec_total
+        st.success(
+            "综合推荐 **%s** · %s · %s"
+            % (rec.get("label") or rec_id, tot_txt, rec_reason)
         )
     else:
-        st.caption("无综合推荐（四项皆空）。")
+        st.warning(rec_reason or "无格子可评分")
     try:
         from robust_ui import ROBUST_MODE
         from ui_cache import UI_MODE_KEY
@@ -2237,9 +2177,7 @@ def _render_results() -> None:
             for c in cells
             if str(c.get("id") or "").strip()
         }
-        default_id = _default_robust_cell_id(
-            cells, rec_id, str((composite or {}).get("id") or "")
-        )
+        default_id = _default_robust_cell_id(cells, rec_id)
         cur = str(st.session_state.get("grid_robust_cell") or "").strip()
         if cell_ids and cur not in cell_ids:
             st.session_state["grid_robust_cell"] = default_id
@@ -2255,7 +2193,7 @@ def _render_results() -> None:
                 )
             with c2:
                 do_send = st.button("送入", type="primary", key="grid_to_robust")
-            st.caption("不过门；锁定该格 overrides 做随机组合。过门推荐仍只用于选参结论。")
+            st.caption("锁定该格 overrides 做随机组合。默认送入综合推荐格。")
             if do_send:
                 cid = str(picked or st.session_state.get("grid_robust_cell") or "").strip()
                 if cid in label_by_id:
@@ -2269,16 +2207,18 @@ def _render_results() -> None:
         pass
     if space_on:
         st.caption(
-            "空间隔离：主列盈亏=调参标的（展示）；过门=侧栏绝对合格线；盲测复用同一 gate 否决。"
+            "空间隔离：主列盈亏=调参标的（展示）；空间分进入排名，盲测不再只否决。默认不改 config / 不 deploy。"
         )
     else:
-        st.caption(
-            "过门=侧栏已启用的绝对合格线；推荐看验收期卡玛。默认不改 config / 不 deploy。"
-        )
+        st.caption("推荐按四维综合分（无盲测时空间维权重摊到另三维）。默认不改 config / 不 deploy。")
 
     sort_metric, sort_desc = _render_result_sort_bar()
-    detail_rows = _sort_detail_groups(detail_rows, sort_metric, sort_desc)
-    main_rows = _reorder_main_rows(main_rows, detail_rows)
+    if sort_metric == _SORT_TOTAL:
+        main_rows = _sort_main_by_total(main_rows, descending=sort_desc)
+        detail_rows = _reorder_detail_to_main(detail_rows, main_rows)
+    else:
+        detail_rows = _sort_detail_groups(detail_rows, sort_metric, sort_desc)
+        main_rows = _reorder_main_rows(main_rows, detail_rows)
     dir_label = "降" if sort_desc else "升"
 
     df = pd.DataFrame(main_rows)
@@ -2298,16 +2238,21 @@ def _render_results() -> None:
             "请加载对应历史，或重新开跑（会生成新 sweep 目录）。"
             % "、".join(extra_ids)
         )
+    order_hint = (
+        "格子总分"
+        if sort_metric == _SORT_TOTAL
+        else "%s 综合均值" % sort_metric
+    )
     st.caption(
         "调参期 %s–%s · 验收期 %s–%s%s · 单位：元"
-        "（过门看侧栏；推荐看验收卡玛；表序按 %s 综合均值 · %s）%s"
+        "（推荐看四维综合分；表序按 %s · %s）%s"
         % (
             win["tune_start"],
             win["tune_end"],
             win["check_start"],
             win["check_end"],
             " · 主列=调参标的" if space_on else "",
-            sort_metric,
+            order_hint,
             dir_label,
             " · 浅蓝底=现行参数" if current_ids else "",
         )
@@ -2317,24 +2262,25 @@ def _render_results() -> None:
     for col in ("合计", "调参期", "验收期", "盲测盈亏"):
         if col in df.columns:
             fmt[col] = "{:.0f}"
-    if "验收卡玛" in df.columns:
-        fmt["验收卡玛"] = "{:.3f}"
+    for col in ("总分", "防御", "结构", "复原", "泛化"):
+        if col in df.columns:
+            fmt[col] = "{:.2f}"
     if fmt:
         styled = styled.format(fmt, na_rep="—")
     st.dataframe(styled, width="stretch", hide_index=True)
-    _render_fail_detail(notes_by_id, cells)
 
     with st.expander("窗内夏普 / 笔数 / 年化", expanded=False):
         _render_detail_window_table(
             detail_rows,
             (
-                "调参 3 行用于选参，盲测 3 行只否决，两篮数字不可加总"
+                "调参 3 行 + 盲测 3 行；空间分按全区间夏普比，两篮数字不可加总"
                 if space_on
                 else "跟踪池 / 主样本"
             ),
         )
         st.caption(
-            "过门用验收期窗内：卡玛、回撤%、夏普、笔数、胜率、盈亏比（非样本级整段）。"
+            "综合分用窗内 KPI：防御=同账户回撤+盈亏盾；结构=验收期胜率×盈亏比与笔数；"
+            "复原=调参/验收夏普与年化衰减；有空间隔离时泛化进排名。"
             "笔数 = 窗内平仓；胜率 / 盈亏比按笔数。"
             "几何年化 / 卡玛 / 回撤来自同一条组合权益；账户盈亏 = 窗内期末 − 期初。"
             "旧 stock×年 sweep 须重跑，不能只汇总。"

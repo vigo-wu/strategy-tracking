@@ -80,7 +80,7 @@ from grid_progress import (  # noqa: E402
     set_batch_status,
     worker_is_alive,
 )
-from grid_gate import fill_gate, gate_for_json, validate_gate  # noqa: E402
+from grid_score import score_cfg_for_json, validate_score  # noqa: E402
 from asset_split import (  # noqa: E402
     AssetSplitError,
     draw_asset_split,
@@ -1340,16 +1340,18 @@ def run_sweep(
         split_prev = prev_freeze.get("asset_split")
         if isinstance(split_prev, dict):
             spec["asset_split"] = split_prev
+        if isinstance(prev_freeze.get("score"), dict):
+            spec["score"] = prev_freeze["score"]
     try:
         split = draw_asset_split(spec, reshuffle=bool(reshuffle), freeze=prev_freeze)
     except AssetSplitError as e:
         raise GridError(str(e)) from e
     spec["asset_split"] = split
     try:
-        gate = validate_gate(spec.get("gate"))
+        score = validate_score(spec.get("score"))
     except ValueError as e:
         raise GridError(str(e)) from e
-    spec["gate"] = gate_for_json(gate)
+    spec["score"] = score_cfg_for_json(score)
 
     book, jobs = assemble_jobs(spec)
     if resume and prev_freeze and prev_freeze.get("n_jobs") is not None:
@@ -1390,7 +1392,7 @@ def run_sweep(
         "asset_split": _json_ready(split),
         "tune_stocks": list(split.get("tune_stocks") or []),
         "holdout_stocks": list(split.get("holdout_stocks") or []),
-        "gate": gate_for_json(gate),
+        "score": score_cfg_for_json(score),
         "batch_size": int(
             (prev_freeze or {}).get("batch_size")
             if resume and prev_freeze and prev_freeze.get("batch_size") is not None
@@ -1447,7 +1449,7 @@ def run_sweep(
         )
         out = _summarize_sweep_cells(
             dest,
-            spec.get("gate"),
+            spec.get("score"),
             cell_ids=[str(c["id"]) for c in cells],
         )
         rec = out.get("recommend") or {}
@@ -1528,7 +1530,7 @@ def run_sweep(
         want = done_cell_ids(prog)
         if not want or want == last_sum_ids:
             return
-        out = _summarize_sweep_cells(dest, spec.get("gate"), cell_ids=want)
+        out = _summarize_sweep_cells(dest, spec.get("score"), cell_ids=want)
         last_sum_ids = list(want)
         info["summary"] = out
         info["recommend"] = out.get("recommend") or {}
@@ -1612,12 +1614,12 @@ def run_sweep(
 
 def _summarize_sweep_cells(
     dest: Path,
-    gate: dict[str, Any] | None,
+    score: dict[str, Any] | None,
     cell_ids: Iterable[str] | None,
 ) -> dict[str, Any]:
     mod = _load_summarize()
     try:
-        out = mod.summarize_sweep(dest, gate=gate, cell_ids=cell_ids)
+        out = mod.summarize_sweep(dest, score=score, cell_ids=cell_ids)
     except Exception as e:
         raise GridError(str(e)) from e
     rec = out.get("recommend") or {}
@@ -1628,14 +1630,14 @@ def _summarize_sweep_cells(
 
 def summarize_only(
     sweep_dir: str | Path,
-    gate: dict[str, Any] | None = None,
+    score: dict[str, Any] | None = None,
     cell_ids: Iterable[str] | None = None,
 ) -> dict[str, Any]:
     dest = Path(sweep_dir)
     _assert_grid_dir(dest)
     mod = _load_summarize()
     try:
-        out = mod.summarize_sweep(dest, gate=gate, cell_ids=cell_ids)
+        out = mod.summarize_sweep(dest, score=score, cell_ids=cell_ids)
     except Exception as e:
         raise GridError(str(e)) from e
     rec = out.get("recommend") or {}
@@ -1689,21 +1691,28 @@ def main() -> None:
         help="忽略 freeze/spec 旧名单，重新抽取（缺 seed 则系统随机）",
     )
     ap.add_argument(
+        "--score-json",
+        default="",
+        help="覆盖评分配置 JSON 文件或内联对象（只汇总重算推荐）",
+    )
+    ap.add_argument(
         "--gate-json",
         default="",
-        help="过门配置 JSON 文件或内联对象（覆盖 spec.gate）",
+        help="已忽略：过门配置不再参与推荐（请用 --score-json）",
     )
     args = ap.parse_args()
     try:
-        gate_override = None
-        raw_gate = str(args.gate_json or "").strip()
-        if raw_gate:
-            gp = Path(raw_gate)
+        if str(args.gate_json or "").strip():
+            print("WARN --gate-json 已忽略，请用 --score-json", flush=True)
+        score_override = None
+        raw_score = str(args.score_json or "").strip()
+        if raw_score:
+            gp = Path(raw_score)
             if gp.is_file():
-                gate_override = json.loads(gp.read_text(encoding="utf-8"))
+                score_override = json.loads(gp.read_text(encoding="utf-8"))
             else:
-                gate_override = json.loads(raw_gate)
-            gate_override = validate_gate(gate_override)
+                score_override = json.loads(raw_score)
+            score_override = validate_score(score_override)
         if args.summarize_only:
             if not args.sweep_dir and not args.spec:
                 raise GridError("--summarize-only 需要 --sweep-dir 或 --spec")
@@ -1713,7 +1722,7 @@ def main() -> None:
                 spec = load_spec(args.spec)
                 sweep = str(spec.get("sweep") or Path(args.spec).stem)
                 sweep_dir = GRID_ROOT / sweep
-            summarize_only(sweep_dir, gate=gate_override)
+            summarize_only(sweep_dir, score=score_override)
             return
         if args.cell and args.resume:
             raise GridError("--cell 不能与 --resume 同时使用")
@@ -1753,12 +1762,12 @@ def main() -> None:
             for key, val in cli_years.items():
                 if val is not None:
                     spec[key] = int(val)
-        if gate_override is not None:
-            spec["gate"] = gate_for_json(gate_override)
-        elif spec.get("gate") is not None:
-            spec["gate"] = gate_for_json(validate_gate(spec.get("gate")))
+        if score_override is not None:
+            spec["score"] = score_cfg_for_json(score_override)
+        elif spec.get("score") is not None:
+            spec["score"] = score_cfg_for_json(validate_score(spec.get("score")))
         else:
-            spec["gate"] = gate_for_json(fill_gate(None))
+            spec["score"] = score_cfg_for_json(None)
         if not resume:
             split = fill_asset_split(spec)
             if args.asset_mode:
