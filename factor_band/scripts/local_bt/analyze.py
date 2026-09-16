@@ -1382,6 +1382,23 @@ def sibling_log_path(detail_path: str | Path) -> Path | None:
     return None
 
 
+_RE_ALL_LEAF = re.compile(r"([A-Za-z_][\w]*)\(")
+
+
+def _signal_display(primary: str, all_raw: str | None) -> str:
+    """all= 多个叶子用 & 拼接（AND）；否则用 signal=。"""
+    prim = str(primary or "").strip() or "-"
+    raw = str(all_raw or "").strip()
+    if not raw or raw == "-":
+        return prim
+    ids = _RE_ALL_LEAF.findall(raw)
+    if len(ids) >= 2:
+        return "&".join(ids)
+    if len(ids) == 1:
+        return ids[0]
+    return prim
+
+
 def _norm_signal_stock(raw: str) -> str:
     s = str(raw or "").strip().upper()
     if not s:
@@ -1406,14 +1423,14 @@ def parse_fill_signals_from_log(log_text: str) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     for line in str(log_text or "").splitlines():
         m = re.search(
-            r"BUY(?: add)? by signal=(\S+)\s+label=(\S+).*?(?:signal_day=(\d+)|@close=)",
+            r"BUY(?: add)? by signal=(\S+)\s+label=(\S+)(?:\s+all=(\S+))?\s+(?:signal_day=(\d+)|@close=)",
             line,
         )
         if m:
             pending_buy = {
-                "signal": m.group(1),
+                "signal": _signal_display(m.group(1), m.group(3)),
                 "label": m.group(2),
-                "day": str(m.group(3) or "")[:8],
+                "day": str(m.group(4) or "")[:8],
             }
             pending_stock = ""
             continue
@@ -1462,13 +1479,13 @@ def parse_fill_signals_from_log(log_text: str) -> list[dict[str, Any]]:
             pending_stock = ""
             continue
         m = re.search(
-            r"SELL by signal=(\S+)\s+label=(\S+).*?(?:signal_day=(\d+)|@close=)",
+            r"SELL by signal=(\S+)\s+label=(\S+)(?:\s+all=(\S+))?\s+(?:signal_day=(\d+)|@close=)",
             line,
         )
         if m:
-            day = str(m.group(3) or "")[:8]
+            day = str(m.group(4) or "")[:8]
             pending_sell = {
-                "signal": m.group(1),
+                "signal": _signal_display(m.group(1), m.group(3)),
                 "label": m.group(2),
                 "day": day,
             }

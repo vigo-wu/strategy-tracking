@@ -18,6 +18,7 @@ from analyze import (
     DEFAULT_REPORT_ROOT,
     DIVIDEND_LABELS,
     DIVIDEND_TYPES,
+    trades_to_dataframe,
 )
 from batch_year_perf import (
     list_grid_samples_with_details,
@@ -1320,7 +1321,9 @@ def _grid_sweep_dir(summary: dict[str, Any]) -> Path:
     return _sweep_dir(_current_spec(_defaults()))
 
 
-def _plot_grid_year_equity(eq: pd.DataFrame, budget: float, title: str) -> go.Figure:
+def _plot_grid_year_equity(
+    eq: pd.DataFrame, budget: float, title: str, *, markers: bool = True
+) -> go.Figure:
     fig = go.Figure()
     pts = eq.dropna(subset=["date"]) if eq is not None and "date" in eq.columns else eq
     if pts is None or pts.empty:
@@ -1330,14 +1333,22 @@ def _plot_grid_year_equity(eq: pd.DataFrame, budget: float, title: str) -> go.Fi
             go.Scatter(
                 x=pd.to_datetime(pts["date"]),
                 y=pts["equity"],
-                mode="lines+markers",
+                mode="lines+markers" if markers else "lines",
                 name="权益",
                 line=dict(color="#1565c0", width=2),
-                marker=dict(size=6),
+                marker=dict(size=6) if markers else dict(),
                 hovertemplate="%{x|%Y/%m/%d}<br>权益 %{y:,.2f}<extra></extra>",
             )
         )
         fig.add_hline(y=budget, line_dash="dash", line_color="#9e9e9e", annotation_text="预算")
+    spike = dict(
+        showspikes=True,
+        spikemode="across",
+        spikesnap="cursor",
+        spikedash="dash",
+        spikecolor="#9e9e9e",
+        spikethickness=1,
+    )
     fig.update_layout(
         title=title,
         xaxis_title="日期",
@@ -1345,7 +1356,9 @@ def _plot_grid_year_equity(eq: pd.DataFrame, budget: float, title: str) -> go.Fi
         height=360,
         margin=dict(l=40, r=20, t=50, b=40),
         legend=dict(orientation="h"),
-        xaxis=dict(tickformat="%Y/%m/%d"),
+        hovermode="x",
+        xaxis=dict(tickformat="%Y/%m/%d", **spike),
+        yaxis=spike,
     )
     return fig
 
@@ -1405,8 +1418,9 @@ def _render_grid_year_perf(summary: dict[str, Any]) -> None:
     m3.metric("已实现盈亏", "%.2f" % sum_pnl)
 
     st.caption(
-        "单账户连续回放（最多 3 笔、CASH_RATIO × 权益复利）。分年切同一条组合权益，"
-        "不是多票独立 10 万账户加总。权益 = 预算 + 已实现盈亏台阶（与实盘评估相同，非全日盯市）。"
+        "单账户连续回放（最多 3 笔、CASH_RATIO × 权益复利）。分年表切同一条组合权益，"
+        "下拉可切单年或全区间。不是多票独立 10 万账户加总。"
+        "权益 = 预算 + 已实现盈亏台阶（与实盘评估相同，非全日盯市）。"
     )
     tbl = result.get("table")
     if tbl is None or getattr(tbl, "empty", True):
@@ -1414,25 +1428,45 @@ def _render_grid_year_perf(summary: dict[str, Any]) -> None:
         return
     st.dataframe(year_perf_display_df(tbl), width="stretch", hide_index=True)
 
+    all_range = "全区间"
     years = [str(y) for y in tbl["year"].tolist()]
+    options = [all_range] + years
     year_key = "grid_year_eq_%s_%s" % (cell_id, sample)
-    if year_key not in st.session_state or st.session_state.get(year_key) not in years:
+    if year_key not in st.session_state or st.session_state.get(year_key) not in options:
         st.session_state[year_key] = years[-1]
-    year = st.selectbox("权益曲线年份", options=years, key=year_key)
-    match = tbl.loc[tbl["year"].astype(str) == str(year)]
-    if match.empty:
-        st.info("该年无权益点。")
-        return
-    start_eq = float(match.iloc[0]["start_equity"])
+    picked = st.selectbox("权益曲线年份", options=options, key=year_key)
     bud = float(result.get("budget") or fallback)
     daily = build_daily_equity(list(result.get("trades") or []), bud)
-    eq_y = daily_equity_for_year(daily, year, start_equity=start_eq)
+    if picked == all_range:
+        eq = daily
+        title = "全区间组合权益（预算 + 已实现盈亏台阶）"
+        markers = False
+    else:
+        match = tbl.loc[tbl["year"].astype(str) == str(picked)]
+        if match.empty:
+            st.info("该年无权益点。")
+            return
+        start_eq = float(match.iloc[0]["start_equity"])
+        eq = daily_equity_for_year(daily, picked, start_equity=start_eq)
+        title = "%s 年组合权益（预算 + 已实现盈亏台阶）" % picked
+        markers = True
     st.plotly_chart(
-        _plot_grid_year_equity(
-            eq_y, bud, "%s 年组合权益（预算 + 已实现盈亏台阶）" % year
-        ),
+        _plot_grid_year_equity(eq, bud, title, markers=markers),
         use_container_width=True,
     )
+    if picked == all_range:
+        show_trades = list(result.get("trades") or [])
+    else:
+        show_trades = list((result.get("trades_by_year") or {}).get(str(picked)) or [])
+    st.subheader("操作明细")
+    st.caption("成交轮次，按卖出年切，与权益台阶一致。")
+    df = trades_to_dataframe(show_trades)
+    for col in ("持有回撤%", "持有浮盈%"):
+        if col in df.columns and df[col].isna().all():
+            df = df.drop(columns=[col])
+    st.dataframe(df, width="stretch", hide_index=True)
+    if df.empty:
+        st.info("无成交轮次" if picked == all_range else "该年无卖出轮次")
 
 
 def _window_metric(book: dict[str, Any], key: str, field: str, *, windows_key: str = "windows") -> Any:

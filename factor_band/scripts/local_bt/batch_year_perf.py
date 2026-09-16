@@ -48,17 +48,23 @@ def _detail_mtime(path: Path) -> int:
 
 
 def parse_detail_trades(path: str | Path, cache: dict | None = None) -> list[dict[str, Any]]:
-    """parse_terminal_rounds + 规范化；按 (路径, mtime) 缓存。"""
+    """parse_terminal_rounds + 规范化 + 旁路 log 补买卖信号；按 (路径, csv/log mtime) 缓存。"""
     p = Path(path)
     if not p.is_file():
         return []
-    key = (str(p.resolve()), _detail_mtime(p))
+    from analyze import (  # noqa: WPS433
+        _normalize_trades,
+        enrich_trades_signals_from_log,
+        report_mod,
+        sibling_log_path,
+    )
+
+    log = sibling_log_path(p)
+    key = (str(p.resolve()), _detail_mtime(p), _detail_mtime(log) if log else 0, "all1")
     if cache is not None and key in cache:
         return list(cache[key])
-    from analyze import _normalize_trades, report_mod  # noqa: WPS433
-
     rounds = report_mod().parse_terminal_rounds(p, quiet=True)
-    trades = _normalize_trades(rounds)
+    trades = enrich_trades_signals_from_log(_normalize_trades(rounds), log)
     if cache is not None:
         stale = [k for k in cache if k[0] == key[0] and k != key]
         for k in stale:
