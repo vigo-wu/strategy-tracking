@@ -1,5 +1,5 @@
 # coding: utf-8
-"""实盘评估 Streamlit 页：侧栏门槛 + 随机组合开跑 / 汇总。"""
+"""实盘评估 Streamlit 页：侧栏四维综合分 + 随机组合开跑 / 汇总。"""
 from __future__ import annotations
 
 import json
@@ -26,7 +26,13 @@ from grid_progress import (
     walk_progress_ratio,
 )
 from grid_run import resolve_pool_workers
-from robust_gate import default_gate, fill_gate
+from robust_score import (
+    _median,
+    default_score,
+    eval_run_score,
+    score_basket,
+    validate_score,
+)
 from robust_run import (
     robust_progress_caption,
     robust_worker_argv,
@@ -68,7 +74,7 @@ def _ensure_state() -> None:
     pending = ss.pop("robust_pending_run_id", None)
     if pending is not None:
         ss["robust_run_id"] = str(pending)
-    dg = default_gate()
+    ds = default_score()
     for k, v in YEAR_DEFAULTS.items():
         ss.setdefault("robust_%s" % k, int(v))
     ss.setdefault("robust_run_id", "post_grid_robust")
@@ -89,68 +95,43 @@ def _ensure_state() -> None:
     ss.setdefault("robust_busy", False)
     ss.setdefault("robust_worker_pid", 0)
     ss.setdefault("robust_stopping", False)
-    ss.setdefault("robust_h_calmar_en", bool(dg["hard"]["calmar"]["enabled"]))
-    ss.setdefault("robust_h_calmar_min", float(dg["hard"]["calmar"]["min"]))
-    ss.setdefault("robust_h_dd_en", bool(dg["hard"]["max_dd"]["enabled"]))
-    ss.setdefault("robust_h_dd_pct", abs(float(dg["hard"]["max_dd"]["floor"])) * 100.0)
-    ss.setdefault("robust_h_sharpe_en", bool(dg["hard"]["oos_sharpe"]["enabled"]))
-    ss.setdefault("robust_h_sharpe_min", float(dg["hard"]["oos_sharpe"]["min"]))
-    ss.setdefault("robust_h_pf_en", bool(dg["hard"]["profit_factor"]["enabled"]))
-    ss.setdefault("robust_h_pf_min", float(dg["hard"]["profit_factor"]["min"]))
-    ss.setdefault("robust_s_wr_en", bool(dg["soft"]["win_rate"]["enabled"]))
-    ss.setdefault("robust_s_wr_veto", bool(dg["soft"]["win_rate"]["veto"]))
-    ss.setdefault("robust_s_wr_min", float(dg["soft"]["win_rate"]["min"]))
-    ss.setdefault("robust_s_nt_en", bool(dg["soft"]["n_trades"]["enabled"]))
-    ss.setdefault("robust_s_nt_veto", bool(dg["soft"]["n_trades"]["veto"]))
-    ss.setdefault("robust_s_nt_min", int(dg["soft"]["n_trades"]["min"]))
-    ss.setdefault("robust_s_nt_psy", float(dg["soft"]["n_trades"]["per_stock_year_min"]))
-    ss.setdefault("robust_a_pass", float(dg["aggregate"]["pass_rate_min"]))
-    ss.setdefault("robust_a_calmar", float(dg["aggregate"]["median_calmar_min"]))
-    ss.setdefault("robust_a_tail_pct", abs(float(dg["aggregate"]["tail_max_dd_floor"])) * 100.0)
+    ss.setdefault("robust_score_w_def", float(ds["w_def"]) * 100.0)
+    ss.setdefault("robust_score_w_str", float(ds["w_str"]) * 100.0)
+    ss.setdefault("robust_score_w_res", float(ds["w_res"]) * 100.0)
+    ss.setdefault("robust_score_w_gen", float(ds["w_gen"]) * 100.0)
+    ss.setdefault("robust_score_dd_cap_pct", float(ds["dd_cap"]) * 100.0)
+    ss.setdefault("robust_score_factor_target", float(ds["factor_target"]))
+    ss.setdefault("robust_score_pf_cap", float(ds["pf_cap"]))
+    ss.setdefault("robust_score_sharpe_target", float(ds["sharpe_target"]))
+    ss.setdefault("robust_score_n_trades_floor", int(ds["n_trades_floor"]))
+    ss.setdefault("robust_score_n_trades_full", int(ds["n_trades_full"]))
+    ss.setdefault("robust_score_go_floor", float(ds["go_floor"]))
 
 
-def gate_from_state() -> dict[str, Any]:
+def _score_from_state() -> dict[str, Any]:
+    """从侧栏读评分配置；勿在 widget 实例化后回写同名 session 键。"""
     ss = st.session_state
-    return fill_gate(
-        {
-            "hard": {
-                "calmar": {
-                    "enabled": bool(ss.get("robust_h_calmar_en", True)),
-                    "min": float(ss.get("robust_h_calmar_min") or 1.2),
-                },
-                "max_dd": {
-                    "enabled": bool(ss.get("robust_h_dd_en", True)),
-                    "floor": -abs(float(ss.get("robust_h_dd_pct") or 12.0)) / 100.0,
-                },
-                "oos_sharpe": {
-                    "enabled": bool(ss.get("robust_h_sharpe_en", True)),
-                    "min": float(ss.get("robust_h_sharpe_min") or 0.7),
-                },
-                "profit_factor": {
-                    "enabled": bool(ss.get("robust_h_pf_en", True)),
-                    "min": float(ss.get("robust_h_pf_min") or 1.4),
-                },
-            },
-            "soft": {
-                "win_rate": {
-                    "enabled": bool(ss.get("robust_s_wr_en", True)),
-                    "veto": bool(ss.get("robust_s_wr_veto", False)),
-                    "min": float(ss.get("robust_s_wr_min") or 42.0),
-                },
-                "n_trades": {
-                    "enabled": bool(ss.get("robust_s_nt_en", True)),
-                    "veto": bool(ss.get("robust_s_nt_veto", False)),
-                    "min": int(ss.get("robust_s_nt_min") or 1),
-                    "per_stock_year_min": float(ss.get("robust_s_nt_psy") or 0.5),
-                },
-            },
-            "aggregate": {
-                "pass_rate_min": float(ss.get("robust_a_pass") or 0.7),
-                "median_calmar_min": float(ss.get("robust_a_calmar") or 1.2),
-                "tail_max_dd_floor": -abs(float(ss.get("robust_a_tail_pct") or 15.0)) / 100.0,
-            },
-        }
-    )
+    raw = {
+        "w_def": float(ss.get("robust_score_w_def") or 30.0),
+        "w_str": float(ss.get("robust_score_w_str") or 25.0),
+        "w_res": float(ss.get("robust_score_w_res") or 25.0),
+        "w_gen": float(ss.get("robust_score_w_gen") or 20.0),
+        "dd_cap": float(ss.get("robust_score_dd_cap_pct") or 35.0),
+        "factor_target": float(ss.get("robust_score_factor_target") or 0.5),
+        "pf_cap": float(ss.get("robust_score_pf_cap") or 5.0),
+        "sharpe_target": float(ss.get("robust_score_sharpe_target") or 0.5),
+        "n_trades_floor": float(ss.get("robust_score_n_trades_floor") or 30.0),
+        "n_trades_full": float(ss.get("robust_score_n_trades_full") or 80.0),
+        "go_floor": float(ss.get("robust_score_go_floor") or 50.0),
+    }
+    return validate_score(raw)
+
+
+def _score_cfg_for_view() -> dict[str, Any]:
+    try:
+        return _score_from_state()
+    except ValueError:
+        return default_score()
 
 
 def _current_spec() -> dict[str, Any]:
@@ -178,7 +159,7 @@ def _current_spec() -> dict[str, Any]:
         "full_span": bool(ss.get("robust_full_span")),
         "compare_div": str(ss.get("robust_compare_div") or DEFAULT_DIVIDEND_TYPE),
         "compound_backtest": bool(ss.get("robust_compound", True)),
-        "gate": gate_from_state(),
+        "score": _score_cfg_for_view(),
     }
     manual = str(ss.get("robust_overrides_json") or "").strip()
     if manual:
@@ -318,7 +299,7 @@ def render_robust_sidebar() -> None:
         st.number_input("盲测起", min_value=1990, max_value=2100, step=1, key="robust_deploy_start", disabled=busy, persist_state="session")
     with d2:
         st.number_input("盲测止", min_value=1990, max_value=2100, step=1, key="robust_deploy_end", disabled=busy, persist_state="session")
-    st.caption("盲测窗须晚于验收期，且三窗互不重叠；GO/NO-GO 只看盲测窗。")
+    st.caption("盲测窗须晚于验收期，且三窗互不重叠。结构/复原看调参 vs 验收；盲测进泛化与盈亏盾。")
     try:
         validate_year_windows(
             {
@@ -386,29 +367,133 @@ def render_robust_sidebar() -> None:
     )
     st.checkbox("复利组合", key="robust_compound", disabled=busy, persist_state="session")
 
-    st.markdown("**硬门（单组必过）**")
-    st.checkbox("卡玛", key="robust_h_calmar_en", disabled=busy, persist_state="session")
-    st.number_input("卡玛 ≥", min_value=0.0, step=0.1, key="robust_h_calmar_min", disabled=busy, persist_state="session")
-    st.checkbox("最大回撤", key="robust_h_dd_en", disabled=busy, persist_state="session")
-    st.number_input("回撤下限 %（绝对值）", min_value=1.0, max_value=80.0, step=1.0, key="robust_h_dd_pct", disabled=busy, persist_state="session")
-    st.checkbox("夏普", key="robust_h_sharpe_en", disabled=busy, persist_state="session")
-    st.number_input("夏普 ≥", min_value=0.0, step=0.1, key="robust_h_sharpe_min", disabled=busy, persist_state="session")
-    st.checkbox("盈亏比", key="robust_h_pf_en", disabled=busy, persist_state="session")
-    st.number_input("盈亏比 ≥", min_value=0.0, step=0.1, key="robust_h_pf_min", disabled=busy, persist_state="session")
-
-    st.markdown("**软门（默认只警告）**")
-    st.checkbox("胜率启用", key="robust_s_wr_en", disabled=busy, persist_state="session")
-    st.checkbox("胜率否决", key="robust_s_wr_veto", disabled=busy, persist_state="session")
-    st.number_input("胜率 ≥ %", min_value=0.0, max_value=100.0, step=1.0, key="robust_s_wr_min", disabled=busy, persist_state="session")
-    st.checkbox("笔数启用", key="robust_s_nt_en", disabled=busy, persist_state="session")
-    st.checkbox("笔数否决", key="robust_s_nt_veto", disabled=busy, persist_state="session")
-    st.number_input("笔数下限", min_value=0, step=1, key="robust_s_nt_min", disabled=busy, persist_state="session")
-    st.number_input("每票每年笔数 ≥", min_value=0.0, step=0.1, key="robust_s_nt_psy", disabled=busy, persist_state="session")
-
-    st.markdown("**整次裁决**")
-    st.number_input("通过率 ≥", min_value=0.0, max_value=1.0, step=0.05, key="robust_a_pass", disabled=busy, persist_state="session")
-    st.number_input("中位卡玛 ≥", min_value=0.0, step=0.1, key="robust_a_calmar", disabled=busy, persist_state="session")
-    st.number_input("尾部回撤 P10 下限 %", min_value=1.0, max_value=80.0, step=1.0, key="robust_a_tail_pct", disabled=busy, persist_state="session")
+    with st.expander("评分维度", expanded=False):
+        st.caption("改这里再点「只汇总」会重算 GO；主表用侧栏现算，不必重跑。")
+        w1, w2 = st.columns(2)
+        with w1:
+            st.number_input(
+                "防御权重%",
+                min_value=0.0,
+                max_value=100.0,
+                step=1.0,
+                format="%.0f",
+                key="robust_score_w_def",
+                disabled=busy,
+                persist_state="session",
+            )
+            st.number_input(
+                "复原权重%",
+                min_value=0.0,
+                max_value=100.0,
+                step=1.0,
+                format="%.0f",
+                key="robust_score_w_res",
+                disabled=busy,
+                persist_state="session",
+            )
+        with w2:
+            st.number_input(
+                "结构权重%",
+                min_value=0.0,
+                max_value=100.0,
+                step=1.0,
+                format="%.0f",
+                key="robust_score_w_str",
+                disabled=busy,
+                persist_state="session",
+            )
+            st.number_input(
+                "泛化权重%",
+                min_value=0.0,
+                max_value=100.0,
+                step=1.0,
+                format="%.0f",
+                key="robust_score_w_gen",
+                disabled=busy,
+                persist_state="session",
+            )
+        w_sum = (
+            float(st.session_state.get("robust_score_w_def") or 0.0)
+            + float(st.session_state.get("robust_score_w_str") or 0.0)
+            + float(st.session_state.get("robust_score_w_res") or 0.0)
+            + float(st.session_state.get("robust_score_w_gen") or 0.0)
+        )
+        st.caption("当前权重和 %.0f%%（打分时归一成 1；嵌套盲测顶泛化维，不摊权）" % w_sum)
+        st.number_input(
+            "回撤 0 分线 %",
+            min_value=0.1,
+            max_value=100.0,
+            step=1.0,
+            format="%.1f",
+            key="robust_score_dd_cap_pct",
+            disabled=busy,
+            persist_state="session",
+        )
+        st.number_input(
+            "获利因子目标",
+            min_value=0.01,
+            max_value=10.0,
+            step=0.05,
+            format="%.2f",
+            key="robust_score_factor_target",
+            disabled=busy,
+            persist_state="session",
+        )
+        st.number_input(
+            "盈亏比封顶",
+            min_value=0.1,
+            max_value=99.0,
+            step=0.5,
+            format="%.1f",
+            key="robust_score_pf_cap",
+            disabled=busy,
+            persist_state="session",
+        )
+        st.number_input(
+            "夏普目标",
+            min_value=0.01,
+            max_value=5.0,
+            step=0.05,
+            format="%.2f",
+            key="robust_score_sharpe_target",
+            disabled=busy,
+            persist_state="session",
+        )
+        n1, n2 = st.columns(2)
+        with n1:
+            st.number_input(
+                "笔数 0 分线",
+                min_value=0,
+                max_value=10000,
+                step=1,
+                key="robust_score_n_trades_floor",
+                disabled=busy,
+                persist_state="session",
+            )
+        with n2:
+            st.number_input(
+                "笔数满分线",
+                min_value=1,
+                max_value=10000,
+                step=1,
+                key="robust_score_n_trades_full",
+                disabled=busy,
+                persist_state="session",
+            )
+        st.number_input(
+            "GO 中位分门槛",
+            min_value=0.1,
+            max_value=100.0,
+            step=1.0,
+            format="%.1f",
+            key="robust_score_go_floor",
+            disabled=busy,
+            persist_state="session",
+        )
+        try:
+            _score_from_state()
+        except ValueError as e:
+            st.error(str(e))
 
 
 def _list_grid_summaries() -> list[Path]:
@@ -710,7 +795,7 @@ def render_robust_mode() -> None:
         st.button("继续", disabled=not resume_ok, key="robust_resume", on_click=_mark_resume)
         st.button("只汇总", disabled=busy, key="robust_sum_only", on_click=_mark_summarize)
         st.button("重抽并开跑", disabled=busy, key="robust_reshuffle", on_click=_mark_reshuffle)
-    st.caption("开跑沿用已抽/freeze 名单；指纹变了会自动重抽。继续跳过已有成交表的组。只汇总用当前侧栏门槛重算。")
+    st.caption("开跑沿用已抽/freeze 名单；指纹变了会自动重抽。继续跳过已有成交表的组。只汇总用当前侧栏评分重算。")
 
     hist = _list_history()
     if hist:
@@ -764,105 +849,207 @@ def _summarize_now() -> None:
         if not root.is_dir():
             st.error("尚无 run 目录：%s" % root)
             return
-        out = summarize_run(root, gate=gate_from_state(), spec=raw)
+        out = summarize_run(root, score=_score_from_state(), spec=raw)
         st.session_state["robust_summary"] = out
-        st.success("已按当前侧栏门槛重算：%s" % ((out.get("verdict") or {}).get("verdict")))
+        st.success("已按当前侧栏评分重算：%s" % ((out.get("verdict") or {}).get("verdict")))
         _persist()
     except Exception as e:
         st.error(str(e))
 
 
+_EPS_TONE = 1e-6
+_PASS_BG = "background-color: rgba(46, 160, 67, 0.18)"
+
+
+def _p10(vals: list[float]) -> float | None:
+    xs = sorted(float(x) for x in vals)
+    if not xs:
+        return None
+    if len(xs) == 1:
+        return xs[0]
+    idx = 0.10 * (len(xs) - 1)
+    lo = int(idx)
+    hi = min(lo + 1, len(xs) - 1)
+    frac = idx - lo
+    return xs[lo] * (1.0 - frac) + xs[hi] * frac
+
+
+def _fmt_score(val: Any) -> str:
+    if val is None:
+        return "—"
+    try:
+        return "%.2f" % float(val)
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _style_pass(series: pd.Series, *, kind: str, cfg: Mapping[str, Any]) -> list[str]:
+    out: list[str] = []
+    for val in series:
+        if val is None or (isinstance(val, float) and pd.isna(val)):
+            out.append("")
+            continue
+        try:
+            x = float(val)
+        except (TypeError, ValueError):
+            out.append("")
+            continue
+        ok = False
+        if kind == "dd":
+            try:
+                cap = float(cfg.get("dd_cap") or 0.35) * 100.0
+            except (TypeError, ValueError):
+                cap = 35.0
+            ok = x <= cap + _EPS_TONE
+        elif kind == "n":
+            try:
+                floor = float(cfg.get("n_trades_floor") or 30.0)
+            except (TypeError, ValueError):
+                floor = 30.0
+            ok = x + _EPS_TONE >= floor
+        else:
+            ok = x + _EPS_TONE >= 0.0
+        out.append(_PASS_BG if ok else "")
+    return out
+
+
+def _live_basket_rows(
+    baskets: list[Any], cfg: Mapping[str, Any]
+) -> tuple[list[dict[str, Any]], bool]:
+    rows: list[dict[str, Any]] = []
+    missing_all = False
+    for b in baskets:
+        if not isinstance(b, Mapping):
+            continue
+        wins = b.get("windows") if isinstance(b.get("windows"), Mapping) else {}
+        all_block = wins.get("all") if isinstance(wins, Mapping) else None
+        if not isinstance(all_block, Mapping) or not all_block:
+            missing_all = True
+        sc = score_basket(wins, cfg)
+        dep = wins.get("deploy") if isinstance(wins.get("deploy"), Mapping) else {}
+        mdd = dep.get("max_dd")
+        try:
+            mdd_pct = None if mdd is None else round(float(mdd) * 100.0, 2)
+        except (TypeError, ValueError):
+            mdd_pct = None
+        rows.append(
+            {
+                "id": b.get("id"),
+                "s_def": sc.get("s_def"),
+                "s_str": sc.get("s_str"),
+                "s_res": sc.get("s_res"),
+                "s_gen": sc.get("s_gen"),
+                "total": sc.get("total"),
+                "scored": sc.get("scored"),
+                "calmar": dep.get("calmar"),
+                "max_dd": mdd,
+                "oos_sharpe": dep.get("oos_sharpe") if dep.get("oos_sharpe") is not None else dep.get("sharpe"),
+                "profit_factor": dep.get("profit_factor"),
+                "win_rate": dep.get("win_rate"),
+                "n_trades": dep.get("n_trades"),
+                "回撤%": mdd_pct,
+            }
+        )
+    return rows, missing_all
+
+
 def _render_results() -> None:
     summary = st.session_state.get("robust_summary")
-    if not isinstance(summary, dict) or not summary.get("verdict"):
+    if not isinstance(summary, dict) or not (
+        summary.get("verdict") or summary.get("baskets")
+    ):
         return
     st.divider()
     st.markdown("**评估结论**")
-    verd = summary.get("verdict") or {}
+    cfg = _score_cfg_for_view()
+    live_rows, missing_all = _live_basket_rows(list(summary.get("baskets") or []), cfg)
+    verd = eval_run_score(live_rows, cfg)
     label = str(verd.get("verdict") or "")
     if label == "GO":
         st.success("%s · %s" % (label, verd.get("reason") or ""))
     else:
         st.error("%s · %s" % (label, verd.get("reason") or ""))
+    if missing_all:
+        st.warning("旧 summary 缺 windows.all，现算防御/泛化会偏。请先点「只汇总」从成交表重算。")
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("通过率", "%.0f%%" % (100.0 * float(verd.get("pass_rate") or 0)))
-    m2.metric("通过组数", "%s / %s" % (verd.get("n_pass"), verd.get("n_baskets")))
-    m3.metric(
-        "中位卡玛",
-        "—" if verd.get("median_calmar") is None else "%.3f" % verd["median_calmar"],
+    m1.metric("中位总分", _fmt_score(verd.get("median_total")))
+    m2.metric("已评分组", "%s / %s" % (verd.get("n_scored"), verd.get("n_baskets")))
+    m3.metric("GO 门槛", _fmt_score(verd.get("go_floor")))
+    p10 = _p10(
+        [float(r["max_dd"]) for r in live_rows if r.get("max_dd") is not None]
     )
     m4.metric(
         "P10 回撤",
-        "—"
-        if verd.get("p10_max_dd") is None
-        else "%.2f%%" % (100.0 * float(verd["p10_max_dd"])),
+        "—" if p10 is None else "%.2f%%" % (100.0 * p10),
     )
+    d1, d2, d3, d4 = st.columns(4)
+    d1.metric("中位防御", _fmt_score(_median([r["s_def"] for r in live_rows if r.get("s_def") is not None])))
+    d2.metric("中位结构", _fmt_score(_median([r["s_str"] for r in live_rows if r.get("s_str") is not None])))
+    d3.metric("中位复原", _fmt_score(_median([r["s_res"] for r in live_rows if r.get("s_res") is not None])))
+    d4.metric("中位泛化", _fmt_score(_median([r["s_gen"] for r in live_rows if r.get("s_gen") is not None])))
     caps = []
     if summary.get("mean_jaccard") is not None:
         caps.append("篮子平均重叠 %s" % summary.get("mean_jaccard"))
     if summary.get("run_id"):
         caps.append("run_id=%s" % summary.get("run_id"))
-    if caps:
-        st.caption(" · ".join(caps))
+    caps.append("主表用侧栏现算，只汇总才落盘")
+    st.caption(" · ".join(caps))
 
-    fails = summary.get("fail_counts") or {}
-    warns = summary.get("warn_counts") or {}
-    if fails or warns:
-        f1, f2 = st.columns(2)
-        with f1:
-            if fails:
-                st.markdown("失败原因")
-                st.dataframe(
-                    pd.DataFrame([{"原因": k, "次数": v} for k, v in fails.items()]),
-                    hide_index=True,
-                    width="stretch",
-                )
-        with f2:
-            if warns:
-                st.markdown("警告原因")
-                st.dataframe(
-                    pd.DataFrame([{"原因": k, "次数": v} for k, v in warns.items()]),
-                    hide_index=True,
-                    width="stretch",
-                )
-
-    rows = []
-    for b in summary.get("baskets") or []:
-        dep = (b.get("windows") or {}).get("deploy") or {}
-        mdd = dep.get("max_dd")
-        rows.append(
+    table_rows = []
+    for r in live_rows:
+        table_rows.append(
             {
-                "组": b.get("id"),
-                "通过": "是" if b.get("pass") else "否",
-                "卡玛": dep.get("calmar"),
-                "回撤%": None if mdd is None else round(float(mdd) * 100.0, 2),
-                "夏普": dep.get("oos_sharpe"),
-                "盈亏比": dep.get("profit_factor"),
-                "胜率%": dep.get("win_rate"),
-                "笔数": dep.get("n_trades"),
-                "失败": b.get("fail"),
-                "警告": b.get("warn"),
+                "组": r.get("id"),
+                "总分": r.get("total"),
+                "防御": r.get("s_def"),
+                "结构": r.get("s_str"),
+                "复原": r.get("s_res"),
+                "泛化": r.get("s_gen"),
+                "卡玛": r.get("calmar"),
+                "回撤%": r.get("回撤%"),
+                "夏普": r.get("oos_sharpe"),
+                "盈亏比": r.get("profit_factor"),
+                "胜率%": r.get("win_rate"),
+                "笔数": r.get("n_trades"),
             }
         )
-    if rows:
-        st.markdown("**各组盲测 KPI**")
-        only_fail = st.checkbox("只看未通过", key="robust_only_fail", value=False)
-        df = pd.DataFrame(rows)
-        if only_fail:
-            df = df[df["通过"] == "否"]
-        st.dataframe(
-            df,
-            hide_index=True,
-            width="stretch",
-            column_config={
-                "卡玛": st.column_config.NumberColumn("卡玛", format="%.3f"),
-                "回撤%": st.column_config.NumberColumn("回撤%", format="%.2f"),
-                "夏普": st.column_config.NumberColumn("夏普", format="%.3f"),
-                "盈亏比": st.column_config.NumberColumn("盈亏比", format="%.2f"),
-                "胜率%": st.column_config.NumberColumn("胜率%", format="%.1f"),
-                "笔数": st.column_config.NumberColumn("笔数", format="%d"),
-            },
-        )
+    if table_rows:
+        st.markdown("**各组综合分 / 盲测 KPI**")
+        df = pd.DataFrame(table_rows)
+        styled = df.style
+        tone_map = {
+            "回撤%": "dd",
+            "笔数": "n",
+            "夏普": "zero",
+            "卡玛": "zero",
+            "胜率%": "zero",
+            "盈亏比": "zero",
+        }
+        for col, kind in tone_map.items():
+            if col in df.columns:
+                styled = styled.apply(
+                    lambda s, k=kind: _style_pass(s, kind=k, cfg=cfg),
+                    subset=[col],
+                )
+        fmt: dict[str, str] = {}
+        for col in ("总分", "防御", "结构", "复原", "泛化"):
+            if col in df.columns:
+                fmt[col] = "{:.2f}"
+        if "卡玛" in df.columns:
+            fmt["卡玛"] = "{:.3f}"
+        if "回撤%" in df.columns:
+            fmt["回撤%"] = "{:.2f}"
+        if "夏普" in df.columns:
+            fmt["夏普"] = "{:.3f}"
+        if "盈亏比" in df.columns:
+            fmt["盈亏比"] = "{:.2f}"
+        if "胜率%" in df.columns:
+            fmt["胜率%"] = "{:.1f}"
+        if "笔数" in df.columns:
+            fmt["笔数"] = "{:.0f}"
+        if fmt:
+            styled = styled.format(fmt, na_rep="—")
+        st.dataframe(styled, hide_index=True, width="stretch")
 
     with st.expander("产物路径"):
         st.code(str(summary.get("summary_path") or summary.get("root") or ""))

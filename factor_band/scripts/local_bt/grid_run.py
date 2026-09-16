@@ -93,7 +93,6 @@ from book_backtest import book_log_name, book_stocks_hash, run_book_backtest  # 
 from run import clear_market_store_cache, run_init_probe  # noqa: E402
 from trades_csv import trades_csv_path  # noqa: E402
 
-WARN_CELL_SOFT = 8
 WARN_JOBS_SOFT = 12
 WALK_PROGRESS_QUEUE_MAX = 256
 RE_RECIPE = re.compile(r"recipe=\s*([0-9a-fA-F]+)")
@@ -297,12 +296,6 @@ def validate_spec(spec: dict[str, Any]) -> list[dict[str, Any]]:
     cells = list(spec.get("cells") or [])
     if not cells:
         raise GridError("spec.cells 为空")
-    if len(cells) > WARN_CELL_SOFT:
-        print(
-            "WARN 格子数 %s > %s；叉乘交互项多，仅提示仍继续跑（技能建议选参 ≤8 格）"
-            % (len(cells), WARN_CELL_SOFT),
-            flush=True,
-        )
     ids: list[str] = []
     out: list[dict[str, Any]] = []
     for raw in cells:

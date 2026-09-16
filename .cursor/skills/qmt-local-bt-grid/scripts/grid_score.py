@@ -19,8 +19,9 @@ SHIELD_MAX = 30.0
 SHIELD_PENALTY = 15.0
 N_TRADES_FLOOR = 30.0
 N_TRADES_FULL = 80.0
-N_TRADES_AT_FLOOR = 20.0
-N_TRADES_AT_FULL = 40.0
+STR_FACTOR_SCALE = 0.70
+N_TRADES_AT_FLOOR = 15.0
+N_TRADES_AT_FULL = 30.0
 SCORE_CLOSE_PAD = 1.0
 EPS_SHARPE = 1e-12
 
@@ -243,7 +244,7 @@ def _s_factor(check: Mapping[str, Any], cfg: Mapping[str, Any] | None = None) ->
     if target <= 0.0:
         return 0.0
     s100 = min(100.0, max(0.0, factor / target * 100.0))
-    return s100 * 0.60
+    return s100 * STR_FACTOR_SCALE
 
 
 def _s_trades(check: Mapping[str, Any], cfg: Mapping[str, Any] | None = None) -> float:

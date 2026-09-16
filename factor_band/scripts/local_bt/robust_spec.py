@@ -9,7 +9,7 @@ from typing import Any, Mapping
 from analyze import DEFAULT_DIVIDEND_TYPE, normalize_dividend_type, normalize_ma_type
 from asset_split import DEFAULT_UNIVERSE_DIR, _as_bool
 from grid_spec import GridSpecError, _as_year, reject_deleted_factor_keys, year_range_set
-from robust_gate import fill_gate, validate_gate
+from robust_score import score_cfg_for_json, validate_score
 
 REPO = Path(__file__).resolve().parents[3]
 THEME = REPO / "factor_band"
@@ -252,8 +252,11 @@ def load_spec(path: str | Path | Mapping[str, Any]) -> dict[str, Any]:
     raw.update(win)
     sampling = fill_sampling(raw)
     raw.update(sampling)
-    gate = validate_gate(raw.get("gate"))
-    raw["gate"] = gate
+    try:
+        score = validate_score(raw.get("score"))
+    except ValueError as e:
+        raise RobustSpecError(str(e)) from e
+    raw["score"] = score_cfg_for_json(score)
 
     resolved = resolve_overrides(raw)
     raw["overrides"] = dict(resolved["overrides"])

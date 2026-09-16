@@ -71,7 +71,6 @@ from grid_spec import (
     EDITOR_CELL_MAX,
     GROUP_ORDER,
     KIND_ENUM,
-    WARN_CELL_SOFT,
     GridSpecError,
     apply_axes_to_selection,
     apply_year_windows,
@@ -813,8 +812,6 @@ def _render_param_table(defaults: dict[str, Any], busy: bool) -> None:
         "%s %s" % (p.label, p.id) for p in catalog if p.id in axes
     ) or "（未选用）"
     st.caption("未勾选不进积；N = Π(各轴扫描个数) = **%s** 格 · 轴：%s" % (n, names))
-    if n > WARN_CELL_SOFT:
-        st.warning("格子数 %s > %s：技能建议少量命名格，叉乘多为交互项。" % (n, WARN_CELL_SOFT))
 
 
 def _render_action_bar(defaults: dict[str, Any], busy: bool) -> None:
@@ -1213,7 +1210,7 @@ def _spawn_grid_worker(
             st.session_state["grid_holdout_stocks"] = list(split.get("holdout_stocks") or [])
             st.session_state["grid_eligible_n"] = int(split.get("eligible_n") or 0)
     st.session_state["grid_flash"] = (
-        "已启动进程 pid=%s。进度在下方刷新；日志 WARN 格子数>8 只是提示，不会停。"
+        "已启动进程 pid=%s。进度在下方刷新。"
         % proc.pid
     )
     _persist_app()
@@ -1258,7 +1255,6 @@ def _render_run_status() -> None:
         st.info(
             "正在跑网格"
             + (" · %s" % cap if cap else " · 正在写 progress")
-            + "。日志里格子数>8 的 WARN 不会停下来等确认。"
         )
     elif cap:
         st.caption(cap)

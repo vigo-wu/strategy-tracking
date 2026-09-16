@@ -72,16 +72,16 @@ class GridScoreTests(unittest.TestCase):
 
     def test_trades_piecewise(self) -> None:
         self.assertAlmostEqual(_s_trades({"n_trades": 29}), 0.0)
-        self.assertAlmostEqual(_s_trades({"n_trades": 30}), 20.0)
-        self.assertAlmostEqual(_s_trades({"n_trades": 55}), 30.0)
-        self.assertAlmostEqual(_s_trades({"n_trades": 80}), 40.0)
-        self.assertAlmostEqual(_s_trades({"n_trades": 90}), 40.0)
+        self.assertAlmostEqual(_s_trades({"n_trades": 30}), 15.0)
+        self.assertAlmostEqual(_s_trades({"n_trades": 55}), 22.5)
+        self.assertAlmostEqual(_s_trades({"n_trades": 80}), 30.0)
+        self.assertAlmostEqual(_s_trades({"n_trades": 90}), 30.0)
 
     def test_pf_cap_5(self) -> None:
         capped = _s_factor({"win_rate": 8.0, "profit_factor": 99.0})
-        expected = min(100.0, (0.08 * 5.0) / 0.5 * 100.0) * 0.60
+        expected = min(100.0, (0.08 * 5.0) / 0.5 * 100.0) * 0.70
         self.assertAlmostEqual(capped, expected)
-        self.assertLess(capped, 60.0)
+        self.assertLess(capped, 70.0)
 
     def test_ann_decay_piecewise(self) -> None:
         self.assertAlmostEqual(

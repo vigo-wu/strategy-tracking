@@ -1,9 +1,8 @@
 # coding: utf-8
-"""实盘评估汇总：窗内组合 KPI + 硬软门 + GO/NO-GO。"""
+"""实盘评估汇总：窗内组合 KPI + 四维综合分 + GO/NO-GO。"""
 from __future__ import annotations
 
 import json
-from collections import Counter
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -13,7 +12,7 @@ from analyze import load_detail_raw, sibling_log_path
 from equity_yearly import build_daily_equity, sharpe_from_returns
 from grid_spec import year_range_set
 from market_csv import compact_day
-from robust_gate import eval_basket, eval_run, gate_for_json, validate_gate
+from robust_score import eval_run_score, score_basket, score_cfg_for_json, validate_score
 from robust_spec import fill_year_windows, load_spec
 
 
@@ -174,20 +173,24 @@ def window_kpi_from_trades(
     return out
 
 
+def pre_deploy_years(win: Mapping[str, int]) -> set[int]:
+    return year_range_set(win["tune_start"], win["tune_end"]) | year_range_set(
+        win["check_start"], win["check_end"]
+    )
+
+
 def summarize_basket_dir(
     basket_dir: Path,
     windows: Mapping[str, int],
-    gate: Mapping[str, Any],
     *,
-    basket_size: int,
     budget: float = 100000.0,
+    score: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     detail = None
     for p in sorted(basket_dir.glob("*_操作明细.csv")):
         detail = p
         break
     if detail is None:
-        # alternate naming
         for p in sorted(basket_dir.glob("*.csv")):
             if "操作明细" in p.name:
                 detail = p
@@ -195,6 +198,7 @@ def summarize_basket_dir(
     trades = trades_from_detail(detail) if detail else []
     win = fill_year_windows(windows)
     blocks = {
+        "all": window_kpi_from_trades(trades, pre_deploy_years(win), budget=budget),
         "tune": window_kpi_from_trades(
             trades, year_range_set(win["tune_start"], win["tune_end"]), budget=budget
         ),
@@ -205,23 +209,17 @@ def summarize_basket_dir(
             trades, year_range_set(win["deploy_start"], win["deploy_end"]), budget=budget
         ),
     }
-    n_years = len(year_range_set(win["deploy_start"], win["deploy_end"])) or 1
-    judged = eval_basket(
-        blocks["deploy"],
-        gate,
-        basket_size=basket_size,
-        n_years=n_years,
-        prefix="盲测",
-    )
+    sc = score_basket(blocks, score)
     return {
         "basket_dir": str(basket_dir),
         "detail": str(detail) if detail else None,
         "windows": blocks,
-        "pass": judged["pass"],
-        "fails": judged["fails"],
-        "warns": judged["warns"],
-        "fail": judged["fail"],
-        "warn": judged["warn"],
+        "s_def": sc.get("s_def"),
+        "s_str": sc.get("s_str"),
+        "s_res": sc.get("s_res"),
+        "s_gen": sc.get("s_gen"),
+        "total": sc.get("total"),
+        "scored": sc.get("scored"),
         "calmar": blocks["deploy"].get("calmar"),
         "max_dd": blocks["deploy"].get("max_dd"),
         "oos_sharpe": blocks["deploy"].get("oos_sharpe"),
@@ -234,7 +232,7 @@ def summarize_basket_dir(
 def summarize_run(
     root: str | Path,
     *,
-    gate: Mapping[str, Any] | None = None,
+    score: Mapping[str, Any] | None = None,
     spec: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     root_p = Path(root)
@@ -251,12 +249,15 @@ def summarize_run(
         raise ValueError("缺少 spec/freeze")
     # may already be loaded
     try:
-        loaded = load_spec(spec) if "deploy_start" in spec or "gate" in spec else dict(spec)
+        loaded = (
+            load_spec(spec)
+            if "deploy_start" in spec or "score" in spec or "gate" in spec
+            else dict(spec)
+        )
     except Exception:
         loaded = dict(spec)
-    g = validate_gate(gate if gate is not None else loaded.get("gate"))
+    cfg = validate_score(score if score is not None else loaded.get("score"))
     win = fill_year_windows(loaded)
-    basket_size = int(loaded.get("basket_size") or 10)
     budget = 100000.0
     ov = loaded.get("overrides") if isinstance(loaded.get("overrides"), Mapping) else {}
     if "TRADE_BUDGET" in ov:
@@ -278,7 +279,7 @@ def summarize_run(
     for child in sorted(root_p.iterdir()):
         if not child.is_dir() or not child.name.startswith("basket_"):
             continue
-        row = summarize_basket_dir(child, win, g, basket_size=basket_size, budget=budget)
+        row = summarize_basket_dir(child, win, budget=budget, score=cfg)
         row["id"] = child.name
         # attach stocks from freeze
         for bm in baskets_meta:
@@ -287,25 +288,15 @@ def summarize_run(
                 break
         rows.append(row)
 
-    verdict = eval_run(rows, g)
-    fail_counter: Counter[str] = Counter()
-    warn_counter: Counter[str] = Counter()
-    for r in rows:
-        for msg in r.get("fails") or []:
-            fail_counter[str(msg)] += 1
-        for msg in r.get("warns") or []:
-            warn_counter[str(msg)] += 1
-
+    verdict = eval_run_score(rows, cfg)
     out = {
         "run_id": loaded.get("run_id"),
         "root": str(root_p),
         "windows": win,
-        "gate": gate_for_json(g),
+        "score": score_cfg_for_json(cfg),
         "overrides_meta": loaded.get("_overrides_meta"),
         "verdict": verdict,
         "baskets": rows,
-        "fail_counts": dict(fail_counter.most_common()),
-        "warn_counts": dict(warn_counter.most_common()),
         "mean_jaccard": None,
     }
     if freeze.is_file():

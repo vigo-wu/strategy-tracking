@@ -43,7 +43,7 @@ MAE 为何不可信、本轮数字：需要时再读 [reference-lessons.md](refe
 7. 每格写入主题 `report/grid/<sweep>/<cell>/`，**不得覆盖** `report/front_ratio/` 等基线 log。
 8. **全局单层多进程池**（禁止格间×格内嵌套 ProcessPool）：`--workers` / `grid_workers` = 全局进程数。`<=0` 自动 `min(walk 数, CPU)`；`1` 全串行；`>=2` 铺平**当前组**各格 walk 进同一池（不夹 16）。一次只提交一组，禁止把全部格子塞进同一个池。格内最多 2 段（tune + holdout）。进度 = (已完成 walk + 在跑 bar 分数) / `(本组格数 × n_jobs)`，参数指纹预检不占分母。
 9. 每格先跑参数指纹预检（Dummy Context Check，不回放 K 线）必核 `recipe=`。人读 init 字段是启用叶子的点路径（`atr_stop.k=`、`ema.1d.trend=`）。该格 `overrides.factor_params` 且叶子已启用时再核对应路径（`trail_stop.tiers` 用 compact JSON）。卸下叶子的覆盖只走 `recipe=` 全表哈希。启用集合读不到则字段级跳过，只核 `recipe=`。不一致则停。通过后该格全部 walk 再跑。
-10. **分组续跑**：`report/grid/<sweep>/progress.json`。已 `done` 的组跳过；未跑完的组标 `dirty`，继续时**整组清空重跑**。`--resume` 不 prune。`--cell` 与 `--resume` / `--batch-size>0` 互斥。CLI `--batch-size` 默认 0（一组=现状）；UI 默认 10。UI 暂停须杀进程树，再用操作系统命令行双重核对 pid（Win11 走 CIM，不依赖 wmic）：cmdline 证明已死或 pid 不存在才标 dirty / 删目录；命令行读不到且 pid 仍在则**不**自动删目录，防止残留进程导致误删。CLI 可用 `pause.flag`。summarize 只传已 done 的格子 id。未跑完时推荐只基于已完成组。格子数>8 只 WARN、**不阻断、不等确认**。
+10. **分组续跑**：`report/grid/<sweep>/progress.json`。已 `done` 的组跳过；未跑完的组标 `dirty`，继续时**整组清空重跑**。`--resume` 不 prune。`--cell` 与 `--resume` / `--batch-size>0` 互斥。CLI `--batch-size` 默认 0（一组=现状）；UI 默认 10。UI 暂停须杀进程树，再用操作系统命令行双重核对 pid（Win11 走 CIM，不依赖 wmic）：cmdline 证明已死或 pid 不存在才标 dirty / 删目录；命令行读不到且 pid 仍在则**不**自动删目录，防止残留进程导致误删。CLI 可用 `pause.flag`。summarize 只传已 done 的格子 id。未跑完时推荐只基于已完成组。
 11. **默认不改 `config.py`、不 deploy**。用户说「按建议修改」再改片段并部署。
 
 ## 选参（四维综合分）
@@ -55,11 +55,11 @@ MAE 为何不可信、本轮数字：需要时再读 [reference-lessons.md](refe
 **综合分（满分 100）。** 权重默认：资金防御 30 / 获利结构 25 / 时空复原 25 / 空间泛化 20（侧栏百分数，写入 spec 前归一成 1）。无空间隔离时空间维作废，按归一后的防御/结构/复原摊权。有空间隔离时空间分进入排名；某格缺盲测窗则 `S_Gen=0`，不摊权。
 
 - 防御：同账户 `all`/`tune`/`check` 最坏 `|max_dd|`，0 分线默认 35%；调参/验收（有盲测再加盲测验收）账户盈亏每有一个 ≤0 扣 15，下限 0。盲测篮回撤不混入防御。
-- 结构：只用验收期。`Factor=(胜率%/100)×min(盈亏比,封顶)`，默认封顶 5、目标 0.5；笔数低于 0 分线得 0，默认 `30–80` 从 20 线性到 40，满分线及以上得 40。
+- 结构：只用验收期。`Factor=(胜率%/100)×min(盈亏比,封顶)`，默认封顶 5、目标 0.5；笔数低于 0 分线得 0，默认 `30–80` 从 15 线性到 30，满分线及以上得 30。
 - 复原：调参/验收夏普按目标（默认 0.5）归一后平均 ×50；年化衰减分段线性，任一窗年化为负得 0。
 - 泛化：全区间调参篮夏普 vs 盲测篮夏普，线性比；盲测 ≤0 或缺窗得 0。
 
-侧栏 / spec `score` 是评分维配置（权重、回撤 0 分线、获利因子目标、盈亏比封顶、夏普目标、笔数 0 分/满分线）。改旋钮再点「只汇总」按 `score` 重算推荐并写入 `summary.json`；界面主表用侧栏配置现算。`--score-json` 覆盖只汇总。`--gate-json` 已忽略（WARN）。公式形状（盈亏盾 30/扣 15、结构 60/40、复原 50/50、接近垫 1.0）写死在 `scripts/grid_score.py`。
+侧栏 / spec `score` 是评分维配置（权重、回撤 0 分线、获利因子目标、盈亏比封顶、夏普目标、笔数 0 分/满分线）。改旋钮再点「只汇总」按 `score` 重算推荐并写入 `summary.json`；界面主表用侧栏配置现算。`--score-json` 覆盖只汇总。`--gate-json` 已忽略（WARN）。公式形状（盈亏盾 30/扣 15、结构 70/30、复原 50/50、接近垫 1.0）写死在 `scripts/grid_score.py`。
 
 Agent 输出：一句综合推荐 + 总分。不要把 MAE 数字写进推荐。
 

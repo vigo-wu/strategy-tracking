@@ -459,15 +459,15 @@ def run_robust(
     force_rerun: bool = False,
     summarize_only: bool = False,
     dry_run: bool = False,
-    gate_override: Mapping[str, Any] | None = None,
+    score_override: Mapping[str, Any] | None = None,
     on_progress: ProgressCb = None,
     csv_root: str | Path | None = None,
 ) -> dict[str, Any]:
     spec = load_spec(spec_raw)
-    if gate_override is not None:
-        from robust_gate import validate_gate
+    if summarize_only and score_override is not None:
+        from robust_score import score_cfg_for_json, validate_score
 
-        spec["gate"] = validate_gate(gate_override)
+        spec["score"] = score_cfg_for_json(validate_score(score_override))
 
     root = run_dir(spec)
     root.mkdir(parents=True, exist_ok=True)
@@ -475,7 +475,7 @@ def run_robust(
     spec_path = root / "spec.json"
 
     if summarize_only:
-        out = summarize_run(root, gate=spec.get("gate"), spec=spec)
+        out = summarize_run(root, score=spec.get("score"), spec=spec)
         _emit(on_progress, phase="done", done=1, total=1, label="只汇总完成")
         return out
 
@@ -633,7 +633,7 @@ def run_robust(
         print("WARN: %s / %s 组回放失败" % (n_fail, len(results)))
 
     _emit(on_progress, phase="summarize", done=n, total=n, label="汇总中")
-    summary = summarize_run(root, gate=spec.get("gate"), spec=spec)
+    summary = summarize_run(root, score=spec.get("score"), spec=spec)
     _emit(
         on_progress,
         phase="done",
@@ -645,25 +645,39 @@ def run_robust(
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="实盘评估：随机组合稳健门")
+    ap = argparse.ArgumentParser(description="实盘评估：随机组合四维综合分")
     ap.add_argument("--spec", required=True, help="robust JSON / 或已有 run 目录的 spec")
     ap.add_argument("--reshuffle", action="store_true")
     ap.add_argument("--workers", type=int, default=0)
     ap.add_argument("--force-rerun", action="store_true")
     ap.add_argument("--summarize-only", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--gate-json", default="", help="覆盖 gate 的 JSON 文件或内联对象")
+    ap.add_argument(
+        "--score-json",
+        default="",
+        help="覆盖评分配置 JSON 文件或内联对象（只汇总重裁 GO）",
+    )
+    ap.add_argument(
+        "--gate-json",
+        default="",
+        help="已忽略：过门配置不再参与裁决（请用 --score-json）",
+    )
     ap.add_argument("--csv-root", default="")
     args = ap.parse_args(argv)
 
-    gate_ov = None
     if str(args.gate_json or "").strip():
-        raw = str(args.gate_json).strip()
+        print("WARN --gate-json 已忽略，请用 --score-json", flush=True)
+    score_ov = None
+    if str(args.score_json or "").strip():
+        from robust_score import validate_score
+
+        raw = str(args.score_json).strip()
         p = Path(raw)
         if p.is_file():
-            gate_ov = json.loads(p.read_text(encoding="utf-8"))
+            score_ov = json.loads(p.read_text(encoding="utf-8"))
         else:
-            gate_ov = json.loads(raw)
+            score_ov = json.loads(raw)
+        score_ov = validate_score(score_ov)
 
     try:
         out = run_robust(
@@ -673,7 +687,7 @@ def main(argv: list[str] | None = None) -> int:
             force_rerun=bool(args.force_rerun),
             summarize_only=bool(args.summarize_only),
             dry_run=bool(args.dry_run),
-            gate_override=gate_ov,
+            score_override=score_ov,
             csv_root=args.csv_root or None,
         )
     except (RobustSpecError, RobustError) as e:

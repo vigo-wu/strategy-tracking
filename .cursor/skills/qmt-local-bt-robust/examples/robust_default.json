@@ -18,26 +18,17 @@
   "basket_size": 10,
   "seed": 42,
   "compound_backtest": true,
-  "gate": {
-    "hard": {
-      "calmar": { "enabled": true, "min": 1.2 },
-      "max_dd": { "enabled": true, "floor": -0.12 },
-      "oos_sharpe": { "enabled": true, "min": 0.7 },
-      "profit_factor": { "enabled": true, "min": 1.4 }
-    },
-    "soft": {
-      "win_rate": { "enabled": true, "veto": false, "min": 42.0 },
-      "n_trades": {
-        "enabled": true,
-        "veto": false,
-        "min": 1,
-        "per_stock_year_min": 0.5
-      }
-    },
-    "aggregate": {
-      "pass_rate_min": 0.7,
-      "median_calmar_min": 1.2,
-      "tail_max_dd_floor": -0.15
-    }
+  "score": {
+    "w_def": 0.3,
+    "w_str": 0.25,
+    "w_res": 0.25,
+    "w_gen": 0.2,
+    "dd_cap": 0.35,
+    "factor_target": 0.5,
+    "pf_cap": 5.0,
+    "sharpe_target": 0.5,
+    "n_trades_floor": 30.0,
+    "n_trades_full": 80.0,
+    "go_floor": 50.0
   }
 }

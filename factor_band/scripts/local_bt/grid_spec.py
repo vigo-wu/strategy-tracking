@@ -13,7 +13,6 @@ from typing import Any, Iterable, Mapping
 
 EPS = 1e-9
 KIND_ENUM = ("base", "tighten", "loosen", "off", "other")
-WARN_CELL_SOFT = 8
 EDITOR_CELL_MAX = 30
 JOB_CONFIRM_THRESHOLD = 400
 
