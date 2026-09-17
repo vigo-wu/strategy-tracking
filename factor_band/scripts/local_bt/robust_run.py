@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -126,6 +127,76 @@ def _merged_overrides(
         out["compound_backtest"] = True
         out["wallet_cash"] = float(out.get("TRADE_BUDGET") or 100000.0)
     return out
+
+
+def trades_cache_key(
+    strategy_overrides: Mapping[str, Any] | None,
+    *,
+    compound: bool = True,
+) -> str:
+    """策略 overrides + compound 的稳定短哈希（不用 merged overrides）。"""
+    payload = {
+        "overrides": json_ready(strategy_overrides or {}),
+        "compound_backtest": bool(compound),
+    }
+    text = json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
+    )
+    return hashlib.md5(text.encode("utf-8")).hexdigest()[:12]
+
+
+def trades_cache_sidecar(log_path: str | Path) -> Path:
+    """与 log 同 stem 的 .ovfp 路径。"""
+    p = Path(log_path)
+    return p.with_name(p.stem + ".ovfp")
+
+
+def trades_cache_hit(
+    trades_path: str | Path,
+    sidecar_path: str | Path,
+    want_key: str,
+    *,
+    force_rerun: bool = False,
+) -> bool:
+    """成交表存在、非强制重跑、且 sidecar 指纹匹配才命中。无 sidecar → 未命中。"""
+    if force_rerun:
+        return False
+    if not Path(trades_path).is_file():
+        return False
+    side = Path(sidecar_path)
+    if not side.is_file():
+        return False
+    try:
+        got = side.read_text(encoding="utf-8").strip()
+    except OSError:
+        return False
+    return got == str(want_key or "").strip()
+
+
+def write_trades_cache_sidecar(sidecar_path: str | Path, key: str) -> None:
+    Path(sidecar_path).write_text(str(key).strip() + "\n", encoding="utf-8")
+
+
+def overrides_changed(
+    old_overrides: Mapping[str, Any] | None,
+    new_overrides: Mapping[str, Any] | None,
+) -> bool:
+    """比较两次策略 overrides 是否实质不同（稳定 JSON）。"""
+    a = json.dumps(
+        json_ready(old_overrides or {}),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    b = json.dumps(
+        json_ready(new_overrides or {}),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return a != b
 
 
 def apply_walk_progress(
@@ -270,10 +341,9 @@ def run_one_basket(
         ma_type=str(payload.get("ma_type") or "EMA"),
         dividend_type=str(payload.get("compare_div") or "front_ratio"),
     )
-    overrides = _merged_overrides(
-        payload.get("overrides") or {},
-        compound=bool(payload.get("compound_backtest", True)),
-    )
+    strategy_ov = dict(payload.get("overrides") or {})
+    compound = bool(payload.get("compound_backtest", True))
+    overrides = _merged_overrides(strategy_ov, compound=compound)
     start = str(payload["start"])
     end = str(payload["end"])
     csv_root = payload.get("csv_root") or DEFAULT_CSV_ROOT
@@ -283,8 +353,10 @@ def run_one_basket(
     force = bool(payload.get("force_rerun"))
     log_path = out_dir / log_name
     tp = trades_csv_path(log_path)
+    ov_key = trades_cache_key(strategy_ov, compound=compound)
+    side = trades_cache_sidecar(log_path)
     try:
-        if tp.is_file() and not force:
+        if trades_cache_hit(tp, side, ov_key, force_rerun=force):
             return {
                 "basket_id": basket_id,
                 "ok": True,
@@ -304,6 +376,7 @@ def run_one_basket(
             overrides=overrides,
             on_progress=on_bar_progress,
         )
+        write_trades_cache_sidecar(trades_cache_sidecar(_lp), ov_key)
         return {
             "basket_id": basket_id,
             "ok": True,
@@ -480,6 +553,12 @@ def run_robust(
         return out
 
     freeze_old = None if reshuffle else (_freeze_from_spec(spec) or load_freeze(freeze_path))
+    disk_freeze = load_freeze(freeze_path)
+    if disk_freeze is not None and overrides_changed(
+        disk_freeze.get("overrides"),
+        spec.get("overrides"),
+    ):
+        print("WARN: overrides 已变，成交表缓存将失效", flush=True)
     sampled = sample_baskets_for_spec(spec, reshuffle=reshuffle, freeze=freeze_old)
     n = int(sampled["n_baskets"])
     if n >= WARN_BASKETS_SOFT:
