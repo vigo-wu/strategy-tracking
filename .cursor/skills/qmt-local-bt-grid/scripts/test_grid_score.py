@@ -5,16 +5,20 @@ from __future__ import annotations
 import unittest
 
 from grid_score import (
+    DD_BREACH_MULT,
+    GEN_LUCK_CAP,
     W_DEF,
     W_GEN,
     W_NO_GEN,
     W_RES,
     W_STR,
+    _dd_breached,
     _s_dd,
     _s_decay,
     _s_factor,
     _s_shield,
     _s_trades,
+    _total,
     fill_score,
     s_gen,
     score_cell,
@@ -48,13 +52,23 @@ def _book(
 class GridScoreTests(unittest.TestCase):
     def test_dd_cap_35pct(self) -> None:
         self.assertAlmostEqual(_s_dd(_book(all_w={"max_dd": -0.35})), 0.0)
-        self.assertAlmostEqual(_s_dd(_book(all_w={"max_dd": -0.175})), 50.0)
+        self.assertAlmostEqual(_s_dd(_book(all_w={"max_dd": -0.175})), 75.0)
+        self.assertAlmostEqual(
+            _s_dd(_book(all_w={"max_dd": -0.30})),
+            100.0 * (1.0 - (0.30 / 0.35) ** 2),
+        )
         self.assertAlmostEqual(_s_dd(_book(all_w={"max_dd": 0.0})), 100.0)
         self.assertAlmostEqual(_s_dd(_book(tune={"max_dd": -0.40}, check={"max_dd": -0.10})), 0.0)
+        self.assertAlmostEqual(
+            _s_dd(_book(all_w={"max_dd": -0.05})),
+            100.0 * (1.0 - (0.05 / 0.35) ** 2),
+        )
 
     def test_dd_ignores_holdout(self) -> None:
         book = _book(all_w={"max_dd": -0.10}, hold_all={"max_dd": -0.40})
-        self.assertAlmostEqual(_s_dd(book), 100.0 * (1.0 - 0.10 / 0.35))
+        ratio = 0.10 / 0.35
+        self.assertAlmostEqual(_s_dd(book), 100.0 * (1.0 - ratio * ratio))
+        self.assertFalse(_dd_breached(book))
 
     def test_shield_floor_and_holdout_node(self) -> None:
         both_pos = _book(tune={"avg_year_pnl": 1.0}, check={"avg_year_pnl": 2.0})
@@ -83,7 +97,7 @@ class GridScoreTests(unittest.TestCase):
         self.assertAlmostEqual(capped, expected)
         self.assertLess(capped, 70.0)
 
-    def test_ann_decay_piecewise(self) -> None:
+    def test_ann_decay_hermite(self) -> None:
         self.assertAlmostEqual(
             _s_decay(_book(tune={"avg_ann_pct": 2.0}, check={"avg_ann_pct": 2.0})),
             50.0,
@@ -91,6 +105,11 @@ class GridScoreTests(unittest.TestCase):
         self.assertAlmostEqual(
             _s_decay(_book(tune={"avg_ann_pct": 2.0}, check={"avg_ann_pct": 1.0})),
             25.0,
+        )
+        r75 = 0.75
+        self.assertAlmostEqual(
+            _s_decay(_book(tune={"avg_ann_pct": 2.0}, check={"avg_ann_pct": 1.5})),
+            50.0 * (3.0 * r75 * r75 - 2.0 * r75 * r75 * r75),
         )
         self.assertAlmostEqual(
             _s_decay(_book(tune={"avg_ann_pct": 2.0}, check={"avg_ann_pct": 0.0})),
@@ -105,7 +124,7 @@ class GridScoreTests(unittest.TestCase):
             50.0,
         )
 
-    def test_spatial_linear_and_missing(self) -> None:
+    def test_spatial_linear_and_case_c(self) -> None:
         eq = _book(all_w={"sharpe": 0.4}, hold_all={"sharpe": 0.4})
         self.assertAlmostEqual(s_gen(eq, space_on=True), 100.0)
         half = _book(all_w={"sharpe": 0.4}, hold_all={"sharpe": 0.2})
@@ -115,6 +134,47 @@ class GridScoreTests(unittest.TestCase):
         missing = _book(all_w={"sharpe": 0.4})
         self.assertAlmostEqual(s_gen(missing, space_on=True), 0.0)
         self.assertIsNone(s_gen(eq, space_on=False))
+        # C：调参 ≤0 且盲测 >0，锚定 sharpe_target，封顶 GEN_LUCK_CAP
+        luck = _book(all_w={"sharpe": -0.1}, hold_all={"sharpe": 0.5})
+        self.assertAlmostEqual(s_gen(luck, space_on=True), 50.0)
+        luck_hi = _book(all_w={"sharpe": 0.0}, hold_all={"sharpe": 2.0})
+        self.assertAlmostEqual(s_gen(luck_hi, space_on=True), GEN_LUCK_CAP)
+        luck_low = _book(all_w={"sharpe": -0.2}, hold_all={"sharpe": 0.25})
+        self.assertAlmostEqual(s_gen(luck_low, space_on=True), 25.0)
+        both_neg = _book(all_w={"sharpe": -0.1}, hold_all={"sharpe": -0.2})
+        self.assertAlmostEqual(s_gen(both_neg, space_on=True), 0.0)
+
+    def test_dd_breach_soft_mult(self) -> None:
+        base_kpi = {
+            "avg_year_pnl": 1.0,
+            "sharpe": 0.5,
+            "avg_ann_pct": 2.0,
+            "win_rate": 50.0,
+            "profit_factor": 1.0,
+            "n_trades": 80,
+        }
+        ok = _book(
+            all_w={"max_dd": -0.10, "sharpe": 0.5},
+            tune={"max_dd": -0.10, **base_kpi},
+            check={"max_dd": -0.10, **base_kpi},
+        )
+        bad = _book(
+            all_w={"max_dd": -0.40, "sharpe": 0.5},
+            tune={"max_dd": -0.40, **base_kpi},
+            check={"max_dd": -0.10, **base_kpi},
+        )
+        sc_ok = score_cell(ok, space_on=False)
+        sc_bad = score_cell(bad, space_on=False)
+        self.assertFalse(_dd_breached(ok))
+        self.assertTrue(_dd_breached(bad))
+        raw_bad = _total(
+            float(sc_bad["s_def"] or 0.0),
+            float(sc_bad["s_str"] or 0.0),
+            float(sc_bad["s_res"] or 0.0),
+            None,
+        )
+        self.assertAlmostEqual(float(sc_bad["total"] or 0.0), raw_bad * DD_BREACH_MULT, places=4)
+        self.assertGreater(float(sc_ok["total"] or 0.0), float(sc_bad["total"] or 0.0))
 
     def test_no_holdout_redistributes(self) -> None:
         book = _book(
@@ -249,7 +309,9 @@ class GridScoreTests(unittest.TestCase):
         wide = score_cell(book, space_on=False, cfg={"dd_cap": 0.35})
         tight = score_cell(book, space_on=False, cfg={"dd_cap": 0.20})
         self.assertGreater(float(wide["s_def"]), float(tight["s_def"]))
+        # dd == dd_cap：回撤分 0，盾分仍可非零；触顶再乘总分
         self.assertAlmostEqual(float(tight["s_def"]), 0.0)
+        self.assertTrue(_dd_breached(book, {"dd_cap": 0.20}))
 
 
 if __name__ == "__main__":

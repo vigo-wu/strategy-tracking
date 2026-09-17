@@ -23,6 +23,8 @@ STR_FACTOR_SCALE = 0.70
 N_TRADES_AT_FLOOR = 15.0
 N_TRADES_AT_FULL = 30.0
 SCORE_CLOSE_PAD = 1.0
+DD_BREACH_MULT = 0.2
+GEN_LUCK_CAP = 80.0
 EPS_SHARPE = 1e-12
 
 _KPI_PERIODS = ("all", "tune", "check")
@@ -198,19 +200,38 @@ def _book_scored(book: Mapping[str, Any]) -> bool:
     return False
 
 
-def _s_dd(book: Mapping[str, Any], cfg: Mapping[str, Any] | None = None) -> float:
+def _dd_max(book: Mapping[str, Any]) -> float | None:
     dds: list[float] = []
     for period in _KPI_PERIODS:
         v = _num(_win(book, period).get("max_dd"))
         if v is not None:
             dds.append(abs(v))
     if not dds:
+        return None
+    return max(dds)
+
+
+def _s_dd(book: Mapping[str, Any], cfg: Mapping[str, Any] | None = None) -> float:
+    dd_max = _dd_max(book)
+    if dd_max is None:
         return 0.0
-    dd_max = max(dds)
     cap = float(_cfg(cfg)["dd_cap"])
     if cap <= 0.0:
         return 0.0
-    return max(0.0, 100.0 * (1.0 - dd_max / cap))
+    ratio = dd_max / cap
+    if ratio >= 1.0:
+        return 0.0
+    return 100.0 * (1.0 - ratio * ratio)
+
+
+def _dd_breached(book: Mapping[str, Any], cfg: Mapping[str, Any] | None = None) -> bool:
+    dd_max = _dd_max(book)
+    if dd_max is None:
+        return False
+    cap = float(_cfg(cfg)["dd_cap"])
+    if cap <= 0.0:
+        return False
+    return dd_max >= cap
 
 
 def _s_shield(book: Mapping[str, Any], *, space_on: bool) -> float:
@@ -289,28 +310,39 @@ def _s_decay(book: Mapping[str, Any]) -> float:
     r = check / tune
     if r >= 1.0:
         return 50.0
-    if r >= 0.5:
-        return _lerp(r, 0.5, 25.0, 1.0, 50.0)
-    return _lerp(max(r, 0.0), 0.0, 0.0, 0.5, 25.0)
+    if r < 0.0:
+        return 0.0
+    return 50.0 * (3.0 * r * r - 2.0 * r * r * r)
 
 
 def s_res(book: Mapping[str, Any], cfg: Mapping[str, Any] | None = None) -> float:
     return _s_sharpe(book, cfg) + _s_decay(book)
 
 
-def s_gen(book: Mapping[str, Any], *, space_on: bool) -> float | None:
+def s_gen(
+    book: Mapping[str, Any],
+    *,
+    space_on: bool,
+    cfg: Mapping[str, Any] | None = None,
+) -> float | None:
     if not space_on:
         return None
     hold = _win(book, "all", windows_key="holdout_windows")
     if not hold:
         return 0.0
     s_h = _num(hold.get("sharpe"))
+    s_t = _num(_win(book, "all").get("sharpe"))
+    # B / D：盲测 ≤0 或缺 → 0
     if s_h is None or s_h <= 0.0:
         return 0.0
-    s_t = _num(_win(book, "all").get("sharpe"))
-    if s_t is None or s_t <= 0.0:
-        return 100.0
-    return 100.0 * min(1.0, s_h / max(s_t, EPS_SHARPE))
+    # A：双正，线性比
+    if s_t is not None and s_t > 0.0:
+        return 100.0 * min(1.0, s_h / max(s_t, EPS_SHARPE))
+    # C：调参 ≤0 且盲测 >0，sharpe_target 锚定，封顶 GEN_LUCK_CAP
+    target = float(_cfg(cfg)["sharpe_target"])
+    if target <= 0.0:
+        return 0.0
+    return min(GEN_LUCK_CAP, 50.0 * (s_h / target))
 
 
 def _total(
@@ -345,13 +377,16 @@ def score_cell(
     def_v = s_def(src, space_on=space_on, cfg=used)
     str_v = s_str(src, used)
     res_v = s_res(src, used)
-    gen_v = s_gen(src, space_on=space_on)
+    gen_v = s_gen(src, space_on=space_on, cfg=used)
+    total = _total(def_v, str_v, res_v, gen_v, used)
+    if _dd_breached(src, used):
+        total *= DD_BREACH_MULT
     return {
         "s_def": _round4(def_v),
         "s_str": _round4(str_v),
         "s_res": _round4(res_v),
         "s_gen": _round4(gen_v),
-        "total": _round4(_total(def_v, str_v, res_v, gen_v, used)),
+        "total": _round4(total),
         "scored": _book_scored(src),
     }
 

@@ -41,7 +41,7 @@ description: >-
 - `windows.all`：年份集合 = 调参年份 ∪ 验收年份（**不要**写成 `year_start`–`check_end`，空年会进几何年化分母）
 - `holdout_windows.all` 与 `holdout_windows.check`：都填盲测 `deploy` KPI
 
-防御仍用同账户 all/tune/check（盲测回撤不混入）；盈亏盾第三节点 = 盲测；结构/复原只用调参 vs 验收；泛化 = 盲测夏普 / 调参∪验收夏普。`space_on` 恒为 True。缺盲测窗或盲测夏普 ≤0 则 `S_Gen=0`。
+防御仍用同账户 all/tune/check（盲测回撤不混入）；盈亏盾第三节点 = 盲测；结构/复原只用调参 vs 验收；泛化双正用盲测 / 调参∪验收夏普；调参 ≤0 且盲测 >0 走情况 C（封顶 80）。`space_on` 恒为 True。缺盲测窗或盲测夏普 ≤0 则 `S_Gen=0`。
 
 侧栏改旋钮后主表现算；点「只汇总」或 CLI `--score-json` 把 `summary.score` 与裁决落盘，不必重跑 walk。旧 summary 无 `windows.all` 时须先「只汇总」从成交表重算。`--gate-json` WARN 后忽略。旧 spec `gate` 残留可忽略。
 
