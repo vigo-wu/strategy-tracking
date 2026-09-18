@@ -569,6 +569,7 @@ def _ohlcv_need_1d():
     if "vol_kc" in need:
         raw_kvn = _factor_param(None, "keltner_vol", "vol_n")
         raw_kvc = _factor_param(None, "keltner_vol", "confirm_days")
+        raw_kvs = _factor_param(None, "keltner_vol", "slope_m")
         try:
             kc_vol_n = int(10 if raw_kvn is None else raw_kvn)
         except (TypeError, ValueError):
@@ -577,8 +578,20 @@ def _ohlcv_need_1d():
             kc_confirm = int(2 if raw_kvc is None else raw_kvc)
         except (TypeError, ValueError):
             kc_confirm = 2
+        try:
+            kc_slope_m = int(5 if raw_kvs is None else raw_kvs)
+        except (TypeError, ValueError):
+            kc_slope_m = 5
         kc_confirm = max(1, kc_confirm)
         parts.append(kc_vol_n + max(0, kc_confirm - 1))
+        try:
+            kc_ma_n_slope = int(
+                (_structure_windows().get("keltner") or {}).get("ma_n") or 0
+            )
+        except (TypeError, ValueError, KeyError):
+            kc_ma_n_slope = 0
+        if kc_ma_n_slope > 0 and kc_slope_m > 1:
+            parts.append(kc_ma_n_slope + kc_slope_m - 1)
     if "atr" in need:
         try:
             atr_n = int(_structure_windows()["atr"]["n"] or 0)
@@ -589,13 +602,13 @@ def _ohlcv_need_1d():
     if "keltner" in need:
         try:
             kc = _structure_windows()["keltner"]
-            kc_ema_n = int(kc.get("ema_n") or 0)
+            kc_ma_n = int(kc.get("ma_n") or 0)
             kc_atr_n = int(kc.get("atr_n") or 0)
         except (TypeError, ValueError, KeyError):
-            kc_ema_n = 0
+            kc_ma_n = 0
             kc_atr_n = 0
-        if kc_ema_n > 0:
-            parts.append(kc_ema_n)
+        if kc_ma_n > 0:
+            parts.append(kc_ma_n)
         if kc_atr_n > 0:
             parts.append(kc_atr_n)
     return max(parts) + 10

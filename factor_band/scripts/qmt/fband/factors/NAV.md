@@ -17,8 +17,8 @@
 
 | 文件 | 符号（主） | 做什么 |
 | :--- | :--- | :--- |
-| [ctx.py](ctx.py) | `_factor_param` `_factor_params_apply_global` `_structure_windows` `_structure_apply_global` `_market_need` `_weekly_market_features` `_build_factor_ctx` `_factor_ctx_bind_state` | 组 `ctx = {market, state, clock}`；`need` 读 `LEAVES`；行情键 `d_mid` / `d_slow` / `d_trend`、周线 `w_mid` / `w_trend`。`daily_ready` = 日线 `closes` 且 `i>=2` |
-| [catalog.py](catalog.py) | `LEAVES` `_leaves_factor_params` | 叶子登记 / `need` / 默认阈值 / 网格轴元数据；整表写入 `RECIPE.factor_params`（`above_ema` 无键） |
+| [ctx.py](ctx.py) | `_factor_param` `_factor_params_apply_global` `_structure_windows` `_structure_apply_global` `_market_need` `_weekly_market_features` `_build_factor_ctx` `_factor_ctx_bind_state` | 组 `ctx = {market, state, clock}`；`need` 读 `LEAVES`；行情键 `d_mid` / `d_slow` / `d_trend`、`kc_mid` / `kc_mid_arr` / `kc_ma_n`、周线 `w_mid` / `w_trend`；价均读 `structure.ma.kind`。`daily_ready` = 日线 `closes` 且 `i>=2` |
+| [catalog.py](catalog.py) | `LEAVES` `_leaves_factor_params` | 叶子登记 / `need` / 默认阈值 / 网格轴元数据；整表写入 `RECIPE.factor_params`（`above_ma` 无键） |
 | [registry.py](registry.py) | `_factor_registry` `_factor_eval` `_factor_hit` | 按 `LEAVES` 取 `_factor_eval_<id>`；缺函数启动时报错 |
 | [expr.py](expr.py) | `_recipe_hit` `_recipe_leaf_ids` `_recipe_compute_leaves` | `and` / `or` / `not`；`False`/`None` = 恒假；启用叶子 + `scale_in` 特例 |
 | [slots.py](slots.py) | `_eval_*_slot` `_eval_recipe_slots` `_recipe_fingerprint` `_recipe_log_kv` | 四个槽位 → `{hit, reasons, detail}`；reasons 用叶子 id；init 点路径只打启用叶子 + `_market_need` 窗 |
@@ -50,7 +50,7 @@ config.py
 
 | 槽 | 形态 | 备注 |
 | :--- | :--- | :--- |
-| `entry` | `above_ema ∧ keltner_vol` | 未命中 reasons 为第一个挡住的叶子 |
+| `entry` | `above_ma ∧ keltner_vol` | 未命中 reasons 为第一个挡住的叶子 |
 | `scale_in` | `false` | **加仓未启用**。`scale_arm` 仍登记；启用时由 `_recipe_compute_leaves` 特例拉入。`scale_once` / 满槽在 `_scale_gate` |
 | `exit` | `atr_stop ∨ atr_trail_stop` | or 短路；主因=第一个命中叶子。`stop_loss` / `trail_stop` / `time_force` 叶子仍在，默认 AST 不引用 |
 | `scale_out` | `false` | **减仓未启用**。Intent 预留 `reduce`，strategy 忽略 |

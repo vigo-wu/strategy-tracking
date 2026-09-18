@@ -90,12 +90,14 @@ def _structure_deep_merge(dst, incoming):
     return dst
 
 
-_STRUCTURE_DELETED_ROOTS = frozenset({"d_ma", "w_ma", "macd"})
-_STRUCTURE_MA_ROOTS = frozenset({"ema", "sma"})
+_STRUCTURE_DELETED_ROOTS = frozenset({"d_ma", "w_ma", "macd", "ema", "sma"})
+_STRUCTURE_MA_ROOTS = frozenset({"ma"})
+_STRUCTURE_MA_KIND_KEYS = frozenset({"kind"})
+_STRUCTURE_MA_KINDS = frozenset({"ema", "sma"})
 
 
 def _structure_ma_period_block(alg_block, period, defaults):
-    """从 ema/sma 段取一周期窗；缺键用 defaults（三元组 mid/slow/trend）。"""
+    """从 ma 段取一周期窗；缺键用 defaults（三元组 mid/slow/trend）。"""
     block = (alg_block or {}).get(period) or {}
     if block and not isinstance(block, dict):
         raise ValueError("RECIPE.structure 周期段须为 dict：%s" % period)
@@ -111,67 +113,93 @@ def _structure_reject_deleted(rec):
     for bad in _STRUCTURE_DELETED_ROOTS:
         if bad in (rec or {}):
             raise ValueError(
-                "已删除的 structure 段 %s：请写 structure.ema|sma.<period>.<window>"
+                "已删除的 structure 段 %s：请写 structure.ma.<period>.<window>"
                 % bad
             )
 
 
 def _structure_validate_ma_periods(alg_block, alg_name):
-    """周期键须 ∈ _VALID_PERIODS。"""
+    """周期键须 ∈ _VALID_PERIODS；跳过 kind 等非周期键。"""
     if not isinstance(alg_block, dict):
         return
     valid = globals().get("_VALID_PERIODS") or ()
     valid_set = frozenset(valid)
     for period in alg_block.keys():
         p = str(period)
+        if p in _STRUCTURE_MA_KIND_KEYS:
+            continue
         if valid_set and p not in valid_set:
             raise ValueError(
-                "RECIPE.structure.%s 周期键须 ∈ _VALID_PERIODS，收到 %s" % (alg_name, p)
+                "RECIPE.structure.%s 周期键须 ∈ _VALID_PERIODS，收到 %s"
+                % (alg_name, p)
             )
 
 
+def _structure_ma_kind(ma_block):
+    raw = (ma_block or {}).get("kind", "ema")
+    kind = str(raw or "ema").strip().lower()
+    if kind not in _STRUCTURE_MA_KINDS:
+        raise ValueError(
+            "RECIPE.structure.ma.kind 须为 ema|sma，收到 %s" % raw
+        )
+    return kind
+
+
+def _structure_keltner_block(keltner):
+    """物化 keltner.ma_n / atr_n；拒绝旧键 ema_n。"""
+    if not isinstance(keltner, dict):
+        keltner = {}
+    if "ema_n" in keltner:
+        raise ValueError(
+            "已删除的 structure 键 keltner.ema_n：请写 keltner.ma_n"
+        )
+    return {
+        "ma_n": _structure_int(keltner, "ma_n", 20),
+        "atr_n": _structure_int(keltner, "atr_n", 20),
+    }
+
+
 def _structure_windows():
-    """只读 RECIPE.structure。缺键用数字字面量。物化 ema/sma × 1d/1w。"""
+    """只读 RECIPE.structure。缺键用数字字面量。物化 ma × 1d/1w + kind。"""
     rec = (globals().get("RECIPE") or {}).get("structure") or {}
     _structure_reject_deleted(rec)
-    ema = rec.get("ema") or {}
-    sma = rec.get("sma") or {}
-    if ema and not isinstance(ema, dict):
-        raise ValueError("RECIPE.structure.ema 须为 dict")
-    if sma and not isinstance(sma, dict):
-        raise ValueError("RECIPE.structure.sma 须为 dict")
-    _structure_validate_ma_periods(ema, "ema")
-    _structure_validate_ma_periods(sma, "sma")
+    ma = rec.get("ma") or {}
+    if ma and not isinstance(ma, dict):
+        raise ValueError("RECIPE.structure.ma 须为 dict")
+    _structure_validate_ma_periods(ma, "ma")
     atr = rec.get("atr") or {}
     keltner = rec.get("keltner") or {}
     return {
-        "ema": {
-            "1d": _structure_ma_period_block(ema, "1d", (20, 60, 120)),
-            "1w": _structure_ma_period_block(ema, "1w", (5, 0, 34)),
-        },
-        "sma": {
-            "1d": _structure_ma_period_block(sma, "1d", (0, 0, 0)),
-            "1w": _structure_ma_period_block(sma, "1w", (0, 0, 0)),
+        "ma": {
+            "kind": _structure_ma_kind(ma),
+            "1d": _structure_ma_period_block(ma, "1d", (20, 60, 120)),
+            "1w": _structure_ma_period_block(ma, "1w", (5, 0, 34)),
         },
         "atr": {
             "n": _structure_int(atr, "n", 14),
         },
-        "keltner": {
-            "ema_n": _structure_int(keltner, "ema_n", 20),
-            "atr_n": _structure_int(keltner, "atr_n", 20),
-        },
+        "keltner": _structure_keltner_block(keltner),
     }
 
 
 def _structure_apply_global(params):
-    """只合进 RECIPE.structure，递归按算法→周期→窗合并。"""
+    """只合进 RECIPE.structure，递归按根→周期→窗合并。"""
     if not isinstance(params, dict):
         return
     _structure_reject_deleted(params)
     for alg in _STRUCTURE_MA_ROOTS:
         block = params.get(alg)
         if block is not None:
-            _structure_validate_ma_periods(block if isinstance(block, dict) else {}, alg)
+            _structure_validate_ma_periods(
+                block if isinstance(block, dict) else {}, alg
+            )
+            if isinstance(block, dict) and "kind" in block:
+                _structure_ma_kind(block)
+    kc = params.get("keltner")
+    if isinstance(kc, dict) and "ema_n" in kc:
+        raise ValueError(
+            "已删除的 structure 键 keltner.ema_n：请写 keltner.ma_n"
+        )
     rec = globals().get("RECIPE")
     if not isinstance(rec, dict):
         return
@@ -183,17 +211,13 @@ def _structure_apply_global(params):
 
 
 def _structure_ma_need_n(period, window):
-    """暖机：同周期同窗取 ema/sma 的 max（仅 >0）。"""
+    """暖机：读 structure.ma 同周期同窗（仅 >0）。"""
     win = _structure_windows()
-    best = 0
-    for alg in ("ema", "sma"):
-        try:
-            n = int((win.get(alg) or {}).get(period, {}).get(window) or 0)
-        except (TypeError, ValueError, AttributeError):
-            n = 0
-        if n > best:
-            best = n
-    return best
+    try:
+        n = int((win.get("ma") or {}).get(period, {}).get(window) or 0)
+    except (TypeError, ValueError, AttributeError):
+        n = 0
+    return n if n > 0 else 0
 
 
 _MARKET_TAGS = frozenset(
@@ -265,9 +289,10 @@ def _weekly_market_features(closes_w):
         "close": None,
     }
     win = _structure_windows()
-    w_ema = win["ema"]["1w"]
-    mid_arr = _ema(closes_w, w_ema["mid"])
-    trend_arr = _ema(closes_w, w_ema["trend"])
+    w_ma = win["ma"]["1w"]
+    kind = win["ma"]["kind"]
+    mid_arr = _ma(closes_w, w_ma["mid"], kind)
+    trend_arr = _ma(closes_w, w_ma["trend"], kind)
     if mid_arr is None or trend_arr is None:
         return detail
     i = len(closes_w) - 1
@@ -310,34 +335,36 @@ def _factor_daily_features(closes, volumes, need=None):
         return False, detail
     if need is None:
         need = _market_need()
-    d_ema = _structure_windows()["ema"]["1d"]
+    win_ma = _structure_windows()["ma"]
+    d_ma = win_ma["1d"]
+    kind = win_ma["kind"]
     try:
-        mid_n = int(d_ema.get("mid") or 0)
+        mid_n = int(d_ma.get("mid") or 0)
     except (TypeError, ValueError):
         mid_n = 0
     try:
-        slow_n = int(d_ema.get("slow") or 0)
+        slow_n = int(d_ma.get("slow") or 0)
     except (TypeError, ValueError):
         slow_n = 0
     try:
-        trend_n = int(d_ema.get("trend") or 0)
+        trend_n = int(d_ma.get("trend") or 0)
     except (TypeError, ValueError):
         trend_n = 0
     detail["mid_n"] = mid_n
     detail["slow_n"] = slow_n
     detail["trend_n"] = trend_n
     mid_arr = (
-        _ema(closes, mid_n)
+        _ma(closes, mid_n, kind)
         if ("d_ma_mid" in need and mid_n > 0)
         else None
     )
     slow_arr = (
-        _ema(closes, slow_n)
+        _ma(closes, slow_n, kind)
         if ("d_ma_slow" in need and slow_n > 0)
         else None
     )
     trend_arr = (
-        _ema(closes, trend_n)
+        _ma(closes, trend_n, kind)
         if ("d_ma_trend" in need and trend_n > 0)
         else None
     )
@@ -400,16 +427,19 @@ def _build_factor_ctx(
     )
     atr = _last_valid(atr_arr) if atr_arr is not None else None
     try:
-        kc_win = _structure_windows()["keltner"]
-        kc_ema_n = int(kc_win["ema_n"] or 0)
+        win_all = _structure_windows()
+        kc_win = win_all["keltner"]
+        kc_ma_n = int(kc_win["ma_n"] or 0)
         kc_atr_n = int(kc_win["atr_n"] or 0)
+        ma_kind = win_all["ma"]["kind"]
     except (TypeError, ValueError, KeyError):
-        kc_ema_n = 0
+        kc_ma_n = 0
         kc_atr_n = 0
+        ma_kind = "ema"
     want_kc = "keltner" in need
     kc_mid_arr = (
-        _ema(closes, kc_ema_n)
-        if want_kc and kc_ema_n > 0 and closes is not None
+        _ma(closes, kc_ma_n, ma_kind)
+        if want_kc and kc_ma_n > 0 and closes is not None
         else None
     )
     kc_atr_arr = (
@@ -444,9 +474,11 @@ def _build_factor_ctx(
         "atr": atr,
         "atr_n": atr_n,
         "kc_mid": kc_mid,
+        "kc_mid_arr": kc_mid_arr,
         "kc_atr": kc_atr,
-        "kc_ema_n": kc_ema_n,
+        "kc_ma_n": kc_ma_n,
         "kc_atr_n": kc_atr_n,
+        "ma_kind": ma_kind,
     }
     return {
         "market": market,

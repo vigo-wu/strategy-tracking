@@ -14,7 +14,7 @@ ACCOUNT_TYPE = "STOCK"  # STOCK / CREDIT
 # BUDGET_BASE=fixed：基数=TRADE_BUDGET（不读其它市值）。
 # k / book_mv 只统计 BOOK_STOCKS。N = 集合/字典长度。实盘单实例监视全池并写账本；回测用 TRADE_BUDGET。
 # 形态：code 集合，或 code → 配置字典（dividend_type 见下方复权注释）。
-# 旧纯字符串 tuple 仍认作白名单。价格均线算法由调用点直调 _ema/_sma，不上本表。
+# 旧纯字符串 tuple 仍认作白名单。价格均线算法由 structure.ma.kind 统一切换。
 BOOK_STOCKS = {
     "600938.SH",
     "603259.SH",
@@ -43,12 +43,12 @@ TRADE_BUDGET = 100000.0
 
 # ---- 周线过滤（跨周期；主图仍是日线）----
 # 均线/ATR/肯特纳窗在 RECIPE.structure（字面量）。
-# 价格均线：structure.ema|sma × 周期键（对齐 _VALID_PERIODS：1d/1w/…）× mid/slow/trend。
-# 调用点直调 _ema 读 ema.*，直调 _sma 读 sma.*（量均窗仍在 factor_params）。
-# 日线 mid 缺省仍物化；slow→时间成本地板；trend→above_ema。<=0 关该条。
+# 价格均线：structure.ma.kind（ema|sma）× 周期键（对齐 _VALID_PERIODS：1d/1w/…）× mid/slow/trend。
+# 调用方读 kind 后传给 _ma；量均仍固定 _sma（窗在 factor_params）。
+# 日线 mid 缺省仍物化；slow→时间成本地板；trend→above_ma。<=0 关该条。
 # 周线 mid/trend（5/34）；slow 默认 0、预计算不用、不上网格轴。取数 need 另钳原 MA55 暖机地板。
 # ATR：威尔德平滑窗 atr.n；<=0 关 atr_stop。
-# 肯特纳：中轨 EMA 窗 keltner.ema_n，带宽 ATR 窗 keltner.atr_n（与 atr.n 独立）；<=0 关。
+# 肯特纳：中轨窗 keltner.ma_n（跟 ma.kind），带宽 ATR 窗 keltner.atr_n（与 atr.n 独立）；<=0 关。
 
 # 盈利后加仓：门槛叶子 scale_arm（峰值浮盈 / 持仓日）在 RECIPE.scale_in；
 #   执行日若已触发卖点则取消加仓
@@ -64,22 +64,22 @@ SCALE_LOTS = True
 RECIPE = {
     "entry": [
         "and",
-        "above_ema",
+        "above_ma",
         "keltner_vol",
     ],
     "scale_in": False,
     "exit": [
         "or",
-        # "stop_loss",
+        "stop_loss",
         "atr_stop",
         "atr_trail_stop",
     ],
     "scale_out": False,
     "structure": {
-        # ema|sma × _VALID_PERIODS 周期键 × mid/slow/trend；<=0 关该条
-        "ema": {"1d": {"trend": 120}},
-        # 肯特纳中轨 EMA / 带宽 ATR；与 atr.n 独立；<=0 关
-        "keltner": {"ema_n": 20, "atr_n": 20},
+        # ma.kind + _VALID_PERIODS 周期键 × mid/slow/trend；<=0 关该条
+        "ma": {"kind": "ema", "1d": {"trend": 120}},
+        # 肯特纳中轨窗 / 带宽 ATR；与 atr.n 独立；<=0 关
+        "keltner": {"ma_n": 20, "atr_n": 20},
     },
 }
 

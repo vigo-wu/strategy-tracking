@@ -100,7 +100,7 @@ def _eval_cases(ns: dict) -> list[dict]:
             "id": "trend_up",
             "buy_ok": bool(entry.get("hit")),
             "buy_reasons": list(entry.get("reasons") or []),
-            "above_ema": bool(ns["_factor_hit"]("above_ema", ctx)),
+            "above_ma": bool(ns["_factor_hit"]("above_ma", ctx)),
             "keltner_vol": bool(ns["_factor_hit"]("keltner_vol", ctx)),
         }
     )
@@ -111,7 +111,7 @@ def _eval_cases(ns: dict) -> list[dict]:
     entry = ns["_eval_entry_slot"](below_ctx)
     cases.append(
         {
-            "id": "below_ema",
+            "id": "below_ma",
             "buy_ok": bool(entry.get("hit")),
             "buy_reasons": list(entry.get("reasons") or []),
         }

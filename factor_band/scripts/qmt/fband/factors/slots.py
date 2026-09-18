@@ -96,19 +96,20 @@ def _recipe_log_value(fid, key, raw):
 
 def _recipe_log_structure_kv(need, win):
     rows = []
+    rows.append(("ma.kind", win["ma"]["kind"]))
     if "d_ma_mid" in need:
-        rows.append(("ema.1d.mid", win["ema"]["1d"]["mid"]))
+        rows.append(("ma.1d.mid", win["ma"]["1d"]["mid"]))
     if "d_ma_slow" in need:
-        rows.append(("ema.1d.slow", win["ema"]["1d"]["slow"]))
+        rows.append(("ma.1d.slow", win["ma"]["1d"]["slow"]))
     if "d_ma_trend" in need:
-        rows.append(("ema.1d.trend", win["ema"]["1d"]["trend"]))
+        rows.append(("ma.1d.trend", win["ma"]["1d"]["trend"]))
     if "weekly" in need:
-        rows.append(("ema.1w.mid", win["ema"]["1w"]["mid"]))
-        rows.append(("ema.1w.trend", win["ema"]["1w"]["trend"]))
+        rows.append(("ma.1w.mid", win["ma"]["1w"]["mid"]))
+        rows.append(("ma.1w.trend", win["ma"]["1w"]["trend"]))
     if "atr" in need:
         rows.append(("atr.n", win["atr"]["n"]))
     if "keltner" in need:
-        rows.append(("keltner.ema_n", win["keltner"]["ema_n"]))
+        rows.append(("keltner.ma_n", win["keltner"]["ma_n"]))
         rows.append(("keltner.atr_n", win["keltner"]["atr_n"]))
     return rows
 

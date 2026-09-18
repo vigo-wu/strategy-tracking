@@ -50,14 +50,14 @@
 
 ## 新的 RECIPE.structure 指标周期窗（指标侧，不是登记表）
 
-要网格能扫窗，四处一起改（这是**参数契约**：指标周期窗的唯一可信数据源 + `_structure_windows()` + 覆盖形态）：
+要网格能扫窗，四处一起改（这是**参数契约**：指标周期窗与 `ma.kind` 的唯一可信数据源 + `_structure_windows()` + 覆盖形态）：
 
 1. `config.RECIPE.structure` 段
 2. `factors/ctx.py` `_structure_windows()`（缺省字面量与 config 一致）
 3. `market._ohlcv_need_1d` / `_ohlcv_need_1w`（暖机）
 4. `local_bt/grid_spec.py` 的 `STRUCTURE_KEYS` 与 `STRUCTURE_ROOTS`
 
-因子调用：先 `_structure_windows()`，再把 `n` 传给 `_ema` / `_sma` / `_calc_atr` / `_calc_keltner`。价格均线算法由调用点选定，不上 `structure`。`_calc_keltner` 的倍数 `k` 由调用方传入，不上 `structure`。
+因子调用：先 `_structure_windows()`，再把窗与 `ma.kind` 传给 `_ma` / `_calc_atr` / `_calc_keltner`。价格均线算法唯一可信数据源是 `structure.ma.kind`（调用方传入 `_ma`，指标不读 `RECIPE`）。`_calc_keltner` 的倍数 `k` 由调用方传入，不上 `structure`。量均仍固定 `_sma`。
 
 ## 加完自检
 

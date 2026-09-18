@@ -8,12 +8,12 @@
    - `_exec_bundle()` 之后注入 `overrides`（写进 exec 得到的 `ns`）。
    - `init()` 之后再注入一次（防止 `_apply_panel` 把资金/开关打回默认）。
    - 建议包装 `_apply_panel`：面板应用完立即再写 `overrides`，这样 init 日志指纹才是格子值。
-   - 因子阈值写 `overrides.factor_params`（如 `stop_loss.pct`）；`RECIPE.structure` 指标周期窗写 `overrides.structure`（如 `ema.1d.mid`）；资金仍写顶层 `CASH_RATIO`。顶层旧键 / 顶层点路径直接报错。fband 因子轴元数据来自 `factors/catalog.py` 的 `LEAVES`，再按买入 `entry`、加仓 `scale_in`、卖出 `exit`、减仓 `scale_out` 四个槽位已启用叶子过滤；未启用叶子不上侧栏。overrides 形态不改。`RECIPE.factor_params` 仍是全表（`recipe=` 指纹 / 参数指纹预检 defaults 不跟目录变窄）。
+   - 因子阈值写 `overrides.factor_params`（如 `stop_loss.pct`）；`RECIPE.structure` 指标周期窗写 `overrides.structure`（如 `ma.1d.mid`）；资金仍写顶层 `CASH_RATIO`。顶层旧键 / 顶层点路径直接报错。fband 因子轴元数据来自 `factors/catalog.py` 的 `LEAVES`，再按买入 `entry`、加仓 `scale_in`、卖出 `exit`、减仓 `scale_out` 四个槽位已启用叶子过滤；未启用叶子不上侧栏。overrides 形态不改。`RECIPE.factor_params` 仍是全表（`recipe=` 指纹 / 参数指纹预检 defaults 不跟目录变窄）。
    - `out_dir` 由调用方指定；批量 payload 带 `overrides` 透传到子进程。
 2. **隔离产物目录**：`report/grid/<sweep>/<cell>/<sample>/<div>/`。禁止写回基线 `report/<div>/`。
 3. **init 指纹**（写进同一份 log，供 runner 校验）
    - 必有：`recipe=`（表达式 + 折进表的全表 `factor_params` + `structure`）。
-   - 人读字段是启用叶子的点路径（如 `atr_stop.k=`、`keltner_vol.vol_n=`、`ema.1d.trend=`），由 `_recipe_log_kv` 展开；卸下叶子不打。
+   - 人读字段是启用叶子的点路径（如 `atr_stop.k=`、`keltner_vol.vol_n=`、`ma.1d.trend=`），由 `_recipe_log_kv` 展开；卸下叶子不打。
    - 该格 `overrides.factor_params` 且叶子已启用时，参数指纹预检再核对应路径；`trail_stop.tiers` 用 compact JSON。未启用叶子的覆盖只走 `recipe=`。启用集合读不到则字段级跳过，只核 `recipe=`。
 4. **主样本 walk**：默认 config `BOOK_STOCKS` 一段 `run_book_backtest`（`year_start0101`–`year_end1231`）。`asset_split.mode=random_from_csv` 时调参 / 盲测 **各一段**（名单写入 `freeze.json` / `spec.json`；CSV 仍用 `csv_for`）。禁止 stock×年独立 10 万账户，禁止 `tune∪holdout` 同一钱包。
 5. **空间隔离（可选）**：`asset_split` 见 skill 示例 `stop_loss_space.json`。主列盈亏仍展示 tune 股；空间分用全区间夏普比进入排名（盲测不再只否决）。某格缺盲测窗则空间维 0 分，不摊权。
@@ -46,7 +46,7 @@ JSON 可序列化。元组在 JSON 里用数组；`null` = Python `None`。
 }
 ```
 
-结构轴 id：`ema.1d.mid` `ema.1d.slow` `ema.1d.trend` `ema.1w.mid` `ema.1w.trend` `atr.n` `keltner.ema_n` `keltner.atr_n`。短 id 如 `e1dm15` / `e1dt` / `atr` / `kem` / `kat`。出场另有 `atr_stop.k`（短 id `ask`）、`atr_trail_stop.k1` / `k2`（`atk1` / `atk2`，浮点倍数轴，**不是**百分比轴）、`time_force.arm`（`tfa`，百分比）。不要写顶层 `D_MA_MID`、顶层 `d_ma.mid` / `ema.1d.mid`，或袋内旧段 `d_ma`/`w_ma`/`macd`。
+结构轴 id：`ma.1d.mid` `ma.1d.slow` `ma.1d.trend` `ma.1w.mid` `ma.1w.trend` `atr.n` `keltner.ma_n` `keltner.atr_n`。短 id 如 `m1dm15` / `m1dt` / `atr` / `kmm` / `kat`。出场另有 `atr_stop.k`（短 id `ask`）、`atr_trail_stop.k1` / `k2`（`atk1` / `atk2`，浮点倍数轴，**不是**百分比轴）、`time_force.arm`（`tfa`，百分比）。不要写顶层 `D_MA_MID`、顶层 `d_ma.mid` / `ma.1d.mid`，或袋内旧段 `d_ma`/`w_ma`/`macd`/`ema`/`sma`。
 
 空 `overrides` = `base`（现行片段常量，仍跑一遍以便对照目录与指纹）。
 

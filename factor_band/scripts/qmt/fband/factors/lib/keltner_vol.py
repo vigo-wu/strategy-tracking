@@ -9,9 +9,9 @@ def _factor_eval_keltner_vol(ctx):
         k = 0.0
     win = _structure_windows()["keltner"]
     try:
-        ema_n = int(win["ema_n"] or 0)
+        ma_n = int(win["ma_n"] or 0)
     except (TypeError, ValueError, KeyError):
-        ema_n = 0
+        ma_n = 0
     try:
         atr_n = int(win["atr_n"] or 0)
     except (TypeError, ValueError, KeyError):
@@ -21,7 +21,7 @@ def _factor_eval_keltner_vol(ctx):
     price = market.get("close")
     if price is None:
         price = market.get("daily_detail", {}).get("price")
-    if k <= 0 or ema_n <= 0 or atr_n <= 0 or None in (mid, atr, price):
+    if k <= 0 or ma_n <= 0 or atr_n <= 0 or None in (mid, atr, price):
         return False, {"k": k, "inside": False, "vol_streak": 0}
     upper = float(mid) + k * float(atr)
     lower = float(mid) - k * float(atr)
@@ -47,6 +47,16 @@ def _factor_eval_keltner_vol(ctx):
     except (TypeError, ValueError):
         vol_need = 2
     vol_need = max(1, vol_need)
+    raw_sm = _factor_param(ctx, "keltner_vol", "slope_m")
+    try:
+        slope_m = int(5 if raw_sm is None else raw_sm)
+    except (TypeError, ValueError):
+        slope_m = 5
+    raw_ms = _factor_param(ctx, "keltner_vol", "min_slope")
+    try:
+        min_slope = float(0.0 if raw_ms is None else raw_ms)
+    except (TypeError, ValueError):
+        min_slope = 0.0
     volumes = market.get("volumes")
     vol_sma = _sma(volumes, vol_n) if vol_n > 0 else None
     vol_streak = 0
@@ -58,6 +68,9 @@ def _factor_eval_keltner_vol(ctx):
             "vol_streak": 0,
             "upper": upper,
             "lower": lower,
+            "slope_m": slope_m,
+            "min_slope": min_slope,
+            "norm_slope": None,
         }
     i = int(market.get("i") or 0)
     for step in range(vol_need):
@@ -75,7 +88,15 @@ def _factor_eval_keltner_vol(ctx):
         if vma is None or vma <= 0 or vj >= vma * ratio or too_low:
             break
         vol_streak += 1
-    hit = bool(inside and vol_streak >= vol_need)
+    kc_mid_arr = market.get("kc_mid_arr")
+    ns = (
+        _norm_slope_from_ma(kc_mid_arr, slope_m)
+        if kc_mid_arr is not None
+        else None
+    )
+    norm = _last_valid(ns, i) if ns is not None else None
+    slope_ok = norm is not None and float(norm) >= min_slope
+    hit = bool(inside and vol_streak >= vol_need and slope_ok)
     return hit, {
         "k": k,
         "min_ratio": min_ratio,
@@ -83,4 +104,7 @@ def _factor_eval_keltner_vol(ctx):
         "vol_streak": vol_streak,
         "upper": upper,
         "lower": lower,
+        "slope_m": slope_m,
+        "min_slope": min_slope,
+        "norm_slope": norm,
     }

@@ -1,7 +1,7 @@
-# === fband/factors/lib/above_ema.py ===
-def _factor_eval_above_ema(ctx):
+# === fband/factors/lib/above_ma.py ===
+def _factor_eval_above_ma(ctx):
     try:
-        n = int(_structure_windows()["ema"]["1d"]["trend"] or 0)
+        n = int(_structure_windows()["ma"]["1d"]["trend"] or 0)
     except (TypeError, ValueError, KeyError):
         n = 0
     if n <= 0:

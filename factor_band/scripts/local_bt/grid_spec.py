@@ -25,17 +25,17 @@ EXIT_KEYS: tuple[str, ...] = ()
 SCALE_FACTOR_KEYS: tuple[str, ...] = ()
 _LEAVES: dict[str, Any] = {}
 STRUCTURE_KEYS = (
-    "ema.1d.mid",
-    "ema.1d.slow",
-    "ema.1d.trend",
-    "ema.1w.mid",
-    "ema.1w.trend",
+    "ma.1d.mid",
+    "ma.1d.slow",
+    "ma.1d.trend",
+    "ma.1w.mid",
+    "ma.1w.trend",
     "atr.n",
-    "keltner.ema_n",
+    "keltner.ma_n",
     "keltner.atr_n",
 )
-STRUCTURE_ROOTS = frozenset({"ema", "sma", "atr", "keltner"})
-DELETED_STRUCTURE_ROOTS = frozenset({"d_ma", "w_ma", "macd"})
+STRUCTURE_ROOTS = frozenset({"ma", "atr", "keltner"})
+DELETED_STRUCTURE_ROOTS = frozenset({"d_ma", "w_ma", "macd", "ema", "sma"})
 DELETED_STRUCTURE_PATHS = frozenset(
     {
         "d_ma.mid",
@@ -44,6 +44,12 @@ DELETED_STRUCTURE_PATHS = frozenset(
         "w_ma.fast",
         "w_ma.mid",
         "w_ma.life",
+        "ema.1d.mid",
+        "ema.1d.slow",
+        "ema.1d.trend",
+        "ema.1w.mid",
+        "ema.1w.trend",
+        "keltner.ema_n",
     }
 )
 MONEY_KEYS = (
@@ -152,13 +158,13 @@ PARAM_LABELS = {
     "LOT_OPEN_FRAC": "开仓仓位",
     "LOT_ADD_FRAC": "第二笔仓位",
     "TRADE_BUDGET": "固定预算",
-    "ema.1d.mid": "日线中均线",
-    "ema.1d.slow": "日线慢均线",
-    "ema.1d.trend": "日线趋势均线",
-    "ema.1w.mid": "周线快均线",
-    "ema.1w.trend": "周线生命线",
+    "ma.1d.mid": "日线中均线",
+    "ma.1d.slow": "日线慢均线",
+    "ma.1d.trend": "日线趋势均线",
+    "ma.1w.mid": "周线快均线",
+    "ma.1w.trend": "周线生命线",
     "atr.n": "日线ATR窗",
-    "keltner.ema_n": "肯特纳EMA窗",
+    "keltner.ma_n": "肯特纳中轨窗",
     "keltner.atr_n": "肯特纳ATR窗",
 }
 ABBREV_FIXED = {
@@ -170,13 +176,13 @@ ABBREV_FIXED = {
     "LOT_OPEN_FRAC": "lof",
     "LOT_ADD_FRAC": "laf",
     "TRADE_BUDGET": "tb",
-    "ema.1d.mid": "e1dm",
-    "ema.1d.slow": "e1ds",
-    "ema.1d.trend": "e1dt",
-    "ema.1w.mid": "e1wm",
-    "ema.1w.trend": "e1wt",
+    "ma.1d.mid": "m1dm",
+    "ma.1d.slow": "m1ds",
+    "ma.1d.trend": "m1dt",
+    "ma.1w.mid": "m1wm",
+    "ma.1w.trend": "m1wt",
     "atr.n": "atr",
-    "keltner.ema_n": "kem",
+    "keltner.ma_n": "kmm",
     "keltner.atr_n": "kat",
 }
 DEFAULT_SCAN = {
@@ -309,7 +315,7 @@ def reject_deleted_factor_keys(spec: Mapping[str, Any] | None) -> None:
                     bad_paths.append(str(bad))
     if bad_paths:
         raise GridSpecError(
-            "已删除的 structure 路径：请写 ema|sma.<period>.<window>。见 %s"
+            "已删除的 structure 路径：请写 ma.<period>.<window>。见 %s"
             % ", ".join(bad_paths)
         )
 
@@ -370,14 +376,14 @@ def nest_factor_path(path: str, value: Any) -> dict[str, Any]:
 
 
 def nest_structure_path(path: str, value: Any) -> dict[str, Any]:
-    """'ema.1d.mid', 15 → {'ema': {'1d': {'mid': 15}}}（全段嵌套）。"""
+    """'ma.1d.mid', 15 → {'ma': {'1d': {'mid': 15}}}（全段嵌套）。"""
     parts = [p for p in str(path).split(".") if p]
     if len(parts) < 2:
         raise GridSpecError("不是 structure 点路径 %s" % path)
     root = parts[0]
     if root in DELETED_STRUCTURE_ROOTS or str(path) in DELETED_STRUCTURE_PATHS:
         raise GridSpecError(
-            "已删除的 structure 路径 %s：请写 ema|sma.<period>.<window>" % path
+            "已删除的 structure 路径 %s：请写 ma.<period>.<window>" % path
         )
     if root not in STRUCTURE_ROOTS:
         raise GridSpecError("未知 structure 根 %s" % path)
@@ -420,7 +426,7 @@ def deep_merge_structure(
     base: Mapping[str, Any] | None,
     incoming: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
-    """递归合并 structure（兼容 keltner 两层与 ema.1d 三层）。"""
+    """递归合并 structure（兼容 keltner 两层与 ma.1d 三层）。"""
 
     def _copy(src: Any) -> Any:
         if isinstance(src, dict):
@@ -432,7 +438,7 @@ def deep_merge_structure(
             key = str(k)
             if key in DELETED_STRUCTURE_ROOTS:
                 raise GridSpecError(
-                    "已删除的 structure 段 %s：请写 ema|sma.<period>.<window>" % key
+                    "已删除的 structure 段 %s：请写 ma.<period>.<window>" % key
                 )
             if isinstance(v, dict):
                 cur = dst.get(key)
@@ -459,7 +465,7 @@ def overrides_has_trail_tiers(overrides: Mapping[str, Any] | None) -> bool:
 
 
 def flatten_structure(table: Mapping[str, Any] | None) -> dict[str, Any]:
-    """RECIPE.structure → {'ema.1d.mid': 20, 'keltner.ema_n': 20, ...}"""
+    """RECIPE.structure → {'ma.1d.mid': 20, 'keltner.ma_n': 20, ...}"""
     out: dict[str, Any] = {}
 
     def _walk(node: Any, prefix: str) -> None:
@@ -867,7 +873,7 @@ def materialize_structure_table(raw: Mapping[str, Any] | None) -> dict[str, Any]
     for bad in DELETED_STRUCTURE_ROOTS:
         if bad in rec:
             raise GridSpecError(
-                "已删除的 structure 段 %s：请写 ema|sma.<period>.<window>" % bad
+                "已删除的 structure 段 %s：请写 ma.<period>.<window>" % bad
             )
 
     def _iint(block: Mapping[str, Any] | None, key: str, default: int) -> int:
@@ -985,7 +991,7 @@ def get_param(family: str) -> ParamSpec | None:
 def require_param(family: str) -> ParamSpec:
     if str(family) in DELETED_STRUCTURE_PATHS or str(family).split(".", 1)[0] in DELETED_STRUCTURE_ROOTS:
         raise GridSpecError(
-            "已删除的 structure 路径 %s：请写 ema|sma.<period>.<window>" % family
+            "已删除的 structure 路径 %s：请写 ma.<period>.<window>" % family
         )
     spec = get_param(family)
     if spec is None:
@@ -1401,13 +1407,13 @@ def family_value_label(family: str, value: Any) -> str:
             return "ATR止损关闭"
         return "ATR止损 %gx" % fv
     if family in (
-        "ema.1d.mid",
-        "ema.1d.slow",
-        "ema.1d.trend",
-        "ema.1w.mid",
-        "ema.1w.trend",
+        "ma.1d.mid",
+        "ma.1d.slow",
+        "ma.1d.trend",
+        "ma.1w.mid",
+        "ma.1w.trend",
         "atr.n",
-        "keltner.ema_n",
+        "keltner.ma_n",
         "keltner.atr_n",
     ):
         try:

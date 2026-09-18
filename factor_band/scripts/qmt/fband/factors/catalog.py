@@ -43,9 +43,23 @@ LEAVES = {
                 "label": "通道缩量确认日",
                 "axis": 14,
             },
+            "slope_m": {
+                "default": 5,
+                "percent": False,
+                "abbrev": "kvs",
+                "label": "斜率窗",
+                "axis": 15,
+            },
+            "min_slope": {
+                "default": 0.0,
+                "percent": False,
+                "abbrev": "kvms",
+                "label": "最小归一化斜率",
+                "axis": 16,
+            },
         },
     },
-    "above_ema": {
+    "above_ma": {
         "label": "价在趋势均线上",
         "group": "entry",
         "need": ("d_ma_trend",),
