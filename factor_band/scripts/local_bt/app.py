@@ -866,6 +866,18 @@ if not _IS_MP_WORKER:
             fig.update_xaxes(title_text="日期", showticklabels=True, row=3, col=1)
         else:
             fig.update_xaxes(title_text="日期", showticklabels=True, row=2, col=1)
+        # 十字线：竖线贯穿各行，横线在当前子图；跟随光标，不吸附到点
+        fig.update_layout(hovermode="closest", spikedistance=-1)
+        _cross = dict(
+            showspikes=True,
+            spikemode="across",
+            spikesnap="cursor",
+            spikecolor="#78909c",
+            spikethickness=1,
+            spikedash="dot",
+        )
+        fig.update_xaxes(**_cross)
+        fig.update_yaxes(**_cross)
         return fig
 
 
