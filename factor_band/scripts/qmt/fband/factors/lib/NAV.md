@@ -12,7 +12,7 @@
 | id | 文件 | 现逻辑 | 主要读 | 阈值（`factor_params`） |
 | :--- | :--- | :--- | :--- | :--- |
 | `keltner_vol` | [keltner_vol.py](keltner_vol.py) | 收盘在肯特纳通道内 + 连续缩量 + 中轨 Norm_Slope>=min_slope | `kc_mid` / `kc_mid_arr` / `kc_atr` / 量 | `keltner_vol.k` / `ratio` / `min_ratio` / `vol_n` / `confirm_days` / `slope_m` / `min_slope`；均线窗是 `structure.keltner.ma_n`（斜率复用 `kc_mid_arr`，不另开 ma_n）；`k<=0` 或窗 `<=0` 关；`min_ratio<=0` 关下限 |
-| `above_ma` | [above_ma.py](above_ma.py) | 收盘 > 日线趋势均线 + 该均线 Norm_Slope>=min_slope | `d_trend` / `d_trend_arr` | `above_ma.slope_m` / `min_slope`；均线窗是 `structure.ma.1d.trend`（斜率复用 `d_trend_arr`，不另开 ma_n）；窗 `<=0` 关闸门；算不出斜率则不命中 |
+| `above_ma` | [above_ma.py](above_ma.py) | 收盘 > 日线趋势均线 + 该均线 Norm_Slope>=min_slope | `d_trend` / `d_trend_arr` | `above_ma.n` / `slope_m` / `min_slope`；均线窗是 `above_ma.n`（不是 `structure.ma.1d.trend`；斜率复用 `d_trend_arr`）；`n<=0` 关闸门；算不出斜率则不命中 |
 | `scale_arm` | [scale_arm.py](scale_arm.py) | 峰值浮盈 + 该笔持仓日 | `state.lots` / peak | `scale_arm.arm` / `bars`；`arm<=0` 回落 `0.03`；`bars<=0` 不查持仓日 |
 | `stop_loss` | [stop_loss.py](stop_loss.py) | 收盘相对成本 | `state.lot` / `cost` | `stop_loss.pct` |
 | `atr_stop` | [atr_stop.py](atr_stop.py) | 收盘 <= 成本 − k×ATR | `state.lot` / `market.atr` | `atr_stop.k`；窗是 `structure.atr.n`（`<=0` 关） |

@@ -559,7 +559,11 @@ def _ohlcv_need_1d():
     parts = [3]
     mid_n = _structure_ma_need_n("1d", "mid")
     slow_n = _structure_ma_need_n("1d", "slow")
-    trend_n = _structure_ma_need_n("1d", "trend")
+    raw_tn = _factor_param(None, "above_ma", "n", 120)
+    try:
+        trend_n = int(120 if raw_tn is None else raw_tn)
+    except (TypeError, ValueError):
+        trend_n = 120
     if "d_ma_mid" in need and mid_n > 0:
         parts.append(mid_n)
     if "d_ma_slow" in need and slow_n > 0:

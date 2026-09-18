@@ -53,10 +53,10 @@ TRADE_BUDGET = 100000.0
 
 # ---- 周线过滤（跨周期；主图仍是日线）----
 # 均线/ATR/肯特纳窗在 RECIPE.structure（字面量）。
-# 价格均线：structure.ma.kind（ema|sma）× 周期键（对齐 _VALID_PERIODS：1d/1w/…）× mid/slow/trend。
+# 价格均线：structure.ma.kind（ema|sma）× 周期键 × mid/slow/trend。缺键为 0（关）。
 # 调用方读 kind 后传给 _ma；量均仍固定 _sma（窗在 factor_params）。
-# 日线 mid 缺省仍物化；slow→时间成本地板；trend→above_ma。<=0 关该条。
-# 周线 mid/trend（5/34）；slow 默认 0、预计算不用、不上网格轴。取数 need 另钳原 MA55 暖机地板。
+# above_ma 的均线窗是 above_ma.n（factor_params），不读 structure.ma.1d.trend。
+# 周线 mid/slow/trend 缺键为 0。取数 need 另钳原 MA55 暖机地板。
 # ATR：威尔德平滑窗 atr.n；<=0 关 atr_stop。
 # 肯特纳：中轨窗 keltner.ma_n（跟 ma.kind），带宽 ATR 窗 keltner.atr_n（与 atr.n 独立）；<=0 关。
 
@@ -69,8 +69,8 @@ SCALE_ONCE_PER_ROUND = True
 SCALE_LOTS = True
 
 # 默认 Recipe：四槽布尔式。因子数字在 factors/catalog.py（写入 factor_params）；
-# 均线/ATR/肯特纳窗只活在 structure。scale_once / 满槽 / 资金不进表。
-# scale_out 恒 false：减仓未启用。
+# ATR/肯特纳窗与显式价格均线窗在 structure。above_ma 周期在 above_ma.n。
+# scale_once / 满槽 / 资金不进表。scale_out 恒 false：减仓未启用。
 RECIPE = {
     "entry": [
         "and",
@@ -87,7 +87,7 @@ RECIPE = {
     "scale_out": False,
     "structure": {
         # ma.kind + _VALID_PERIODS 周期键 × mid/slow/trend；<=0 关该条
-        "ma": {"kind": "ema", "1d": {"trend": 120}},
+        "ma": {"kind": "ema"},
         # 肯特纳中轨窗 / 带宽 ATR；与 atr.n 独立；<=0 关
         "keltner": {"ma_n": 20, "atr_n": 20},
     },
@@ -249,6 +249,14 @@ LEAVES = {
         "group": "entry",
         "need": ("d_ma_trend",),
         "params": {
+            "n": {
+                "default": 120,
+                "percent": False,
+                "abbrev": "amn",
+                "label": "趋势均线周期",
+                "off": "le0",
+                "axis": 16,
+            },
             "slope_m": {
                 "default": 5,
                 "percent": False,
@@ -3302,7 +3310,11 @@ def _ohlcv_need_1d():
     parts = [3]
     mid_n = _structure_ma_need_n("1d", "mid")
     slow_n = _structure_ma_need_n("1d", "slow")
-    trend_n = _structure_ma_need_n("1d", "trend")
+    raw_tn = _factor_param(None, "above_ma", "n", 120)
+    try:
+        trend_n = int(120 if raw_tn is None else raw_tn)
+    except (TypeError, ValueError):
+        trend_n = 120
     if "d_ma_mid" in need and mid_n > 0:
         parts.append(mid_n)
     if "d_ma_slow" in need and slow_n > 0:
@@ -3666,8 +3678,8 @@ def _structure_windows():
     return {
         "ma": {
             "kind": _structure_ma_kind(ma),
-            "1d": _structure_ma_period_block(ma, "1d", (20, 60, 120)),
-            "1w": _structure_ma_period_block(ma, "1w", (5, 0, 34)),
+            "1d": _structure_ma_period_block(ma, "1d", (0, 0, 0)),
+            "1w": _structure_ma_period_block(ma, "1w", (0, 0, 0)),
         },
         "atr": {
             "n": _structure_int(atr, "n", 14),
@@ -3841,10 +3853,11 @@ def _factor_daily_features(closes, volumes, need=None):
         slow_n = int(d_ma.get("slow") or 0)
     except (TypeError, ValueError):
         slow_n = 0
+    raw_tn = _factor_param(None, "above_ma", "n", 120)
     try:
-        trend_n = int(d_ma.get("trend") or 0)
+        trend_n = int(120 if raw_tn is None else raw_tn)
     except (TypeError, ValueError):
-        trend_n = 0
+        trend_n = 120
     detail["mid_n"] = mid_n
     detail["slow_n"] = slow_n
     detail["trend_n"] = trend_n
@@ -4104,10 +4117,11 @@ def _factor_eval_keltner_vol(ctx):
 
 # === fband/factors/lib/above_ma.py ===
 def _factor_eval_above_ma(ctx):
+    raw_n = _factor_param(ctx, "above_ma", "n", 120)
     try:
-        n = int(_structure_windows()["ma"]["1d"]["trend"] or 0)
-    except (TypeError, ValueError, KeyError):
-        n = 0
+        n = int(120 if raw_n is None else raw_n)
+    except (TypeError, ValueError):
+        n = 120
     if n <= 0:
         return True, {"n": n, "off": True}
     market = (ctx or {}).get("market") or {}
@@ -4805,8 +4819,6 @@ def _recipe_log_structure_kv(need, win):
         rows.append(("ma.1d.mid", win["ma"]["1d"]["mid"]))
     if "d_ma_slow" in need:
         rows.append(("ma.1d.slow", win["ma"]["1d"]["slow"]))
-    if "d_ma_trend" in need:
-        rows.append(("ma.1d.trend", win["ma"]["1d"]["trend"]))
     if "weekly" in need:
         rows.append(("ma.1w.mid", win["ma"]["1w"]["mid"]))
         rows.append(("ma.1w.trend", win["ma"]["1w"]["trend"]))

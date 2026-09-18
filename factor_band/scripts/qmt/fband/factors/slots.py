@@ -101,8 +101,6 @@ def _recipe_log_structure_kv(need, win):
         rows.append(("ma.1d.mid", win["ma"]["1d"]["mid"]))
     if "d_ma_slow" in need:
         rows.append(("ma.1d.slow", win["ma"]["1d"]["slow"]))
-    if "d_ma_trend" in need:
-        rows.append(("ma.1d.trend", win["ma"]["1d"]["trend"]))
     if "weekly" in need:
         rows.append(("ma.1w.mid", win["ma"]["1w"]["mid"]))
         rows.append(("ma.1w.trend", win["ma"]["1w"]["trend"]))

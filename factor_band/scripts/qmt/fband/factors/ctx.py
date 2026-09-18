@@ -172,8 +172,8 @@ def _structure_windows():
     return {
         "ma": {
             "kind": _structure_ma_kind(ma),
-            "1d": _structure_ma_period_block(ma, "1d", (20, 60, 120)),
-            "1w": _structure_ma_period_block(ma, "1w", (5, 0, 34)),
+            "1d": _structure_ma_period_block(ma, "1d", (0, 0, 0)),
+            "1w": _structure_ma_period_block(ma, "1w", (0, 0, 0)),
         },
         "atr": {
             "n": _structure_int(atr, "n", 14),
@@ -347,10 +347,11 @@ def _factor_daily_features(closes, volumes, need=None):
         slow_n = int(d_ma.get("slow") or 0)
     except (TypeError, ValueError):
         slow_n = 0
+    raw_tn = _factor_param(None, "above_ma", "n", 120)
     try:
-        trend_n = int(d_ma.get("trend") or 0)
+        trend_n = int(120 if raw_tn is None else raw_tn)
     except (TypeError, ValueError):
-        trend_n = 0
+        trend_n = 120
     detail["mid_n"] = mid_n
     detail["slow_n"] = slow_n
     detail["trend_n"] = trend_n

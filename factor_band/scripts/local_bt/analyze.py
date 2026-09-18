@@ -1034,6 +1034,155 @@ def ohlc_from_csv(
 
 
 _CHART_MA_CFG: dict[str, Any] | None = None
+_CHART_K_DEFAULT = 2.0
+_STRUCTURE_DELETED_ROOTS = frozenset({"d_ma", "w_ma", "macd", "ema", "sma"})
+_INDICATOR_NS: dict[str, Any] | None = None
+
+
+def _chart_structure_int(block: Any, key: str, default: int) -> int:
+    raw = (block or {}).get(key) if isinstance(block, dict) else None
+    try:
+        return int(default if raw is None else raw)
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def materialize_chart_windows(
+    structure: dict[str, Any] | None,
+    *,
+    k: float = _CHART_K_DEFAULT,
+) -> dict[str, Any]:
+    """与 ctx._structure_windows 同形。忽略已删根键。k 来自调用方（不在 structure 里）。"""
+    rec = dict(structure or {})
+    for bad in _STRUCTURE_DELETED_ROOTS:
+        rec.pop(bad, None)
+    ma = rec.get("ma") if isinstance(rec.get("ma"), dict) else {}
+    kind = str((ma or {}).get("kind") or "ema").strip().lower()
+    if kind not in ("ema", "sma"):
+        kind = "ema"
+
+    def _period(period: str, defaults: tuple[int, int, int]) -> dict[str, int]:
+        block = (ma or {}).get(period) or {}
+        if not isinstance(block, dict):
+            block = {}
+        mid_d, slow_d, trend_d = defaults
+        return {
+            "mid": _chart_structure_int(block, "mid", mid_d),
+            "slow": _chart_structure_int(block, "slow", slow_d),
+            "trend": _chart_structure_int(block, "trend", trend_d),
+        }
+
+    atr = rec.get("atr") if isinstance(rec.get("atr"), dict) else {}
+    keltner = rec.get("keltner") if isinstance(rec.get("keltner"), dict) else {}
+    try:
+        k_f = float(k)
+    except (TypeError, ValueError):
+        k_f = _CHART_K_DEFAULT
+    return {
+        "kind": kind,
+        "ma": {
+            "1d": _period("1d", (0, 0, 0)),
+            "1w": _period("1w", (0, 0, 0)),
+        },
+        "atr": {"n": _chart_structure_int(atr, "n", 14)},
+        "keltner": {
+            "ma_n": _chart_structure_int(keltner, "ma_n", 20),
+            "atr_n": _chart_structure_int(keltner, "atr_n", 20),
+            "k": k_f,
+        },
+    }
+
+
+def _chart_recipe_leaf_ids(expr: Any) -> set[str]:
+    """四个槽位 AST 里的叶子 id。False/None/True 无叶子。"""
+    if expr is False or expr is None or expr is True:
+        return set()
+    if isinstance(expr, str):
+        return {expr}
+    if not isinstance(expr, (list, tuple)) or not expr:
+        return set()
+    op = expr[0]
+    if op in ("and", "or", "not"):
+        out: set[str] = set()
+        for node in expr[1:]:
+            out |= _chart_recipe_leaf_ids(node)
+        return out
+    if isinstance(op, str):
+        return {op}
+    return set()
+
+
+def _chart_above_ma_enabled(rec: Any) -> bool:
+    if not isinstance(rec, dict):
+        return False
+    used: set[str] = set()
+    for slot in ("entry", "scale_in", "exit", "scale_out"):
+        used |= _chart_recipe_leaf_ids(rec.get(slot))
+    return "above_ma" in used
+
+
+def _above_ma_n_from_recipe(rec: Any) -> int | None:
+    if not isinstance(rec, dict):
+        return None
+    fp = rec.get("factor_params")
+    if not isinstance(fp, dict):
+        return None
+    block = fp.get("above_ma")
+    if not isinstance(block, dict) or "n" not in block:
+        return None
+    try:
+        return int(block["n"])
+    except (TypeError, ValueError):
+        return None
+
+
+def _catalog_above_ma_n() -> int:
+    path = THEME / "scripts" / "qmt" / "fband" / "factors" / "catalog.py"
+    if not path.is_file():
+        return 120
+    spec = importlib.util.spec_from_file_location("fband_catalog_above_ma_chart", path)
+    if spec is None or spec.loader is None:
+        return 120
+    mod = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(mod)
+        leaves = getattr(mod, "LEAVES", None) or {}
+        raw = ((leaves.get("above_ma") or {}).get("params") or {}).get("n") or {}
+        return int(raw.get("default", 120))
+    except Exception:
+        return 120
+
+
+def _keltner_k_from_recipe(rec: Any) -> float | None:
+    if not isinstance(rec, dict):
+        return None
+    fp = rec.get("factor_params")
+    if not isinstance(fp, dict):
+        return None
+    block = fp.get("keltner_vol")
+    if not isinstance(block, dict) or "k" not in block:
+        return None
+    try:
+        return float(block["k"])
+    except (TypeError, ValueError):
+        return None
+
+
+def _catalog_keltner_k() -> float:
+    path = THEME / "scripts" / "qmt" / "fband" / "factors" / "catalog.py"
+    if not path.is_file():
+        return _CHART_K_DEFAULT
+    spec = importlib.util.spec_from_file_location("fband_catalog_chart", path)
+    if spec is None or spec.loader is None:
+        return _CHART_K_DEFAULT
+    mod = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(mod)
+        leaves = getattr(mod, "LEAVES", None) or {}
+        raw = ((leaves.get("keltner_vol") or {}).get("params") or {}).get("k") or {}
+        return float(raw.get("default", _CHART_K_DEFAULT))
+    except Exception:
+        return _CHART_K_DEFAULT
 
 
 def load_chart_ma_config(
@@ -1041,19 +1190,14 @@ def load_chart_ma_config(
     *,
     force: bool = False,
 ) -> dict[str, Any]:
-    """读 hlband config 的均线周期。价格均线算法由策略调用点决定（现行 EMA）。不 import 拼接脚本。"""
+    """读 RECIPE.structure，物化成与 _structure_windows 同形。不 import 拼接脚本。"""
     global _CHART_MA_CFG
     if _CHART_MA_CFG is not None and config_path is None and (not force):
         return _CHART_MA_CFG
-    out: dict[str, Any] = {
-        "ma_type": "EMA",
-        "book": {},
-        "d_mid": 20,
-        "d_slow": 60,
-        "w_fast": 5,
-        "w_mid": 13,
-        "w_life": 34,
-    }
+    structure: dict[str, Any] = {}
+    k = _catalog_keltner_k()
+    above_n = _catalog_above_ma_n()
+    above_on = False
     path = Path(config_path) if config_path else HLBAND_CONFIG
     if path.is_file():
         spec = importlib.util.spec_from_file_location("hlband_config_chart", path)
@@ -1062,50 +1206,59 @@ def load_chart_ma_config(
             try:
                 spec.loader.exec_module(mod)
                 rec = getattr(mod, "RECIPE", None) or {}
-                st = rec.get("structure") if isinstance(rec, dict) else {}
-                st = st if isinstance(st, dict) else {}
-                d_ma = st.get("d_ma") if isinstance(st.get("d_ma"), dict) else {}
-                w_ma = st.get("w_ma") if isinstance(st.get("w_ma"), dict) else {}
-                for key, block, attr, default in (
-                    ("d_mid", d_ma, "mid", 20),
-                    ("d_slow", d_ma, "slow", 60),
-                    ("w_fast", w_ma, "fast", 5),
-                    ("w_mid", w_ma, "mid", 13),
-                    ("w_life", w_ma, "life", 34),
-                ):
-                    try:
-                        raw_n = block.get(attr, default)
-                        out[key] = int(raw_n) if raw_n is not None else int(default)
-                    except (TypeError, ValueError):
-                        out[key] = default
-                book: dict[str, str] = {}
-                raw = getattr(mod, "BOOK_STOCKS", None)
-                items = []
-                if isinstance(raw, dict):
-                    items = list(raw.items())
-                elif isinstance(raw, (list, tuple, set, frozenset)):
-                    items = [(str(x), {}) for x in raw]
-                for k, v in items:
-                    code = str(k or "").strip().upper()
-                    if not code:
-                        continue
-                    book[code] = "EMA"
-                out["book"] = book
+                if isinstance(rec, dict):
+                    st = rec.get("structure")
+                    if isinstance(st, dict):
+                        structure = st
+                    k_over = _keltner_k_from_recipe(rec)
+                    if k_over is not None:
+                        k = k_over
+                    n_over = _above_ma_n_from_recipe(rec)
+                    if n_over is not None:
+                        above_n = n_over
+                    above_on = _chart_above_ma_enabled(rec)
             except Exception:
-                pass
+                structure = {}
+    out = materialize_chart_windows(structure, k=k)
+    try:
+        above_n = int(above_n)
+    except (TypeError, ValueError):
+        above_n = 0
+    out["above_ma_n"] = above_n if above_on and above_n > 0 else 0
     if config_path is None:
         _CHART_MA_CFG = out
     return out
 
 
+def chart_window_periods(windows: dict[str, Any], period: str = "1d") -> list[int]:
+    p = str(period or "1d").strip().lower()
+    key = "1w" if p in ("1w", "week", "weekly", "w") else "1d"
+    block = ((windows or {}).get("ma") or {}).get(key) or {}
+    nums = [block.get("mid"), block.get("slow"), block.get("trend")]
+    out: list[int] = []
+    for raw in nums:
+        try:
+            n = int(raw or 0)
+        except (TypeError, ValueError):
+            n = 0
+        if n > 0:
+            out.append(n)
+    return out
+
+
 def chart_ma_periods(period: str = "1d") -> list[int]:
     cfg = load_chart_ma_config()
+    out = chart_window_periods(cfg, period)
     p = str(period or "1d").strip().lower()
     if p in ("1w", "week", "weekly", "w"):
-        nums = [int(cfg["w_fast"]), int(cfg["w_mid"]), int(cfg["w_life"])]
-    else:
-        nums = [int(cfg["d_mid"]), int(cfg["d_slow"])]
-    return [n for n in nums if n > 0]
+        return out
+    try:
+        n = int(cfg.get("above_ma_n") or 0)
+    except (TypeError, ValueError):
+        n = 0
+    if n > 0 and n not in out:
+        out.append(n)
+    return out
 
 
 def ma_kind_from_detail_path(path: str | Path) -> str:
@@ -1120,7 +1273,7 @@ def resolve_chart_ma_kind(
     detail_path: str | Path | None = None,
     ma_kind: str = "",
 ) -> str:
-    """明细文件名 _(SMA|EMA)（历史档案）→ 否则 EMA（与策略调用点一致）。"""
+    """明细文件名 _(SMA|EMA)（历史档案）→ 否则 structure.ma.kind。"""
     forced = normalize_ma_type(ma_kind)
     if forced:
         return forced
@@ -1128,7 +1281,7 @@ def resolve_chart_ma_kind(
         from_name = ma_kind_from_detail_path(detail_path)
         if from_name:
             return from_name
-    return "EMA"
+    return normalize_ma_type(load_chart_ma_config().get("kind")) or "EMA"
 
 
 def _ema_sma_seed(c, n: int):
@@ -1166,6 +1319,48 @@ def price_ma(closes, n, kind: str = "EMA"):
             out[n:] = (cs[n:] - cs[:-n]) / float(n)
         return out
     return _ema_sma_seed(c, n)
+
+
+def _chart_indicator_ns() -> dict[str, Any]:
+    """exec atr.py / keltner.py。_ma 用 price_ma，不复制威尔德公式。"""
+    global _INDICATOR_NS
+    if _INDICATOR_NS is not None:
+        return _INDICATOR_NS
+    root = THEME / "scripts" / "qmt" / "fband" / "indicators"
+    ns: dict[str, Any] = {"np": np, "_ma": price_ma}
+    exec((root / "atr.py").read_text(encoding="utf-8"), ns)
+    exec((root / "keltner.py").read_text(encoding="utf-8"), ns)
+    _INDICATOR_NS = ns
+    return ns
+
+
+def _attach_chart_overlays(df: pd.DataFrame, *, kind: str, weekly: bool) -> None:
+    """日线写入 ATR 与肯特纳。窗来自 load_chart_ma_config。周线不写。"""
+    if weekly or df.empty:
+        return
+    win = load_chart_ma_config()
+    highs = df["High"].to_numpy(dtype=float)
+    lows = df["Low"].to_numpy(dtype=float)
+    closes = df["Close"].to_numpy(dtype=float)
+    ns = _chart_indicator_ns()
+    atr_n = int((win.get("atr") or {}).get("n") or 0)
+    if atr_n > 0:
+        arr = ns["_calc_atr"](highs, lows, closes, atr_n)
+        df["ATR"] = np.nan if arr is None else arr
+    kc = win.get("keltner") or {}
+    ma_n = int(kc.get("ma_n") or 0)
+    kc_atr_n = int(kc.get("atr_n") or 0)
+    try:
+        k = float(kc.get("k") or 0)
+    except (TypeError, ValueError):
+        k = 0.0
+    if ma_n > 0 and kc_atr_n > 0 and k > 0:
+        pack = ns["_calc_keltner"](highs, lows, closes, ma_n, kc_atr_n, k, kind)
+        if pack:
+            mid, upper, lower = pack
+            df["KC_MID"] = mid
+            df["KC_UP"] = upper
+            df["KC_LO"] = lower
 
 
 def _bars_to_ohlc(bars) -> pd.DataFrame:
@@ -1393,6 +1588,7 @@ def ohlc_frame_for_chart(
                 df[col] = np.nan
             else:
                 df[col] = arr
+        _attach_chart_overlays(df, kind=kind, weekly=weekly)
         if start_d:
             df = df[df.index >= pd.Timestamp(start_d)].copy()
     df.attrs["ma_kind"] = kind

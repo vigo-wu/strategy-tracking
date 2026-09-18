@@ -1,9 +1,10 @@
 # === fband/factors/lib/above_ma.py ===
 def _factor_eval_above_ma(ctx):
+    raw_n = _factor_param(ctx, "above_ma", "n", 120)
     try:
-        n = int(_structure_windows()["ma"]["1d"]["trend"] or 0)
-    except (TypeError, ValueError, KeyError):
-        n = 0
+        n = int(120 if raw_n is None else raw_n)
+    except (TypeError, ValueError):
+        n = 120
     if n <= 0:
         return True, {"n": n, "off": True}
     market = (ctx or {}).get("market") or {}

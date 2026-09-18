@@ -605,14 +605,16 @@ if not _IS_MP_WORKER:
         title: str,
         *,
         period: str = "1d",
-        ma_life: int = 34,
+        trend_n: int = 0,
     ) -> go.Figure:
+        has_atr = "ATR" in ohlc.columns and bool(ohlc["ATR"].notna().any())
+        n_rows = 3 if has_atr else 2
         fig = make_subplots(
-            rows=2,
+            rows=n_rows,
             cols=1,
             shared_xaxes=True,
             vertical_spacing=0.04,
-            row_heights=[0.72, 0.28],
+            row_heights=[0.62, 0.19, 0.19] if has_atr else [0.72, 0.28],
         )
         if ohlc.empty:
             fig.add_annotation(text="无 OHLC", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
@@ -648,31 +650,71 @@ if not _IS_MP_WORKER:
             row=1,
             col=1,
         )
-        ma_colors = {
-            "MA20": "#1565c0",
-            "MA60": "#ef6c00",
-            "MA5": "#6a1b9a",
-            "MA13": "#00838f",
-            "MA34": "#c62828",
-        }
+        ma_palette = ("#1565c0", "#ef6c00", "#6a1b9a", "#00838f", "#c62828", "#546e7a")
         ma_cols = [
             c
             for c in ohlc.columns
             if str(c).startswith("MA") and str(c)[2:].isdigit()
         ]
-        for col in ma_cols:
+        for i, col in enumerate(ma_cols):
             n = int(str(col)[2:])
-            width = 2.4 if weekly and n == int(ma_life) else 1.5
+            width = 2.4 if weekly and trend_n > 0 and n == int(trend_n) else 1.5
             fig.add_trace(
                 go.Scatter(
                     x=x_pos,
                     y=ohlc[col],
                     name=col,
                     mode="lines",
-                    line=dict(width=width, color=ma_colors.get(col, "#546e7a")),
+                    line=dict(width=width, color=ma_palette[i % len(ma_palette)]),
                     connectgaps=False,
                     customdata=x_dates,
                     hovertemplate="%{customdata}<br>" + col + " %{y:.4g}<extra></extra>",
+                ),
+                row=1,
+                col=1,
+            )
+        if "KC_UP" in ohlc.columns and "KC_LO" in ohlc.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=x_pos,
+                    y=ohlc["KC_UP"],
+                    name="KC上",
+                    mode="lines",
+                    line=dict(width=1, color="rgba(94,53,177,0.85)"),
+                    connectgaps=False,
+                    customdata=x_dates,
+                    hovertemplate="%{customdata}<br>KC上 %{y:.4g}<extra></extra>",
+                ),
+                row=1,
+                col=1,
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=x_pos,
+                    y=ohlc["KC_LO"],
+                    name="KC下",
+                    mode="lines",
+                    line=dict(width=1, color="rgba(94,53,177,0.85)"),
+                    fill="tonexty",
+                    fillcolor="rgba(94,53,177,0.12)",
+                    connectgaps=False,
+                    customdata=x_dates,
+                    hovertemplate="%{customdata}<br>KC下 %{y:.4g}<extra></extra>",
+                ),
+                row=1,
+                col=1,
+            )
+        if "KC_MID" in ohlc.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=x_pos,
+                    y=ohlc["KC_MID"],
+                    name="KC中",
+                    mode="lines",
+                    line=dict(width=1, dash="dot", color="#5e35b1"),
+                    connectgaps=False,
+                    customdata=x_dates,
+                    hovertemplate="%{customdata}<br>KC中 %{y:.4g}<extra></extra>",
                 ),
                 row=1,
                 col=1,
@@ -774,16 +816,24 @@ if not _IS_MP_WORKER:
 
         fig.update_layout(
             title=title,
-            height=560,
+            height=720 if has_atr else 560,
             # 默认拖拽平移；滚轮缩放需配合 plotly config scrollZoom
             dragmode="pan",
             xaxis_rangeslider_visible=False,
             margin=dict(l=40, r=20, t=50, b=40),
             legend=dict(orientation="h"),
         )
-        # 允许 x 轴缩放/平移；y 轴留出 B/S 边距
+        # 允许 x 轴缩放/平移；y 轴留出 B/S 边距，并盖住肯特纳轨
         y_lo = float(ohlc["Low"].min()) - pad * 2.2
         y_hi = float(ohlc["High"].max()) + pad * 2.2
+        if "KC_LO" in ohlc.columns:
+            lo_kc = ohlc["KC_LO"].min()
+            if pd.notna(lo_kc):
+                y_lo = min(y_lo, float(lo_kc))
+        if "KC_UP" in ohlc.columns:
+            hi_kc = ohlc["KC_UP"].max()
+            if pd.notna(hi_kc):
+                y_hi = max(y_hi, float(hi_kc))
         tickvals = _kline_tick_vals(len(ohlc))
         fig.update_xaxes(
             type="linear",
@@ -795,8 +845,27 @@ if not _IS_MP_WORKER:
         )
         fig.update_yaxes(title_text="价格", fixedrange=False, range=[y_lo, y_hi], row=1, col=1)
         fig.update_yaxes(title_text="量", fixedrange=False, row=2, col=1)
-        fig.update_xaxes(title_text="日期", showticklabels=True, row=2, col=1)
         fig.update_xaxes(showticklabels=False, row=1, col=1)
+        if has_atr:
+            fig.add_trace(
+                go.Scatter(
+                    x=x_pos,
+                    y=ohlc["ATR"],
+                    name="ATR",
+                    mode="lines",
+                    line=dict(width=1.4, color="#00838f"),
+                    connectgaps=False,
+                    customdata=x_dates,
+                    hovertemplate="%{customdata}<br>ATR %{y:.4g}<extra></extra>",
+                ),
+                row=3,
+                col=1,
+            )
+            fig.update_yaxes(title_text="ATR", fixedrange=False, row=3, col=1)
+            fig.update_xaxes(showticklabels=False, row=2, col=1)
+            fig.update_xaxes(title_text="日期", showticklabels=True, row=3, col=1)
+        else:
+            fig.update_xaxes(title_text="日期", showticklabels=True, row=2, col=1)
         return fig
 
 
@@ -1085,7 +1154,23 @@ if not _IS_MP_WORKER:
                 csv_root=csv_root,
             )
             periods = chart_ma_periods(period)
-            ma_label = "MA" + "/".join(str(n) for n in periods)
+            cfg = load_chart_ma_config()
+            bits = []
+            if periods:
+                bits.append("%s %s" % (ma_kind, "/".join(str(n) for n in periods)))
+            if period == "1d":
+                kc = cfg.get("keltner") or {}
+                kc_ma = int(kc.get("ma_n") or 0)
+                kc_atr = int(kc.get("atr_n") or 0)
+                try:
+                    kc_k = float(kc.get("k") or 0)
+                except (TypeError, ValueError):
+                    kc_k = 0.0
+                if kc_ma > 0 and kc_atr > 0 and kc_k > 0:
+                    bits.append("KC%s/%s" % (kc_ma, kc_atr))
+                atr_n = int((cfg.get("atr") or {}).get("n") or 0)
+                if atr_n > 0:
+                    bits.append("ATR%s" % atr_n)
             pit_err = str(ohlc.attrs.get("pit_error") or "")
             pit_div = str(ohlc.attrs.get("dividend_type") or "")
             pit_asof = str(ohlc.attrs.get("pit_asof") or "")
@@ -1094,18 +1179,16 @@ if not _IS_MP_WORKER:
             elif uses_pit_front(pit_div) and pit_asof:
                 st.caption("%s · asof=%s" % (dividend_label(pit_div), pit_asof))
             st.caption("K 线：滚轮缩放 · 拖拽左右平移 · 双击复位")
-            ktitle = "%s %s · %s + 买卖点 · %s" % (
+            ktitle = "%s %s + 买卖点 · %s" % (
                 period_label,
-                ma_kind,
-                ma_label,
+                " · ".join(bits) or ma_kind,
                 stock or ohlc_csv.name,
             )
             if title_prefix:
                 ktitle = "%s%s" % (title_prefix, ktitle)
-            cfg = load_chart_ma_config()
-            ma_life = int((cfg or {}).get("w_life") or 34)
+            trend_n = int(((cfg.get("ma") or {}).get("1w") or {}).get("trend") or 0)
             st.plotly_chart(
-                _plot_kline(ohlc, trades, ktitle, period=period, ma_life=ma_life),
+                _plot_kline(ohlc, trades, ktitle, period=period, trend_n=trend_n),
                 use_container_width=True,
                 config=_KLINE_PLOT_CONFIG,
             )

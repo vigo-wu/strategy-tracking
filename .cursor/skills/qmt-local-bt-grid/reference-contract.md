@@ -13,7 +13,7 @@
 2. **隔离产物目录**：`report/grid/<sweep>/<cell>/<sample>/<div>/`。禁止写回基线 `report/<div>/`。
 3. **init 指纹**（写进同一份 log，供 runner 校验）
    - 必有：`recipe=`（表达式 + 折进表的全表 `factor_params` + `structure`）。
-   - 人读字段是启用叶子的点路径（如 `atr_stop.k=`、`keltner_vol.vol_n=`、`ma.1d.trend=`），由 `_recipe_log_kv` 展开；卸下叶子不打。
+   - 人读字段是启用叶子的点路径（如 `atr_stop.k=`、`keltner_vol.vol_n=`、`above_ma.n=`），由 `_recipe_log_kv` 展开；卸下叶子不打。
    - 该格 `overrides.factor_params` 且叶子已启用时，参数指纹预检再核对应路径；`trail_stop.tiers` 用 compact JSON。未启用叶子的覆盖只走 `recipe=`。启用集合读不到则字段级跳过，只核 `recipe=`。
 4. **主样本 walk**：默认 config `BOOK_STOCKS` 一段 `run_book_backtest`（`year_start0101`–`year_end1231`）。`asset_split.mode=random_from_csv` 时调参 / 盲测 **各一段**（名单写入 `freeze.json` / `spec.json`；CSV 仍用 `csv_for`）。禁止 stock×年独立 10 万账户，禁止 `tune∪holdout` 同一钱包。
 5. **空间隔离（可选）**：`asset_split` 见 skill 示例 `stop_loss_space.json`。主列盈亏仍展示 tune 股；空间分用全区间夏普比进入排名（盲测不再只否决）。某格缺盲测窗则空间维 0 分，不摊权。
@@ -46,7 +46,7 @@ JSON 可序列化。元组在 JSON 里用数组；`null` = Python `None`。
 }
 ```
 
-结构轴 id：`ma.1d.mid` `ma.1d.slow` `ma.1d.trend` `ma.1w.mid` `ma.1w.trend` `atr.n` `keltner.ma_n` `keltner.atr_n`。短 id 如 `m1dm15` / `m1dt` / `atr` / `kmm` / `kat`。出场另有 `atr_stop.k`（短 id `ask`）、`atr_trail_stop.k1` / `k2`（`atk1` / `atk2`，浮点倍数轴，**不是**百分比轴）、`time_force.arm`（`tfa`，百分比）。不要写顶层 `D_MA_MID`、顶层 `d_ma.mid` / `ma.1d.mid`，或袋内旧段 `d_ma`/`w_ma`/`macd`/`ema`/`sma`。
+结构轴 id：`ma.1d.mid` `ma.1d.slow` `ma.1d.trend` `ma.1w.mid` `ma.1w.trend` `atr.n` `keltner.ma_n` `keltner.atr_n`。`ma.1d.trend` 是显式写入的价格均线窗，不是 `above_ma` 的周期；`above_ma` 周期是 `above_ma.n`。短 id 如 `m1dm15` / `m1dt` / `atr` / `kmm` / `kat`。出场另有 `atr_stop.k`（短 id `ask`）、`atr_trail_stop.k1` / `k2`（`atk1` / `atk2`，浮点倍数轴，**不是**百分比轴）、`time_force.arm`（`tfa`，百分比）。不要写顶层 `D_MA_MID`、顶层 `d_ma.mid` / `ma.1d.mid`，或袋内旧段 `d_ma`/`w_ma`/`macd`/`ema`/`sma`。
 
 空 `overrides` = `base`（现行片段常量，仍跑一遍以便对照目录与指纹）。
 

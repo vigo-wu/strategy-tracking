@@ -64,6 +64,14 @@ LEAVES = {
         "group": "entry",
         "need": ("d_ma_trend",),
         "params": {
+            "n": {
+                "default": 120,
+                "percent": False,
+                "abbrev": "amn",
+                "label": "趋势均线周期",
+                "off": "le0",
+                "axis": 16,
+            },
             "slope_m": {
                 "default": 5,
                 "percent": False,
