@@ -63,7 +63,22 @@ LEAVES = {
         "label": "价在趋势均线上",
         "group": "entry",
         "need": ("d_ma_trend",),
-        "params": {},
+        "params": {
+            "slope_m": {
+                "default": 5,
+                "percent": False,
+                "abbrev": "ams",
+                "label": "趋势斜率窗",
+                "axis": 17,
+            },
+            "min_slope": {
+                "default": 0.0,
+                "percent": False,
+                "abbrev": "amms",
+                "label": "趋势最小斜率",
+                "axis": 18,
+            },
+        },
     },
     "scale_arm": {
         "label": "加仓-浮盈持仓门槛",

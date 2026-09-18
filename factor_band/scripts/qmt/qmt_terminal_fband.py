@@ -248,7 +248,22 @@ LEAVES = {
         "label": "价在趋势均线上",
         "group": "entry",
         "need": ("d_ma_trend",),
-        "params": {},
+        "params": {
+            "slope_m": {
+                "default": 5,
+                "percent": False,
+                "abbrev": "ams",
+                "label": "趋势斜率窗",
+                "axis": 17,
+            },
+            "min_slope": {
+                "default": 0.0,
+                "percent": False,
+                "abbrev": "amms",
+                "label": "趋势最小斜率",
+                "axis": 18,
+            },
+        },
     },
     "scale_arm": {
         "label": "加仓-浮盈持仓门槛",
@@ -3294,6 +3309,13 @@ def _ohlcv_need_1d():
         parts.append(slow_n)
     if "d_ma_trend" in need and trend_n > 0:
         parts.append(trend_n)
+        raw_ams = _factor_param(None, "above_ma", "slope_m")
+        try:
+            am_slope_m = int(5 if raw_ams is None else raw_ams)
+        except (TypeError, ValueError):
+            am_slope_m = 5
+        if am_slope_m > 1:
+            parts.append(trend_n + am_slope_m - 1)
     if "vol_kc" in need:
         raw_kvn = _factor_param(None, "keltner_vol", "vol_n")
         raw_kvc = _factor_param(None, "keltner_vol", "confirm_days")
@@ -3790,6 +3812,7 @@ def _factor_daily_features(closes, volumes, need=None):
         "d_mid": None,
         "d_slow": None,
         "d_trend": None,
+        "d_trend_arr": None,
         "vol10": None,
         "vol20": None,
         "vol_need": 1,
@@ -3859,6 +3882,7 @@ def _factor_daily_features(closes, volumes, need=None):
             "d_mid": m_mid,
             "d_slow": m_slow,
             "d_trend": m_trend,
+            "d_trend_arr": trend_arr,
             "vol10": vol10,
             "vol20": vol20,
             "price": price,
@@ -3933,6 +3957,7 @@ def _build_factor_ctx(
         "d_mid": daily.get("d_mid"),
         "d_slow": daily.get("d_slow"),
         "d_trend": daily.get("d_trend"),
+        "d_trend_arr": daily.get("d_trend_arr"),
         "vol10": daily.get("vol10"),
         "vol20": daily.get("vol20"),
         "mid_n": daily.get("mid_n"),
@@ -4088,14 +4113,41 @@ def _factor_eval_above_ma(ctx):
     market = (ctx or {}).get("market") or {}
     if not market.get("daily_ready"):
         return False, {"n": n}
+    raw_sm = _factor_param(ctx, "above_ma", "slope_m")
+    try:
+        slope_m = int(5 if raw_sm is None else raw_sm)
+    except (TypeError, ValueError):
+        slope_m = 5
+    raw_ms = _factor_param(ctx, "above_ma", "min_slope")
+    try:
+        min_slope = float(0.0 if raw_ms is None else raw_ms)
+    except (TypeError, ValueError):
+        min_slope = 0.0
     price = market.get("close")
     if price is None:
         price = market.get("daily_detail", {}).get("price")
     ma = market.get("d_trend")
+    i = int(market.get("i") or 0)
+    trend_arr = market.get("d_trend_arr")
+    ns = (
+        _norm_slope_from_ma(trend_arr, slope_m)
+        if trend_arr is not None
+        else None
+    )
+    norm = _last_valid(ns, i) if ns is not None else None
+    detail = {
+        "n": n,
+        "ma": ma,
+        "price": None if price is None else float(price),
+        "slope_m": slope_m,
+        "min_slope": min_slope,
+        "norm_slope": norm,
+    }
     if price is None or ma is None:
-        return False, {"n": n, "ma": ma, "price": price}
-    hit = float(price) > float(ma)
-    return hit, {"n": n, "ma": ma, "price": float(price)}
+        return False, detail
+    slope_ok = norm is not None and float(norm) >= min_slope
+    hit = bool(float(price) > float(ma) and slope_ok)
+    return hit, detail
 
 # === fband/factors/lib/scale_arm.py ===
 def _scale_arm_threshold(ctx=None):

@@ -566,6 +566,13 @@ def _ohlcv_need_1d():
         parts.append(slow_n)
     if "d_ma_trend" in need and trend_n > 0:
         parts.append(trend_n)
+        raw_ams = _factor_param(None, "above_ma", "slope_m")
+        try:
+            am_slope_m = int(5 if raw_ams is None else raw_ams)
+        except (TypeError, ValueError):
+            am_slope_m = 5
+        if am_slope_m > 1:
+            parts.append(trend_n + am_slope_m - 1)
     if "vol_kc" in need:
         raw_kvn = _factor_param(None, "keltner_vol", "vol_n")
         raw_kvc = _factor_param(None, "keltner_vol", "confirm_days")
