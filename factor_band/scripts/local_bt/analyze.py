@@ -6,6 +6,7 @@ import importlib.util
 import re
 import sys
 from collections import deque
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -1224,6 +1225,107 @@ def map_day_to_bar(
     return ohlc.index[int(loc) if not isinstance(loc, slice) else loc.start]
 
 
+_PIT_CHART_NS: dict[str, Any] | None = None
+
+
+def _pit_chart_ns() -> dict[str, Any]:
+    """exec pit_front.py（拼接片段无独立 import）。不调用依赖 A 的缓存函数。"""
+    global _PIT_CHART_NS
+    if _PIT_CHART_NS is not None:
+        return _PIT_CHART_NS
+    import datetime as dt
+
+    path = REPO / "scripts" / "qmt_common" / "pit_front.py"
+    ns: dict[str, Any] = {"datetime": dt, "A": None}
+    exec(path.read_text(encoding="utf-8"), ns)
+    _PIT_CHART_NS = ns
+    return ns
+
+
+def _csv_root_for_chart(csv_path: Path, csv_root: str | Path | None) -> Path:
+    if csv_root:
+        root = Path(csv_root)
+        if root.name in DIVIDEND_TYPES:
+            return root.parent
+        return root
+    cur = csv_path.parent
+    for _ in range(5):
+        if (cur / "divid_factors").is_dir():
+            return cur
+        if cur.parent == cur:
+            break
+        cur = cur.parent
+    return DEFAULT_CSV_ROOT
+
+
+def _none_daily_for_chart(
+    csv_path: Path,
+    stock: str,
+    csv_root: str | Path | None,
+) -> Path | None:
+    """PIT 原料：已在 none/ 则用原路径，否则同层 none/ 的同标的日线。"""
+    if csv_path.parent.name == "none" and csv_path.is_file():
+        return csv_path
+    code = str(stock or "").strip()
+    if not code and csv_path.is_file():
+        try:
+            code = str(peek_daily_csv_meta(csv_path).get("stock") or "")
+        except Exception:
+            code = ""
+    if not code:
+        return None
+    if csv_path.parent.name in DIVIDEND_TYPES:
+        sibling = daily_csv_for_stock(csv_path.parent.parent / "none", code)
+        if sibling is not None and sibling.is_file():
+            return sibling
+    found = daily_csv_for_stock(
+        resolve_typed_dir(_csv_root_for_chart(csv_path, csv_root), "none"),
+        code,
+    )
+    if found is not None and found.is_file():
+        return found
+    return None
+
+
+def _adjust_bars_pit(bars, factors: dict[str, Any], logical_div: str):
+    """按最后一根 bar 的日期做一次 PIT。返回 (bars, asof, error)。volume 不动。"""
+    if not bars:
+        return bars, "", ""
+    ns = _pit_chart_ns()
+    mode = ns["pit_mode_from_div"](logical_div)
+    if not mode:
+        return bars, "", ""
+    asof = str(bars[-1].day)
+    if mode == "diff":
+        events = ns["pit_parse_full_events"](factors)
+    else:
+        events = ns["pit_parse_events"](factors)
+    if not events:
+        return bars, asof, ""
+    o2, h2, l2, c2 = ns["pit_adjust_ohlc"](
+        [b.day for b in bars],
+        [b.open for b in bars],
+        [b.high for b in bars],
+        [b.low for b in bars],
+        [b.close for b in bars],
+        events,
+        asof,
+        mode,
+    )
+    out = []
+    for i, b in enumerate(bars):
+        out.append(
+            replace(
+                b,
+                open=float(o2[i]),
+                high=float(h2[i]),
+                low=float(l2[i]),
+                close=float(c2[i]),
+            )
+        )
+    return out, asof, ""
+
+
 def ohlc_frame_for_chart(
     csv_path: str | Path,
     start: str = "",
@@ -1232,15 +1334,31 @@ def ohlc_frame_for_chart(
     period: str = "1d",
     ma_kind: str = "",
     detail_path: str | Path | None = None,
+    dividend_type: str = "",
+    csv_root: str | Path | None = None,
 ) -> pd.DataFrame:
-    """日/周 OHLC + MA 列。均线在切可见区间前用历史暖机。"""
-    code, dailies = load_daily_csv(csv_path, stock=stock)
+    """日/周 OHLC + MA 列。均线在切可见区间前用历史暖机。
+
+    front / front_ratio：先换 none 原料，再按区间最后一根 bar 做一次 PIT。
+    """
+    div = normalize_dividend_type(dividend_type)
+    if not div and detail_path is not None:
+        div = dividend_from_detail_path(detail_path)
+    path = Path(csv_path)
+    pit_error = ""
+    if uses_pit_front(div):
+        raw = _none_daily_for_chart(path, stock, csv_root)
+        if raw is None:
+            pit_error = "缺 none 日线，K 线未复权"
+        else:
+            path = raw
+    code, dailies = load_daily_csv(path, stock=stock)
     kind = resolve_chart_ma_kind(stock=code or stock, detail_path=detail_path, ma_kind=ma_kind)
     start_d = compact_day(start)
     end_d = compact_day(end)
     weekly = _is_weekly_period(period)
     if weekly:
-        wpath = find_weekly_csv(csv_path, stock=code or stock)
+        wpath = find_weekly_csv(path, stock=code or stock)
         if wpath is not None:
             _c, bars = load_weekly_csv(wpath, stock=code or stock)
         else:
@@ -1249,21 +1367,39 @@ def ohlc_frame_for_chart(
         bars = dailies
     if end_d:
         bars = [b for b in bars if b.day <= end_d]
+    asof = ""
+    if uses_pit_front(div) and not pit_error and bars:
+        root = _csv_root_for_chart(path, csv_root)
+        try:
+            factors = load_divid_factors_json(root, code or stock)
+        except FileNotFoundError:
+            pit_error = "缺 divid_factors，K 线未复权"
+            factors = None
+        except Exception as e:
+            pit_error = "复权失败：%s" % e
+            factors = None
+        if factors is not None:
+            bars, asof, err = _adjust_bars_pit(bars, factors, div)
+            if err:
+                pit_error = err
+                asof = ""
     df = _bars_to_ohlc(bars)
-    if df.empty:
-        return df
-    closes = df["Close"].to_numpy(dtype=float)
-    for n in chart_ma_periods("1w" if weekly else "1d"):
-        arr = price_ma(closes, n, kind)
-        col = "MA%d" % int(n)
-        if arr is None:
-            df[col] = np.nan
-        else:
-            df[col] = arr
-    if start_d:
-        df = df[df.index >= pd.Timestamp(start_d)].copy()
+    if not df.empty:
+        closes = df["Close"].to_numpy(dtype=float)
+        for n in chart_ma_periods("1w" if weekly else "1d"):
+            arr = price_ma(closes, n, kind)
+            col = "MA%d" % int(n)
+            if arr is None:
+                df[col] = np.nan
+            else:
+                df[col] = arr
+        if start_d:
+            df = df[df.index >= pd.Timestamp(start_d)].copy()
     df.attrs["ma_kind"] = kind
     df.attrs["period"] = "1w" if weekly else "1d"
+    df.attrs["dividend_type"] = div
+    df.attrs["pit_asof"] = asof
+    df.attrs["pit_error"] = pit_error
     return df
 
 

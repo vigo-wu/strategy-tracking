@@ -1081,9 +1081,18 @@ if not _IS_MP_WORKER:
                 period=period,
                 ma_kind=ma_kind,
                 detail_path=detail_path,
+                dividend_type=dividend_type,
+                csv_root=csv_root,
             )
             periods = chart_ma_periods(period)
             ma_label = "MA" + "/".join(str(n) for n in periods)
+            pit_err = str(ohlc.attrs.get("pit_error") or "")
+            pit_div = str(ohlc.attrs.get("dividend_type") or "")
+            pit_asof = str(ohlc.attrs.get("pit_asof") or "")
+            if pit_err:
+                st.warning(pit_err)
+            elif uses_pit_front(pit_div) and pit_asof:
+                st.caption("%s · asof=%s" % (dividend_label(pit_div), pit_asof))
             st.caption("K 线：滚轮缩放 · 拖拽左右平移 · 双击复位")
             ktitle = "%s %s · %s + 买卖点 · %s" % (
                 period_label,
@@ -1595,6 +1604,8 @@ if not _IS_MP_WORKER:
         start: str,
         end: str,
         title_prefix: str = "",
+        dividend_type: str = "",
+        csv_root: str | None = None,
     ) -> None:
         ohlc = Path(entry["ohlc_csv"]) if entry.get("ohlc_csv") else None
         ohlc_ok = ohlc if ohlc and ohlc.is_file() else None
@@ -1610,6 +1621,8 @@ if not _IS_MP_WORKER:
             range_end=end,
             stock=stock,
             title_prefix=title_prefix,
+            dividend_type=dividend_type,
+            csv_root=csv_root,
         )
 
 
@@ -1621,6 +1634,7 @@ if not _IS_MP_WORKER:
         end: str,
         tabs_key: str,
         default_div: str = "",
+        csv_root: str | None = None,
     ) -> None:
         divs_ok = [d for d in DIVIDEND_TYPES if d in by_div]
         if not divs_ok:
@@ -1659,6 +1673,8 @@ if not _IS_MP_WORKER:
                 stock=stock,
                 start=start,
                 end=end,
+                dividend_type=divs_ok[0],
+                csv_root=csv_root,
             )
             return
         labels = [dividend_label(d) for d in divs_ok]
@@ -1674,6 +1690,8 @@ if not _IS_MP_WORKER:
                     start=start,
                     end=end,
                     title_prefix="%s · " % dividend_label(div),
+                    dividend_type=div,
+                    csv_root=csv_root,
                 )
 
 
@@ -2017,6 +2035,7 @@ if not _IS_MP_WORKER:
                 end=end_s,
                 tabs_key="batch_div_tabs",
                 default_div=normalize_dividend_type(row.get("dividend_type")),
+                csv_root=csv_root,
             )
             return
         ohlc = Path(row["csv"]) if row.get("csv") else None
@@ -2027,6 +2046,8 @@ if not _IS_MP_WORKER:
             range_start=start_s,
             range_end=end_s,
             stock=stock,
+            csv_root=csv_root,
+            dividend_type=normalize_dividend_type(row.get("dividend_type")),
         )
 
 
@@ -3347,6 +3368,7 @@ if not _IS_MP_WORKER:
                 start=str(saved.get("start") or ""),
                 end=str(saved.get("end") or ""),
                 tabs_key="single_div_tabs",
+                csv_root=csv_root,
             )
 
     elif mode == "仅分析已有明细":
@@ -3426,13 +3448,12 @@ if not _IS_MP_WORKER:
                 except Exception:
                     auto_on = str(ohlc_csv) == str(ohlc_match)
             if auto_on:
+                linked_div = div_guess or normalize_dividend_type(ohlc_csv.parent.name)
                 st.caption(
                     "已按明细关联 %s · %s"
                     % (
                         stock_guess or stock or "?",
-                        dividend_label(
-                            normalize_dividend_type(ohlc_csv.parent.name) or div_guess
-                        ),
+                        dividend_label(linked_div) if linked_div else "未识别复权",
                     )
                 )
             elif ohlc_match is None:
@@ -3498,6 +3519,8 @@ if not _IS_MP_WORKER:
                     range_start=ao.get("start") or "",
                     range_end=ao.get("end") or "",
                     stock=ao.get("stock") or "",
+                    csv_root=csv_root,
+                    dividend_type=dividend_from_detail_path(ao["detail"]),
                 )
 
     _persist_form_cache()
