@@ -172,7 +172,7 @@ LOG_DIR = r"D:\FactorBand\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "FactorBand"
-STRATEGY_VER = "v5.0.0"
+STRATEGY_VER = "v5.1.0"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）
@@ -319,7 +319,7 @@ LEAVES = {
                 "default": 2.0,
                 "percent": False,
                 "abbrev": "ask",
-                "label": "ATR止损倍数",
+                "label": "ATR%止损倍数",
                 "kind": "smaller_tighten",
                 "off": "le0",
                 "axis": 4,
@@ -354,7 +354,7 @@ LEAVES = {
                 "default": 2.0,
                 "percent": False,
                 "abbrev": "atk1",
-                "label": "ATR移动保本",
+                "label": "ATR%移动保本",
                 "kind": "smaller_tighten",
                 "off": "le0",
                 "axis": 5,
@@ -363,7 +363,7 @@ LEAVES = {
                 "default": 2.0,
                 "percent": False,
                 "abbrev": "atk2",
-                "label": "ATR移动回撤",
+                "label": "ATR%移动回撤",
                 "kind": "smaller_tighten",
                 "off": "le0",
                 "axis": 6,
@@ -2320,6 +2320,31 @@ def _calc_atr(highs, lows, closes, n):
         return None
     return _wilder(tr, n)
 
+
+def _atr_to_pct(atr, closes):
+    """NATR：ATR/Close*100。非正收盘为 NaN。"""
+    if atr is None or closes is None:
+        return None
+    a = np.asarray(atr, dtype=float)
+    c = np.asarray(closes, dtype=float)
+    n = min(len(a), len(c))
+    if n <= 0:
+        return None
+    a = a[:n]
+    c = c[:n]
+    out = np.full(n, np.nan, dtype=float)
+    ok = np.isfinite(a) & np.isfinite(c) & (c > 0.0)
+    out[ok] = a[ok] / c[ok] * 100.0
+    return out
+
+
+def _calc_atr_pct(highs, lows, closes, n):
+    """威尔德 ATR 再 /Close*100。n 必传，不读 RECIPE。"""
+    atr = _calc_atr(highs, lows, closes, n)
+    if atr is None:
+        return None
+    return _atr_to_pct(atr, closes)
+
 # === fband/indicators/keltner.py ===
 def _calc_keltner(highs, lows, closes, ma_n, atr_n, k, kind):
     """返回 (mid, upper, lower) 或 None。中轨 _ma，带宽 k×威尔德 ATR。
@@ -3935,6 +3960,8 @@ def _build_factor_ctx(
         else None
     )
     atr = _last_valid(atr_arr) if atr_arr is not None else None
+    atr_pct_arr = _atr_to_pct(atr_arr, closes) if atr_arr is not None else None
+    atr_pct = _last_valid(atr_pct_arr) if atr_pct_arr is not None else None
     try:
         win_all = _structure_windows()
         kc_win = win_all["keltner"]
@@ -3982,6 +4009,7 @@ def _build_factor_ctx(
         "v20": daily.get("v20"),
         "vol_need": daily.get("vol_need"),
         "atr": atr,
+        "atr_pct": atr_pct,
         "atr_n": atr_n,
         "kc_mid": kc_mid,
         "kc_mid_arr": kc_mid_arr,
@@ -4274,7 +4302,7 @@ def _factor_eval_stop_loss(ctx):
 
 # === fband/factors/lib/atr_stop.py ===
 def _factor_eval_atr_stop(ctx):
-    """收盘 <= 成本 - k * ATR。n<=0 或 k<=0 关掉。"""
+    """收盘 <= 成本 * (1 - k * ATR% / 100)。n<=0 或 k<=0 关掉。"""
     market = (ctx or {}).get("market") or {}
     state = (ctx or {}).get("state") or {}
     lot = state.get("lot") or {}
@@ -4283,6 +4311,7 @@ def _factor_eval_atr_stop(ctx):
         cost = state.get("cost")
     price = market.get("close")
     atr = market.get("atr")
+    atr_pct = market.get("atr_pct")
     try:
         atr_n = int(market.get("atr_n") or 0)
     except (TypeError, ValueError):
@@ -4295,16 +4324,30 @@ def _factor_eval_atr_stop(ctx):
         cost = float(cost or 0)
     except (TypeError, ValueError):
         cost = 0.0
-    if atr_n <= 0 or k <= 0 or cost <= 0 or price is None or atr is None:
+    if (
+        atr_n <= 0
+        or k <= 0
+        or cost <= 0
+        or price is None
+        or atr is None
+        or atr_pct is None
+    ):
         return False, {}
     try:
         atr = float(atr)
+        atr_pct = float(atr_pct)
     except (TypeError, ValueError):
         return False, {}
-    if atr <= 0:
+    if atr <= 0 or atr_pct <= 0:
         return False, {}
-    hit = float(price) <= cost - k * atr
-    return bool(hit), {"cost": cost, "price": float(price), "atr": atr, "k": k}
+    hit = float(price) <= cost * (1.0 - k * atr_pct / 100.0)
+    return bool(hit), {
+        "cost": cost,
+        "price": float(price),
+        "atr": atr,
+        "atr_pct": atr_pct,
+        "k": k,
+    }
 
 # === fband/factors/lib/trail_stop.py ===
 def _trail_tier_params(max_profit, tiers=None):
@@ -4369,7 +4412,7 @@ def _factor_eval_trail_stop(ctx):
 
 # === fband/factors/lib/atr_trail_stop.py ===
 def _factor_eval_atr_trail_stop(ctx):
-    """峰值相对成本 > k1*ATR 武装：收盘<=成本 或 峰值回撤>=k2*ATR。"""
+    """峰值相对成本 > k1*ATR% 武装：收盘<=成本 或 峰值回撤>=k2*ATR%。"""
     market = (ctx or {}).get("market") or {}
     state = (ctx or {}).get("state") or {}
     lot = state.get("lot") or {}
@@ -4381,6 +4424,7 @@ def _factor_eval_atr_trail_stop(ctx):
         peak = state.get("hold_peak")
     price = market.get("close")
     atr = market.get("atr")
+    atr_pct = market.get("atr_pct")
     try:
         atr_n = int(market.get("atr_n") or 0)
     except (TypeError, ValueError):
@@ -4397,30 +4441,45 @@ def _factor_eval_atr_trail_stop(ctx):
         cost = float(cost or 0)
     except (TypeError, ValueError):
         cost = 0.0
-    if atr_n <= 0 or k1 <= 0 or cost <= 0 or price is None or atr is None:
+    if (
+        atr_n <= 0
+        or k1 <= 0
+        or cost <= 0
+        or price is None
+        or atr is None
+        or atr_pct is None
+    ):
         return False, {}
     if peak is None:
         return False, {}
     try:
         peak = float(peak)
         atr = float(atr)
+        atr_pct = float(atr_pct)
     except (TypeError, ValueError):
         return False, {}
-    if peak <= 0 or atr <= 0:
+    if peak <= 0 or atr <= 0 or atr_pct <= 0:
         return False, {}
-    if not (peak - cost > k1 * atr):
-        return False, {"cost": cost, "peak": peak, "atr": atr, "armed": False}
+    if not ((peak - cost) / cost > k1 * atr_pct / 100.0):
+        return False, {
+            "cost": cost,
+            "peak": peak,
+            "atr": atr,
+            "atr_pct": atr_pct,
+            "armed": False,
+        }
     px = float(price)
     be = px <= cost
     giveback = False
     if k2 > 0:
-        giveback = (peak - px) >= k2 * atr
+        giveback = (peak - px) / peak >= k2 * atr_pct / 100.0
     hit = bool(be or giveback)
     return hit, {
         "cost": cost,
         "price": px,
         "peak": peak,
         "atr": atr,
+        "atr_pct": atr_pct,
         "k1": k1,
         "k2": k2,
         "armed": True,

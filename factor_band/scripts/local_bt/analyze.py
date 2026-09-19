@@ -1335,7 +1335,7 @@ def _chart_indicator_ns() -> dict[str, Any]:
 
 
 def _attach_chart_overlays(df: pd.DataFrame, *, kind: str, weekly: bool) -> None:
-    """日线写入 ATR 与肯特纳。窗来自 load_chart_ma_config。周线不写。"""
+    """日线写入 NATR 与肯特纳。窗来自 load_chart_ma_config。周线不写。"""
     if weekly or df.empty:
         return
     win = load_chart_ma_config()
@@ -1346,7 +1346,8 @@ def _attach_chart_overlays(df: pd.DataFrame, *, kind: str, weekly: bool) -> None
     atr_n = int((win.get("atr") or {}).get("n") or 0)
     if atr_n > 0:
         arr = ns["_calc_atr"](highs, lows, closes, atr_n)
-        df["ATR"] = np.nan if arr is None else arr
+        pct = ns["_atr_to_pct"](arr, closes) if arr is not None else None
+        df["NATR"] = np.nan if pct is None else pct
     kc = win.get("keltner") or {}
     ma_n = int(kc.get("ma_n") or 0)
     kc_atr_n = int(kc.get("atr_n") or 0)

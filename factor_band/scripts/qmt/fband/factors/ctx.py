@@ -429,6 +429,8 @@ def _build_factor_ctx(
         else None
     )
     atr = _last_valid(atr_arr) if atr_arr is not None else None
+    atr_pct_arr = _atr_to_pct(atr_arr, closes) if atr_arr is not None else None
+    atr_pct = _last_valid(atr_pct_arr) if atr_pct_arr is not None else None
     try:
         win_all = _structure_windows()
         kc_win = win_all["keltner"]
@@ -476,6 +478,7 @@ def _build_factor_ctx(
         "v20": daily.get("v20"),
         "vol_need": daily.get("vol_need"),
         "atr": atr,
+        "atr_pct": atr_pct,
         "atr_n": atr_n,
         "kc_mid": kc_mid,
         "kc_mid_arr": kc_mid_arr,

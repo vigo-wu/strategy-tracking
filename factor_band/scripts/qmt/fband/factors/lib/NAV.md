@@ -15,8 +15,8 @@
 | `above_ma` | [above_ma.py](above_ma.py) | 收盘 > 日线趋势均线 + 该均线 Norm_Slope>=min_slope | `d_trend` / `d_trend_arr` | `above_ma.n` / `slope_m` / `min_slope`；均线窗是 `above_ma.n`（不是 `structure.ma.1d.trend`；斜率复用 `d_trend_arr`）；`n<=0` 关闸门；算不出斜率则不命中 |
 | `scale_arm` | [scale_arm.py](scale_arm.py) | 峰值浮盈 + 该笔持仓日 | `state.lots` / peak | `scale_arm.arm` / `bars`；`arm<=0` 回落 `0.03`；`bars<=0` 不查持仓日 |
 | `stop_loss` | [stop_loss.py](stop_loss.py) | 收盘相对成本 | `state.lot` / `cost` | `stop_loss.pct` |
-| `atr_stop` | [atr_stop.py](atr_stop.py) | 收盘 <= 成本 − k×ATR | `state.lot` / `market.atr` | `atr_stop.k`；窗是 `structure.atr.n`（`<=0` 关） |
-| `atr_trail_stop` | [atr_trail_stop.py](atr_trail_stop.py) | 峰值相对成本 > k1×ATR 武装；收盘<=成本或峰值回撤>=k2×ATR | `state.lot` / `hold_peak` / `market.atr` | `atr_trail_stop.k1` / `k2`；`k1<=0` 整条关；`k2<=0` 只保本 |
+| `atr_stop` | [atr_stop.py](atr_stop.py) | 收盘 <= 成本 × (1 − k×ATR%/100) | `state.lot` / `market.atr` / `market.atr_pct` | `atr_stop.k`（ATR% 倍数）；窗是 `structure.atr.n`（`<=0` 关） |
+| `atr_trail_stop` | [atr_trail_stop.py](atr_trail_stop.py) | 峰值相对成本 > k1×ATR% 武装；收盘<=成本或峰值回撤/峰值>=k2×ATR% | `state.lot` / `hold_peak` / `market.atr` / `market.atr_pct` | `atr_trail_stop.k1` / `k2`（ATR% 倍数）；`k1<=0` 整条关；`k2<=0` 只保本 |
 | `trail_stop` | [trail_stop.py](trail_stop.py) | 阶梯回撤 / 利润底 | `hold_peak` | `trail_stop.tiers`（默认 exit 不引用） |
 | `time_force` | [time_force.py](time_force.py) | 持仓日 + 慢线地板 + 武装让路 | `hold_bars` / peak | `time_force.bars` / `time_force.arm`；`arm<=0` 关让路；慢线是 `structure.ma.1d.slow`，调用点 `_ma(..., kind)` |
 

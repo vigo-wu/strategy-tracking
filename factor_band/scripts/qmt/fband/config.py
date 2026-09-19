@@ -162,7 +162,7 @@ LOG_DIR = r"D:\FactorBand\logs"
 LOG_IN_BACKTEST = False
 
 STRATEGY_NAME = "FactorBand"
-STRATEGY_VER = "v5.0.0"
+STRATEGY_VER = "v5.1.0"
 # =======================================================
 
 # 券商委托终态：成交 / 废单死单（勿改除非对接环境不同）

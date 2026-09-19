@@ -41,3 +41,28 @@ def _calc_atr(highs, lows, closes, n):
     if tr is None:
         return None
     return _wilder(tr, n)
+
+
+def _atr_to_pct(atr, closes):
+    """NATR：ATR/Close*100。非正收盘为 NaN。"""
+    if atr is None or closes is None:
+        return None
+    a = np.asarray(atr, dtype=float)
+    c = np.asarray(closes, dtype=float)
+    n = min(len(a), len(c))
+    if n <= 0:
+        return None
+    a = a[:n]
+    c = c[:n]
+    out = np.full(n, np.nan, dtype=float)
+    ok = np.isfinite(a) & np.isfinite(c) & (c > 0.0)
+    out[ok] = a[ok] / c[ok] * 100.0
+    return out
+
+
+def _calc_atr_pct(highs, lows, closes, n):
+    """威尔德 ATR 再 /Close*100。n 必传，不读 RECIPE。"""
+    atr = _calc_atr(highs, lows, closes, n)
+    if atr is None:
+        return None
+    return _atr_to_pct(atr, closes)

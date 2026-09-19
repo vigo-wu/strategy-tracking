@@ -9,7 +9,7 @@ LEAVES = {
         "need": ("keltner", "vol_kc"),
         "params": {
             "k": {
-                "default": 2.0,
+                "default": 1.0,
                 "percent": False,
                 "abbrev": "kvk",
                 "label": "通道倍数",
@@ -37,7 +37,7 @@ LEAVES = {
                 "axis": 13,
             },
             "confirm_days": {
-                "default": 2,
+                "default": 3,
                 "percent": False,
                 "abbrev": "kvc",
                 "label": "通道缩量确认日",
@@ -51,7 +51,7 @@ LEAVES = {
                 "axis": 15,
             },
             "min_slope": {
-                "default": 0.0,
+                "default": 0.05,
                 "percent": False,
                 "abbrev": "kvms",
                 "label": "最小归一化斜率",
@@ -80,7 +80,7 @@ LEAVES = {
                 "axis": 17,
             },
             "min_slope": {
-                "default": 0.0,
+                "default": 0.03,
                 "percent": False,
                 "abbrev": "amms",
                 "label": "趋势最小斜率",
@@ -131,10 +131,10 @@ LEAVES = {
         "need": ("atr",),
         "params": {
             "k": {
-                "default": 2.0,
+                "default": 1.0,
                 "percent": False,
                 "abbrev": "ask",
-                "label": "ATR止损倍数",
+                "label": "ATR%止损倍数",
                 "kind": "smaller_tighten",
                 "off": "le0",
                 "axis": 4,
@@ -166,19 +166,19 @@ LEAVES = {
         "need": ("atr",),
         "params": {
             "k1": {
-                "default": 2.0,
+                "default": 1.0,
                 "percent": False,
                 "abbrev": "atk1",
-                "label": "ATR移动保本",
+                "label": "ATR%移动保本",
                 "kind": "smaller_tighten",
                 "off": "le0",
                 "axis": 5,
             },
             "k2": {
-                "default": 2.0,
+                "default": 1.0,
                 "percent": False,
                 "abbrev": "atk2",
-                "label": "ATR移动回撤",
+                "label": "ATR%移动回撤",
                 "kind": "smaller_tighten",
                 "off": "le0",
                 "axis": 6,

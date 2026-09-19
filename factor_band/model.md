@@ -140,8 +140,8 @@ scale_out: false
 
 | 卖点 | 条件 | 日志码 |
 | :--- | :--- | :--- |
-| ① ATR 止损 | 收盘 ≤ **该笔**成本 − `atr_stop.k`×ATR（当前 `k=2.0`、`atr.n=14`）；`atr.n<=0` 或 `k<=0` 关 | `atr_stop` |
-| ② ATR 移动止盈 | **该笔**峰值相对成本 > `atr_trail_stop.k1`×ATR 武装（当前 `k1=2.0`）：收盘 ≤ 成本（保本）或峰值回撤 ≥ `k2`×ATR（当前 `k2=2.0`）；`k1<=0` 整条关；`k2<=0` 只保本 | `atr_trail_stop` |
+| ① ATR 止损 | 收盘 ≤ **该笔**成本 × (1 − `atr_stop.k`×ATR%/100)（当前 `k=2.0`、`atr.n=14`；ATR%=ATR/收盘×100）；`atr.n<=0` 或 `k<=0` 关 | `atr_stop` |
+| ② ATR 移动止盈 | **该笔**峰值相对成本 > `atr_trail_stop.k1`×ATR% 武装（当前 `k1=2.0`）：收盘 ≤ 成本（保本）或峰值回撤/峰值 ≥ `k2`×ATR%（当前 `k2=2.0`）；`k1<=0` 整条关；`k2<=0` 只保本 | `atr_trail_stop` |
 
 优先级（挂 pending 主因，`exit` 的 or 短路）：`atr_stop` > `atr_trail_stop`。`time_force` / `stop_loss` / `trail_stop` 叶子仍在，默认 AST 不引用。
 
@@ -169,8 +169,8 @@ scale_out: false
 | 开仓 | 趋势+通道缩量 | 收盘 > EMA120 且肯特纳通道内连续 2 日缩量 |
 | 加仓 | 默认关 | `scale_in=false`；启用后见 `scale_arm` + `keltner_vol` |
 | 填满仓位 | 全池最多 3 笔 50/30/剩余 | 前两笔 50%/30%；第三笔吃剩余可部署资金；满 3 笔 `book_lot_cap` |
-| ATR 止损 | 成本 − k×ATR | `close ≤ cost − 2×ATR14`（威尔德；`atr.n<=0` 或 `k<=0` 关） |
-| ATR 移动止盈 | 峰值相对成本 | 峰值相对成本 > 2×ATR 武装；收盘≤成本或回撤≥2×ATR（`k1`/`k2`；`k1<=0` 关；`k2<=0` 只保本） |
+| ATR 止损 | 成本 × (1 − k×ATR%) | `close ≤ cost × (1 − 2×ATR14/close)`（NATR；`atr.n<=0` 或 `k<=0` 关） |
+| ATR 移动止盈 | 峰值相对成本 | 峰值相对成本 > 2×ATR% 武装；收盘≤成本或回撤/峰值≥2×ATR%（`k1`/`k2`；`k1<=0` 关；`k2<=0` 只保本） |
 | 智能时间 | MA60 地板 | `> time_force.bars` 日：破 MA60 强平；站上且峰值 < `time_force.arm`（3%）立即强平；峰值≥arm 不按日历强平 |
 
 ---
@@ -218,9 +218,9 @@ scale_out: false
 | `scale_arm.arm` | `0.03` | 峰值浮盈门槛（独立于 `trail_stop` 档1；`factor_params`） |
 | `scale_arm.bars` | `8` | 该笔持仓满 8 日才加仓（`factor_params`；`<=0` 不查持仓日） |
 | `stop_loss.pct` | `0.08` | 硬止损（相对该笔成本；`factor_params`；默认 exit 不引用） |
-| `atr_stop.k` | `2.0` | ATR 止损倍数：收盘 ≤ 成本 − k×ATR（`factor_params`，浮点，可扫 `1.5`）；`<=0` 关 |
-| `atr_trail_stop.k1` | `2.0` | ATR 移动保本：峰值相对成本 > k1×ATR（`factor_params`，浮点）；`<=0` 整条关 |
-| `atr_trail_stop.k2` | `2.0` | ATR 移动回撤：已武装且峰值回撤 ≥ k2×ATR（`factor_params`，浮点）；`<=0` 只保本 |
+| `atr_stop.k` | `2.0` | ATR% 止损倍数：收盘 ≤ 成本 × (1 − k×ATR%/100)（`factor_params`，浮点，可扫 `1.5`）；`<=0` 关 |
+| `atr_trail_stop.k1` | `2.0` | ATR% 移动保本：峰值相对成本 > k1×ATR%（`factor_params`，浮点）；`<=0` 整条关 |
+| `atr_trail_stop.k2` | `2.0` | ATR% 移动回撤：已武装且峰值回撤/峰值 ≥ k2×ATR%（`factor_params`，浮点）；`<=0` 只保本 |
 | `LIVE_CLOSE_CONFIRM` | `True` | 收盘确认 + 开盘兜底 |
 | `SIGNAL_CONFIRM_START/END` | `145630` / `150000` | 用当日近似完整 K 确认信号；须早于尾盘成交 |
 | `PENDING_EXEC_START/END` | `145640` / `145700` | 14:56:40 连续竞价尾盘限价：买挂卖一、卖挂买一；14:57 起不报 |

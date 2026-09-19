@@ -17,7 +17,7 @@
 | [ema.py](ema.py) | `_ema` | 是 | 指数均线；由 `_ma` 分发调用 |
 | [ma.py](ma.py) | `_ma` | 是 | 价格均线入口；`kind`（`"sma"`\|`"ema"`）必传，不读 `RECIPE`；非法 kind → `None` |
 | [norm_slope.py](norm_slope.py) | `_calc_norm_slope` `_norm_slope_from_ma` | 是 | 均线 OLS 斜率归一化；经 `_ma`；`ma_n` / `slope_m` / `ma_kind` 必传/显式，不读 `RECIPE` |
-| [atr.py](atr.py) | `_true_range` `_wilder` `_calc_atr` | 是 | 威尔德 ATR；`n` **必传**，不读 `RECIPE` / `atr.n`；`n<=0` 或长度不足 → `None` |
+| [atr.py](atr.py) | `_true_range` `_wilder` `_calc_atr` `_atr_to_pct` `_calc_atr_pct` | 是 | 威尔德 ATR；NATR=`ATR/Close×100`（`_atr_to_pct` 对已算序列换算；`_calc_atr_pct` 薄封装）。`n` **必传**，不读 `RECIPE` / `atr.n`；`n<=0` 或长度不足 → `None` |
 | [keltner.py](keltner.py) | `_calc_keltner` | 是 | 中轨 `_ma` ± k×威尔德 ATR；须在 ma / atr 之后；`ma_n` / `atr_n` / `k` / `kind` **必传**，不读 `RECIPE` |
 
 不要把因子放进来（如 `keltner_vol` / `trail_stop`）。

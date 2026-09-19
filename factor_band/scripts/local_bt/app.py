@@ -607,7 +607,7 @@ if not _IS_MP_WORKER:
         period: str = "1d",
         trend_n: int = 0,
     ) -> go.Figure:
-        has_atr = "ATR" in ohlc.columns and bool(ohlc["ATR"].notna().any())
+        has_atr = "NATR" in ohlc.columns and bool(ohlc["NATR"].notna().any())
         n_rows = 3 if has_atr else 2
         fig = make_subplots(
             rows=n_rows,
@@ -850,18 +850,18 @@ if not _IS_MP_WORKER:
             fig.add_trace(
                 go.Scatter(
                     x=x_pos,
-                    y=ohlc["ATR"],
-                    name="ATR",
+                    y=ohlc["NATR"],
+                    name="NATR",
                     mode="lines",
                     line=dict(width=1.4, color="#00838f"),
                     connectgaps=False,
                     customdata=x_dates,
-                    hovertemplate="%{customdata}<br>ATR %{y:.4g}<extra></extra>",
+                    hovertemplate="%{customdata}<br>NATR %{y:.2f}%<extra></extra>",
                 ),
                 row=3,
                 col=1,
             )
-            fig.update_yaxes(title_text="ATR", fixedrange=False, row=3, col=1)
+            fig.update_yaxes(title_text="NATR %", fixedrange=False, row=3, col=1)
             fig.update_xaxes(showticklabels=False, row=2, col=1)
             fig.update_xaxes(title_text="日期", showticklabels=True, row=3, col=1)
         else:
